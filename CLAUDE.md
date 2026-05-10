@@ -93,21 +93,22 @@ slightly different roles, so the multi-reviewer setup is intentional.
 
 **Ownership is tracked in `../review/inventory.md`.** Codex owns the numbered
 series (`01-overview.md` through `04-observations.md` plus `README.md`).
-Gemini owns `gemini-notes.md`. Claude Code has no current series claim — if
-you produce a review artifact, create a new file and coordinate with the user
-before staking out a series.
+Gemini owns `gemini-notes.md`.
 
-**Hard rule from inventory.md:** *Do not modify files owned by other agents.*
-Each owner refreshes their own files on the next pass; edits you make to
-someone else's file will be overwritten anyway.
+**Claude Code's role here is read-only.** This agent does not create, modify,
+or stake out files in `../review/`. The user wants Claude Code's contribution
+to land in the pxx codebase (code, tests, docs) — not in the review folder.
+Treat `../review/` as inputs only.
 
 When the user cites a finding ("flagged in 04-observations.md..."):
 1. Locate the file in `../review/` and read the cited item in full
-2. Address only what they pointed at unless they expand scope
+2. Address it by editing the relevant code/docs *in the pxx repo*, not by
+   modifying the review file
 3. Leave other findings alone — they may be intentional, queued, or already
    under review by another agent
-4. **Do not write to files you don't own in `../review/`**. Add new files
-   under your name if you have a unique perspective worth recording.
+4. **Never write to `../review/`** — not even to add new files. If you have an
+   observation worth preserving, suggest the user surface it themselves or
+   capture it in `plans/`, `CLAUDE.md`, or the relevant code comment.
 
 The reviewers may also be **stale** — the codebase may have moved on since the
 last review pass. Verify a cited finding against current code before acting.

@@ -1,5 +1,7 @@
 # Dogfooding pxx: A Plan for Self-Improvement
 
+> Backlog ID: **001**. See [plans/backlog.md](backlog.md) for the inventory.
+>
 > Status: **planning only**. No code in this document is being executed.
 > It exists to capture the design intent for using pxx to improve pxx, so that
 > when implementation starts, we don't drift into bad patterns.

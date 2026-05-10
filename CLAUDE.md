@@ -92,6 +92,22 @@ accidental edits. The startup banner prints the active mode.
 When working on pxx itself: the same rule applies — type `pxx --edit` to make
 changes. No special-casing for the pxx repo.
 
+## Plans inventory (`plans/backlog.md`)
+
+The `plans/` folder is governed by `plans/backlog.md` — a master inventory
+where each plan has a stable numeric ID and explicit Blocks / Blocked by
+columns.
+
+**Before proposing a new plan in this repo:**
+1. Read `plans/backlog.md` to make sure no existing plan covers the idea.
+2. If a similar plan exists, expand it rather than creating a duplicate.
+3. If a new plan is genuinely warranted, follow the "Workflow for adding a
+   new plan" section in backlog.md: pick the next free ID, create
+   `plans/<slug>.md`, add the `> Backlog ID: NNN` header line at the top,
+   add a row, and bump the next-free-ID line.
+
+This keeps the planning surface coherent as it grows.
+
 **Three configs feed aider, and they do different things:**
 - `config/aider.conf.yml` — aider behavior (edit-format, caching, lint/test cmds, privacy)
 - `config/model-settings.yml` — per-model context windows; values here are OOM-sensitive on the Studio

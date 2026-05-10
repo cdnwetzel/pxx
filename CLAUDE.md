@@ -88,21 +88,26 @@ agent behavior, not pxx behavior.
 
 Above this repo, at `../review/` (i.e. `/Users/you/ai/code_pro/review/`),
 three different AI CLIs — **Claude Code, Gemini, and Codex** — periodically
-perform **read-only** code reviews of pxx. The directory is refreshed
-recurringly. Typical files: `04-observations.md`, `discrepancies.md`,
-`02-architecture.md`, etc.
+perform **read-only** code reviews of pxx. Each reviewer tends to excel at
+slightly different roles, so the multi-reviewer setup is intentional.
 
-These reviewers are **independent of the agent currently editing pxx**. That's
-the whole point: different reviewer = different blind spots = better chance of
-catching drift the co-author missed.
+**Ownership is tracked in `../review/inventory.md`.** Codex owns the numbered
+series (`01-overview.md` through `04-observations.md` plus `README.md`).
+Gemini owns `gemini-notes.md`. Claude Code has no current series claim — if
+you produce a review artifact, create a new file and coordinate with the user
+before staking out a series.
+
+**Hard rule from inventory.md:** *Do not modify files owned by other agents.*
+Each owner refreshes their own files on the next pass; edits you make to
+someone else's file will be overwritten anyway.
 
 When the user cites a finding ("flagged in 04-observations.md..."):
 1. Locate the file in `../review/` and read the cited item in full
 2. Address only what they pointed at unless they expand scope
 3. Leave other findings alone — they may be intentional, queued, or already
-   under review
-4. **Do not write to `../review/`**. The reviewers overwrite their own output
-   on the next pass; any edits you make will be lost.
+   under review by another agent
+4. **Do not write to files you don't own in `../review/`**. Add new files
+   under your name if you have a unique perspective worth recording.
 
 The reviewers may also be **stale** — the codebase may have moved on since the
 last review pass. Verify a cited finding against current code before acting.

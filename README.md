@@ -85,6 +85,17 @@ bash scripts/doctor.sh
 
 Reports: which endpoints are reachable, memory pressure, loaded models, CPU temp.
 
+## Developing pxx itself
+
+```bash
+uv sync --extra dev          # one-time per machine — creates .venv/
+uv run pytest -q             # 14 tests on the pure helper functions
+uv run ruff check --fix      # lint + auto-fix
+uv run ruff format           # format
+```
+
+See `CLAUDE.md` for the full dev workflow and project conventions.
+
 ## Environment overrides
 
 | Var | Purpose |

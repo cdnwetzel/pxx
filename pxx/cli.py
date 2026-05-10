@@ -1,4 +1,5 @@
 """pxx entry point: detect endpoint, pick model, exec aider."""
+
 from __future__ import annotations
 
 import os
@@ -37,7 +38,10 @@ def _find_aider() -> str:
     found = shutil.which("aider")
     if found:
         return found
-    print("pxx: aider not found. Reinstall: uv tool install --editable . --python 3.12", file=sys.stderr)
+    print(
+        "pxx: aider not found. Reinstall: uv tool install --editable . --python 3.12",
+        file=sys.stderr,
+    )
     sys.exit(1)
 
 
@@ -46,7 +50,9 @@ def _in_git_repo() -> bool:
     try:
         result = subprocess.run(
             ["git", "rev-parse", "--is-inside-work-tree"],
-            capture_output=True, check=False, timeout=2,
+            capture_output=True,
+            check=False,
+            timeout=2,
         )
         return result.returncode == 0 and result.stdout.strip() == b"true"
     except (FileNotFoundError, subprocess.TimeoutExpired):
@@ -68,13 +74,20 @@ def main() -> None:
 
     args = [
         aider_bin,
-        "--model", model,
-        "--read", str(SYSTEM_PROMPT),
-        "--config", str(AIDER_CONF),
-        "--model-settings-file", str(MODEL_SETTINGS),
+        "--model",
+        model,
+        "--read",
+        str(SYSTEM_PROMPT),
+        "--config",
+        str(AIDER_CONF),
+        "--model-settings-file",
+        str(MODEL_SETTINGS),
     ]
     if not _in_git_repo():
-        print("pxx: no git repo here — auto-commits disabled. Run `git init` to enable.", file=sys.stderr)
+        print(
+            "pxx: no git repo here — auto-commits disabled. Run `git init` to enable.",
+            file=sys.stderr,
+        )
         args.append("--no-git")
     args.extend(sys.argv[1:])
     os.execv(aider_bin, args)

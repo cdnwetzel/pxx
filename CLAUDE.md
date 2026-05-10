@@ -18,6 +18,8 @@ Endpoint priority (first reachable wins, 1s probe timeout):
 
 ## Commands
 
+### Using pxx
+
 ```bash
 # Install (editable) — uses uv tool
 uv tool install --editable . --python 3.12
@@ -29,13 +31,31 @@ bash scripts/doctor.sh
 cd ~/some-python-project && pxx
 ```
 
-There is **no test suite** in this repo and `pyproject.toml` declares no test
-dependencies. The `/test` slash command and the `test-cmd: "pytest -q"` in
-`config/aider.conf.yml` are for *downstream* projects that pxx is used to edit,
-not for pxx itself. Don't claim a change is "verified" without saying how.
+### Developing pxx
+
+Dev deps (`pytest`, `ruff`) live in `pyproject.toml` under
+`[project.optional-dependencies] dev`. Use a project-local venv managed by uv —
+**not** `--with` flags on the tool install (those bypass standard packaging).
+
+```bash
+# One-time per machine: create .venv/ from pyproject.toml + uv.lock
+uv sync --extra dev
+
+# Lint
+uv run ruff check --fix
+uv run ruff format
+
+# Test
+uv run pytest -q
+```
+
+Tests cover the pure helper functions in `pxx/cli.py` and `pxx/endpoints.py`
+(`model_for`, `_in_git_repo`, `_find_aider`, `_probe`, `detect_endpoint`).
+They do **not** exercise aider or Ollama — those are integration concerns.
 
 After editing `cli.py` or `endpoints.py`, the running pxx/aider session still
-has old code in memory — the user must exit and re-launch to test.
+has old code in memory — the user must exit and re-launch to test interactively.
+Tests will catch regressions on the pure functions automatically.
 
 ## Architecture (the parts that span multiple files)
 

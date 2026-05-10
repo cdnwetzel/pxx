@@ -6,10 +6,10 @@ First reachable wins. 1-second timeout per probe.
 LAN = mDNS / physical office network (e.g. mac-studio.local:11434).
 Remote = work DNS resolvable while connected to the SSL VPN.
 """
+
 from __future__ import annotations
 
 import os
-import socket
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -32,7 +32,7 @@ def _probe(url: str) -> bool:
     try:
         with urllib.request.urlopen(f"{url}/api/tags", timeout=PROBE_TIMEOUT_SEC):
             return True
-    except (urllib.error.URLError, socket.timeout, OSError):
+    except (urllib.error.URLError, TimeoutError, OSError):
         return False
 
 

@@ -17,6 +17,64 @@ class TestProbe:
         # Port 1 is reserved; nothing will be listening.
         assert _probe("http://localhost:1") is False
 
+    def test_rejects_non_ollama_json(self, monkeypatch):
+        # A 200 response that isn't Ollama-shaped should still fail the probe.
+        import io
+
+        class _Ctx:
+            def __init__(self, data: bytes):
+                self.body = io.BytesIO(data)
+
+            def __enter__(self):
+                return self.body
+
+            def __exit__(self, *args):
+                pass
+
+        monkeypatch.setattr(
+            "urllib.request.urlopen",
+            lambda *a, **kw: _Ctx(b'{"something_else": []}'),
+        )
+        assert _probe("http://x:11434") is False
+
+    def test_rejects_non_json_response(self, monkeypatch):
+        import io
+
+        class _Ctx:
+            def __init__(self, data: bytes):
+                self.body = io.BytesIO(data)
+
+            def __enter__(self):
+                return self.body
+
+            def __exit__(self, *args):
+                pass
+
+        monkeypatch.setattr(
+            "urllib.request.urlopen",
+            lambda *a, **kw: _Ctx(b"<html>not ollama</html>"),
+        )
+        assert _probe("http://x:11434") is False
+
+    def test_accepts_valid_ollama_response(self, monkeypatch):
+        import io
+
+        class _Ctx:
+            def __init__(self, data: bytes):
+                self.body = io.BytesIO(data)
+
+            def __enter__(self):
+                return self.body
+
+            def __exit__(self, *args):
+                pass
+
+        monkeypatch.setattr(
+            "urllib.request.urlopen",
+            lambda *a, **kw: _Ctx(b'{"models": [{"name": "qwen3:4b"}]}'),
+        )
+        assert _probe("http://x:11434") is True
+
 
 class TestDetectEndpoint:
     def test_explicit_override_short_circuits(self, monkeypatch):

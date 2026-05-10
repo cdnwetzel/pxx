@@ -21,6 +21,15 @@ fi
 echo "==> Configuring Ollama service..."
 # Bind to all interfaces so the Neo can reach it both on-LAN
 # and when connected through the SSL VPN.
+#
+# SECURITY POSTURE: 0.0.0.0:11434 means Ollama listens on every network
+# interface on this host. Ollama itself has no authentication. This is
+# only safe because the network boundary controls who can reach this port:
+#   - LAN: trusted office network (physical access required)
+#   - Remote: SSL VPN required (authenticated tunnel)
+#   - Public internet: NOT exposed (no port forward on the router)
+# If you ever take this Studio off a trusted network — e.g. a coffee-shop
+# wifi — change OLLAMA_HOST to 127.0.0.1:11434 first.
 launchctl setenv OLLAMA_HOST "0.0.0.0:11434"
 launchctl setenv OLLAMA_KEEP_ALIVE "30m"
 launchctl setenv OLLAMA_MAX_LOADED_MODELS "1"

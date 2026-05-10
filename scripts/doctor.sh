@@ -23,8 +23,8 @@ echo "=== pxx doctor ==="
 echo
 
 echo "Endpoints (priority order):"
-printf "  1. Studio LAN  (%s): " "${PXX_STUDIO_LAN_URL:-http://mac-studio.local:11434}"
-probe "${PXX_STUDIO_LAN_URL:-http://mac-studio.local:11434}"
+printf "  1. Studio LAN  (%s): " "${PXX_STUDIO_LAN_URL:-http://workstation:11434}"
+probe "${PXX_STUDIO_LAN_URL:-http://workstation:11434}"
 
 printf "  2. Studio over VPN (%s): " "${PXX_STUDIO_REMOTE_URL:-not set}"
 probe "${PXX_STUDIO_REMOTE_URL:-}"

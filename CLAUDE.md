@@ -16,6 +16,13 @@ Two-machine design:
 Endpoint priority (first reachable wins, 1s probe timeout):
 `PXX_OLLAMA_BASE` override → Studio LAN → Studio over VPN → Neo localhost.
 
+**Security posture:** the Studio binds Ollama to `0.0.0.0:11434` (all
+interfaces). Ollama itself has no authentication, so this is only safe
+because the network boundary is the auth layer: trusted LAN at the office,
+SSL VPN for remote access, no public-internet exposure. If the Studio
+ever moves to an untrusted network, change `OLLAMA_HOST` to
+`127.0.0.1:11434` first (see inline note in `scripts/setup-studio.sh`).
+
 ## Commands
 
 ### Using pxx

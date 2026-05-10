@@ -9,6 +9,7 @@ Remote = work DNS resolvable while connected to the SSL VPN.
 
 from __future__ import annotations
 
+import json
 import os
 import urllib.error
 import urllib.request
@@ -16,7 +17,7 @@ from dataclasses import dataclass
 
 PROBE_TIMEOUT_SEC = 1.0
 
-DEFAULT_STUDIO_LAN = "http://mac-studio.local:11434"
+DEFAULT_STUDIO_LAN = "http://workstation:11434"
 DEFAULT_NEO = "http://localhost:11434"
 
 
@@ -27,12 +28,19 @@ class Endpoint:
 
 
 def _probe(url: str) -> bool:
+    """Return True iff `url` responds to /api/tags with an Ollama-shaped payload.
+
+    Tighter than a bare reachability check: confirms the response parses as
+    JSON and contains a `models` key. Prevents probe success on a random HTTP
+    responder that happens to be listening on the port.
+    """
     if not url:
         return False
     try:
-        with urllib.request.urlopen(f"{url}/api/tags", timeout=PROBE_TIMEOUT_SEC):
-            return True
-    except (urllib.error.URLError, TimeoutError, OSError):
+        with urllib.request.urlopen(f"{url}/api/tags", timeout=PROBE_TIMEOUT_SEC) as resp:
+            data = json.load(resp)
+            return isinstance(data, dict) and "models" in data
+    except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError):
         return False
 
 

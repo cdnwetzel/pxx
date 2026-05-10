@@ -22,7 +22,7 @@ is **never reused**, even if a plan is cancelled.
 | --- | ------------------------------------ | ------------------------------------------------- | -------- | -------- | ---------- |
 | 001 | Dogfooding pxx (self-improvement)    | [dogfooding.md](dogfooding.md)                    | blocked  | —        | 002, 003   |
 | 002 | Safety foundation                    | [safety-foundation.md](safety-foundation.md)      | planned  | 001      | —          |
-| 003 | Scoping & dry-run                    | [scoping-and-dry-run.md](scoping-and-dry-run.md)  | proposed | 001      | —          |
+| 003 | Scoping & dry-run                    | [scoping-and-dry-run.md](scoping-and-dry-run.md)  | planned  | 001      | —          |
 | 004 | Session audit log                    | [session-audit-log.md](session-audit-log.md)      | proposed | —        | —          |
 
 ## Status legend

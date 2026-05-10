@@ -30,21 +30,39 @@ export PXX_STUDIO_LAN_URL=http://workstation:11434
 export PXX_STUDIO_REMOTE_URL=http://workstation:11434
 ```
 
+## Modes — reviewer first, edit on opt-in
+
+`pxx` defaults to a **read-only ask mode** so you can safely run it against any
+codebase (real, unfamiliar, sensitive) without risking accidental edits. To
+allow edits, pass `--edit`.
+
+```bash
+pxx                  # ask mode: read files, answer questions, NO file changes
+pxx --edit           # code mode: standard aider — propose diffs, auto-commit
+```
+
+The startup banner prints the active mode so you always know which one you're in.
+
 ## Daily use
 
 ```bash
-# At the office, on the LAN:
+# At the office, on the LAN, exploring a codebase:
 cd ~/some-python-project
-pxx                                      # auto-detects Studio via mDNS
+pxx                                      # ask mode (default, no edits possible)
+
+# Same project, ready to make changes:
+pxx --edit                               # code mode
 
 # Remote: bring up the SSL VPN, then:
-pxx                                      # auto-detects Studio over VPN
+pxx                                      # auto-detects Studio over VPN (ask)
+pxx --edit                               # ...or in edit mode
 
 # Offline (no VPN, off-LAN):
-pxx                                      # falls through to local qwen3:4b
+pxx                                      # falls through to local qwen3:4b (ask)
 ```
 
-`pxx` prints which endpoint and model it picked before launching aider, so you always know which brain you're talking to.
+`pxx` prints which endpoint, model, and **mode** it picked before launching aider,
+so you always know which brain you're talking to and whether it can write.
 
 ## Slash commands
 

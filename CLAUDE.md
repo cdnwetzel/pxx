@@ -66,10 +66,24 @@ Tests will catch regressions on the pure functions automatically.
    everything else (including the explicit `override` endpoint) gets `STUDIO_DEFAULT`.
    If overriding to a small box via `PXX_OLLAMA_BASE`, the user must also set
    `PXX_MODEL`, otherwise it will try to load `devstral:24b` (the Studio default).
-4. Locates the aider binary (prefers same-venv) and `os.execv`s into it, passing
+4. Parses one pxx-level flag (`--edit`) out of `sys.argv`. Default is ask mode
+   (read-only); `--edit` flips to code mode.
+5. Calls `_build_aider_args()` which assembles the full argv, injecting
+   `--chat-mode ask|code` *unless* the user has already passed `--chat-mode`
+   themselves (explicit user choice wins).
+6. Locates the aider binary (prefers same-venv) and `os.execv`s into it, passing
    `--read pxx/prompts/system.md`, `--config config/aider.conf.yml`,
    `--model-settings-file config/model-settings.yml`, plus `--no-git` when cwd
    is not a git repo.
+
+## Modes — reviewer first
+
+pxx defaults to **ask mode** (read-only). The user must pass `--edit` to allow
+file changes. This makes it safe to run pxx against any codebase without risking
+accidental edits. The startup banner prints the active mode.
+
+When working on pxx itself: the same rule applies — type `pxx --edit` to make
+changes. No special-casing for the pxx repo.
 
 **Three configs feed aider, and they do different things:**
 - `config/aider.conf.yml` — aider behavior (edit-format, caching, lint/test cmds, privacy)

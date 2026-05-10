@@ -1,7 +1,7 @@
 """Tests for pxx.cli pure functions.
 
-Covers the three module-level helpers that have no I/O dependencies on
-aider or Ollama: model_for, _in_git_repo, _find_aider.
+Covers the module-level helpers that have no I/O dependencies on aider or
+Ollama: model_for, _in_git_repo, _find_aider, _build_aider_args.
 """
 
 from __future__ import annotations
@@ -12,6 +12,7 @@ from pathlib import Path
 from pxx.cli import (
     NEO_DEFAULT,
     STUDIO_DEFAULT,
+    _build_aider_args,
     _find_aider,
     _in_git_repo,
     model_for,
@@ -61,3 +62,61 @@ class TestFindAider:
         found = _find_aider()
         assert Path(found).exists()
         assert Path(found).name == "aider"
+
+
+class TestBuildAiderArgs:
+    def test_default_mode_is_ask(self):
+        args = _build_aider_args("/x/aider", "m", [], in_git_repo=True, edit_mode=False)
+        assert "--chat-mode" in args
+        assert args[args.index("--chat-mode") + 1] == "ask"
+
+    def test_edit_mode_is_code(self):
+        args = _build_aider_args("/x/aider", "m", [], in_git_repo=True, edit_mode=True)
+        assert args[args.index("--chat-mode") + 1] == "code"
+
+    def test_explicit_chat_mode_passes_through(self):
+        # User passing --chat-mode architect should not be overridden by pxx.
+        args = _build_aider_args(
+            "/x/aider",
+            "m",
+            ["--chat-mode", "architect"],
+            in_git_repo=True,
+            edit_mode=False,
+        )
+        assert args.count("--chat-mode") == 1
+        assert args[args.index("--chat-mode") + 1] == "architect"
+
+    def test_explicit_chat_mode_equals_form_also_respected(self):
+        args = _build_aider_args(
+            "/x/aider",
+            "m",
+            ["--chat-mode=help"],
+            in_git_repo=True,
+            edit_mode=True,
+        )
+        # pxx should not inject its own --chat-mode when user used the = form.
+        assert "--chat-mode" not in args
+        assert "--chat-mode=help" in args
+
+    def test_no_git_flag_added_when_outside_repo(self):
+        args = _build_aider_args("/x/aider", "m", [], in_git_repo=False, edit_mode=False)
+        assert "--no-git" in args
+
+    def test_no_git_flag_skipped_when_inside_repo(self):
+        args = _build_aider_args("/x/aider", "m", [], in_git_repo=True, edit_mode=False)
+        assert "--no-git" not in args
+
+    def test_user_args_appended_last(self):
+        args = _build_aider_args(
+            "/x/aider",
+            "m",
+            ["--message", "hi"],
+            in_git_repo=True,
+            edit_mode=False,
+        )
+        # --message and "hi" should be the last two elements
+        assert args[-2:] == ["--message", "hi"]
+
+    def test_first_arg_is_aider_binary(self):
+        args = _build_aider_args("/x/aider", "m", [], in_git_repo=True, edit_mode=False)
+        assert args[0] == "/x/aider"

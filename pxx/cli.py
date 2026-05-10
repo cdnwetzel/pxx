@@ -59,18 +59,22 @@ def _in_git_repo() -> bool:
         return False
 
 
-def main() -> None:
-    try:
-        endpoint = detect_endpoint()
-    except RuntimeError as e:
-        print(f"pxx: {e}", file=sys.stderr)
-        sys.exit(1)
+def _build_aider_args(
+    aider_bin: str,
+    model: str,
+    user_args: list[str],
+    in_git_repo: bool,
+    edit_mode: bool,
+) -> list[str]:
+    """Construct the argv to exec into aider with.
 
-    os.environ["OLLAMA_API_BASE"] = endpoint.url
-    model = model_for(endpoint)
-    aider_bin = _find_aider()
-
-    print(f"pxx: endpoint={endpoint.name} ({endpoint.url})  model={model}", file=sys.stderr)
+    Default chat mode is `ask` (read-only); `--edit` flips to `code` (the
+    standard editing flow). Explicit `--chat-mode` in user_args wins over both.
+    """
+    has_chat_mode = any(a == "--chat-mode" or a.startswith("--chat-mode=") for a in user_args)
+    chat_mode_args: list[str] = []
+    if not has_chat_mode:
+        chat_mode_args = ["--chat-mode", "code" if edit_mode else "ask"]
 
     args = [
         aider_bin,
@@ -82,14 +86,42 @@ def main() -> None:
         str(AIDER_CONF),
         "--model-settings-file",
         str(MODEL_SETTINGS),
+        *chat_mode_args,
     ]
-    if not _in_git_repo():
+    if not in_git_repo:
+        args.append("--no-git")
+    args.extend(user_args)
+    return args
+
+
+def main() -> None:
+    try:
+        endpoint = detect_endpoint()
+    except RuntimeError as e:
+        print(f"pxx: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    edit_mode = "--edit" in sys.argv
+    user_args = [a for a in sys.argv[1:] if a != "--edit"]
+    in_git_repo = _in_git_repo()
+
+    os.environ["OLLAMA_API_BASE"] = endpoint.url
+    model = model_for(endpoint)
+    aider_bin = _find_aider()
+
+    mode_label = "edit" if edit_mode else "ask (read-only — pass --edit to allow changes)"
+    print(
+        f"pxx: endpoint={endpoint.name} ({endpoint.url})  model={model}  mode={mode_label}",
+        file=sys.stderr,
+    )
+
+    if not in_git_repo:
         print(
             "pxx: no git repo here — auto-commits disabled. Run `git init` to enable.",
             file=sys.stderr,
         )
-        args.append("--no-git")
-    args.extend(sys.argv[1:])
+
+    args = _build_aider_args(aider_bin, model, user_args, in_git_repo, edit_mode)
     os.execv(aider_bin, args)
 
 

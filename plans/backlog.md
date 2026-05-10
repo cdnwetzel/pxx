@@ -18,9 +18,12 @@ is **never reused**, even if a plan is cancelled.
 
 ## Plans
 
-| ID  | Title                                | File                            | Status   | Blocks | Blocked by |
-| --- | ------------------------------------ | ------------------------------- | -------- | ------ | ---------- |
-| 001 | Dogfooding pxx (self-improvement)    | [dogfooding.md](dogfooding.md)  | proposed | —      | —          |
+| ID  | Title                                | File                                              | Status   | Blocks   | Blocked by |
+| --- | ------------------------------------ | ------------------------------------------------- | -------- | -------- | ---------- |
+| 001 | Dogfooding pxx (self-improvement)    | [dogfooding.md](dogfooding.md)                    | blocked  | —        | 002, 003   |
+| 002 | Safety foundation                    | [safety-foundation.md](safety-foundation.md)      | proposed | 001      | —          |
+| 003 | Scoping & dry-run                    | [scoping-and-dry-run.md](scoping-and-dry-run.md)  | proposed | 001      | —          |
+| 004 | Session audit log                    | [session-audit-log.md](session-audit-log.md)      | proposed | —        | —          |
 
 ## Status legend
 
@@ -42,4 +45,4 @@ is **never reused**, even if a plan is cancelled.
 
 ## Next free ID
 
-`002`
+`005`

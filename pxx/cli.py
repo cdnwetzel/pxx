@@ -15,12 +15,18 @@ SYSTEM_PROMPT = PKG_DIR / "prompts" / "system.md"
 AIDER_CONF = REPO_ROOT / "config" / "aider.conf.yml"
 MODEL_SETTINGS = REPO_ROOT / "config" / "model-settings.yml"
 
-STUDIO_MODEL = os.environ.get("PXX_MODEL", "ollama_chat/devstral:24b")
-NEO_MODEL = os.environ.get("PXX_MODEL", "ollama_chat/qwen3:4b")
+STUDIO_DEFAULT = "ollama_chat/devstral:24b"
+NEO_DEFAULT = "ollama_chat/qwen3:4b"
 
 
 def model_for(endpoint: Endpoint) -> str:
-    return NEO_MODEL if endpoint.name == "neo" else STUDIO_MODEL
+    # Only the "neo" endpoint name gets NEO_DEFAULT; every other name
+    # (including PXX_OLLAMA_BASE "override") is assumed to be a Studio-class
+    # machine and gets STUDIO_DEFAULT. Override the assumption with PXX_MODEL.
+    override = os.environ.get("PXX_MODEL")
+    if override:
+        return override
+    return NEO_DEFAULT if endpoint.name == "neo" else STUDIO_DEFAULT
 
 
 def _find_aider() -> str:

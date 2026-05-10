@@ -42,9 +42,10 @@ has old code in memory — the user must exit and re-launch to test.
 **`pxx/cli.py`** is the only entry point (`pxx.cli:main`). It:
 1. Calls `detect_endpoint()` from `pxx/endpoints.py`
 2. Sets `OLLAMA_API_BASE` from the chosen endpoint
-3. Picks model via `model_for(endpoint)` — only `name == "neo"` gets `NEO_MODEL`,
-   everything else (including the explicit `override` endpoint) gets `STUDIO_MODEL`.
-   If overriding to a small box, the user must also set `PXX_MODEL`.
+3. Picks model via `model_for(endpoint)` — only `name == "neo"` gets `NEO_DEFAULT`,
+   everything else (including the explicit `override` endpoint) gets `STUDIO_DEFAULT`.
+   If overriding to a small box via `PXX_OLLAMA_BASE`, the user must also set
+   `PXX_MODEL`, otherwise it will try to load `devstral:24b` (the Studio default).
 4. Locates the aider binary (prefers same-venv) and `os.execv`s into it, passing
    `--read pxx/prompts/system.md`, `--config config/aider.conf.yml`,
    `--model-settings-file config/model-settings.yml`, plus `--no-git` when cwd

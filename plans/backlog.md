@@ -8,13 +8,19 @@ is **never reused**, even if a plan is cancelled.
 1. Pick the next free ID from **"Next free ID"** at the bottom of this file.
 2. Scan the table below to make sure an existing plan doesn't already cover
    the idea. If one does, expand that plan instead of creating a duplicate.
-3. Create `plans/<slug>.md` (filename is just the slug; the ID lives here).
-4. Inside the new plan file, add a one-line header at the top:
-   `> Backlog ID: **NNN**. See [plans/backlog.md](backlog.md) for the inventory.`
-5. Add a row to the Plans table below.
+3. Copy [`_template.md`](_template.md) to `plans/<slug>.md` (filename is
+   just the slug; the ID lives in the header block).
+4. Fill in the title, ID, status (`proposed` for new stubs, `planned` once
+   fleshed out), and the dependency columns.
+5. Add a row to the Plans table below with the same ID, title, file link,
+   status, and dependencies.
 6. Bump the "Next free ID" line.
 7. If this plan blocks another, or is blocked by one, fill in the dependency
    columns on both ends so the graph stays consistent.
+
+The template documents which sections are required at "proposed" vs
+"planned" stages and which are optional. Following it keeps the plans
+comparable and scannable.
 
 ## Plans
 

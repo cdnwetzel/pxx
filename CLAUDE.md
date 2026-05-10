@@ -84,17 +84,32 @@ is the meta-rules for editing pxx with pxx.
 aider session via `/load <path>`. They are not Python code. Editing them changes
 agent behavior, not pxx behavior.
 
-## Code review observations (`review/*.md`)
+## Code review observations (`../review/*.md`)
 
-The user maintains a `review/` directory with periodic code-review output (e.g.
-`review/04-observations.md`, `review/discrepancies.md`). Each file is a snapshot,
-typically opening with *"Don't act unless asked."*
+Above this repo, at `../review/` (i.e. `/Users/you/ai/code_pro/review/`),
+three different AI CLIs — **Claude Code, Gemini, and Codex** — periodically
+perform **read-only** code reviews of pxx. The directory is refreshed
+recurringly. Typical files: `04-observations.md`, `discrepancies.md`,
+`02-architecture.md`, etc.
+
+These reviewers are **independent of the agent currently editing pxx**. That's
+the whole point: different reviewer = different blind spots = better chance of
+catching drift the co-author missed.
 
 When the user cites a finding ("flagged in 04-observations.md..."):
-1. Locate the file and read the cited item in full before acting
+1. Locate the file in `../review/` and read the cited item in full
 2. Address only what they pointed at unless they expand scope
-3. Leave the other findings alone — they may be intentional, queued, or under
-   review
+3. Leave other findings alone — they may be intentional, queued, or already
+   under review
+4. **Do not write to `../review/`**. The reviewers overwrite their own output
+   on the next pass; any edits you make will be lost.
+
+The reviewers may also be **stale** — the codebase may have moved on since the
+last review pass. Verify a cited finding against current code before acting.
+
+**Stay open-minded but not credulous.** Some findings will be misguided
+(reviewers don't know the user's intent or project history). Use them as
+planning inputs, not commands.
 
 **Proactively notice the same classes of drift the review docs catch:**
 - README claims ↔ code defaults (model names, version pins, command examples)

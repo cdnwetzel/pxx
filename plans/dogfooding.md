@@ -2,9 +2,13 @@
 
 > Backlog ID: **001**. See [plans/backlog.md](backlog.md) for the inventory.
 >
-> Status: **planning only**. No code in this document is being executed.
-> It exists to capture the design intent for using pxx to improve pxx, so that
-> when implementation starts, we don't drift into bad patterns.
+> Status: **blocked**. Blocks: `—`. Blocked by: `002, 003`.
+>
+> Three sibling plans were extracted from this document so each could be
+> reasoned about independently — see [Coordination with other plans](#coordination-with-other-plans).
+> No code in this document is being executed. It exists to capture the design
+> intent for using pxx to improve pxx; specific *mechanisms* live in the
+> sibling plans.
 
 ## Context
 
@@ -68,6 +72,36 @@ Four reasons dogfooding is uniquely valuable for an agentic CLI like pxx:
    tool itself. The first commit was hand-written; commit number N can be
    asked for and reviewed.
 
+## Coordination with other plans
+
+This plan is the **umbrella** for self-improvement. After the initial draft,
+three sibling plans were extracted so each could own a well-scoped piece of
+machinery. The tier path below relies on them rather than redefining their
+mechanisms:
+
+- **#002 (Safety foundation)** owns the pre-session safety tag, the
+  pre-commit hook (test + lint gate + diff cap), and the self-sanity import
+  check. Tier 3 here *uses* #002's mechanisms; it does not redefine them.
+- **#003 (Scoping & dry-run)** owns the `--scope` flag, the `--dry-run`
+  pass-through, and the trusted-paths config. Tier 2 here benefits from
+  `--dry-run`; Tier 3 uses `--scope` to bound each autonomous session to a
+  single module.
+- **#004 (Session audit log)** owns the per-session JSONL log under
+  `$XDG_STATE_HOME/pxx/sessions/`. Tier 4 here consumes that log as the raw
+  data source for `learnings.md`.
+
+**Status implication:** this plan stays `blocked` until both #002 and #003
+reach `done`. #004 is not a hard blocker but materially improves the quality
+of Tier 4.
+
+**What this plan still owns (not delegated):**
+
+- The **tier path itself** — the staged progression from observation to
+  bounded autonomy, with the criteria that gate each transition.
+- The **philosophy** — why dogfooding is uniquely valuable here, why we stop
+  short of Tier 5, what 20/80 means for a personal tool.
+- The **success metrics** below — how we'll know dogfooding is working.
+
 ## The bootstrap problem (and why it's mostly solved)
 
 The meta-challenge: **you must already have a minimally functional agentic CLI
@@ -103,27 +137,28 @@ The bootstrap risk is mitigated because:
 
 ## Phased path
 
-### Tier 1 — Observation only  *(start here)*
+### Tier 1 — Observation only  *(largely already live)*
 
 **Goal:** pxx can see itself. No edits.
 
-- `pxx --self-test` → runs `uv run pytest -q` from `pxx`'s repo root, prints
-  output, exits with the same code as pytest. Runs in any cwd.
-- `pxx --self-lint` → runs `uv run ruff check . && uv run ruff format --check .`
-  from pxx's repo root.
-- `pxx --self-audit` → launches aider in the pxx repo with `pxx/commands/audit.md`
-  pre-loaded, in a configuration that disables file edits.
+**Reviewer-first default (commit `957e4d0`) already makes Tier 1 mostly free:**
+running `pxx` in the pxx repo without `--edit` loads the system prompt,
+endpoints, and (when #003 lands) optional `--scope` — all read-only. The
+`--self-audit` flag from the original sketch is therefore redundant; the
+equivalent is `cd <pxx-repo> && pxx`.
 
-These commands don't modify pxx. They make it trivial to check pxx's health
-from any directory on either machine.
+What's still worth adding here:
 
-**Implementation cost:** ~30 lines in `cli.py`, no new deps, additional flag
-parsing.
+- `pxx --self-test` → runs `uv run pytest -q` against the pxx repo regardless
+  of cwd. Useful as a portable health check from any project.
+- `pxx --self-lint` → same for `uv run ruff check .` and `uv run ruff format --check .`.
+
+**Implementation cost:** ~30 lines in `cli.py`. No new deps.
 
 **Risk:** zero.
 
-**Success criterion:** `pxx --self-test` and `pxx --self-lint` can replace the
-ad-hoc `cd /Users/you/ai/code_pro/pxx && uv run pytest -q` rituals.
+**Success criterion:** the ad-hoc ritual `cd ~/ai/code_pro/pxx && uv run pytest -q`
+is replaced by a one-word command runnable from anywhere on either machine.
 
 ### Tier 2 — Suggested changes, human-approved
 
@@ -150,59 +185,74 @@ already; this just constrains the opening prompt.
 
 **Goal:** pxx can make small, reversible improvements with minimal supervision.
 
-- Each session opens, makes **one focused change** (e.g. "tighten type hints in
-  `endpoints.py`", "add a `--dry-run` flag"), runs the test gate, commits if
-  green, **stops**.
-- A pre-commit hook runs `uv run pytest -q` and `uv run ruff check`. Either
-  failing rejects the commit.
-- The session **does not push**. Pushing remains a deliberate `git deliver`.
-- A per-session diff cap (e.g. 100 lines) refuses to commit larger changes
-  without explicit user override.
-- Commits land with a `[autonomous]` tag in the message so they can be
-  filtered out of history later if needed.
+**Requires #002 (Safety foundation) and #003 (Scoping & dry-run) to be `done`.**
+Tier 3 doesn't reinvent their mechanisms — it composes them into a workflow:
 
-Realistic Tier-3 tasks once stable:
+- **From #002**: pre-session safety tag, pre-commit hook (test + lint gate),
+  per-session diff cap, self-sanity check on launch.
+- **From #003**: `--scope` to bound each session to a specific module/dir.
 
-- *"Add a `--dry-run` flag that prints the args we'd pass to aider but doesn't
-  exec."* — small, testable, additive.
-- *"Add `--rollback` that runs `git reset --hard HEAD~1` after a confirmation
-  prompt."* — narrow scope, easy verification.
+What Tier 3 itself adds on top:
+
+- A **workflow convention**: each session opens as
+  `pxx --edit --scope <path>` targeting one module, makes **one focused
+  change**, lets the pre-commit hook gate the commit, then stops.
+- An **`[autonomous]` commit-message tag** so self-driven commits are
+  filterable from manual ones.
+- An optional **`pxx --self-fix "<task description>"`** subcommand that
+  automates the open-session + close-session loop for unattended runs.
+- A **no-push rule**: Tier 3 commits stay on the local branch. `git deliver`
+  remains a deliberate human action.
+
+Realistic Tier-3 tasks once #002 and #003 land:
+
+- *"Add a `--rollback` that runs `git reset --hard pxx-pre/<latest>` after
+  a confirmation prompt."* — uses #002's tags directly.
 - *"You just crashed in `_in_git_repo` when run from a submodule. Reproduce,
   fix, add a regression test."* — the self-debug case from the why-section.
+- *"Refactor `endpoints.py` to extract `_candidates()` so it's testable
+  independently."* — `--scope pxx/endpoints.py` keeps the change surgical.
 
-**Implementation cost:** pre-commit hook (`.git/hooks/pre-commit`, copied via a
-new entry in `setup-*.sh`), a `pxx --self-fix "<task>"` subcommand, and the
-diff-size guard.
+**Implementation cost:** small once #002 and #003 are in place — mostly a
+workflow doc plus the optional `--self-fix` subcommand.
 
-**Risk:** medium. Bad commits are local-only, easy to revert. Don't propagate
-to Studio or GitHub without user action.
+**Risk:** medium. Bad commits are local-only, easy to revert via #002's
+safety tag. Don't propagate to Studio or GitHub without user action.
 
 ### Tier 4 — Learnings loop
 
 **Goal:** pxx accumulates lessons across sessions and feeds them back into its
 own system prompt.
 
-This is the pattern surfaced by recent research (the "learnings file" approach
-from MindStudio, SICA, and Anthropic's own auto-memory in Claude Code). Keep a
-`pxx/prompts/learnings.md` file. After each session, the user (or pxx, with
-human review at first) appends one-line observations:
+**Materially improved by #004 (Session audit log).** Without #004, Tier 4
+relies on memory; with #004, the JSONL log is the raw data source.
 
-- "model often forgets that `.aider.conf.yml` is in `.aiderignore`"
-- "model proposes new deps without justification — reinforce the rule"
-- "`/refocus` should mention 32K context window explicitly"
+Pattern:
 
-On startup, `cli.py` adds `learnings.md` to aider's read-only context list
-(`--read`). The model sees the accumulated lessons every session.
+- Keep a `pxx/prompts/learnings.md` file with one-line behavioral lessons:
+  - *"model often forgets that `.aider.conf.yml` is in `.aiderignore`"*
+  - *"model proposes new deps without justification — reinforce the rule"*
+  - *"`/refocus` should mention 32K context window explicitly"*
+- On startup, `cli.py` adds `learnings.md` to aider's `--read` context list
+  so every session sees the accumulated lessons.
+- **#004's JSONL log is the input**: periodically (manually at first), grep
+  the log for patterns — repeated revert+retry cycles, files that always
+  trigger circuit-breaker trips (#002), sessions that ended with the same
+  kind of failure. Distill those observations into one-line entries in
+  `learnings.md`.
 
 This is **not** model fine-tuning — it's context-engineering. Durable
 behavioral steering through plain text files, version-controlled like
 everything else.
 
-**Implementation cost:** create the file, add to `cli.py`'s args, document the
-append convention.
+**Implementation cost (assuming #004 is `done`):** create `learnings.md`,
+add a `--read` line in `cli.py`, document the append-from-#004-log convention.
 
-**Risk:** low, but watch for the file growing unbounded. Periodic compaction is
-itself a dogfoodable task ("read `learnings.md` and merge duplicates").
+**Implementation cost (without #004):** same code, but `learnings.md` has to
+be hand-maintained from memory — much lower signal.
+
+**Risk:** low, but watch for the file growing unbounded. Periodic compaction
+is itself a dogfoodable task ("read `learnings.md` and merge duplicates").
 
 ### Tier 5 — Full self-evolution
 

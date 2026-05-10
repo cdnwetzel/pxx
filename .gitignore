@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+.venv/
+.env
+# aider runtime artifacts (not the config file we track)
+.aider.chat.history.md
+.aider.input.history
+.aider.llm.history
+.aider*.tags.cache.v*/
+# Claude Code hook contains a real ntfy token — keep local per machine
+.claude/hooks/notify.sh
+.claude/*.lock
+*.egg-info/
+dist/
+build/
+.DS_Store

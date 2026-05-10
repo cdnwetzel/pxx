@@ -1,0 +1,22 @@
+# Files aider MUST NOT modify when editing pxx itself.
+# These have memory, install, or behavior implications.
+# Edit by hand if you genuinely need to change them.
+
+# Ollama context windows / call parameters — wrong values can OOM the Studio
+config/model-settings.yml
+
+# Aider's own defaults — change behavior in subtle ways
+config/aider.conf.yml
+.aider.conf.yml
+
+# Meta — the guardrails themselves
+.aiderignore
+CONVENTIONS.md
+
+# Package metadata + dependencies — break installs
+pyproject.toml
+
+# Install / lifecycle scripts — break setup on fresh machines
+scripts/setup-studio.sh
+scripts/setup-neo.sh
+scripts/doctor.sh

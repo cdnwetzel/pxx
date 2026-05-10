@@ -1,0 +1,48 @@
+{
+  "permissions": {
+    "deny": [
+      "Write(.env)",
+      "Write(.env.*)",
+      "Write(**/requirements*.txt)",
+      "Write(**/*.lock)",
+      "Write(**/*credential*)",
+      "Write(**/*secret*)",
+      "Write(**/*.key)",
+      "Bash(pip install*)",
+      "Bash(npm install*)"
+    ],
+    "allow": [
+      "Bash(git*)",
+      "Bash(pytest*)",
+      "Bash(python -m pytest*)",
+      "Bash(ruff*)",
+      "Bash(uv*)",
+      "Bash(ollama*)",
+      "Bash(curl*)"
+    ]
+  },
+  "hooks": {
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/notify.sh\" finished"
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/notify.sh\" \"needs your input\""
+          }
+        ]
+      }
+    ]
+  }
+}

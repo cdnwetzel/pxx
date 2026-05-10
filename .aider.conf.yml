@@ -1,0 +1,10 @@
+# Project-level aider overrides for pxx self-development.
+# Loaded automatically by aider when run in this repo.
+# Stacks on top of pxx's global config; does not replace it.
+
+# Always inject the project rules so the model sees the guardrails
+read:
+  - CONVENTIONS.md
+
+# No magic confirmations — explicit yes/no on every prompt
+yes-always: false

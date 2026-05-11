@@ -7,6 +7,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(dirname "$SCRIPT_DIR")"
 
+# shellcheck source=./_lib.sh
+. "$SCRIPT_DIR/_lib.sh"
+
 echo "==> Checking Homebrew..."
 if ! command -v brew >/dev/null; then
   echo "Install Homebrew first: https://brew.sh"
@@ -15,7 +18,7 @@ fi
 
 echo "==> Installing Ollama (offline fallback)..."
 if ! command -v ollama >/dev/null; then
-  brew install ollama
+  _with_check "brew install ollama" brew install ollama
 fi
 
 echo "==> Tuning Ollama for 8GB..."
@@ -28,19 +31,19 @@ brew services restart ollama 2>/dev/null || brew services start ollama
 sleep 3
 
 echo "==> Pulling offline fallback model..."
-ollama pull qwen3:4b
+_with_check "ollama pull qwen3:4b" ollama pull qwen3:4b
 
 echo "==> Installing uv (Python env manager)..."
 if ! command -v uv >/dev/null; then
-  brew install uv
+  _with_check "brew install uv" brew install uv
 fi
 
 echo "==> Installing Python 3.12 (aider deps don't yet support 3.13+)..."
-uv python install 3.12
+_with_check "uv python install 3.12" uv python install 3.12
 
 echo "==> Installing pxx..."
 cd "$REPO_DIR"
-uv tool install --editable . --python 3.12
+_with_check "uv tool install pxx" uv tool install --editable . --python 3.12
 
 echo "==> Verifying..."
 if command -v pxx >/dev/null; then

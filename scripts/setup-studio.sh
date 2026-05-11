@@ -7,6 +7,9 @@
 
 set -euo pipefail
 
+# shellcheck source=./_lib.sh
+. "$(dirname "${BASH_SOURCE[0]}")/_lib.sh"
+
 echo "==> Checking Homebrew..."
 if ! command -v brew >/dev/null; then
   echo "Install Homebrew first: https://brew.sh"
@@ -15,7 +18,7 @@ fi
 
 echo "==> Installing Ollama..."
 if ! command -v ollama >/dev/null; then
-  brew install ollama
+  _with_check "brew install ollama" brew install ollama
 fi
 
 echo "==> Configuring Ollama service..."
@@ -40,9 +43,12 @@ brew services restart ollama 2>/dev/null || brew services start ollama
 sleep 3
 
 echo "==> Pulling models..."
-ollama pull devstral:24b   # 14GB — primary, agentic editing
-ollama pull qwen3:14b      # generalist alternate
-ollama pull qwen3:8b       # smaller fallback if memory pressure
+# 14GB — primary, agentic editing
+_with_check "ollama pull devstral:24b" ollama pull devstral:24b
+# generalist alternate
+_with_check "ollama pull qwen3:14b"    ollama pull qwen3:14b
+# smaller fallback if memory pressure
+_with_check "ollama pull qwen3:8b"     ollama pull qwen3:8b
 
 echo "==> Verifying Ollama API..."
 curl -sS http://localhost:11434/api/tags >/dev/null && echo "    Ollama API: OK" || echo "    Ollama API: FAIL"

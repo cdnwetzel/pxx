@@ -10,9 +10,10 @@ probe() {
     echo "(not set)"
     return
   fi
-  if curl -sS --max-time 1 "$url/api/tags" >/dev/null 2>&1; then
+  local resp
+  if resp=$(curl -sS --max-time 1 "$url/api/tags" 2>/dev/null); then
     local models
-    models=$(curl -sS --max-time 1 "$url/api/tags" | python3 -c "import sys,json; d=json.load(sys.stdin); print(', '.join(m['name'] for m in d.get('models', [])) or 'none loaded')" 2>/dev/null || echo "?")
+    models=$(echo "$resp" | python3 -c "import sys,json; d=json.load(sys.stdin); print(', '.join(m['name'] for m in d.get('models', [])) or 'none loaded')" 2>/dev/null || echo "?")
     echo "OK — models: $models"
   else
     echo "unreachable"

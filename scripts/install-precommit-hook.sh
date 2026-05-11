@@ -24,7 +24,12 @@ if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     exit 1
 fi
 
-GIT_DIR=$(git rev-parse --git-dir)
+# Use ABSOLUTE paths so success / uninstall messages unambiguously
+# identify which repo got the hook. Without this, the message
+# 'Installed pxx pre-commit hook at .git/hooks/pre-commit' can hide
+# that the install went to cwd's repo when the user expected another.
+GIT_DIR=$(git rev-parse --absolute-git-dir)
+WORK_TREE=$(git rev-parse --show-toplevel)
 HOOKS_DIR="$GIT_DIR/hooks"
 HOOK="$HOOKS_DIR/pre-commit"
 
@@ -41,6 +46,7 @@ if [ "${1:-}" = "--uninstall" ]; then
     fi
     rm -f "$HOOK"
     echo "Removed pxx pre-commit hook at $HOOK"
+    echo "  (repo: $WORK_TREE)"
     exit 0
 fi
 
@@ -69,3 +75,4 @@ mkdir -p "$HOOKS_DIR"
 } > "$HOOK"
 chmod +x "$HOOK"
 echo "Installed pxx pre-commit hook at $HOOK"
+echo "  (repo: $WORK_TREE)"

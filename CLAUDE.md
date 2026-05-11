@@ -155,9 +155,12 @@ three different AI CLIs — **Claude Code, Gemini, and Codex** — periodically
 perform **read-only** code reviews of pxx. Each reviewer tends to excel at
 slightly different roles, so the multi-reviewer setup is intentional.
 
-**Ownership is tracked in `../review/inventory.md`.** Codex owns the numbered
-series (`01-overview.md` through `04-observations.md` plus `README.md`).
-Gemini owns `gemini-notes.md`.
+**Ownership is tracked in `../review/inventory.md`** — that file is the
+authoritative source. Codex and Gemini each own a clearly-scoped set of
+files there. Ownership shifts as agents adopt or vacate files (the
+inventory itself records which agent last edited what and why), so
+always consult `inventory.md` directly rather than relying on a
+snapshot in this file.
 
 **Claude Code's role here is read-only.** This agent does not create, modify,
 or stake out files in `../review/`. The user wants Claude Code's contribution

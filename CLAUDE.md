@@ -192,6 +192,6 @@ If a task seems to require editing one of these, stop and ask. The
 | Var | Effect |
 |---|---|
 | `PXX_OLLAMA_BASE`      | Skip detection entirely, use this URL |
-| `PXX_STUDIO_LAN_URL`   | Override `http://mac-studio.local:11434` |
+| `PXX_STUDIO_LAN_URL`   | Override `http://workstation:11434` |
 | `PXX_STUDIO_REMOTE_URL`| Studio's VPN-reachable URL (empty by default) |
 | `PXX_MODEL`            | Force a specific model regardless of endpoint |

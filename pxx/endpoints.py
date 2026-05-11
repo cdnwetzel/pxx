@@ -3,7 +3,8 @@
 Priority: explicit override > Studio LAN > Studio over VPN > Neo localhost.
 First reachable wins. 1-second timeout per probe.
 
-LAN = mDNS / physical office network (e.g. mac-studio.local:11434).
+LAN = on the office network (e.g. workstation:11434, resolvable via
+corp DNS or mDNS).
 Remote = work DNS resolvable while connected to the SSL VPN.
 """
 

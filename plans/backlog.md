@@ -3,6 +3,25 @@
 Master inventory of pxx planning docs. Each plan gets a stable numeric ID that
 is **never reused**, even if a plan is cancelled.
 
+## Scope of this inventory
+
+This backlog tracks **pxx development work** — changes to pxx's code, tests,
+configs, scripts, prompts, slash commands, or repo-level documentation.
+
+It does **NOT** track:
+
+- Review-agent workflows or meta-tooling (Gemini's `GEMINI.md` workflow,
+  Codex's review-refresh passes, etc.). Those agents own their own work
+  and their output lives in `../review/`.
+- Updates to `../review/*` — owned by the review agents per
+  `../review/inventory.md`.
+- Per-agent instruction files (`CLAUDE.md`, `GEMINI.md`) — those evolve
+  independently as the agents themselves do.
+
+If you are an automated agent considering an entry here: ask the user
+first if your work is *meta-tooling for yourself* vs. *a change to pxx
+itself*. Only the latter belongs in this inventory.
+
 ## Workflow for adding a new plan
 
 1. Pick the next free ID from **"Next free ID"** at the bottom of this file.
@@ -35,8 +54,6 @@ comparable and scannable.
 | 007 | Slash-command discoverability        | [slash-command-discoverability.md](slash-command-discoverability.md) | planned  | —        | —          |
 | 008 | Auto-restart hint after self-edits   | [auto-restart-hint.md](auto-restart-hint.md)                         | blocked  | —        | 002, 004   |
 | 009 | VS Code (Continue.dev) integration   | [vscode-continue-integration.md](vscode-continue-integration.md)     | planned  | —        | —          |
-| 010 | Gemini CLI Workflow Integration      | [gemini-workflow-integration.md](gemini-workflow-integration.md) | done     | —        | —          |
-| 011 | Codex review refresh                 | [codex-review-refresh.md](codex-review-refresh.md)                   | in-progress | —     | —          |
 
 ## Status legend
 
@@ -58,4 +75,4 @@ comparable and scannable.
 
 ## Next free ID
 
-`012`
+`010`

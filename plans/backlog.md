@@ -47,7 +47,7 @@ comparable and scannable.
 | --- | ------------------------------------ | ------------------------------------------------- | -------- | -------- | ---------- |
 | 001 | Dogfooding pxx (self-improvement)    | [dogfooding.md](dogfooding.md)                    | blocked  | —        | 003        |
 | 002 | Safety foundation                    | [safety-foundation.md](safety-foundation.md)      | done     | 001      | —          |
-| 003 | Scoping & dry-run                    | [scoping-and-dry-run.md](scoping-and-dry-run.md)  | planned  | 001      | —          |
+| 003 | Scoping & dry-run                    | [scoping-and-dry-run.md](scoping-and-dry-run.md)  | in-progress | 001    | —          |
 | 004 | Session audit log                    | [session-audit-log.md](session-audit-log.md)      | planned  | —        | —          |
 | 005 | Setup-script hardening               | [setup-script-hardening.md](setup-script-hardening.md) | done     | —        | —          |
 | 006 | Cross-machine drift detection        | [cross-machine-drift-detection.md](cross-machine-drift-detection.md) | planned  | —        | —          |

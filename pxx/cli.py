@@ -371,6 +371,10 @@ def main() -> None:
 
     edit_mode = "--edit" in sys.argv
     big_mode = "--big" in sys.argv
+    # S2 (#003): --dry-run is an aider flag (already in its arg parser);
+    # we detect it only for banner purposes and let it pass through to
+    # aider naturally — no need to strip it from user_args.
+    dry_run = "--dry-run" in sys.argv
     user_args = [a for a in sys.argv[1:] if a not in ("--edit", "--big")]
     in_git_repo = _in_git_repo()
 
@@ -411,7 +415,7 @@ def main() -> None:
             "Make at least one commit to enable it.",
             file=sys.stderr,
         )
-    if big_mode and edit_mode:
+    if big_mode and edit_mode and not dry_run:
         print(
             "pxx: --big set — pre-commit diff cap bypassed for this session.",
             file=sys.stderr,
@@ -419,6 +423,22 @@ def main() -> None:
     elif big_mode and not edit_mode:
         print(
             "pxx: --big has no effect in ask mode (no commits to gate); ignored.",
+            file=sys.stderr,
+        )
+    elif big_mode and dry_run:
+        print(
+            "pxx: --big has no effect with --dry-run (no commits will land); ignored.",
+            file=sys.stderr,
+        )
+
+    if dry_run and edit_mode:
+        print(
+            "pxx: --dry-run set — aider will describe changes but not write or commit them.",
+            file=sys.stderr,
+        )
+    elif dry_run and not edit_mode:
+        print(
+            "pxx: --dry-run is redundant in ask mode (no writes either way); ignored.",
             file=sys.stderr,
         )
 

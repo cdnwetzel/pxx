@@ -30,11 +30,11 @@ comparable and scannable.
 | 002 | Safety foundation                    | [safety-foundation.md](safety-foundation.md)      | planned  | 001      | —          |
 | 003 | Scoping & dry-run                    | [scoping-and-dry-run.md](scoping-and-dry-run.md)  | planned  | 001      | —          |
 | 004 | Session audit log                    | [session-audit-log.md](session-audit-log.md)      | planned  | —        | —          |
-| 005 | Setup-script hardening               | [setup-script-hardening.md](setup-script-hardening.md) | proposed | —        | —          |
-| 006 | Cross-machine drift detection        | [cross-machine-drift-detection.md](cross-machine-drift-detection.md) | proposed | —        | —          |
+| 005 | Setup-script hardening               | [setup-script-hardening.md](setup-script-hardening.md) | planned  | —        | —          |
+| 006 | Cross-machine drift detection        | [cross-machine-drift-detection.md](cross-machine-drift-detection.md) | planned  | —        | —          |
 | 007 | Slash-command discoverability        | [slash-command-discoverability.md](slash-command-discoverability.md) | planned  | —        | —          |
 | 008 | Auto-restart hint after self-edits   | [auto-restart-hint.md](auto-restart-hint.md)                         | blocked  | —        | 002, 004   |
-| 009 | VS Code (Continue.dev) integration   | [vscode-continue-integration.md](vscode-continue-integration.md)     | proposed | —        | —          |
+| 009 | VS Code (Continue.dev) integration   | [vscode-continue-integration.md](vscode-continue-integration.md)     | planned  | —        | —          |
 
 ## Status legend
 

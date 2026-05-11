@@ -35,6 +35,8 @@ comparable and scannable.
 | 007 | Slash-command discoverability        | [slash-command-discoverability.md](slash-command-discoverability.md) | planned  | —        | —          |
 | 008 | Auto-restart hint after self-edits   | [auto-restart-hint.md](auto-restart-hint.md)                         | blocked  | —        | 002, 004   |
 | 009 | VS Code (Continue.dev) integration   | [vscode-continue-integration.md](vscode-continue-integration.md)     | planned  | —        | —          |
+| 010 | Gemini CLI Workflow Integration      | [gemini-workflow-integration.md](gemini-workflow-integration.md) | done     | —        | —          |
+| 011 | Codex review refresh                 | [codex-review-refresh.md](codex-review-refresh.md)                   | in-progress | —     | —          |
 
 ## Status legend
 
@@ -56,4 +58,4 @@ comparable and scannable.
 
 ## Next free ID
 
-`010`
+`012`

@@ -440,6 +440,33 @@ def _self_lint() -> int:
     return combined
 
 
+def _extract_self_fix_task(argv: list[str]) -> tuple[str | None, list[str]]:
+    """Extract the positional task string immediately after ``--self-fix`` (#012).
+
+    The task is the arg immediately following ``--self-fix`` *iff* it does not
+    start with ``-`` (so flag args like ``--scope`` or ``--message`` are NOT
+    swallowed). When the immediate-next slot is a flag, no task is extracted
+    here — the user is expected to provide one via ``--message`` or pxx
+    refuses to run.
+
+    Returns ``(task_or_None, argv_with_task_removed)``. ``--self-fix`` itself
+    stays in argv; only the task slot is consumed.
+    """
+    try:
+        idx = argv.index("--self-fix")
+    except ValueError:
+        return None, argv
+    if idx + 1 < len(argv) and not argv[idx + 1].startswith("-"):
+        task = argv[idx + 1]
+        return task, argv[: idx + 1] + argv[idx + 2 :]
+    return None, argv
+
+
+# Tier 3 (#012): tighter diff cap for autonomous sessions (default 60 vs
+# the normal 100). Surfaced as a constant for testability.
+SELF_FIX_DIFF_CAP = 60
+
+
 def _install_precommit_hook() -> None:
     """Invoke scripts/install-precommit-hook.sh in the current working dir.
 
@@ -495,6 +522,13 @@ def main() -> None:
     # the self-improve prompt loaded. Ask-only by design — combined with
     # --edit it exits 2 so a typo can't silently flip the session.
     self_improve_mode = "--self-improve" in sys.argv
+    # Tier 3 (#012): --self-fix opens a bounded autonomous --edit --scope
+    # session. Implies --edit; requires --scope; sets PXX_AUTONOMOUS=1 and
+    # PXX_DIFF_CAP=60 in the env for the pre-commit / prepare-commit-msg
+    # hooks to honor. The task slot (if positional) is consumed here so
+    # downstream parsers (extract_scope_args) don't treat it as a path.
+    self_fix_mode = "--self-fix" in sys.argv
+    self_fix_task, argv_after_self_fix = _extract_self_fix_task(sys.argv[1:])
 
     if self_improve_mode and edit_mode:
         print(
@@ -503,7 +537,20 @@ def main() -> None:
         )
         sys.exit(2)
 
-    if self_improve_mode:
+    if self_fix_mode and self_improve_mode:
+        print(
+            "pxx: --self-fix and --self-improve are mutually exclusive "
+            "(autonomous-edit vs suggest-only). Pick one.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
+    if self_fix_mode:
+        # --self-fix implies --edit; force it on so all downstream
+        # edit-mode logic (safety tag, banner, diff cap, scope gate) fires.
+        edit_mode = True
+
+    if self_improve_mode or self_fix_mode:
         # chdir before any cwd-relative checks (in_git_repo, _git_repo_root,
         # trusted-paths) so they see the pxx repo as the working tree.
         os.chdir(REPO_ROOT)
@@ -541,11 +588,22 @@ def main() -> None:
 
     # S1 (#003): consume --scope <path> (and --scope=<path>) before
     # the --edit/--big/--anywhere strip, since extract_scope_args needs to
-    # see them in argv order to pair flag with value.
-    scope_args, argv_after_scope = extract_scope_args(sys.argv[1:])
+    # see them in argv order to pair flag with value. Run on the post-
+    # self-fix-task argv so the task string isn't mistaken for a path.
+    scope_args, argv_after_scope = extract_scope_args(argv_after_self_fix)
     user_args = [
-        a for a in argv_after_scope if a not in ("--edit", "--big", "--anywhere", "--self-improve")
+        a
+        for a in argv_after_scope
+        if a not in ("--edit", "--big", "--anywhere", "--self-improve", "--self-fix")
     ]
+    # Tier 3 (#012): inject the self-fix task as --message unless the user
+    # already provided one explicitly.
+    if self_fix_task:
+        has_message = any(
+            a == "--message" or a.startswith("--message=") for a in user_args
+        )
+        if not has_message:
+            user_args = ["--message", self_fix_task, *user_args]
     in_git_repo = _in_git_repo()
 
     # Resolve scope paths against the repo root. Without a git repo, scope
@@ -574,12 +632,31 @@ def main() -> None:
                     sys.exit(1)
                 os.environ["PXX_SCOPE"] = format_for_env(scope_prefixes)
 
+    # Tier 3 (#012): --self-fix refuses to launch without --scope so the
+    # autonomous session can't touch surprising files. Check AFTER scope
+    # resolution so we know whether a real scope landed (vs e.g. --scope
+    # ignored outside a git repo).
+    if self_fix_mode and not scope_prefixes:
+        print(
+            "pxx: --self-fix requires --scope <path>; "
+            "refusing to run an autonomous edit without explicit scope.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
     os.environ["OLLAMA_API_BASE"] = endpoint.url
     # M4 (#002): --big tells the pre-commit hook to skip the per-session
     # diff cap. Set the env var before exec so the hook (which runs
     # later, in the aider-spawned shell) sees it.
     if big_mode:
         os.environ["PXX_ALLOW_BIG_DIFF"] = "1"
+    # Tier 3 (#012): --self-fix sets PXX_AUTONOMOUS=1 so the
+    # prepare-commit-msg hook tags the resulting commit, and tightens the
+    # diff cap to SELF_FIX_DIFF_CAP unless the user explicitly overrode it.
+    if self_fix_mode:
+        os.environ["PXX_AUTONOMOUS"] = "1"
+        if "PXX_DIFF_CAP" not in os.environ:
+            os.environ["PXX_DIFF_CAP"] = str(SELF_FIX_DIFF_CAP)
     model = model_for(endpoint)
     aider_bin = _find_aider()
 
@@ -596,7 +673,12 @@ def main() -> None:
             empty_repo = True
 
     if edit_mode:
-        mode_label = "edit (untrusted path)" if untrusted_override else "edit"
+        parts: list[str] = []
+        if untrusted_override:
+            parts.append("untrusted path")
+        if self_fix_mode:
+            parts.append("autonomous")
+        mode_label = "edit" + (f" ({', '.join(parts)})" if parts else "")
     elif self_improve_mode:
         mode_label = "ask (self-improve)"
     else:
@@ -605,6 +687,13 @@ def main() -> None:
         f"pxx: endpoint={endpoint.name} ({endpoint.url})  model={model}  mode={mode_label}",
         file=sys.stderr,
     )
+    if self_fix_mode:
+        cap = os.environ.get("PXX_DIFF_CAP", str(SELF_FIX_DIFF_CAP))
+        print(
+            f"pxx: --self-fix: task={self_fix_task!r}  diff_cap={cap}  "
+            f"commits will be tagged [autonomous].",
+            file=sys.stderr,
+        )
     if safety_tag:
         print(
             f"pxx: safety tag {safety_tag} — undo session with: git reset --hard {safety_tag}",

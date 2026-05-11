@@ -130,6 +130,10 @@ class TestPrepareCommitMsgHook:
         (repo / "scratch.txt").write_text(f"content-{message}")
         subprocess.run(["git", "add", "scratch.txt"], cwd=repo, check=True)
         env = {**os.environ, "PXX_PRECOMMIT_SKIP": "1"}
+        # Explicitly drop PXX_AUTONOMOUS so leakage from another pytest test
+        # in the same process doesn't poison this subprocess. The test
+        # controls it via the `autonomous` flag, not via parent env.
+        env.pop("PXX_AUTONOMOUS", None)
         if autonomous:
             env["PXX_AUTONOMOUS"] = "1"
         cmd = ["git", "commit", "-q", "-m", message]

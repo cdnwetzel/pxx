@@ -7,6 +7,7 @@ Ollama: model_for, _in_git_repo, _find_aider, _build_aider_args, the
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import tempfile
@@ -631,6 +632,252 @@ class TestSelfImproveFlag:
         read_paths = [argv[i + 1] for i, a in enumerate(argv) if a == "--read"]
         assert any("system.md" in p for p in read_paths)
         assert any("self-improve.md" in p for p in read_paths)
+
+
+class TestExtractSelfFixTask:
+    """Unit tests for the task-string extractor (#012)."""
+
+    def test_no_self_fix_flag_returns_none(self):
+        from pxx.cli import _extract_self_fix_task
+
+        task, rest = _extract_self_fix_task(["--edit", "--scope", "tests/"])
+        assert task is None
+        assert rest == ["--edit", "--scope", "tests/"]
+
+    def test_positional_task_after_self_fix(self):
+        from pxx.cli import _extract_self_fix_task
+
+        task, rest = _extract_self_fix_task(
+            ["--self-fix", "fix typo", "--scope", "pxx/cli.py"]
+        )
+        assert task == "fix typo"
+        assert rest == ["--self-fix", "--scope", "pxx/cli.py"]
+
+    def test_flag_arg_after_self_fix_is_not_swallowed(self):
+        # --message immediately after --self-fix is NOT the task.
+        from pxx.cli import _extract_self_fix_task
+
+        task, rest = _extract_self_fix_task(
+            ["--self-fix", "--message", "fix it", "--scope", "x/"]
+        )
+        assert task is None
+        assert rest == ["--self-fix", "--message", "fix it", "--scope", "x/"]
+
+    def test_self_fix_at_end_of_argv(self):
+        from pxx.cli import _extract_self_fix_task
+
+        task, rest = _extract_self_fix_task(["--edit", "--self-fix"])
+        assert task is None
+        assert rest == ["--edit", "--self-fix"]
+
+
+class TestSelfFixFlag:
+    """Integration tests for the --self-fix flag (#012)."""
+
+    @pytest.fixture(autouse=True)
+    def _isolate_env(self, monkeypatch):
+        """Prevent cross-test leakage of env vars main() sets via os.environ[k]=v.
+
+        monkeypatch.delenv records the original (absent) state and restores
+        at teardown, so even if main() sets these directly the cleanup runs.
+        """
+        for v in (
+            "PXX_AUTONOMOUS",
+            "PXX_DIFF_CAP",
+            "PXX_SCOPE",
+            "PXX_ALLOW_BIG_DIFF",
+            "OLLAMA_API_BASE",
+        ):
+            monkeypatch.delenv(v, raising=False)
+
+    def _patch_endpoint_and_exec(self, monkeypatch):
+        from pxx import cli as cli_module
+
+        monkeypatch.setattr(
+            cli_module, "detect_endpoint", lambda: Endpoint("neo", "http://x:11434")
+        )
+        monkeypatch.setattr(cli_module.os, "execv", lambda *_: None)
+        monkeypatch.setattr(cli_module, "_find_aider", lambda: "/x/aider")
+        # CRITICAL: --self-fix forces edit_mode=True which triggers the
+        # #002 safety-tag block. Without mocking, _create_safety_tag runs
+        # `git stash --include-untracked` in the REAL pxx repo (because
+        # main() chdirs to REPO_ROOT for self_fix_mode), wiping the
+        # developer's uncommitted work into a stash. Mock both safety-tag
+        # helpers to no-op so the test never touches the real .git/.
+        monkeypatch.setattr(cli_module, "_create_safety_tag", lambda: None)
+        monkeypatch.setattr(cli_module, "_prune_old_safety_tags", lambda **k: None)
+
+    def test_self_fix_without_scope_exits_2(self, monkeypatch, tmp_path, capsys):
+        from pxx import cli as cli_module
+
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(sys, "argv", ["pxx", "--self-fix", "fix typo"])
+        self._patch_endpoint_and_exec(monkeypatch)
+        # Skip the trusted-paths gate for this test (no config).
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg-empty"))
+
+        with pytest.raises(SystemExit) as exc:
+            cli_module.main()
+        assert exc.value.code == 2
+        err = capsys.readouterr().err
+        assert "--self-fix requires --scope" in err
+
+    def test_self_fix_with_self_improve_exits_2(self, monkeypatch, tmp_path, capsys):
+        from pxx import cli as cli_module
+
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(sys, "argv", ["pxx", "--self-fix", "x", "--self-improve"])
+        self._patch_endpoint_and_exec(monkeypatch)
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg-empty"))
+
+        with pytest.raises(SystemExit) as exc:
+            cli_module.main()
+        assert exc.value.code == 2
+        err = capsys.readouterr().err
+        assert "mutually exclusive" in err
+
+    def test_self_fix_sets_autonomous_env_and_tightens_diff_cap(
+        self, monkeypatch, tmp_path
+    ):
+        from pxx import cli as cli_module
+
+        monkeypatch.chdir(tmp_path)
+        # Need a scope path that resolves under a git repo. Use REPO_ROOT
+        # itself: pxx is a git repo, so the scope check will pass.
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            ["pxx", "--self-fix", "fix typo", "--scope", str(REPO_ROOT / "pxx")],
+        )
+        self._patch_endpoint_and_exec(monkeypatch)
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg-empty"))
+        monkeypatch.delenv("PXX_AUTONOMOUS", raising=False)
+        monkeypatch.delenv("PXX_DIFF_CAP", raising=False)
+
+        cli_module.main()
+        assert os.environ.get("PXX_AUTONOMOUS") == "1"
+        assert os.environ.get("PXX_DIFF_CAP") == "60"
+
+    def test_self_fix_respects_user_diff_cap_override(self, monkeypatch, tmp_path):
+        from pxx import cli as cli_module
+
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            ["pxx", "--self-fix", "fix", "--scope", str(REPO_ROOT / "pxx")],
+        )
+        self._patch_endpoint_and_exec(monkeypatch)
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg-empty"))
+        monkeypatch.setenv("PXX_DIFF_CAP", "200")
+
+        cli_module.main()
+        # User's explicit cap wins.
+        assert os.environ.get("PXX_DIFF_CAP") == "200"
+
+    def test_self_fix_banner_shows_autonomous_annotation(
+        self, monkeypatch, tmp_path, capsys
+    ):
+        from pxx import cli as cli_module
+
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            ["pxx", "--self-fix", "fix", "--scope", str(REPO_ROOT / "pxx")],
+        )
+        self._patch_endpoint_and_exec(monkeypatch)
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg-empty"))
+
+        cli_module.main()
+        err = capsys.readouterr().err
+        assert "mode=edit (autonomous)" in err
+        assert "[autonomous]" in err  # the info line about commit tagging
+
+    def test_self_fix_task_injected_as_message(self, monkeypatch, tmp_path):
+        from pxx import cli as cli_module
+
+        captured: list[list[str]] = []
+        monkeypatch.setattr(cli_module.os, "execv", lambda _bin, args: captured.append(args))
+        monkeypatch.setattr(
+            cli_module, "detect_endpoint", lambda: Endpoint("neo", "http://x:11434")
+        )
+        monkeypatch.setattr(cli_module, "_find_aider", lambda: "/x/aider")
+
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            ["pxx", "--self-fix", "fix typo in cli", "--scope", str(REPO_ROOT / "pxx")],
+        )
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg-empty"))
+
+        cli_module.main()
+        assert captured, "execv was not called"
+        argv = captured[0]
+        # --message and the task should be in aider's argv.
+        assert "--message" in argv
+        assert "fix typo in cli" in argv
+
+    def test_self_fix_does_not_overwrite_explicit_message(self, monkeypatch, tmp_path):
+        from pxx import cli as cli_module
+
+        captured: list[list[str]] = []
+        monkeypatch.setattr(cli_module.os, "execv", lambda _bin, args: captured.append(args))
+        monkeypatch.setattr(
+            cli_module, "detect_endpoint", lambda: Endpoint("neo", "http://x:11434")
+        )
+        monkeypatch.setattr(cli_module, "_find_aider", lambda: "/x/aider")
+
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "pxx",
+                "--self-fix",
+                "positional task",
+                "--message",
+                "user explicit",
+                "--scope",
+                str(REPO_ROOT / "pxx"),
+            ],
+        )
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg-empty"))
+
+        cli_module.main()
+        argv = captured[0]
+        # The user's explicit --message survives; positional was NOT prepended
+        # as a second --message (which would have made aider pick whichever
+        # arg wins; we test the simpler invariant: only one --message in argv).
+        assert argv.count("--message") == 1
+        assert "user explicit" in argv
+        # Positional task should NOT be in argv as a separate token (since
+        # _extract_self_fix_task consumed it from sys.argv).
+        # NB: aider sees the user's --message exactly as given.
+
+    def test_self_fix_stripped_from_user_args(self, monkeypatch, tmp_path):
+        from pxx import cli as cli_module
+
+        captured: list[list[str]] = []
+        monkeypatch.setattr(cli_module.os, "execv", lambda _bin, args: captured.append(args))
+        monkeypatch.setattr(
+            cli_module, "detect_endpoint", lambda: Endpoint("neo", "http://x:11434")
+        )
+        monkeypatch.setattr(cli_module, "_find_aider", lambda: "/x/aider")
+
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            ["pxx", "--self-fix", "fix", "--scope", str(REPO_ROOT / "pxx")],
+        )
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg-empty"))
+
+        cli_module.main()
+        argv = captured[0]
+        # Aider must not see --self-fix.
+        assert "--self-fix" not in argv
 
 
 class TestInstallHookFlag:

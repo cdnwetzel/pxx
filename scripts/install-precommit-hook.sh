@@ -1,78 +1,118 @@
 #!/usr/bin/env bash
-# Install pxx's pre-commit hook into the current git repo.
+# Install pxx's git hooks into the current git repo.
 #
 # Usage:
 #   bash scripts/install-precommit-hook.sh             # install / refresh
-#   bash scripts/install-precommit-hook.sh --force     # overwrite non-pxx hook
-#   bash scripts/install-precommit-hook.sh --uninstall # remove pxx hook
+#   bash scripts/install-precommit-hook.sh --force     # overwrite non-pxx hooks
+#   bash scripts/install-precommit-hook.sh --uninstall # remove pxx hooks
 #
-# The hook content lives in scripts/pre-commit-template. This installer
-# copies it (with a marker line) into .git/hooks/pre-commit and makes
-# it executable. Idempotent: re-running refreshes the hook.
+# Two hooks are installed:
+#   pre-commit          (#002 M2)   ruff + pytest + diff cap + scope gate
+#   prepare-commit-msg  (#012 M2)   prepends [autonomous] when PXX_AUTONOMOUS=1
 #
-# Refuses to overwrite a pre-existing non-pxx pre-commit hook unless
-# --force is passed.
+# Templates live in scripts/<hook>-template. This installer copies each
+# (with a marker line) into .git/hooks/<hook> and makes it executable.
+# Idempotent: re-running refreshes both hooks.
+#
+# Refuses to overwrite a pre-existing non-pxx hook unless --force is passed.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-TEMPLATE="$SCRIPT_DIR/pre-commit-template"
 MARKER="# pxx-managed pre-commit hook"
+# Single marker string covers both hooks — it's a generic "this is
+# pxx-managed" sentinel; the historical name reflects that the
+# pre-commit hook was the first one installed.
 
 if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     echo "ERROR: not inside a git repository (cwd: $(pwd))" >&2
     exit 1
 fi
 
-# Use ABSOLUTE paths so success / uninstall messages unambiguously
-# identify which repo got the hook. Without this, the message
-# 'Installed pxx pre-commit hook at .git/hooks/pre-commit' can hide
-# that the install went to cwd's repo when the user expected another.
 GIT_DIR=$(git rev-parse --absolute-git-dir)
 WORK_TREE=$(git rev-parse --show-toplevel)
 HOOKS_DIR="$GIT_DIR/hooks"
-HOOK="$HOOKS_DIR/pre-commit"
 
-# Uninstall path.
-if [ "${1:-}" = "--uninstall" ]; then
-    if [ ! -f "$HOOK" ]; then
-        echo "No pre-commit hook found at $HOOK; nothing to do."
-        exit 0
-    fi
-    if ! grep -q "$MARKER" "$HOOK" 2>/dev/null; then
-        echo "ERROR: $HOOK is not pxx-managed; refusing to remove." >&2
-        echo "  Remove it manually if you want it gone." >&2
+# Hook spec: (hook-name, template-filename) pairs. Add more here as new
+# hooks are added; the install/uninstall paths below iterate over them.
+HOOKS=(
+    "pre-commit:pre-commit-template"
+    "prepare-commit-msg:prepare-commit-msg-template"
+)
+
+FORCE=0
+UNINSTALL=0
+for arg in "$@"; do
+    case "$arg" in
+        --force) FORCE=1 ;;
+        --uninstall) UNINSTALL=1 ;;
+        *)
+            echo "ERROR: unknown arg: $arg" >&2
+            echo "  Usage: $0 [--force] [--uninstall]" >&2
+            exit 2
+            ;;
+    esac
+done
+
+install_one_hook() {
+    local hook_name="$1" template_name="$2"
+    local hook="$HOOKS_DIR/$hook_name"
+    local template="$SCRIPT_DIR/$template_name"
+
+    if [ ! -f "$template" ]; then
+        echo "ERROR: hook template not found at $template" >&2
         exit 1
     fi
-    rm -f "$HOOK"
-    echo "Removed pxx pre-commit hook at $HOOK"
+
+    if [ -f "$hook" ]; then
+        if grep -q "$MARKER" "$hook" 2>/dev/null; then
+            echo "pxx $hook_name hook already installed at $hook; refreshing..."
+        elif [ "$FORCE" = "1" ]; then
+            echo "Existing $hook_name hook is NOT pxx-managed; --force given, overwriting..."
+        else
+            echo "ERROR: $hook exists and is not pxx-managed." >&2
+            echo "  Use '$0 --force' to overwrite, or merge by hand." >&2
+            exit 1
+        fi
+    fi
+
+    mkdir -p "$HOOKS_DIR"
+    {
+        printf '%s\n' "$MARKER"
+        cat "$template"
+    } > "$hook"
+    chmod +x "$hook"
+    echo "Installed pxx $hook_name hook at $hook"
+}
+
+uninstall_one_hook() {
+    local hook_name="$1"
+    local hook="$HOOKS_DIR/$hook_name"
+
+    if [ ! -f "$hook" ]; then
+        echo "No $hook_name hook found at $hook; nothing to do."
+        return 0
+    fi
+    if ! grep -q "$MARKER" "$hook" 2>/dev/null; then
+        echo "WARN: $hook is not pxx-managed; skipping." >&2
+        return 0
+    fi
+    rm -f "$hook"
+    echo "Removed pxx $hook_name hook at $hook"
+}
+
+if [ "$UNINSTALL" = "1" ]; then
+    for spec in "${HOOKS[@]}"; do
+        hook_name="${spec%%:*}"
+        uninstall_one_hook "$hook_name"
+    done
     echo "  (repo: $WORK_TREE)"
     exit 0
 fi
 
-if [ ! -f "$TEMPLATE" ]; then
-    echo "ERROR: hook template not found at $TEMPLATE" >&2
-    exit 1
-fi
-
-# Refuse to overwrite a non-pxx hook unless --force.
-if [ -f "$HOOK" ]; then
-    if grep -q "$MARKER" "$HOOK" 2>/dev/null; then
-        echo "pxx pre-commit hook already installed at $HOOK; refreshing..."
-    elif [ "${1:-}" = "--force" ]; then
-        echo "Existing pre-commit hook is NOT pxx-managed; --force given, overwriting..."
-    else
-        echo "ERROR: $HOOK exists and is not pxx-managed." >&2
-        echo "  Use '$0 --force' to overwrite, or merge by hand." >&2
-        exit 1
-    fi
-fi
-
-mkdir -p "$HOOKS_DIR"
-{
-    printf '%s\n' "$MARKER"
-    cat "$TEMPLATE"
-} > "$HOOK"
-chmod +x "$HOOK"
-echo "Installed pxx pre-commit hook at $HOOK"
+for spec in "${HOOKS[@]}"; do
+    hook_name="${spec%%:*}"
+    template_name="${spec##*:}"
+    install_one_hook "$hook_name" "$template_name"
+done
 echo "  (repo: $WORK_TREE)"

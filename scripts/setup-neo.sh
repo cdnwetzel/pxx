@@ -52,12 +52,18 @@ else
   echo "    pxx not on PATH — run: uv tool update-shell  (then restart shell)"
 fi
 
+echo "==> Configuring ~/.zshrc with pxx env vars (marker-managed; idempotent)..."
+# This block is rewritten in place on every setup run.  If you previously
+# added these exports by hand, remove the hand-added copies once; the
+# marker block will manage them from now on.
+_append_with_markers "$HOME/.zshrc" "pxx-env" <<'EOF'
+export PXX_STUDIO_LAN_URL=http://workstation:11434
+export PXX_STUDIO_REMOTE_URL=http://workstation:11434
+EOF
+echo "    ~/.zshrc updated.  Open a new shell or run: source ~/.zshrc"
+
 echo ""
 echo "==> Neo setup complete."
-echo ""
-echo "    Add to ~/.zshrc (fill in your work-internal Studio hostname):"
-echo "      export PXX_STUDIO_LAN_URL=http://workstation:11434"
-echo "      export PXX_STUDIO_REMOTE_URL=http://workstation:11434"
 echo ""
 echo "    Daily flow:"
 echo "      Office (LAN):    pxx                       (auto-detects Studio)"

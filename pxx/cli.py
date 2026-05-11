@@ -113,6 +113,24 @@ def _git_dirty() -> bool:
         return False
 
 
+def _has_commits() -> bool:
+    """True iff the current git repo has at least one commit (HEAD resolved).
+
+    Empty repos (``git init`` with no commit yet) have an unborn HEAD;
+    ``git tag <name>`` fails because there's nothing to point at.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            capture_output=True,
+            check=False,
+            timeout=2,
+        )
+        return result.returncode == 0
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return False
+
+
 def _create_safety_tag() -> str | None:
     """Create a local-only safety tag at HEAD; stash dirty state.
 
@@ -365,12 +383,17 @@ def main() -> None:
     model = model_for(endpoint)
     aider_bin = _find_aider()
 
-    # M1 (#002): pre-session safety tag for --edit sessions in a git repo.
-    # Prune old tags first (cheap), then create today's.
+    # M1 (#002): pre-session safety tag for --edit sessions in a git repo
+    # with at least one commit (empty repos have an unborn HEAD and can't
+    # be tagged). Prune old tags first (cheap), then create today's.
     safety_tag: str | None = None
+    empty_repo = False
     if edit_mode and in_git_repo:
-        _prune_old_safety_tags()
-        safety_tag = _create_safety_tag()
+        if _has_commits():
+            _prune_old_safety_tags()
+            safety_tag = _create_safety_tag()
+        else:
+            empty_repo = True
 
     mode_label = "edit" if edit_mode else "ask (read-only — pass --edit to allow changes)"
     print(
@@ -380,6 +403,12 @@ def main() -> None:
     if safety_tag:
         print(
             f"pxx: safety tag {safety_tag} — undo session with: git reset --hard {safety_tag}",
+            file=sys.stderr,
+        )
+    elif empty_repo:
+        print(
+            "pxx: empty git repo (no commits yet) — safety tag skipped. "
+            "Make at least one commit to enable it.",
             file=sys.stderr,
         )
     if big_mode and edit_mode:

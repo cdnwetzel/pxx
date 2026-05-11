@@ -24,6 +24,7 @@ from pxx.cli import (
     _create_safety_tag,
     _find_aider,
     _git_dirty,
+    _has_commits,
     _in_git_repo,
     _print_command_listing,
     _prune_old_safety_tags,
@@ -374,6 +375,28 @@ class TestGitDirty:
         assert _git_dirty() is False
 
 
+class TestHasCommits:
+    def test_false_in_empty_repo(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        subprocess.run(["git", "init", "-q"], check=True)
+        # No commits — HEAD is unborn.
+        assert _has_commits() is False
+
+    def test_true_after_first_commit(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        subprocess.run(["git", "init", "-q"], check=True)
+        subprocess.run(["git", "config", "user.email", "x@x"], check=True)
+        subprocess.run(["git", "config", "user.name", "x"], check=True)
+        (tmp_path / "f.txt").write_text("a")
+        subprocess.run(["git", "add", "f.txt"], check=True)
+        subprocess.run(["git", "commit", "-q", "-m", "init"], check=True)
+        assert _has_commits() is True
+
+    def test_false_outside_git_repo(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        assert _has_commits() is False
+
+
 class TestCreateSafetyTag:
     def _init_repo(self, tmp_path):
         subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
@@ -430,6 +453,12 @@ class TestCreateSafetyTag:
     def test_returns_none_outside_git_repo(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         # No git init.
+        assert _create_safety_tag() is None
+
+    def test_returns_none_in_empty_repo_no_commits(self, tmp_path, monkeypatch):
+        # git init without committing — HEAD is unborn, git tag fails.
+        monkeypatch.chdir(tmp_path)
+        subprocess.run(["git", "init", "-q"], check=True)
         assert _create_safety_tag() is None
 
 

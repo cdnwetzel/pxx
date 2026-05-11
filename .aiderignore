@@ -20,3 +20,7 @@ pyproject.toml
 scripts/setup-studio.sh
 scripts/setup-neo.sh
 scripts/doctor.sh
+scripts/install-precommit-hook.sh
+scripts/pre-commit-template
+scripts/_lib.sh
+scripts/test_lib.sh

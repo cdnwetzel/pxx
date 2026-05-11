@@ -302,10 +302,33 @@ def _print_command_listing() -> None:
         print(f"  /load {c.path}")
 
 
+def _install_precommit_hook() -> None:
+    """Invoke scripts/install-precommit-hook.sh in the current working dir.
+
+    Used by `pxx --install-hook` to wire the per-repo pre-commit gate
+    (ruff + pytest + diff cap) into the cwd's git repo.
+    """
+    script = REPO_ROOT / "scripts" / "install-precommit-hook.sh"
+    if not script.exists():
+        print(f"pxx: installer script not found at {script}", file=sys.stderr)
+        sys.exit(1)
+    cmd = ["bash", str(script)]
+    if "--force" in sys.argv:
+        cmd.append("--force")
+    if "--uninstall" in sys.argv:
+        cmd.append("--uninstall")
+    result = subprocess.run(cmd, check=False)
+    sys.exit(result.returncode)
+
+
 def main() -> None:
     if "--list-commands" in sys.argv:
         _print_command_listing()
         sys.exit(0)
+
+    if "--install-hook" in sys.argv:
+        _install_precommit_hook()
+        # _install_precommit_hook exits, so we never reach this line.
 
     # M3 (#002): pre-launch self-sanity. Runs before any other work so a
     # self-edit that broke pxx surfaces a clear recovery message rather
@@ -319,10 +342,16 @@ def main() -> None:
         sys.exit(1)
 
     edit_mode = "--edit" in sys.argv
-    user_args = [a for a in sys.argv[1:] if a != "--edit"]
+    big_mode = "--big" in sys.argv
+    user_args = [a for a in sys.argv[1:] if a not in ("--edit", "--big")]
     in_git_repo = _in_git_repo()
 
     os.environ["OLLAMA_API_BASE"] = endpoint.url
+    # M4 (#002): --big tells the pre-commit hook to skip the per-session
+    # diff cap. Set the env var before exec so the hook (which runs
+    # later, in the aider-spawned shell) sees it.
+    if big_mode:
+        os.environ["PXX_ALLOW_BIG_DIFF"] = "1"
     model = model_for(endpoint)
     aider_bin = _find_aider()
 
@@ -341,6 +370,16 @@ def main() -> None:
     if safety_tag:
         print(
             f"pxx: safety tag {safety_tag} — undo session with: git reset --hard {safety_tag}",
+            file=sys.stderr,
+        )
+    if big_mode and edit_mode:
+        print(
+            "pxx: --big set — pre-commit diff cap bypassed for this session.",
+            file=sys.stderr,
+        )
+    elif big_mode and not edit_mode:
+        print(
+            "pxx: --big has no effect in ask mode (no commits to gate); ignored.",
             file=sys.stderr,
         )
 

@@ -148,34 +148,35 @@ is the meta-rules for editing pxx with pxx.
 aider session via `/load <path>`. They are not Python code. Editing them changes
 agent behavior, not pxx behavior.
 
-## Code review observations (`../review/*.md`)
+## Code review observations (`../review/`)
 
 Above this repo, at `../review/` (i.e. `/Users/you/ai/code_pro/review/`),
 three different AI CLIs — **Claude Code, Gemini, and Codex** — periodically
-perform **read-only** code reviews of pxx. Each reviewer tends to excel at
-slightly different roles, so the multi-reviewer setup is intentional.
+produce parallel-perspective code reviews of pxx. Each reviewer tends to excel
+at slightly different roles, so the multi-reviewer setup is intentional.
 
-**Ownership is tracked in `../review/inventory.md`** — that file is the
-authoritative source. Codex and Gemini each own a clearly-scoped set of
-files there. Ownership shifts as agents adopt or vacate files (the
-inventory itself records which agent last edited what and why), so
-always consult `inventory.md` directly rather than relying on a
-snapshot in this file.
+**Layout (since 2026-05-10):** agent-namespaced. Each agent's files live at
+`../review/<agent>/<agent>-*.md` — both the folder and the filename prefix
+must match the agent name. `../review/inventory.md` is the authoritative
+rule statement; `../review/README.md` is the landing index.
 
-**Claude Code's role here is read-only.** This agent does not create, modify,
-or stake out files in `../review/`. The user wants Claude Code's contribution
-to land in the pxx codebase (code, tests, docs) — not in the review folder.
-Treat `../review/` as inputs only.
+**Claude Code's writable surface is `../review/claude/` only.** This agent
+may create and refresh files under `../review/claude/` whose names match
+`claude-*.md`. Everything else under `../review/` (Codex's folder, Gemini's
+folder, the two shared root files except for Claude's own section in
+`inventory.md`) is **read-only** for Claude. Do not edit files outside the
+Claude namespace, even to fix obvious typos in another agent's work — surface
+the observation in `claude-followups.md` instead.
 
-When the user cites a finding ("flagged in 04-observations.md..."):
-1. Locate the file in `../review/` and read the cited item in full
-2. Address it by editing the relevant code/docs *in the pxx repo*, not by
-   modifying the review file
-3. Leave other findings alone — they may be intentional, queued, or already
-   under review by another agent
-4. **Never write to `../review/`** — not even to add new files. If you have an
-   observation worth preserving, suggest the user surface it themselves or
-   capture it in `plans/`, `CLAUDE.md`, or the relevant code comment.
+When the user cites a finding ("flagged in codex-04-observations.md..."):
+1. Locate the file in `../review/` and read the cited item in full.
+2. If the finding maps to a pxx change, address it by editing the relevant
+   code/docs *in the pxx repo*.
+3. If the finding maps to a Claude-perspective response, capture it in
+   `../review/claude/claude-followups.md` (or refresh the relevant
+   `claude-*.md` file).
+4. Leave other agents' findings alone unless the user routes them — they may
+   be intentional, queued, or under review by that agent.
 
 The reviewers may also be **stale** — the codebase may have moved on since the
 last review pass. Verify a cited finding against current code before acting.

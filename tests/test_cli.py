@@ -298,6 +298,120 @@ class TestScopeFlag:
         assert "(repo root)" in content
 
 
+class TestAnywhereFlag:
+    """Tests for the pxx --anywhere flag (#003 S3).
+
+    --anywhere is a one-session bypass for the trusted-paths gate. It must
+    be stripped from user_args before they're passed to aider.
+    """
+
+    def test_anywhere_flag_detected_in_argv(self):
+        argv = ["pxx", "--edit", "--anywhere"]
+        assert "--anywhere" in argv
+
+    def test_anywhere_flag_stripped_from_user_args(self):
+        from pxx.scope import extract_scope_args
+
+        _, after = extract_scope_args(
+            ["--scope", "tests/", "--edit", "--anywhere", "--message", "hi"]
+        )
+        user_args = [a for a in after if a not in ("--edit", "--big", "--anywhere")]
+        assert "--anywhere" not in user_args
+        assert "--edit" not in user_args
+        assert user_args == ["--message", "hi"]
+
+
+class TestTrustedPathGate:
+    """Integration tests for the trusted-paths gate in main() (#003 S3)."""
+
+    def _patch_endpoint_and_exec(self, monkeypatch):
+        from pxx import cli as cli_module
+
+        monkeypatch.setattr(
+            cli_module, "detect_endpoint", lambda: Endpoint("neo", "http://x:11434")
+        )
+        monkeypatch.setattr(cli_module.os, "execv", lambda *_: None)
+        monkeypatch.setattr(cli_module, "_find_aider", lambda: "/x/aider")
+
+    def _write_trusted_config(self, tmp_path, monkeypatch, entries: list[Path]) -> Path:
+        """Point XDG_CONFIG_HOME at tmp_path and write trusted-paths there."""
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+        cfg_dir = tmp_path / "xdg" / "pxx"
+        cfg_dir.mkdir(parents=True)
+        cfg = cfg_dir / "trusted-paths"
+        cfg.write_text("\n".join(str(e) for e in entries) + "\n")
+        return cfg
+
+    def test_edit_outside_trusted_path_blocks_without_anywhere(self, tmp_path, monkeypatch, capsys):
+        from pxx import cli as cli_module
+
+        trusted = tmp_path / "trusted-zone"
+        trusted.mkdir()
+        cfg = self._write_trusted_config(tmp_path, monkeypatch, [trusted])
+
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        monkeypatch.chdir(elsewhere)
+        monkeypatch.setattr(sys, "argv", ["pxx", "--edit"])
+        self._patch_endpoint_and_exec(monkeypatch)
+
+        with pytest.raises(SystemExit) as exc:
+            cli_module.main()
+        assert exc.value.code == 1
+        err = capsys.readouterr().err
+        assert "not under any trusted prefix" in err
+        assert "--anywhere" in err
+        assert str(cfg) in err
+
+    def test_edit_outside_trusted_path_allowed_with_anywhere(self, tmp_path, monkeypatch, capsys):
+        from pxx import cli as cli_module
+
+        trusted = tmp_path / "trusted-zone"
+        trusted.mkdir()
+        self._write_trusted_config(tmp_path, monkeypatch, [trusted])
+
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        monkeypatch.chdir(elsewhere)
+        monkeypatch.setattr(sys, "argv", ["pxx", "--edit", "--anywhere"])
+        self._patch_endpoint_and_exec(monkeypatch)
+
+        cli_module.main()
+        err = capsys.readouterr().err
+        assert "mode=edit (untrusted path)" in err
+
+    def test_edit_inside_trusted_path_allowed_without_anywhere(self, tmp_path, monkeypatch, capsys):
+        from pxx import cli as cli_module
+
+        trusted = tmp_path / "trusted-zone"
+        trusted.mkdir()
+        self._write_trusted_config(tmp_path, monkeypatch, [trusted])
+
+        monkeypatch.chdir(trusted)
+        monkeypatch.setattr(sys, "argv", ["pxx", "--edit"])
+        self._patch_endpoint_and_exec(monkeypatch)
+
+        cli_module.main()
+        err = capsys.readouterr().err
+        assert "mode=edit" in err
+        assert "untrusted path" not in err
+
+    def test_no_trusted_paths_config_allows_anywhere(self, tmp_path, monkeypatch, capsys):
+        from pxx import cli as cli_module
+
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg-empty"))
+        random_dir = tmp_path / "random"
+        random_dir.mkdir()
+        monkeypatch.chdir(random_dir)
+        monkeypatch.setattr(sys, "argv", ["pxx", "--edit"])
+        self._patch_endpoint_and_exec(monkeypatch)
+
+        cli_module.main()
+        err = capsys.readouterr().err
+        assert "not under any trusted prefix" not in err
+        assert "mode=edit" in err
+
+
 class TestSelfTest:
     """Tests for the pxx --self-test flag (#001 Tier 1)."""
 

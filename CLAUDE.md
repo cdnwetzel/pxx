@@ -40,6 +40,10 @@ cd ~/some-python-project && pxx
 # Self-modes (#001 Tier 1): run pxx's own gates from anywhere
 pxx --self-test       # uv run pytest -q against the pxx repo
 pxx --self-lint       # ruff check + ruff format --check against the pxx repo
+
+# Trusted paths (#003 S3): if ~/.config/pxx/trusted-paths is populated,
+# pxx --edit outside any listed prefix is hard-blocked. Override one-shot:
+pxx --edit --anywhere   # bypass the gate for this session; banner annotates "untrusted path"
 ```
 
 ### Aider upgrade discipline

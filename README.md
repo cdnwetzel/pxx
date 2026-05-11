@@ -43,6 +43,15 @@ pxx --edit           # code mode: standard aider — propose diffs, auto-commit
 
 The startup banner prints the active mode so you always know which one you're in.
 
+### Trusted paths (optional belt-and-suspenders)
+
+If you populate `~/.config/pxx/trusted-paths` (one absolute or `~/`-prefixed
+path per line; `#` comments OK), `pxx --edit` outside any listed prefix is
+hard-blocked with a message naming the cwd, the config file, and the closest
+matching prefix. Pass `--anywhere` to override for one session — the banner
+then annotates `mode=edit (untrusted path)`. With no config file, all paths
+are trusted (opt-in feature, no behavior change by default).
+
 ## Self-modes — portable health checks
 
 Two flags run pxx's own test/lint gate against the pxx repo, regardless of cwd.

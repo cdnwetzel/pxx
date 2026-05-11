@@ -1,10 +1,11 @@
-"""Tests for pxx.scope — path-prefix scope handling (#003 S1)."""
+"""Tests for pxx.scope — path-prefix scope handling (#003 S1, S3)."""
 
 from __future__ import annotations
 
 import io
 import os
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -12,8 +13,11 @@ from pxx.scope import (
     extract_scope_args,
     format_for_env,
     is_in_scope,
+    is_path_trusted,
+    load_trusted_paths,
     resolve_scopes,
     scope_check_main,
+    trusted_paths_config_path,
 )
 
 
@@ -236,3 +240,103 @@ class TestScopeCliInvocation:
         )
         assert result.returncode == 0
         assert result.stdout.strip() == ""
+
+
+class TestTrustedPathsConfigPath:
+    def test_uses_xdg_config_home_when_set(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+        assert trusted_paths_config_path() == tmp_path / "pxx" / "trusted-paths"
+
+    def test_falls_back_to_dot_config(self, monkeypatch):
+        monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+        assert trusted_paths_config_path() == Path.home() / ".config" / "pxx" / "trusted-paths"
+
+    def test_empty_xdg_config_home_falls_back(self, monkeypatch):
+        # POSIX ${VAR:-default} treats empty same as unset.
+        monkeypatch.setenv("XDG_CONFIG_HOME", "")
+        assert trusted_paths_config_path() == Path.home() / ".config" / "pxx" / "trusted-paths"
+
+
+class TestLoadTrustedPaths:
+    def test_missing_file_returns_empty(self, tmp_path):
+        assert load_trusted_paths(tmp_path / "does-not-exist") == []
+
+    def test_empty_file_returns_empty(self, tmp_path):
+        cfg = tmp_path / "trusted-paths"
+        cfg.write_text("")
+        assert load_trusted_paths(cfg) == []
+
+    def test_comments_and_blanks_skipped(self, tmp_path):
+        cfg = tmp_path / "trusted-paths"
+        target = tmp_path / "real-dir"
+        target.mkdir()
+        cfg.write_text(f"# a comment\n\n{target}  # inline comment\n   \n")
+        assert load_trusted_paths(cfg) == [str(target.resolve())]
+
+    def test_tilde_expansion(self, tmp_path, monkeypatch):
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        sub = fake_home / "projects"
+        sub.mkdir()
+        monkeypatch.setenv("HOME", str(fake_home))
+        cfg = tmp_path / "trusted-paths"
+        cfg.write_text("~/projects\n")
+        assert load_trusted_paths(cfg) == [str(sub.resolve())]
+
+    def test_multiple_entries(self, tmp_path):
+        a = tmp_path / "a"
+        b = tmp_path / "b"
+        a.mkdir()
+        b.mkdir()
+        cfg = tmp_path / "trusted-paths"
+        cfg.write_text(f"{a}\n{b}\n")
+        assert load_trusted_paths(cfg) == [str(a.resolve()), str(b.resolve())]
+
+
+class TestIsPathTrusted:
+    def test_empty_prefixes_trusts_everything(self, tmp_path):
+        ok, closest = is_path_trusted(tmp_path, [])
+        assert ok is True
+        assert closest is None
+
+    def test_exact_match_is_trusted(self, tmp_path):
+        ok, closest = is_path_trusted(tmp_path, [str(tmp_path)])
+        assert ok is True
+        assert closest is None
+
+    def test_subdirectory_is_trusted(self, tmp_path):
+        sub = tmp_path / "sub"
+        sub.mkdir()
+        ok, closest = is_path_trusted(sub, [str(tmp_path)])
+        assert ok is True
+        assert closest is None
+
+    def test_sibling_is_not_trusted_returns_closest(self, tmp_path):
+        trusted = tmp_path / "trusted"
+        sibling = tmp_path / "elsewhere"
+        trusted.mkdir()
+        sibling.mkdir()
+        ok, closest = is_path_trusted(sibling, [str(trusted)])
+        assert ok is False
+        assert closest == str(trusted)
+
+    def test_prefix_string_match_does_not_count_as_trusted(self, tmp_path):
+        # /a/foo should not be trusted just because /a/foobar is. Requires
+        # a path-boundary separator, not raw startswith.
+        foo = tmp_path / "foo"
+        foobar = tmp_path / "foobar"
+        foo.mkdir()
+        foobar.mkdir()
+        ok, _ = is_path_trusted(foobar, [str(foo)])
+        assert ok is False
+
+    def test_closest_picks_longest_shared_prefix(self, tmp_path):
+        deep = tmp_path / "a" / "b" / "c"
+        other = tmp_path / "x"
+        deep.mkdir(parents=True)
+        other.mkdir()
+        target = tmp_path / "a" / "b" / "different"
+        target.mkdir(parents=True)
+        ok, closest = is_path_trusted(target, [str(other), str(deep)])
+        assert ok is False
+        assert closest == str(deep)

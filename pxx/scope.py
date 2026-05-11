@@ -15,8 +15,12 @@ passed in. The cli.py module composes it with real git state.
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
+
+TRUSTED_PATHS_FILENAME = "trusted-paths"
+"""Basename of the trusted-paths config under $XDG_CONFIG_HOME/pxx/ (#003 S3)."""
 
 
 def extract_scope_args(argv: list[str]) -> tuple[list[str], list[str]]:
@@ -114,6 +118,76 @@ def format_for_env(scope_paths: list[str]) -> str:
     return ":".join(scope_paths)
 
 
+def trusted_paths_config_path() -> Path:
+    """Return the absolute path of the trusted-paths config file (#003 S3).
+
+    Resolution: ``${XDG_CONFIG_HOME:-$HOME/.config}/pxx/trusted-paths``.
+    The file is not required to exist; callers decide what an absent file
+    means (``load_trusted_paths`` treats it as "no restriction").
+    """
+    base = os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
+    return Path(base) / "pxx" / TRUSTED_PATHS_FILENAME
+
+
+def load_trusted_paths(config_path: Path | None = None) -> list[str]:
+    """Parse the trusted-paths config into a list of absolute path strings.
+
+    Each non-comment, non-blank line is expanded (``~/`` → ``$HOME``) and
+    resolved to an absolute path with no trailing slash. ``#`` starts a
+    comment to end-of-line.
+
+    Returns ``[]`` for a missing or fully-empty config — the caller treats
+    that as "all paths trusted" (opt-in feature; absent config = no gate).
+    """
+    path = config_path if config_path is not None else trusted_paths_config_path()
+    if not path.exists():
+        return []
+    out: list[str] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        s = line.split("#", 1)[0].strip()
+        if not s:
+            continue
+        out.append(str(Path(s).expanduser().resolve()))
+    return out
+
+
+def is_path_trusted(target: Path, trusted_prefixes: list[str]) -> tuple[bool, str | None]:
+    """Check whether ``target`` lies under any trusted prefix.
+
+    Returns ``(trusted, closest_match)``:
+
+    - ``trusted`` is True iff ``target`` equals or is a descendant of any
+      trusted prefix. Empty ``trusted_prefixes`` returns ``(True, None)`` —
+      the no-config case means all paths are trusted.
+    - When not trusted, ``closest_match`` is the trusted prefix sharing the
+      longest leading path component with ``target`` (useful in error
+      messages). Falls back to the first entry when nothing shares a
+      meaningful parent.
+    """
+    if not trusted_prefixes:
+        return True, None
+    target_abs = target.resolve()
+    target_str = str(target_abs)
+    for prefix in trusted_prefixes:
+        if target_str == prefix or target_str.startswith(prefix + os.sep):
+            return True, None
+    target_parts = target_abs.parts
+    best = trusted_prefixes[0]
+    best_shared = 0
+    for prefix in trusted_prefixes:
+        prefix_parts = Path(prefix).parts
+        shared = 0
+        for a, b in zip(target_parts, prefix_parts, strict=False):
+            if a == b:
+                shared += 1
+            else:
+                break
+        if shared > best_shared:
+            best_shared = shared
+            best = prefix
+    return False, best
+
+
 def scope_check_main(argv: list[str] | None = None) -> int:
     """CLI entry for the pre-commit hook.
 
@@ -131,8 +205,6 @@ def scope_check_main(argv: list[str] | None = None) -> int:
 
         git diff --cached --name-only | pxx-scope-check check
     """
-    import os
-
     argv = argv if argv is not None else sys.argv[1:]
     if not argv or argv[0] != "check":
         print("usage: python3 -m pxx.scope check  < stdin-list-of-files", file=sys.stderr)

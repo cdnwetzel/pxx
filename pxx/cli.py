@@ -16,7 +16,10 @@ from pxx.endpoints import Endpoint, detect_endpoint
 from pxx.scope import (
     extract_scope_args,
     format_for_env,
+    is_path_trusted,
+    load_trusted_paths,
     resolve_scopes,
+    trusted_paths_config_path,
 )
 
 PKG_DIR = Path(__file__).parent
@@ -479,24 +482,52 @@ def main() -> None:
     # than a confusing mid-startup crash.
     _self_sanity_check()
 
-    try:
-        endpoint = detect_endpoint()
-    except RuntimeError as e:
-        print(f"pxx: {e}", file=sys.stderr)
-        sys.exit(1)
-
     edit_mode = "--edit" in sys.argv
     big_mode = "--big" in sys.argv
     # S2 (#003): --dry-run is an aider flag (already in its arg parser);
     # we detect it only for banner purposes and let it pass through to
     # aider naturally — no need to strip it from user_args.
     dry_run = "--dry-run" in sys.argv
+    # S3 (#003): --anywhere is a one-session bypass for the trusted-paths
+    # gate. Stripped from user_args before aider sees it.
+    anywhere_mode = "--anywhere" in sys.argv
+
+    # S3 (#003): trusted-paths gate. Fires only on --edit when the user
+    # has populated ~/.config/pxx/trusted-paths. Missing/empty file means
+    # all paths trusted (opt-in feature; no behavior change by default).
+    # Runs before endpoint detection so a wrong-cwd mistake fails fast,
+    # without paying the ~1s probe cost.
+    untrusted_override = False
+    if edit_mode:
+        trusted_prefixes = load_trusted_paths()
+        if trusted_prefixes:
+            path_trusted, closest = is_path_trusted(Path.cwd(), trusted_prefixes)
+            if not path_trusted:
+                if not anywhere_mode:
+                    cfg = trusted_paths_config_path()
+                    print(
+                        f"pxx: cwd is not under any trusted prefix.\n"
+                        f"  cwd:          {Path.cwd()}\n"
+                        f"  config:       {cfg}\n"
+                        f"  closest:      {closest}\n"
+                        f"  Override one-shot: pxx --edit --anywhere ...\n"
+                        f"  Or trust this path: add it to {cfg}",
+                        file=sys.stderr,
+                    )
+                    sys.exit(1)
+                untrusted_override = True
+
+    try:
+        endpoint = detect_endpoint()
+    except RuntimeError as e:
+        print(f"pxx: {e}", file=sys.stderr)
+        sys.exit(1)
 
     # S1 (#003): consume --scope <path> (and --scope=<path>) before
-    # the --edit/--big strip, since extract_scope_args needs to see them
-    # in argv order to pair flag with value.
+    # the --edit/--big/--anywhere strip, since extract_scope_args needs to
+    # see them in argv order to pair flag with value.
     scope_args, argv_after_scope = extract_scope_args(sys.argv[1:])
-    user_args = [a for a in argv_after_scope if a not in ("--edit", "--big")]
+    user_args = [a for a in argv_after_scope if a not in ("--edit", "--big", "--anywhere")]
     in_git_repo = _in_git_repo()
 
     # Resolve scope paths against the repo root. Without a git repo, scope
@@ -546,7 +577,10 @@ def main() -> None:
         else:
             empty_repo = True
 
-    mode_label = "edit" if edit_mode else "ask (read-only — pass --edit to allow changes)"
+    if edit_mode:
+        mode_label = "edit (untrusted path)" if untrusted_override else "edit"
+    else:
+        mode_label = "ask (read-only — pass --edit to allow changes)"
     print(
         f"pxx: endpoint={endpoint.name} ({endpoint.url})  model={model}  mode={mode_label}",
         file=sys.stderr,

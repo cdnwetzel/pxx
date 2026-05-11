@@ -45,33 +45,64 @@ single JSON object:
 ```json
 {
   "event": "session_start",
-  "ts": "2026-05-10T18:42:09.123-04:00",
-  "session_id": "20260510T184209-9b3a",
+  "ts": "2026-05-11T12:42:09.123-04:00",
+  "session_id": "20260511T124209-9b3a",
   "pxx_version": "0.1.0",
-  "mode": "ask",
+  "session_class": "self-fix",
   "model": "ollama_chat/devstral:24b",
   "endpoint_name": "studio_lan",
   "endpoint_url": "http://workstation:11434",
   "cwd": "/Users/you/ai/code_pro/pxx",
   "git_repo_root": "/Users/you/ai/code_pro/pxx",
-  "git_head_sha": "70abb57...",
+  "git_head_sha": "806980e...",
   "git_dirty": false,
-  "scope": [],
-  "edit_mode": false,
+  "scope": ["pxx/cli.py"],
+  "edit_mode": true,
   "dry_run": false,
   "big": false,
+  "autonomous": true,
+  "diff_cap": 60,
+  "untrusted_path": false,
   "aider_history_path": ".aider.chat.history.md"
 }
 ```
 
+**`session_class` is the headline field.** It captures *which pxx mode
+the user actually invoked*, as a single grep-friendly enum:
+
+| Value          | Triggered by                                                |
+| -------------- | ----------------------------------------------------------- |
+| `ask`          | default `pxx` (no `--edit`, no `--self-*`)                  |
+| `edit`         | `pxx --edit`                                                |
+| `dry-run`      | `pxx --edit --dry-run` (or with implicit `--edit` defaults) |
+| `self-test`    | `pxx --self-test` (#010)                                    |
+| `self-lint`    | `pxx --self-lint` (#010)                                    |
+| `self-improve` | `pxx --self-improve` (#011)                                 |
+| `self-fix`     | `pxx --self-fix` (#012)                                     |
+
+The legacy boolean fields (`edit_mode`, `dry_run`, `big`, `autonomous`)
+stay alongside `session_class` for readability — they reflect the
+underlying flag state without forcing readers to memorize the mode
+table. They are derivable from `session_class` but it's cheap to keep
+them explicit and the records are append-once so the redundancy never
+drifts.
+
 **What is logged:**
 
-- All pxx-level state at launch (mode, model, endpoint, flags)
+- `session_class` (the one-field summary of which pxx mode was invoked)
+- All pxx-level state at launch (model, endpoint, flags)
 - Repo identity (root path + HEAD SHA + dirty flag)
 - The path to aider's per-project history file, so a reader can jump
   from the audit log into the conversation when needed
-- Scope (from #003) if set
-- `big` (from #002) if set
+- `scope` (from #003 S1) if set
+- `big` (from #002 M4) if set
+- `autonomous` (from #012, mirrors `PXX_AUTONOMOUS=1`) — True iff the
+  session is a `--self-fix` run; lets readers filter Tier-3 sessions
+  without parsing the mode enum
+- `diff_cap` (effective `PXX_DIFF_CAP`, e.g. 60 for `--self-fix`, 100
+  otherwise) so post-mortems can spot cap-near-misses
+- `untrusted_path` (from #003 S3) — True iff `--anywhere` was used to
+  override the trusted-paths gate
 
 **What is NOT logged, ever:**
 
@@ -137,23 +168,28 @@ Three commits, smallest first:
 
 ## Coordination with other plans
 
-- **#001 (Dogfooding) — Tier 4 learnings loop.** The audit log is the
-  natural input to `learnings.md`. When Tier 4 lands, it will grep this
-  log for patterns ("model frequently forgets X", "circuit breaker trips
-  most often on file Y") and propose distilled lessons.
-- **#002 (Safety foundation) — circuit breaker.** When the pre-commit
-  hook rejects a commit, that fact isn't directly captured here (the
-  rejection happens in git, not pxx). But the next session_start record
-  shows whether a commit was actually made, so a "circuit breaker
-  tripped → next session" pattern is visible by comparing consecutive
-  records' `git_head_sha`.
-- **#003 (Scoping & dry-run) — record enrichment.** The `scope`,
-  `dry_run` flags will be live in the record only after #003 lands. Until
-  then they're recorded as `[]` and `false` respectively (the values pxx
-  has anyway).
+As of 2026-05-11, the dependency landscape looks like this:
 
-None of these are hard dependencies — #004 ships fine standalone with
-empty/false defaults for fields owned by future plans.
+- **#002 (Safety foundation) — done.** Pre-commit hook, safety tag,
+  diff cap. The audit log records the *effective* `diff_cap` (60 for
+  `--self-fix` per #012, 100 otherwise, or whatever the user overrode
+  with `PXX_DIFF_CAP=N`). Hook rejections happen in git, not pxx, so
+  they're not directly logged — but consecutive records' `git_head_sha`
+  reveal whether a session actually produced a commit.
+- **#003 (Scoping & dry-run) — done.** `scope`, `dry_run`, and
+  `untrusted_path` are all real fields now, not future placeholders.
+- **#001 (Dogfooding) — in-progress.** Tier 1 (#010), 2 (#011), 3
+  (#012) are done. The audit log is *the* primary input to Tier 4
+  (`learnings.md`): query `session_class == "self-fix"` to bucket
+  Tier-3 outcomes, `autonomous == true` to find every autonomous
+  commit, etc. Tier 4 has not started yet; this plan is its
+  prerequisite for high-signal data.
+- **#012 (Dogfooding Tier 3) — done.** Sets `PXX_AUTONOMOUS=1` and
+  `PXX_DIFF_CAP=60` in the env. This plan reads those env vars at
+  session start and stamps them into the record.
+
+None of these are hard dependencies — #004 ships fine standalone, and
+all its prerequisite fields are now live.
 
 ## Verification
 
@@ -162,7 +198,10 @@ empty/false defaults for fields owned by future plans.
 | First-ever `pxx` invocation on a machine                              | Log dir created at `$XDG_STATE_HOME/pxx/sessions/`; today's `.jsonl` file created with one `session_start` record         |
 | Run `pxx` twice in same day                                           | Same `.jsonl` file gains a second line; no new file created                                                              |
 | Run `pxx` across midnight UTC                                         | Second invocation writes to next day's file (date-rolled filename)                                                       |
-| `pxx --edit --scope tests/ --big` (after #002 + #003 land)            | Record contains `"edit_mode": true`, `"scope": ["tests/"]`, `"big": true`                                                |
+| `pxx --edit --scope tests/ --big`                                     | Record contains `"session_class": "edit"`, `"edit_mode": true`, `"scope": ["tests/"]`, `"big": true`                       |
+| `pxx --self-fix "fix bug" --scope pxx/cli.py`                         | Record contains `"session_class": "self-fix"`, `"autonomous": true`, `"diff_cap": 60`                                      |
+| `pxx --self-improve`                                                  | Record contains `"session_class": "self-improve"`, `"edit_mode": false`                                                    |
+| `pxx --self-test` from `/tmp`                                         | Record contains `"session_class": "self-test"`, `"cwd": "/tmp"`, `"git_repo_root": <pxx-repo>` (REPO_ROOT, where pytest ran) |
 | Inspect a record — does it ever contain file content or LLM output?   | No. Only metadata, paths, sizes, SHAs. Grep confirms.                                                                    |
 | Env contains `OPENAI_API_KEY=secret`; run `pxx`                       | Record contains no value from any `*KEY*`/`*TOKEN*`/`*SECRET*` env var                                                   |
 | Synthetic 100-day-old log file present at launch                      | File deleted on next session start                                                                                       |

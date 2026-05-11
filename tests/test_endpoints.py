@@ -10,6 +10,7 @@ from pxx.endpoints import Endpoint, _probe, detect_endpoint
 
 
 class TestProbe:
+    # regression: empty url
     def test_empty_url_returns_false(self):
         assert _probe("") is False
 

@@ -1204,7 +1204,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "aider-chat" },
+    { name = "aider-chat", specifier = "==0.86.2" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.7" },
 ]

@@ -38,6 +38,29 @@ bash scripts/doctor.sh
 cd ~/some-python-project && pxx
 ```
 
+### Aider upgrade discipline
+
+`pyproject.toml` pins `aider-chat==<exact-version>` deliberately. Aider
+releases roughly weekly and can change behavior pxx depends on (chat
+modes, `--read` semantics, `--model-settings-file` shape, edit format
+defaults, exit codes). **Never bump on auto-pilot.**
+
+When upgrading aider:
+
+1. Read aider's CHANGELOG / release notes for the new version (and any
+   versions skipped since the current pin).
+2. Spot-check pxx's specific touch points against the new aider:
+   `--chat-mode`, `--read`, `--config`, `--model-settings-file`, edit
+   format, exit semantics, and the `os.execv` boundary.
+3. Bump `aider-chat==<new>` in `pyproject.toml`.
+4. `uv sync --extra dev` to refresh `.venv/`.
+5. `uv run pytest -q` and `bash scripts/test_lib.sh` for regression.
+6. `pxx --list-commands` and a real session smoke test.
+7. Commit `chore(aider): bump to <new>` with a one-line summary of what
+   changed in aider and which pxx touch points were verified.
+
+Even patch releases get this treatment. The discipline is the point.
+
 ### Developing pxx
 
 Dev deps (`pytest`, `ruff`) live in `pyproject.toml` under

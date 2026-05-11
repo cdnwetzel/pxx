@@ -4,7 +4,12 @@ version = "0.1.0"
 description = "Personal offline Python coding agent, thin wrapper over aider."
 requires-python = ">=3.11,<3.13"
 dependencies = [
-    "aider-chat",
+    # Pinned exact — aider releases weekly and can change pxx's wrapped
+    # surfaces (chat modes, --read, --model-settings-file, edit format,
+    # exit semantics). Bump deliberately after reading CHANGELOG and
+    # spot-checking pxx's touch points. See "Aider upgrade discipline"
+    # in CLAUDE.md.
+    "aider-chat==0.86.2",
 ]
 
 [project.optional-dependencies]

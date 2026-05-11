@@ -2,7 +2,7 @@
 
 > Backlog ID: **001**. See [plans/backlog.md](backlog.md) for the inventory.
 >
-> Status: **in-progress**. Blocks: `—`. Blocked by: `—`. Sub-plans: `#010` (Tier 1, done), `#011` (Tier 2, done), `#012` (Tier 3, planned).
+> Status: **in-progress**. Blocks: `—`. Blocked by: `—`. Sub-plans: `#010` (Tier 1, done), `#011` (Tier 2, done), `#012` (Tier 3, done). Tier 4 (learnings loop) pending; materially improved by `#004`.
 >
 > Three sibling plans were extracted from this document so each could be
 > reasoned about independently — see [Coordination with other plans](#coordination-with-other-plans).

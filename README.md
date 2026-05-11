@@ -79,6 +79,28 @@ pxx --self-improve --message "focus on cli.py"  # seed the review with a topic
 to combine with `--edit` (the session is suggest-only by design — copy the
 markdown list and apply it manually with a regular `pxx --edit` session).
 
+A fourth self-mode opens a *bounded autonomous edit* session targeting one
+module — pxx improving pxx, with safety gates from `#002` and scope
+enforcement from `#003` doing the bounds-checking:
+
+```bash
+pxx --self-fix "fix typo in cli.py banner" --scope pxx/cli.py
+```
+
+`--self-fix` always requires `--scope` (refuses to run without it), tightens
+the per-commit diff cap to 60 lines (raise once with `PXX_DIFF_CAP=N`, or
+bypass with `--big`), and commits land with `[autonomous]` prepended to the
+first line so they're filterable from manual commits:
+
+```bash
+git log --oneline --grep '^\[autonomous\]'        # show autonomous commits
+git log --invert-grep --grep '^\[autonomous\]'    # hide them
+```
+
+**No-push convention:** `--self-fix` commits stay on your local branch.
+`pxx` never invokes `git push` / `git deliver` on its own; that's always
+an explicit human action.
+
 ## Daily use
 
 ```bash

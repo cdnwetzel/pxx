@@ -37,10 +37,11 @@ bash scripts/doctor.sh
 # Run pxx in another project directory
 cd ~/some-python-project && pxx
 
-# Self-modes (#001 Tier 1+2): pxx improving pxx
-pxx --self-test       # uv run pytest -q against the pxx repo
-pxx --self-lint       # ruff check + ruff format --check against the pxx repo
-pxx --self-improve    # ask-mode aider session w/ suggest-only prompt (chat output)
+# Self-modes (#001 Tier 1+2+3): pxx improving pxx
+pxx --self-test                      # uv run pytest -q against the pxx repo
+pxx --self-lint                      # ruff check + ruff format --check against the pxx repo
+pxx --self-improve                   # ask-mode aider session w/ suggest-only prompt
+pxx --self-fix "<task>" --scope X    # bounded autonomous edit; commits tagged [autonomous]
 
 # Trusted paths (#003 S3): if ~/.config/pxx/trusted-paths is populated,
 # pxx --edit outside any listed prefix is hard-blocked. Override one-shot:

@@ -2,7 +2,7 @@
 
 > Backlog ID: **012**. See [plans/backlog.md](backlog.md) for the inventory.
 >
-> Status: **planned**. Blocks: `—`. Blocked by: `—`. Parent: `#001`. Siblings: `#010` (Tier 1, done), `#011` (Tier 2, done).
+> Status: **done**. Blocks: `—`. Blocked by: `—`. Parent: `#001`. Siblings: `#010` (Tier 1, done), `#011` (Tier 2, done).
 
 ## Context
 

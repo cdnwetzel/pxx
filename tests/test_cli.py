@@ -81,14 +81,18 @@ class TestFindAider:
 
 
 class TestBuildAiderArgs:
-    def test_default_mode_is_ask(self):
+    def test_default_mode_injects_chat_mode_ask(self):
         args = _build_aider_args("/x/aider", "m", [], in_git_repo=True, edit_mode=False)
         assert "--chat-mode" in args
         assert args[args.index("--chat-mode") + 1] == "ask"
 
-    def test_edit_mode_is_code(self):
+    def test_edit_mode_omits_chat_mode_flag(self):
+        # Aider 0.86.2 has no "code" value for --chat-mode (the flag is
+        # aliased to --edit-format and accepts diff/udiff/whole/ask/etc).
+        # pxx omits --chat-mode in edit mode and lets aider use its
+        # default + the config's edit-format=diff.
         args = _build_aider_args("/x/aider", "m", [], in_git_repo=True, edit_mode=True)
-        assert args[args.index("--chat-mode") + 1] == "code"
+        assert "--chat-mode" not in args
 
     def test_explicit_chat_mode_passes_through(self):
         # User passing --chat-mode architect should not be overridden by pxx.
@@ -165,25 +169,6 @@ class TestBigFlag:
     def test_big_flag_absent_when_not_passed(self):
         argv = ["pxx", "--edit"]
         assert "--big" not in argv
-
-    def test_main_sets_env_var_when_big_given(self, monkeypatch, capsys):
-        """`pxx --big --list-commands` short-circuits via --list-commands but
-        we can verify env is set before exec by checking inside main() flow.
-        Easier: just verify main() with --big in argv sets PXX_ALLOW_BIG_DIFF.
-
-        We can't run all of main() because of os.execv at the end. So we
-        verify by short-circuiting via --list-commands.
-        """
-        # --list-commands short-circuits before env setting, so we need a
-        # different approach. Instead, replicate the env-set logic and
-        # verify the contract.
-        monkeypatch.delenv("PXX_ALLOW_BIG_DIFF", raising=False)
-        # Simulate the main() logic
-        big_mode = "--big" in ["pxx", "--edit", "--big"]
-        assert big_mode is True
-        if big_mode:
-            monkeypatch.setenv("PXX_ALLOW_BIG_DIFF", "1")
-        assert os.environ.get("PXX_ALLOW_BIG_DIFF") == "1"
 
     def test_big_without_edit_is_noop_for_diff_cap(self):
         # The pre-commit hook only runs on commits, which only happen in

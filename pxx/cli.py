@@ -210,15 +210,25 @@ def _build_aider_args(
 ) -> list[str]:
     """Construct the argv to exec into aider with.
 
-    Default chat mode is `ask` (read-only); `--edit` flips to `code` (the
-    standard editing flow). Explicit `--chat-mode` in user_args wins over both.
-    Optional ``extra_reads`` are passed as additional ``--read`` files after
-    the system prompt (e.g., the commands-context file).
+    In ask mode (default), pass ``--chat-mode ask`` for explicit read-only
+    behavior. In edit mode, pass **nothing** — aider uses its default edit
+    flow with the edit-format set by ``config/aider.conf.yml`` (currently
+    ``diff``). Explicit ``--chat-mode`` in user_args wins over both.
+
+    Note: in aider 0.86.2, ``--chat-mode`` and ``--edit-format`` are the
+    same argument under two names, and there is no value called ``code``.
+    Passing ``--chat-mode code`` errors out — hence we omit it for edit
+    mode and rely on the config default.
+
+    Optional ``extra_reads`` are passed as additional ``--read`` files
+    after the system prompt (e.g., the commands-context file).
     """
     has_chat_mode = any(a == "--chat-mode" or a.startswith("--chat-mode=") for a in user_args)
     chat_mode_args: list[str] = []
-    if not has_chat_mode:
-        chat_mode_args = ["--chat-mode", "code" if edit_mode else "ask"]
+    if not has_chat_mode and not edit_mode:
+        # Only inject in ask mode. Edit mode lets aider use its default +
+        # config's edit-format=diff.
+        chat_mode_args = ["--chat-mode", "ask"]
 
     extra_read_args: list[str] = []
     for p in extra_reads or []:

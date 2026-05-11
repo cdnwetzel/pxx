@@ -67,14 +67,25 @@ _append_with_markers() {
     touch "$file"
 
     if _marker_present "$file" "$marker"; then
-        local tmp
-        tmp=$(mktemp)
-        awk -v start="$start_line" -v end="$end_line" -v content="$content" '
-            $0 == start { in_block = 1; print; print content; next }
-            $0 == end   { in_block = 0; print; next }
+        # Replace block. Pass content via a temp file (not -v) so awk
+        # does not choke on multi-line strings with embedded newlines.
+        local content_tmp file_tmp
+        content_tmp=$(mktemp)
+        printf '%s\n' "$content" > "$content_tmp"
+        file_tmp=$(mktemp)
+        awk -v start="$start_line" -v end="$end_line" -v cf="$content_tmp" '
+            $0 == start {
+                in_block = 1
+                print start
+                while ((getline line < cf) > 0) print line
+                close(cf)
+                next
+            }
+            $0 == end   { in_block = 0; print end; next }
             !in_block   { print }
-        ' "$file" > "$tmp"
-        mv "$tmp" "$file"
+        ' "$file" > "$file_tmp"
+        mv "$file_tmp" "$file"
+        rm -f "$content_tmp"
     else
         printf '\n%s\n%s\n%s\n' "$start_line" "$content" "$end_line" >> "$file"
     fi

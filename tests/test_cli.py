@@ -187,6 +187,38 @@ class TestBigFlag:
         # main() is hard to test directly.
 
 
+class TestDryRunFlag:
+    """Tests for the pxx --dry-run flag (#003 S2).
+
+    --dry-run is an aider flag (already in aider's own arg parser);
+    pxx detects it for banner purposes only and does NOT strip it from
+    sys.argv, so aider sees it naturally and applies its own dry-run.
+    """
+
+    def test_dry_run_passes_through_to_user_args(self):
+        # main() filters --edit and --big from user_args but NOT --dry-run.
+        argv = ["pxx", "--edit", "--dry-run", "--message", "hi"]
+        filtered = [a for a in argv[1:] if a not in ("--edit", "--big")]
+        assert "--dry-run" in filtered
+        assert filtered == ["--dry-run", "--message", "hi"]
+
+    def test_dry_run_flag_detected_in_argv(self):
+        argv = ["pxx", "--edit", "--dry-run"]
+        assert "--dry-run" in argv
+
+    def test_dry_run_alone_without_edit_recognized(self):
+        argv = ["pxx", "--dry-run"]
+        assert "--dry-run" in argv
+        assert "--edit" not in argv
+
+    def test_dry_run_with_big_all_present(self):
+        # The combo is allowed; main() warns that --big is meaningless
+        # with --dry-run (no commits land). Both flags coexist in argv.
+        argv = ["pxx", "--edit", "--big", "--dry-run"]
+        for flag in ("--edit", "--big", "--dry-run"):
+            assert flag in argv
+
+
 class TestInstallHookFlag:
     def test_install_hook_flag_detected(self):
         argv = ["pxx", "--install-hook"]

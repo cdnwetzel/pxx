@@ -200,11 +200,27 @@ class TestCommandsContext:
         result = _write_commands_context(commands)
         content = result.read_text(encoding="utf-8")
         assert "# Available slash commands" in content
-        assert "Do not invent new commands" in content
+        assert "Do not invent commands" in content
         assert "/load /a.md" in content
         assert "review" in content
         assert "/load /t.md" in content
         assert "tests" in content
+
+    def test_content_includes_routing_directive_and_example(self, tmp_path, monkeypatch):
+        """The context must instruct task-routing, not just list commands."""
+        monkeypatch.setattr(tempfile, "gettempdir", lambda: str(tmp_path))
+        commands = [
+            CommandInfo(name="typecheck", path=Path("/tc.md"), description="type hints"),
+        ]
+        result = _write_commands_context(commands)
+        content = result.read_text(encoding="utf-8")
+        # Directive: scan-first language and MUST-lead requirement.
+        assert "scan this list first" in content.lower()
+        assert "MUST lead" in content or "must lead" in content.lower()
+        # Example block grounds the behavior in a concrete case.
+        assert "## Example" in content
+        assert "User:" in content
+        assert "You:" in content
 
     def test_file_overwritten_on_each_call(self, tmp_path, monkeypatch):
         monkeypatch.setattr(tempfile, "gettempdir", lambda: str(tmp_path))

@@ -119,12 +119,24 @@ def _write_commands_context(commands: list[CommandInfo]) -> Path | None:
         return None
 
     tmp = Path(tempfile.gettempdir()) / COMMANDS_CONTEXT_FILE
+    # Find a representative example for the routing instruction.
+    example = next((c for c in commands if c.name == "typecheck"), commands[0])
     lines = [
         "# Available slash commands",
         "",
-        "When the user describes a task that maps to one of these, suggest the",
-        "matching `/load <path>` line below. Do not invent new commands; only",
-        "suggest from this list.",
+        "**Before answering any request, scan this list first.** If the user's",
+        "message maps to one of these commands, your reply MUST lead with the",
+        "matching `/load <path>` line and a one-sentence pitch — only fall",
+        "through to direct help if the user declines or no command applies.",
+        "Do not invent commands; only suggest from this list.",
+        "",
+        "## Example",
+        "",
+        'User: "Add type hints to this function"',
+        f'You: "Try `/load {example.path}` — it is tuned for exactly this kind of task.',
+        '     Share the function if you want me to apply hints directly instead."',
+        "",
+        "## Commands",
         "",
     ]
     for c in commands:

@@ -51,7 +51,7 @@ comparable and scannable.
 | 004 | Session audit log                    | [session-audit-log.md](session-audit-log.md)      | planned  | —        | —          |
 | 005 | Setup-script hardening               | [setup-script-hardening.md](setup-script-hardening.md) | planned  | —        | —          |
 | 006 | Cross-machine drift detection        | [cross-machine-drift-detection.md](cross-machine-drift-detection.md) | planned  | —        | —          |
-| 007 | Slash-command discoverability        | [slash-command-discoverability.md](slash-command-discoverability.md) | done     | —        | —          |
+| 007 | Slash-command discoverability        | [slash-command-discoverability.md](slash-command-discoverability.md) | in-progress | —     | —          |
 | 008 | Auto-restart hint after self-edits   | [auto-restart-hint.md](auto-restart-hint.md)                         | blocked  | —        | 002, 004   |
 | 009 | VS Code (Continue.dev) integration   | [vscode-continue-integration.md](vscode-continue-integration.md)     | planned  | —        | —          |
 

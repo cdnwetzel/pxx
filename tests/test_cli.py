@@ -18,6 +18,7 @@ import pytest
 from pxx.cli import (
     COMMANDS_CONTEXT_FILE,
     NEO_DEFAULT,
+    REPO_ROOT,
     SAFETY_TAG_PREFIX,
     STUDIO_DEFAULT,
     _build_aider_args,
@@ -28,7 +29,9 @@ from pxx.cli import (
     _in_git_repo,
     _print_command_listing,
     _prune_old_safety_tags,
+    _self_lint,
     _self_sanity_check,
+    _self_test,
     _write_commands_context,
     main,
     model_for,
@@ -293,6 +296,140 @@ class TestScopeFlag:
         assert result is not None
         content = result.read_text()
         assert "(repo root)" in content
+
+
+class TestSelfTest:
+    """Tests for the pxx --self-test flag (#001 Tier 1)."""
+
+    def test_self_test_returns_child_returncode_on_pass(self, monkeypatch, capsys):
+        calls: list[dict] = []
+
+        def fake_run(cmd, cwd, check):
+            calls.append({"cmd": cmd, "cwd": cwd, "check": check})
+
+            class R:
+                returncode = 0
+
+            return R()
+
+        monkeypatch.setattr(subprocess, "run", fake_run)
+        rc = _self_test()
+        assert rc == 0
+        assert calls == [{"cmd": ["uv", "run", "pytest", "-q"], "cwd": REPO_ROOT, "check": False}]
+        err = capsys.readouterr().err
+        assert "self-test — running" in err
+        assert "self-test — passed (0)" in err
+
+    def test_self_test_propagates_nonzero(self, monkeypatch, capsys):
+        class R:
+            returncode = 1
+
+        monkeypatch.setattr(subprocess, "run", lambda *a, **k: R())
+        rc = _self_test()
+        assert rc == 1
+        assert "self-test — failed (1)" in capsys.readouterr().err
+
+    def test_self_test_banner_goes_to_stderr_not_stdout(self, monkeypatch, capsys):
+        class R:
+            returncode = 0
+
+        monkeypatch.setattr(subprocess, "run", lambda *a, **k: R())
+        _self_test()
+        captured = capsys.readouterr()
+        assert "self-test" in captured.err
+        assert "self-test" not in captured.out
+
+    def test_main_with_self_test_short_circuits_before_endpoint(self, monkeypatch):
+        from pxx import cli as cli_module
+
+        called: list[str] = []
+
+        def fake_detect():
+            called.append("detect_endpoint")
+            raise RuntimeError("should not be called")
+
+        class R:
+            returncode = 0
+
+        monkeypatch.setattr(cli_module, "detect_endpoint", fake_detect)
+        monkeypatch.setattr(subprocess, "run", lambda *a, **k: R())
+        monkeypatch.setattr(sys, "argv", ["pxx", "--self-test"])
+        with pytest.raises(SystemExit) as exc:
+            cli_module.main()
+        assert exc.value.code == 0
+        assert called == []
+
+
+class TestSelfLint:
+    """Tests for the pxx --self-lint flag (#001 Tier 1)."""
+
+    def _stub_run(self, rc_by_cmd: dict[tuple[str, ...], int]):
+        """Build a fake subprocess.run that returns mapped exit codes."""
+        calls: list[list[str]] = []
+
+        def fake_run(cmd, cwd, check):
+            calls.append(cmd)
+
+            class R:
+                returncode = rc_by_cmd.get(tuple(cmd), 0)
+
+            return R()
+
+        return fake_run, calls
+
+    def test_runs_both_check_and_format(self, monkeypatch, capsys):
+        fake, calls = self._stub_run({})
+        monkeypatch.setattr(subprocess, "run", fake)
+        rc = _self_lint()
+        assert rc == 0
+        assert calls == [
+            ["uv", "run", "ruff", "check", "."],
+            ["uv", "run", "ruff", "format", "--check", "."],
+        ]
+        err = capsys.readouterr().err
+        assert "self-lint — running" in err
+        assert "check=0 format=0 combined=0" in err
+
+    def test_nonzero_if_check_fails(self, monkeypatch, capsys):
+        fake, _ = self._stub_run({("uv", "run", "ruff", "check", "."): 1})
+        monkeypatch.setattr(subprocess, "run", fake)
+        rc = _self_lint()
+        assert rc != 0
+        assert "check=1 format=0" in capsys.readouterr().err
+
+    def test_nonzero_if_format_fails(self, monkeypatch, capsys):
+        fake, _ = self._stub_run({("uv", "run", "ruff", "format", "--check", "."): 1})
+        monkeypatch.setattr(subprocess, "run", fake)
+        rc = _self_lint()
+        assert rc != 0
+        assert "check=0 format=1" in capsys.readouterr().err
+
+    def test_both_subcommands_run_even_when_check_fails(self, monkeypatch):
+        # Don't short-circuit on first failure — user wants to see every issue.
+        fake, calls = self._stub_run({("uv", "run", "ruff", "check", "."): 1})
+        monkeypatch.setattr(subprocess, "run", fake)
+        _self_lint()
+        assert len(calls) == 2
+
+    def test_main_with_self_lint_short_circuits_before_endpoint(self, monkeypatch):
+        from pxx import cli as cli_module
+
+        called: list[str] = []
+
+        def fake_detect():
+            called.append("detect_endpoint")
+            raise RuntimeError("should not be called")
+
+        class R:
+            returncode = 0
+
+        monkeypatch.setattr(cli_module, "detect_endpoint", fake_detect)
+        monkeypatch.setattr(subprocess, "run", lambda *a, **k: R())
+        monkeypatch.setattr(sys, "argv", ["pxx", "--self-lint"])
+        with pytest.raises(SystemExit) as exc:
+            cli_module.main()
+        assert exc.value.code == 0
+        assert called == []
 
 
 class TestInstallHookFlag:

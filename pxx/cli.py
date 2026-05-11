@@ -22,6 +22,7 @@ from pxx.scope import (
 PKG_DIR = Path(__file__).parent
 REPO_ROOT = PKG_DIR.parent
 SYSTEM_PROMPT = PKG_DIR / "prompts" / "system.md"
+SELF_IMPROVE_PROMPT = PKG_DIR / "prompts" / "self-improve.md"
 AIDER_CONF = REPO_ROOT / "config" / "aider.conf.yml"
 MODEL_SETTINGS = REPO_ROOT / "config" / "model-settings.yml"
 
@@ -389,6 +390,53 @@ def _print_command_listing() -> None:
         print(f"  /load {c.path}")
 
 
+def _self_test() -> int:
+    """Run `uv run pytest -q` against the pxx repo, regardless of cwd (#001 T1).
+
+    Returns the child's exit code. Banner + status line go to stderr so the
+    pytest output on stdout stays clean for piping.
+    """
+    cmd = ["uv", "run", "pytest", "-q"]
+    print(
+        f"pxx: self-test — running `{' '.join(cmd)}` in {REPO_ROOT}",
+        file=sys.stderr,
+    )
+    rc = subprocess.run(cmd, cwd=REPO_ROOT, check=False).returncode
+    status = "passed" if rc == 0 else "failed"
+    print(f"pxx: self-test — {status} ({rc})", file=sys.stderr)
+    return rc
+
+
+def _self_lint() -> int:
+    """Run ruff check and ruff format --check against the pxx repo (#001 T1).
+
+    Both sub-commands always run (don't short-circuit on first failure) so
+    the user sees every violation in one pass. Returns 0 only if both pass;
+    otherwise the combined non-zero is the bitwise OR of the two exit codes
+    — preserving distinguishability if a caller wants to switch on it.
+    """
+    check_cmd = ["uv", "run", "ruff", "check", "."]
+    format_cmd = ["uv", "run", "ruff", "format", "--check", "."]
+
+    print(
+        f"pxx: self-lint — running `{' '.join(check_cmd)}` in {REPO_ROOT}",
+        file=sys.stderr,
+    )
+    check_rc = subprocess.run(check_cmd, cwd=REPO_ROOT, check=False).returncode
+    print(
+        f"pxx: self-lint — running `{' '.join(format_cmd)}` in {REPO_ROOT}",
+        file=sys.stderr,
+    )
+    format_rc = subprocess.run(format_cmd, cwd=REPO_ROOT, check=False).returncode
+
+    combined = check_rc | format_rc
+    print(
+        f"pxx: self-lint — check={check_rc} format={format_rc} combined={combined}",
+        file=sys.stderr,
+    )
+    return combined
+
+
 def _install_precommit_hook() -> None:
     """Invoke scripts/install-precommit-hook.sh in the current working dir.
 
@@ -416,6 +464,15 @@ def main() -> None:
     if "--install-hook" in sys.argv:
         _install_precommit_hook()
         # _install_precommit_hook exits, so we never reach this line.
+
+    # T1 (#001 Dogfooding): portable health-check commands that target the
+    # pxx repo regardless of cwd. They don't need Ollama or the sanity check
+    # (the test/lint run itself catches any import-time breakage), so they
+    # short-circuit at the same level as --list-commands.
+    if "--self-test" in sys.argv:
+        sys.exit(_self_test())
+    if "--self-lint" in sys.argv:
+        sys.exit(_self_lint())
 
     # M3 (#002): pre-launch self-sanity. Runs before any other work so a
     # self-edit that broke pxx surfaces a clear recovery message rather

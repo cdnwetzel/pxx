@@ -45,7 +45,7 @@ comparable and scannable.
 
 | ID  | Title                                | File                                              | Status   | Blocks   | Blocked by |
 | --- | ------------------------------------ | ------------------------------------------------- | -------- | -------- | ---------- |
-| 001 | Dogfooding pxx (self-improvement)    | [dogfooding.md](dogfooding.md)                    | blocked  | —        | 003        |
+| 001 | Dogfooding pxx (self-improvement)    | [dogfooding.md](dogfooding.md)                    | in-progress | —        | —          |
 | 002 | Safety foundation                    | [safety-foundation.md](safety-foundation.md)      | done     | 001      | —          |
 | 003 | Scoping & dry-run                    | [scoping-and-dry-run.md](scoping-and-dry-run.md)  | in-progress | 001    | —          |
 | 004 | Session audit log                    | [session-audit-log.md](session-audit-log.md)      | planned  | —        | —          |
@@ -54,6 +54,7 @@ comparable and scannable.
 | 007 | Slash-command discoverability        | [slash-command-discoverability.md](slash-command-discoverability.md) | done     | —        | —          |
 | 008 | Auto-restart hint after self-edits   | [auto-restart-hint.md](auto-restart-hint.md)                         | blocked  | —        | 004        |
 | 009 | VS Code (Continue.dev) integration   | [vscode-continue-integration.md](vscode-continue-integration.md)     | planned  | —        | —          |
+| 010 | Dogfooding Tier 1 — self-test/lint   | [dogfooding-tier1-self-test-lint.md](dogfooding-tier1-self-test-lint.md) | done | —    | —          |
 
 ## Status legend
 
@@ -75,4 +76,4 @@ comparable and scannable.
 
 ## Next free ID
 
-`010`
+`011`

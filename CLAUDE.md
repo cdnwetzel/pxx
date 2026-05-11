@@ -36,6 +36,10 @@ bash scripts/doctor.sh
 
 # Run pxx in another project directory
 cd ~/some-python-project && pxx
+
+# Self-modes (#001 Tier 1): run pxx's own gates from anywhere
+pxx --self-test       # uv run pytest -q against the pxx repo
+pxx --self-lint       # ruff check + ruff format --check against the pxx repo
 ```
 
 ### Aider upgrade discipline

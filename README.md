@@ -43,6 +43,21 @@ pxx --edit           # code mode: standard aider — propose diffs, auto-commit
 
 The startup banner prints the active mode so you always know which one you're in.
 
+## Self-modes — portable health checks
+
+Two flags run pxx's own test/lint gate against the pxx repo, regardless of cwd.
+They short-circuit before endpoint detection, so they work offline and don't
+need Ollama:
+
+```bash
+pxx --self-test      # uv run pytest -q against the pxx repo
+pxx --self-lint      # uv run ruff check . AND uv run ruff format --check .
+```
+
+Both return Unix-style exit codes — non-zero if anything fails. `--self-lint`
+runs both ruff sub-commands every time (no short-circuit on first failure) so
+you see every violation in one pass.
+
 ## Daily use
 
 ```bash
@@ -107,7 +122,7 @@ Reports: which endpoints are reachable, memory pressure, loaded models, CPU temp
 
 ```bash
 uv sync --extra dev          # one-time per machine — creates .venv/
-uv run pytest -q             # 14 tests on the pure helper functions
+uv run pytest -q             # tests on the pure helper functions (or: pxx --self-test)
 uv run ruff check --fix      # lint + auto-fix
 uv run ruff format           # format
 ```

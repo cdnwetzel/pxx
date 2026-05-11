@@ -7,8 +7,11 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$(dirname "$SCRIPT_DIR")"
+
 # shellcheck source=./_lib.sh
-. "$(dirname "${BASH_SOURCE[0]}")/_lib.sh"
+. "$SCRIPT_DIR/_lib.sh"
 
 echo "==> Checking Homebrew..."
 if ! command -v brew >/dev/null; then
@@ -52,6 +55,16 @@ _with_check "ollama pull qwen3:8b"     ollama pull qwen3:8b
 
 echo "==> Verifying Ollama API..."
 curl -sS http://localhost:11434/api/tags >/dev/null && echo "    Ollama API: OK" || echo "    Ollama API: FAIL"
+
+echo "==> Installing pxx pre-commit hook in this repo (#002)..."
+# Studio is primarily an Ollama host, but it has a pxx git repo too
+# (rsync'd from the Neo). Installing the hook here means quick local
+# fixes from the Studio side still get gated.
+if (cd "$REPO_DIR" && git rev-parse --is-inside-work-tree >/dev/null 2>&1); then
+  cd "$REPO_DIR" && bash "$SCRIPT_DIR/install-precommit-hook.sh"
+else
+  echo "    pxx repo not a git work tree at $REPO_DIR; skipping hook install."
+fi
 
 LAN_HOST="$(hostname).local"
 echo ""

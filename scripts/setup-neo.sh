@@ -45,6 +45,11 @@ echo "==> Installing pxx..."
 cd "$REPO_DIR"
 _with_check "uv tool install pxx" uv tool install --editable . --python 3.12
 
+echo "==> Installing pxx pre-commit hook in this repo (#002)..."
+# Runs in cwd = REPO_DIR (set above), which is pxx's git repo.
+# Idempotent: refreshes the hook on every setup-script run.
+bash "$SCRIPT_DIR/install-precommit-hook.sh"
+
 echo "==> Verifying..."
 if command -v pxx >/dev/null; then
   echo "    pxx installed at: $(which pxx)"

@@ -45,14 +45,14 @@ comparable and scannable.
 
 | ID  | Title                                | File                                              | Status   | Blocks   | Blocked by |
 | --- | ------------------------------------ | ------------------------------------------------- | -------- | -------- | ---------- |
-| 001 | Dogfooding pxx (self-improvement)    | [dogfooding.md](dogfooding.md)                    | blocked  | —        | 002, 003   |
-| 002 | Safety foundation                    | [safety-foundation.md](safety-foundation.md)      | in-progress | 001    | —          |
+| 001 | Dogfooding pxx (self-improvement)    | [dogfooding.md](dogfooding.md)                    | blocked  | —        | 003        |
+| 002 | Safety foundation                    | [safety-foundation.md](safety-foundation.md)      | done     | 001      | —          |
 | 003 | Scoping & dry-run                    | [scoping-and-dry-run.md](scoping-and-dry-run.md)  | planned  | 001      | —          |
 | 004 | Session audit log                    | [session-audit-log.md](session-audit-log.md)      | planned  | —        | —          |
 | 005 | Setup-script hardening               | [setup-script-hardening.md](setup-script-hardening.md) | done     | —        | —          |
 | 006 | Cross-machine drift detection        | [cross-machine-drift-detection.md](cross-machine-drift-detection.md) | planned  | —        | —          |
 | 007 | Slash-command discoverability        | [slash-command-discoverability.md](slash-command-discoverability.md) | done     | —        | —          |
-| 008 | Auto-restart hint after self-edits   | [auto-restart-hint.md](auto-restart-hint.md)                         | blocked  | —        | 002, 004   |
+| 008 | Auto-restart hint after self-edits   | [auto-restart-hint.md](auto-restart-hint.md)                         | blocked  | —        | 004        |
 | 009 | VS Code (Continue.dev) integration   | [vscode-continue-integration.md](vscode-continue-integration.md)     | planned  | —        | —          |
 
 ## Status legend

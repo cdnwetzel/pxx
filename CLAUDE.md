@@ -108,6 +108,33 @@ columns.
 
 This keeps the planning surface coherent as it grows.
 
+### Status hygiene — non-negotiable
+
+The backlog's status column must reflect current reality. **Update it in the
+same commit as the work that motivates the change.** Never batch status
+updates into a separate "housekeeping" commit; never let the backlog show
+`planned` for a plan with in-flight commits.
+
+Transitions:
+
+- **Starting work** on a plan: `planned` → `in-progress` in the same commit
+  as the first concrete code/doc change.
+- **Multi-step plan**: status stays `in-progress` across all commits until
+  the last verification step lands. Do not bounce back to `planned`.
+- **Completing**: `in-progress` → `done` in the same commit that lands the
+  last verification step.
+- **Cascade unblock**: when a plan reaches `done`, scan for any plan whose
+  "Blocked by" column lists this ID. Remove the now-`done` ID from that
+  column. If the column becomes empty, transition `blocked` → `planned`
+  (or `in-progress` if implementation starts in the same commit).
+- **Newly discovered blocker**: if mid-implementation reveals a missing
+  prerequisite, transition `in-progress` → `blocked` and add the new ID
+  to "Blocked by". Surface this in the commit message.
+- **`Next free ID`**: bump whenever a new plan is added; never let it lag.
+
+The motivating rule: *"a backlog whose statuses lag behind the work is
+worse than no backlog: it deceives."*
+
 **Three configs feed aider, and they do different things:**
 - `config/aider.conf.yml` — aider behavior (edit-format, caching, lint/test cmds, privacy)
 - `config/model-settings.yml` — per-model context windows; values here are OOM-sensitive on the Studio

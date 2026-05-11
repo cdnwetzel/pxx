@@ -1,4 +1,4 @@
-# /refactor
+# /refactor — Refactor for clarity; keep behavior identical
 
 Refactor the selected code for clarity. Behavior must stay identical.
 

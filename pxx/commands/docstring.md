@@ -1,4 +1,4 @@
-# /docstring
+# /docstring — Add a concise docstring (only when asked)
 
 Add docstrings to the selected function(s). Only what I asked for.
 

@@ -1,4 +1,4 @@
-# /typecheck
+# /typecheck — Tighten type hints toward mypy --strict
 
 Add or tighten type hints in the selected code. Treat `mypy --strict` as the bar.
 

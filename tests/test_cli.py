@@ -1,13 +1,17 @@
 """Tests for pxx.cli pure functions.
 
 Covers the module-level helpers that have no I/O dependencies on aider or
-Ollama: model_for, _in_git_repo, _find_aider, _build_aider_args.
+Ollama: model_for, _in_git_repo, _find_aider, _build_aider_args, and the
+--list-commands flag handling.
 """
 
 from __future__ import annotations
 
 import subprocess
+import sys
 from pathlib import Path
+
+import pytest
 
 from pxx.cli import (
     NEO_DEFAULT,
@@ -15,6 +19,8 @@ from pxx.cli import (
     _build_aider_args,
     _find_aider,
     _in_git_repo,
+    _print_command_listing,
+    main,
     model_for,
 )
 from pxx.endpoints import Endpoint
@@ -120,3 +126,48 @@ class TestBuildAiderArgs:
     def test_first_arg_is_aider_binary(self):
         args = _build_aider_args("/x/aider", "m", [], in_git_repo=True, edit_mode=False)
         assert args[0] == "/x/aider"
+
+
+class TestListCommandsFlag:
+    def test_print_command_listing_includes_all_six_commands(self, capsys):
+        _print_command_listing()
+        out = capsys.readouterr().out
+        for name in ("audit", "docstring", "refactor", "refocus", "test", "typecheck"):
+            assert f"/{name}" in out
+
+    def test_print_command_listing_includes_real_descriptions(self, capsys):
+        _print_command_listing()
+        out = capsys.readouterr().out
+        # All six should now have real descriptions, not the placeholder.
+        assert "(no description)" not in out
+
+    def test_print_command_listing_includes_paste_ready_load_lines(self, capsys):
+        _print_command_listing()
+        out = capsys.readouterr().out
+        assert "Paste-ready /load lines:" in out
+        assert "/load " in out
+
+    def test_main_with_list_commands_flag_exits_zero(self, monkeypatch, capsys):
+        monkeypatch.setattr(sys, "argv", ["pxx", "--list-commands"])
+        with pytest.raises(SystemExit) as exc:
+            main()
+        assert exc.value.code == 0
+        out = capsys.readouterr().out
+        assert "Available slash commands:" in out
+
+    def test_list_commands_flag_short_circuits_endpoint_detection(self, monkeypatch):
+        """--list-commands must exit before any endpoint probing occurs."""
+        from pxx import cli as cli_module
+
+        calls: list[str] = []
+
+        def fake_detect() -> Endpoint:
+            calls.append("detect_endpoint")
+            raise RuntimeError("should not be called when --list-commands is set")
+
+        monkeypatch.setattr(cli_module, "detect_endpoint", fake_detect)
+        monkeypatch.setattr(sys, "argv", ["pxx", "--list-commands"])
+        with pytest.raises(SystemExit) as exc:
+            cli_module.main()
+        assert exc.value.code == 0
+        assert calls == []

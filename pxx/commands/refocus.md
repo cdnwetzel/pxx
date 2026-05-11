@@ -1,4 +1,4 @@
-# /refocus
+# /refocus — Digest the conversation before /clear (context-rot recovery)
 
 We are about to `/clear` to fight context rot. Before I clear, write a concise digest I can paste back to re-anchor the conversation.
 

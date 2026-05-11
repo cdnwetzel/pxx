@@ -8,6 +8,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from pxx.commands_index import list_commands
 from pxx.endpoints import Endpoint, detect_endpoint
 
 PKG_DIR = Path(__file__).parent
@@ -94,7 +95,29 @@ def _build_aider_args(
     return args
 
 
+def _print_command_listing() -> None:
+    """Print available slash commands and their /load paths to stdout."""
+    commands = list_commands()
+    if not commands:
+        print("No slash commands found in pxx/commands/", file=sys.stderr)
+        return
+
+    name_width = max(len(c.name) for c in commands)
+    print("Available slash commands:")
+    print()
+    for c in commands:
+        print(f"  /{c.name:<{name_width}}  — {c.description}")
+    print()
+    print("Paste-ready /load lines:")
+    for c in commands:
+        print(f"  /load {c.path}")
+
+
 def main() -> None:
+    if "--list-commands" in sys.argv:
+        _print_command_listing()
+        sys.exit(0)
+
     try:
         endpoint = detect_endpoint()
     except RuntimeError as e:

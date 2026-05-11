@@ -1,4 +1,4 @@
-# /audit
+# /audit — Read-only review for bugs, unsafe patterns, perf footguns
 
 Read-only review of the selected code. Do not edit anything. Report findings as a numbered list with `file:line` references.
 

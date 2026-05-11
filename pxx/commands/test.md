@@ -1,4 +1,4 @@
-# /test
+# /test — Write parametrized pytest tests
 
 Write pytest tests for the target function(s).
 

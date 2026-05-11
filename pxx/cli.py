@@ -6,9 +6,10 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
-from pxx.commands_index import list_commands
+from pxx.commands_index import CommandInfo, list_commands
 from pxx.endpoints import Endpoint, detect_endpoint
 
 PKG_DIR = Path(__file__).parent
@@ -66,16 +67,23 @@ def _build_aider_args(
     user_args: list[str],
     in_git_repo: bool,
     edit_mode: bool,
+    extra_reads: list[Path] | None = None,
 ) -> list[str]:
     """Construct the argv to exec into aider with.
 
     Default chat mode is `ask` (read-only); `--edit` flips to `code` (the
     standard editing flow). Explicit `--chat-mode` in user_args wins over both.
+    Optional ``extra_reads`` are passed as additional ``--read`` files after
+    the system prompt (e.g., the commands-context file).
     """
     has_chat_mode = any(a == "--chat-mode" or a.startswith("--chat-mode=") for a in user_args)
     chat_mode_args: list[str] = []
     if not has_chat_mode:
         chat_mode_args = ["--chat-mode", "code" if edit_mode else "ask"]
+
+    extra_read_args: list[str] = []
+    for p in extra_reads or []:
+        extra_read_args.extend(["--read", str(p)])
 
     args = [
         aider_bin,
@@ -83,6 +91,7 @@ def _build_aider_args(
         model,
         "--read",
         str(SYSTEM_PROMPT),
+        *extra_read_args,
         "--config",
         str(AIDER_CONF),
         "--model-settings-file",
@@ -93,6 +102,35 @@ def _build_aider_args(
         args.append("--no-git")
     args.extend(user_args)
     return args
+
+
+COMMANDS_CONTEXT_FILE = "pxx-commands-context.md"
+"""Filename used for the in-session command-listing context file in $TMPDIR."""
+
+
+def _write_commands_context(commands: list[CommandInfo]) -> Path | None:
+    """Write the slash-command listing to a tempfile for aider's `--read` context.
+
+    Returns the absolute path to the written file, or ``None`` if no commands
+    were found. The file is overwritten on each invocation — fixed filename
+    means at most one stale file exists, and no cleanup is needed.
+    """
+    if not commands:
+        return None
+
+    tmp = Path(tempfile.gettempdir()) / COMMANDS_CONTEXT_FILE
+    lines = [
+        "# Available slash commands",
+        "",
+        "When the user describes a task that maps to one of these, suggest the",
+        "matching `/load <path>` line below. Do not invent new commands; only",
+        "suggest from this list.",
+        "",
+    ]
+    for c in commands:
+        lines.append(f"- `/load {c.path}` — {c.description}")
+    tmp.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return tmp
 
 
 def _print_command_listing() -> None:
@@ -144,7 +182,12 @@ def main() -> None:
             file=sys.stderr,
         )
 
-    args = _build_aider_args(aider_bin, model, user_args, in_git_repo, edit_mode)
+    commands_context = _write_commands_context(list_commands())
+    extra_reads = [commands_context] if commands_context else []
+
+    args = _build_aider_args(
+        aider_bin, model, user_args, in_git_repo, edit_mode, extra_reads=extra_reads
+    )
     os.execv(aider_bin, args)
 
 

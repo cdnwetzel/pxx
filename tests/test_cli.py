@@ -1,28 +1,32 @@
 """Tests for pxx.cli pure functions.
 
 Covers the module-level helpers that have no I/O dependencies on aider or
-Ollama: model_for, _in_git_repo, _find_aider, _build_aider_args, and the
---list-commands flag handling.
+Ollama: model_for, _in_git_repo, _find_aider, _build_aider_args, the
+--list-commands flag handling, and the in-session commands-context file.
 """
 
 from __future__ import annotations
 
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
 
 from pxx.cli import (
+    COMMANDS_CONTEXT_FILE,
     NEO_DEFAULT,
     STUDIO_DEFAULT,
     _build_aider_args,
     _find_aider,
     _in_git_repo,
     _print_command_listing,
+    _write_commands_context,
     main,
     model_for,
 )
+from pxx.commands_index import CommandInfo
 from pxx.endpoints import Endpoint
 
 
@@ -171,3 +175,75 @@ class TestListCommandsFlag:
             cli_module.main()
         assert exc.value.code == 0
         assert calls == []
+
+
+class TestCommandsContext:
+    def test_returns_path_when_commands_present(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(tempfile, "gettempdir", lambda: str(tmp_path))
+        commands = [CommandInfo(name="foo", path=Path("/x/foo.md"), description="bar")]
+        result = _write_commands_context(commands)
+        assert result == tmp_path / COMMANDS_CONTEXT_FILE
+        assert result.exists()
+
+    def test_returns_none_for_empty_command_list(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(tempfile, "gettempdir", lambda: str(tmp_path))
+        assert _write_commands_context([]) is None
+        # And no file should have been created.
+        assert not (tmp_path / COMMANDS_CONTEXT_FILE).exists()
+
+    def test_content_includes_header_and_paste_lines(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(tempfile, "gettempdir", lambda: str(tmp_path))
+        commands = [
+            CommandInfo(name="audit", path=Path("/a.md"), description="review"),
+            CommandInfo(name="test", path=Path("/t.md"), description="tests"),
+        ]
+        result = _write_commands_context(commands)
+        content = result.read_text(encoding="utf-8")
+        assert "# Available slash commands" in content
+        assert "Do not invent new commands" in content
+        assert "/load /a.md" in content
+        assert "review" in content
+        assert "/load /t.md" in content
+        assert "tests" in content
+
+    def test_file_overwritten_on_each_call(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(tempfile, "gettempdir", lambda: str(tmp_path))
+        # First write — single command.
+        _write_commands_context([CommandInfo(name="x", path=Path("/x.md"), description="d1")])
+        first = (tmp_path / COMMANDS_CONTEXT_FILE).read_text()
+        assert "/load /x.md" in first
+        # Second write — different command. Old content must be gone.
+        _write_commands_context([CommandInfo(name="y", path=Path("/y.md"), description="d2")])
+        second = (tmp_path / COMMANDS_CONTEXT_FILE).read_text()
+        assert "/load /y.md" in second
+        assert "/load /x.md" not in second
+
+
+class TestBuildAiderArgsWithExtraReads:
+    def test_extra_reads_inserted_after_system_prompt(self):
+        extras = [Path("/tmp/a.md"), Path("/tmp/b.md")]
+        args = _build_aider_args(
+            "/x/aider", "m", [], in_git_repo=True, edit_mode=False, extra_reads=extras
+        )
+        # Find all --read flag indices.
+        read_indices = [i for i, a in enumerate(args) if a == "--read"]
+        assert len(read_indices) == 3, args
+        # System prompt comes first; then the two extras in order.
+        assert args[read_indices[1] + 1] == "/tmp/a.md"
+        assert args[read_indices[2] + 1] == "/tmp/b.md"
+
+    def test_no_extra_reads_when_param_omitted(self):
+        args = _build_aider_args("/x/aider", "m", [], in_git_repo=True, edit_mode=False)
+        assert args.count("--read") == 1
+
+    def test_no_extra_reads_when_empty_list(self):
+        args = _build_aider_args(
+            "/x/aider", "m", [], in_git_repo=True, edit_mode=False, extra_reads=[]
+        )
+        assert args.count("--read") == 1
+
+    def test_extra_reads_with_none(self):
+        args = _build_aider_args(
+            "/x/aider", "m", [], in_git_repo=True, edit_mode=False, extra_reads=None
+        )
+        assert args.count("--read") == 1

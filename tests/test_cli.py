@@ -10,6 +10,7 @@ from __future__ import annotations
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 import pytest
@@ -17,11 +18,16 @@ import pytest
 from pxx.cli import (
     COMMANDS_CONTEXT_FILE,
     NEO_DEFAULT,
+    SAFETY_TAG_PREFIX,
     STUDIO_DEFAULT,
     _build_aider_args,
+    _create_safety_tag,
     _find_aider,
+    _git_dirty,
     _in_git_repo,
     _print_command_listing,
+    _prune_old_safety_tags,
+    _self_sanity_check,
     _write_commands_context,
     main,
     model_for,
@@ -233,6 +239,186 @@ class TestCommandsContext:
         second = (tmp_path / COMMANDS_CONTEXT_FILE).read_text()
         assert "/load /y.md" in second
         assert "/load /x.md" not in second
+
+
+class TestSelfSanityCheck:
+    def test_passes_for_real_module(self):
+        # Real module imports cleanly; should not exit.
+        _self_sanity_check("pxx.endpoints")
+
+    def test_exits_2_on_import_failure(self, capsys):
+        with pytest.raises(SystemExit) as exc:
+            _self_sanity_check("nonexistent.module.that.cannot.exist")
+        assert exc.value.code == 2
+        err = capsys.readouterr().err
+        assert "failed to import" in err
+        assert "Recover with one of:" in err
+        # Recovery hints use `git -C <repo> reset --hard ...` form.
+        assert "reset --hard" in err
+        assert "reflog" in err
+
+    def test_exits_2_on_import_error_in_module(self, monkeypatch, capsys):
+        # Simulate a module that imports but raises during its top-level code.
+        # importlib.import_module() should re-raise.
+        import importlib
+
+        def fake_import(name):
+            raise ImportError("simulated import-time failure")
+
+        monkeypatch.setattr(importlib, "import_module", fake_import)
+        with pytest.raises(SystemExit) as exc:
+            _self_sanity_check("pxx.endpoints")
+        assert exc.value.code == 2
+        assert "simulated import-time failure" in capsys.readouterr().err
+
+
+class TestGitDirty:
+    def test_clean_tree(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        subprocess.run(["git", "init", "-q"], check=True)
+        subprocess.run(["git", "config", "user.email", "x@x"], check=True)
+        subprocess.run(["git", "config", "user.name", "x"], check=True)
+        # Empty repo (no commits yet) is also "clean" for our purposes — no
+        # changes to stash. Verify status reflects that.
+        (tmp_path / "f.txt").write_text("a")
+        subprocess.run(["git", "add", "f.txt"], check=True)
+        subprocess.run(["git", "commit", "-q", "-m", "init"], check=True)
+        assert _git_dirty() is False
+
+    def test_unstaged_changes(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        subprocess.run(["git", "init", "-q"], check=True)
+        subprocess.run(["git", "config", "user.email", "x@x"], check=True)
+        subprocess.run(["git", "config", "user.name", "x"], check=True)
+        (tmp_path / "f.txt").write_text("a")
+        subprocess.run(["git", "add", "f.txt"], check=True)
+        subprocess.run(["git", "commit", "-q", "-m", "init"], check=True)
+        (tmp_path / "f.txt").write_text("b")
+        assert _git_dirty() is True
+
+    def test_untracked_file(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        subprocess.run(["git", "init", "-q"], check=True)
+        subprocess.run(["git", "config", "user.email", "x@x"], check=True)
+        subprocess.run(["git", "config", "user.name", "x"], check=True)
+        (tmp_path / "untracked.txt").write_text("a")
+        assert _git_dirty() is True
+
+    def test_outside_git_repo(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        # No git init — _git_dirty should not crash, just return False.
+        assert _git_dirty() is False
+
+
+class TestCreateSafetyTag:
+    def _init_repo(self, tmp_path):
+        subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+        subprocess.run(["git", "config", "user.email", "x@x"], cwd=tmp_path, check=True)
+        subprocess.run(["git", "config", "user.name", "x"], cwd=tmp_path, check=True)
+        (tmp_path / "f.txt").write_text("initial")
+        subprocess.run(["git", "add", "f.txt"], cwd=tmp_path, check=True)
+        subprocess.run(["git", "commit", "-q", "-m", "init"], cwd=tmp_path, check=True)
+
+    def test_returns_tag_in_git_repo_clean_tree(self, tmp_path, monkeypatch):
+        self._init_repo(tmp_path)
+        monkeypatch.chdir(tmp_path)
+        tag = _create_safety_tag()
+        assert tag is not None
+        assert tag.startswith(SAFETY_TAG_PREFIX)
+        # Verify tag exists in git.
+        result = subprocess.run(
+            ["git", "tag", "--list", tag],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        assert result.stdout.strip() == tag
+
+    def test_returns_tag_with_unix_timestamp_suffix(self, tmp_path, monkeypatch):
+        self._init_repo(tmp_path)
+        monkeypatch.chdir(tmp_path)
+        before = int(time.time())
+        tag = _create_safety_tag()
+        after = int(time.time())
+        assert tag is not None
+        ts = int(tag.removeprefix(SAFETY_TAG_PREFIX))
+        assert before <= ts <= after
+
+    def test_stashes_dirty_changes(self, tmp_path, monkeypatch):
+        self._init_repo(tmp_path)
+        monkeypatch.chdir(tmp_path)
+        # Make the working tree dirty.
+        (tmp_path / "f.txt").write_text("modified")
+        (tmp_path / "new-untracked.txt").write_text("brand new")
+        tag = _create_safety_tag()
+        assert tag is not None
+        # Stash should now exist.
+        stash_list = subprocess.run(
+            ["git", "stash", "list"],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        assert tag in stash_list.stdout
+
+    def test_returns_none_outside_git_repo(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        # No git init.
+        assert _create_safety_tag() is None
+
+
+class TestPruneOldSafetyTags:
+    def _init_repo(self, tmp_path):
+        subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+        subprocess.run(["git", "config", "user.email", "x@x"], cwd=tmp_path, check=True)
+        subprocess.run(["git", "config", "user.name", "x"], cwd=tmp_path, check=True)
+        (tmp_path / "f.txt").write_text("x")
+        subprocess.run(["git", "add", "f.txt"], cwd=tmp_path, check=True)
+        subprocess.run(["git", "commit", "-q", "-m", "init"], cwd=tmp_path, check=True)
+
+    def test_deletes_old_tags(self, tmp_path, monkeypatch):
+        self._init_repo(tmp_path)
+        monkeypatch.chdir(tmp_path)
+        # Tag at a timestamp 100 days ago.
+        old_ts = int(time.time()) - 100 * 86400
+        old_tag = f"{SAFETY_TAG_PREFIX}{old_ts}"
+        subprocess.run(["git", "tag", old_tag], cwd=tmp_path, check=True)
+        # And a recent tag (today).
+        recent_tag = f"{SAFETY_TAG_PREFIX}{int(time.time())}"
+        subprocess.run(["git", "tag", recent_tag], cwd=tmp_path, check=True)
+        _prune_old_safety_tags(retention_days=30)
+        remaining = subprocess.run(
+            ["git", "tag", "--list", f"{SAFETY_TAG_PREFIX}*"],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.split()
+        assert old_tag not in remaining
+        assert recent_tag in remaining
+
+    def test_skips_malformed_tag_names(self, tmp_path, monkeypatch):
+        self._init_repo(tmp_path)
+        monkeypatch.chdir(tmp_path)
+        malformed = f"{SAFETY_TAG_PREFIX}not-a-timestamp"
+        subprocess.run(["git", "tag", malformed], cwd=tmp_path, check=True)
+        _prune_old_safety_tags(retention_days=30)
+        # Malformed tag should still exist — we don't delete what we can't parse.
+        remaining = subprocess.run(
+            ["git", "tag", "--list", f"{SAFETY_TAG_PREFIX}*"],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.split()
+        assert malformed in remaining
+
+    def test_silent_outside_git_repo(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        # No exception, no error output.
+        _prune_old_safety_tags(retention_days=30)
 
 
 class TestBuildAiderArgsWithExtraReads:

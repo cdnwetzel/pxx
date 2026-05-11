@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import importlib
 import os
 import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 from pxx.commands_index import CommandInfo, list_commands
@@ -59,6 +61,143 @@ def _in_git_repo() -> bool:
         return result.returncode == 0 and result.stdout.strip() == b"true"
     except (FileNotFoundError, subprocess.TimeoutExpired):
         return False
+
+
+# ---------------------------------------------------------------------------
+# Safety foundation (#002)
+# ---------------------------------------------------------------------------
+
+SAFETY_TAG_PREFIX = "pxx-pre/"
+SAFETY_TAG_RETENTION_DAYS = 30
+
+
+def _self_sanity_check(module_name: str = "pxx.endpoints") -> None:
+    """Refuse to launch if a critical pxx module fails to import.
+
+    Protects against self-modification (Tier 3 of #001) leaving pxx in a
+    broken state. Without this, a bad self-edit produces a confusing crash
+    mid-startup rather than a clear "your edit broke me" message.
+
+    Exits with status 2 on failure so a wrapper can distinguish "pxx broken"
+    from normal exit codes.
+    """
+    try:
+        importlib.import_module(module_name)
+    except Exception as e:
+        repo_root = REPO_ROOT
+        print(
+            f"pxx: own module `{module_name}` failed to import: {e}\n"
+            f"  pxx may have been broken by a self-edit.\n"
+            f"  Recover with one of:\n"
+            f"    git -C {repo_root} reflog\n"
+            f"    git -C {repo_root} reset --hard <last-known-good>\n"
+            f"    git -C {repo_root} reset --hard pxx-pre/<unix-ts>",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
+
+def _git_dirty() -> bool:
+    """True if cwd's git work tree has uncommitted or untracked changes."""
+    try:
+        # Tracked-but-uncommitted changes (staged or unstaged).
+        diff = subprocess.run(
+            ["git", "status", "--porcelain", "--untracked-files=normal"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=2,
+        )
+        return diff.returncode == 0 and bool(diff.stdout.strip())
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return False
+
+
+def _create_safety_tag() -> str | None:
+    """Create a local-only safety tag at HEAD; stash dirty state.
+
+    Returns the tag name on success, ``None`` if not in a git repo or git
+    operations fail (best-effort — safety tags are a convenience, not a
+    correctness guarantee).
+
+    Tag namespace `pxx-pre/<unix-ts>` is local-only by design: `git deliver`
+    pushes only `main`, not tags, so safety tags never reach the remotes.
+    """
+    if not _in_git_repo():
+        return None
+
+    ts = int(time.time())
+    tag = f"{SAFETY_TAG_PREFIX}{ts}"
+
+    try:
+        # Stash any uncommitted changes first so the tag points at a clean
+        # HEAD. The stash itself is recoverable via `git stash list`.
+        if _git_dirty():
+            subprocess.run(
+                [
+                    "git",
+                    "stash",
+                    "push",
+                    "--include-untracked",
+                    "--message",
+                    f"{tag}: working state at session start",
+                ],
+                capture_output=True,
+                check=False,
+                timeout=10,
+            )
+
+        # Create the tag at current HEAD.
+        result = subprocess.run(
+            ["git", "tag", tag],
+            capture_output=True,
+            check=False,
+            timeout=2,
+        )
+        if result.returncode != 0:
+            return None
+        return tag
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return None
+
+
+def _prune_old_safety_tags(retention_days: int = SAFETY_TAG_RETENTION_DAYS) -> None:
+    """Delete `pxx-pre/<ts>` tags older than `retention_days`.
+
+    Best-effort, silent on errors. Tag names embed unix timestamps, so we
+    parse the suffix rather than asking git for tag dates. Malformed tags
+    in the namespace are skipped.
+    """
+    if not _in_git_repo():
+        return
+
+    cutoff = int(time.time()) - (retention_days * 86400)
+
+    try:
+        result = subprocess.run(
+            ["git", "tag", "--list", f"{SAFETY_TAG_PREFIX}*"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=2,
+        )
+        if result.returncode != 0:
+            return
+        for tag in result.stdout.strip().splitlines():
+            suffix = tag.removeprefix(SAFETY_TAG_PREFIX)
+            try:
+                ts = int(suffix)
+            except ValueError:
+                continue
+            if ts < cutoff:
+                subprocess.run(
+                    ["git", "tag", "-d", tag],
+                    capture_output=True,
+                    check=False,
+                    timeout=2,
+                )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return
 
 
 def _build_aider_args(
@@ -168,6 +307,11 @@ def main() -> None:
         _print_command_listing()
         sys.exit(0)
 
+    # M3 (#002): pre-launch self-sanity. Runs before any other work so a
+    # self-edit that broke pxx surfaces a clear recovery message rather
+    # than a confusing mid-startup crash.
+    _self_sanity_check()
+
     try:
         endpoint = detect_endpoint()
     except RuntimeError as e:
@@ -182,11 +326,23 @@ def main() -> None:
     model = model_for(endpoint)
     aider_bin = _find_aider()
 
+    # M1 (#002): pre-session safety tag for --edit sessions in a git repo.
+    # Prune old tags first (cheap), then create today's.
+    safety_tag: str | None = None
+    if edit_mode and in_git_repo:
+        _prune_old_safety_tags()
+        safety_tag = _create_safety_tag()
+
     mode_label = "edit" if edit_mode else "ask (read-only — pass --edit to allow changes)"
     print(
         f"pxx: endpoint={endpoint.name} ({endpoint.url})  model={model}  mode={mode_label}",
         file=sys.stderr,
     )
+    if safety_tag:
+        print(
+            f"pxx: safety tag {safety_tag} — undo session with: git reset --hard {safety_tag}",
+            file=sys.stderr,
+        )
 
     if not in_git_repo:
         print(

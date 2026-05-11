@@ -12,6 +12,8 @@
 #   3. uv run pytest -q               → must pass
 #   4. Diff cap: refuse if (added + removed) > PXX_DIFF_CAP (default 100)
 #      unless PXX_ALLOW_BIG_DIFF=1 is set (via `pxx --edit --big`).
+#   5. Scope gate (#003): if PXX_SCOPE is set, refuse if any staged file
+#      is outside the colon-separated scope prefixes.
 #
 # Assumes the target repo uses uv + pyproject.toml + pytest + ruff. Opinionated.
 # Run `bash scripts/install-precommit-hook.sh --uninstall` (or remove the file
@@ -71,4 +73,30 @@ if [ "$allow_big" != "1" ]; then
     fi
 fi
 
-echo "pxx pre-commit: ✓ ruff, pytest, diff-cap all passed."
+# 5. Scope gate (#003).
+# When pxx is launched with --scope, it exports PXX_SCOPE=<colon-paths> into
+# the environment that aider — and any git invocation aider makes — inherits.
+# This step calls `pxx-scope-check` (installed alongside pxx by uv tool) to
+# print any staged files outside the declared scope, and rejects the commit
+# if there are any.
+if [ -n "${PXX_SCOPE:-}" ]; then
+    if ! command -v pxx-scope-check >/dev/null 2>&1; then
+        echo
+        echo "pxx pre-commit: PXX_SCOPE=$PXX_SCOPE is set but 'pxx-scope-check' is not on PATH."
+        echo "  This usually means pxx isn't installed (or its bin dir isn't on PATH)."
+        echo "  Either install pxx ('uv tool install --editable <pxx-repo>'),"
+        echo "  unset PXX_SCOPE, or remove this hook. Commit aborted."
+        exit 1
+    fi
+    out_of_scope=$(git diff --cached --name-only | pxx-scope-check check)
+    if [ -n "$out_of_scope" ]; then
+        echo
+        echo "pxx pre-commit: staged files outside PXX_SCOPE=$PXX_SCOPE — commit aborted."
+        echo "  Out-of-scope files:"
+        echo "$out_of_scope" | sed 's/^/    /'
+        echo "  Either unstage them, or re-launch pxx with a wider --scope."
+        exit 1
+    fi
+fi
+
+echo "pxx pre-commit: ✓ ruff, pytest, diff-cap, scope all passed."

@@ -219,6 +219,82 @@ class TestDryRunFlag:
             assert flag in argv
 
 
+class TestScopeFlag:
+    """Tests for the pxx --scope <path> flag (#003 S1).
+
+    These cover the cli.py integration; the underlying scope module is
+    exhaustively tested in test_scope.py. The focus here is that:
+
+    - --scope <value> is extracted from argv before --edit/--big stripping
+      and does NOT leak into user_args (would confuse aider)
+    - resolve_scopes is invoked against the git repo root
+    - PXX_SCOPE env var is set for the pre-commit hook to read
+    - _write_scope_context generates the expected directive file
+    """
+
+    def test_extract_scope_args_consumes_scope_before_passthrough(self):
+        from pxx.scope import extract_scope_args
+
+        # Mirrors the cli.py call order: extract_scope_args runs on
+        # sys.argv[1:], then --edit / --big are stripped from what remains.
+        argv = ["--scope", "tests/", "--edit", "--message", "hi"]
+        scopes, after = extract_scope_args(argv)
+        user_args = [a for a in after if a not in ("--edit", "--big")]
+        assert scopes == ["tests/"]
+        assert user_args == ["--message", "hi"]
+        # Critical: --scope/<value> must not appear in user_args (would
+        # land in aider's argv and crash, since aider has no --scope flag).
+        assert "--scope" not in user_args
+        assert "tests/" not in user_args
+
+    def test_multiple_scope_flags_union(self):
+        from pxx.scope import extract_scope_args
+
+        argv = ["--scope", "tests/", "--scope=docs/", "--edit"]
+        scopes, after = extract_scope_args(argv)
+        assert scopes == ["tests/", "docs/"]
+        user_args = [a for a in after if a not in ("--edit", "--big")]
+        assert user_args == []
+
+    def test_pxx_scope_env_format(self):
+        from pxx.scope import format_for_env
+
+        # cli.py calls format_for_env on the resolved (post-resolve) list
+        # before setting os.environ["PXX_SCOPE"]. Format is colon-separated.
+        assert format_for_env(["tests/", "docs/"]) == "tests/:docs/"
+
+    def test_write_scope_context_creates_directive_file(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("tempfile.gettempdir", lambda: str(tmp_path))
+        from pxx import cli
+
+        result = cli._write_scope_context(["tests/", "pxx/cli.py"])
+        assert result is not None
+        assert result.exists()
+        content = result.read_text()
+        assert "SCOPE RESTRICTION" in content
+        assert "`tests/`" in content
+        assert "`pxx/cli.py`" in content
+        assert "refuse" in content.lower()
+
+    def test_write_scope_context_returns_none_when_no_scopes(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("tempfile.gettempdir", lambda: str(tmp_path))
+        from pxx import cli
+
+        assert cli._write_scope_context([]) is None
+
+    def test_write_scope_context_renders_repo_root_label(self, tmp_path, monkeypatch):
+        # Empty string in scope_prefixes (resolved from `.`) means "repo root".
+        # The directive file should label that visibly, not show an empty
+        # backtick that would confuse the model.
+        monkeypatch.setattr("tempfile.gettempdir", lambda: str(tmp_path))
+        from pxx import cli
+
+        result = cli._write_scope_context([""])
+        assert result is not None
+        content = result.read_text()
+        assert "(repo root)" in content
+
+
 class TestInstallHookFlag:
     def test_install_hook_flag_detected(self):
         argv = ["pxx", "--install-hook"]

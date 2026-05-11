@@ -13,6 +13,11 @@ from pathlib import Path
 
 from pxx.commands_index import CommandInfo, list_commands
 from pxx.endpoints import Endpoint, detect_endpoint
+from pxx.scope import (
+    extract_scope_args,
+    format_for_env,
+    resolve_scopes,
+)
 
 PKG_DIR = Path(__file__).parent
 REPO_ROOT = PKG_DIR.parent
@@ -274,6 +279,60 @@ def _build_aider_args(
 COMMANDS_CONTEXT_FILE = "pxx-commands-context.md"
 """Filename used for the in-session command-listing context file in $TMPDIR."""
 
+SCOPE_CONTEXT_FILE = "pxx-scope-context.md"
+"""Filename used for the in-session scope-directive context file in $TMPDIR."""
+
+
+def _write_scope_context(scope_prefixes: list[str]) -> Path | None:
+    """Write a scope-directive markdown file for aider's `--read` context.
+
+    Returns the absolute path written, or ``None`` if no scopes were given.
+    Same overwrite-fixed-filename pattern as ``_write_commands_context``.
+    """
+    if not scope_prefixes:
+        return None
+
+    tmp = Path(tempfile.gettempdir()) / SCOPE_CONTEXT_FILE
+    lines = [
+        "# SCOPE RESTRICTION",
+        "",
+        "**This session may only edit files under these path prefixes:**",
+        "",
+    ]
+    for p in scope_prefixes:
+        lines.append(f"- `{p or '(repo root)'}`")
+    lines.extend(
+        [
+            "",
+            "If asked to change a file outside this scope, refuse and tell the",
+            "user to widen the scope by re-running pxx with another `--scope <path>`.",
+            "Do not produce SEARCH/REPLACE blocks for out-of-scope files.",
+            "",
+            "If the user's task requires editing files outside this scope, say so",
+            "explicitly and ask them to widen the scope; do not try to work around",
+            "the restriction.",
+        ]
+    )
+    tmp.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return tmp
+
+
+def _git_repo_root() -> Path | None:
+    """Return the absolute Path of the current git repo's top-level, or None."""
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=2,
+        )
+        if result.returncode != 0:
+            return None
+        return Path(result.stdout.strip())
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return None
+
 
 def _write_commands_context(commands: list[CommandInfo]) -> Path | None:
     """Write the slash-command listing to a tempfile for aider's `--read` context.
@@ -375,8 +434,39 @@ def main() -> None:
     # we detect it only for banner purposes and let it pass through to
     # aider naturally — no need to strip it from user_args.
     dry_run = "--dry-run" in sys.argv
-    user_args = [a for a in sys.argv[1:] if a not in ("--edit", "--big")]
+
+    # S1 (#003): consume --scope <path> (and --scope=<path>) before
+    # the --edit/--big strip, since extract_scope_args needs to see them
+    # in argv order to pair flag with value.
+    scope_args, argv_after_scope = extract_scope_args(sys.argv[1:])
+    user_args = [a for a in argv_after_scope if a not in ("--edit", "--big")]
     in_git_repo = _in_git_repo()
+
+    # Resolve scope paths against the repo root. Without a git repo, scope
+    # has no enforcement surface (no commits to gate), so we warn and drop
+    # rather than failing — keeps behavior consistent with the no-repo case
+    # for the safety tag in M1.
+    scope_prefixes: list[str] = []
+    if scope_args:
+        if not in_git_repo:
+            print(
+                "pxx: --scope ignored outside a git repo (no commit gate to anchor).",
+                file=sys.stderr,
+            )
+        else:
+            repo_root = _git_repo_root()
+            if repo_root is None:
+                print(
+                    "pxx: --scope ignored — could not determine git repo root.",
+                    file=sys.stderr,
+                )
+            else:
+                try:
+                    scope_prefixes = resolve_scopes(scope_args, repo_root)
+                except ValueError as e:
+                    print(f"pxx: {e}", file=sys.stderr)
+                    sys.exit(1)
+                os.environ["PXX_SCOPE"] = format_for_env(scope_prefixes)
 
     os.environ["OLLAMA_API_BASE"] = endpoint.url
     # M4 (#002): --big tells the pre-commit hook to skip the per-session
@@ -442,6 +532,14 @@ def main() -> None:
             file=sys.stderr,
         )
 
+    if scope_prefixes:
+        display = ", ".join(p or "(repo root)" for p in scope_prefixes)
+        print(
+            f"pxx: scope={display} — session limited to these prefixes "
+            "(hook will reject out-of-scope commits).",
+            file=sys.stderr,
+        )
+
     if not in_git_repo:
         print(
             "pxx: no git repo here — auto-commits disabled. Run `git init` to enable.",
@@ -450,6 +548,9 @@ def main() -> None:
 
     commands_context = _write_commands_context(list_commands())
     extra_reads = [commands_context] if commands_context else []
+    scope_context = _write_scope_context(scope_prefixes)
+    if scope_context is not None:
+        extra_reads.append(scope_context)
 
     args = _build_aider_args(
         aider_bin, model, user_args, in_git_repo, edit_mode, extra_reads=extra_reads

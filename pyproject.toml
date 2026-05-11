@@ -20,6 +20,7 @@ dev = [
 
 [project.scripts]
 pxx = "pxx.cli:main"
+pxx-scope-check = "pxx.scope:scope_check_main"
 
 [build-system]
 requires = ["hatchling"]

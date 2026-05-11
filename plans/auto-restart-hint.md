@@ -2,13 +2,13 @@
 
 > Backlog ID: **008**. See [plans/backlog.md](backlog.md) for the inventory.
 >
-> Status: **blocked**. Blocks: `—`. Blocked by: `002, 004`.
+> Status: **blocked**. Blocks: `—`. Blocked by: `004`.
 >
-> Plan content is design-complete; implementation is queued behind #002
-> (which owns the hook installer) and #004 (which owns the last-seen
-> HEAD record). Standalone implementation is possible but rebuilds
-> infrastructure those plans own — see "Coordination notes" below for the
-> trade-off.
+> Plan content is design-complete; implementation is now queued only
+> behind #004 (which owns the last-seen HEAD record) — #002 (the hook
+> installer) landed in commits 22bac57/94da2d0/953b7b6. Standalone
+> implementation against today's `#002` machinery is possible if #004
+> stays deferred — see "Coordination notes" below for the trade-off.
 
 ## Context
 

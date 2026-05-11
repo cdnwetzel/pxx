@@ -546,6 +546,93 @@ class TestSelfLint:
         assert called == []
 
 
+class TestSelfImproveFlag:
+    """Tests for the pxx --self-improve flag (#011 Tier 2)."""
+
+    def _patch_endpoint_and_exec(self, monkeypatch):
+        from pxx import cli as cli_module
+
+        monkeypatch.setattr(
+            cli_module, "detect_endpoint", lambda: Endpoint("neo", "http://x:11434")
+        )
+        monkeypatch.setattr(cli_module.os, "execv", lambda *_: None)
+        monkeypatch.setattr(cli_module, "_find_aider", lambda: "/x/aider")
+
+    def test_self_improve_flag_detected_in_argv(self):
+        argv = ["pxx", "--self-improve"]
+        assert "--self-improve" in argv
+
+    def test_self_improve_stripped_from_user_args(self):
+        from pxx.scope import extract_scope_args
+
+        _, after = extract_scope_args(["--self-improve", "--message", "focus on cli"])
+        user_args = [
+            a for a in after if a not in ("--edit", "--big", "--anywhere", "--self-improve")
+        ]
+        assert "--self-improve" not in user_args
+        assert user_args == ["--message", "focus on cli"]
+
+    def test_self_improve_combined_with_edit_exits_2(self, monkeypatch, tmp_path, capsys):
+        from pxx import cli as cli_module
+
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(sys, "argv", ["pxx", "--self-improve", "--edit"])
+        self._patch_endpoint_and_exec(monkeypatch)
+
+        with pytest.raises(SystemExit) as exc:
+            cli_module.main()
+        assert exc.value.code == 2
+        err = capsys.readouterr().err
+        assert "ask-only" in err
+        assert "--edit" in err
+
+    def test_self_improve_banner_shows_self_improve_mode(self, monkeypatch, tmp_path, capsys):
+        from pxx import cli as cli_module
+
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(sys, "argv", ["pxx", "--self-improve"])
+        self._patch_endpoint_and_exec(monkeypatch)
+
+        cli_module.main()
+        err = capsys.readouterr().err
+        assert "mode=ask (self-improve)" in err
+
+    def test_self_improve_chdirs_to_repo_root(self, monkeypatch, tmp_path):
+        from pxx import cli as cli_module
+
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(sys, "argv", ["pxx", "--self-improve"])
+        self._patch_endpoint_and_exec(monkeypatch)
+
+        cli_module.main()
+        # After main() returns (execv is mocked), cwd should be REPO_ROOT.
+        assert Path.cwd() == REPO_ROOT
+
+    def test_self_improve_extra_reads_includes_prompt(self, monkeypatch, tmp_path):
+        from pxx import cli as cli_module
+
+        captured_args: list[list[str]] = []
+
+        def fake_execv(_bin, args):
+            captured_args.append(args)
+
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(sys, "argv", ["pxx", "--self-improve"])
+        monkeypatch.setattr(
+            cli_module, "detect_endpoint", lambda: Endpoint("neo", "http://x:11434")
+        )
+        monkeypatch.setattr(cli_module.os, "execv", fake_execv)
+        monkeypatch.setattr(cli_module, "_find_aider", lambda: "/x/aider")
+
+        cli_module.main()
+        assert captured_args, "execv was not called"
+        argv = captured_args[0]
+        # Both system.md and self-improve.md should be in --read positions.
+        read_paths = [argv[i + 1] for i, a in enumerate(argv) if a == "--read"]
+        assert any("system.md" in p for p in read_paths)
+        assert any("self-improve.md" in p for p in read_paths)
+
+
 class TestInstallHookFlag:
     def test_install_hook_flag_detected(self):
         argv = ["pxx", "--install-hook"]

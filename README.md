@@ -67,6 +67,18 @@ Both return Unix-style exit codes — non-zero if anything fails. `--self-lint`
 runs both ruff sub-commands every time (no short-circuit on first failure) so
 you see every violation in one pass.
 
+A third self-mode opens an aider session pre-loaded with a "suggest only,
+no edits" prompt for reviewing the pxx codebase for improvements:
+
+```bash
+pxx --self-improve                              # ask mode, banner=ask (self-improve)
+pxx --self-improve --message "focus on cli.py"  # seed the review with a topic
+```
+
+`--self-improve` always targets the pxx repo (regardless of cwd) and refuses
+to combine with `--edit` (the session is suggest-only by design — copy the
+markdown list and apply it manually with a regular `pxx --edit` session).
+
 ## Daily use
 
 ```bash

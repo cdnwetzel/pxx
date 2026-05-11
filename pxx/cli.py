@@ -491,6 +491,22 @@ def main() -> None:
     # S3 (#003): --anywhere is a one-session bypass for the trusted-paths
     # gate. Stripped from user_args before aider sees it.
     anywhere_mode = "--anywhere" in sys.argv
+    # Tier 2 (#011): --self-improve runs in the pxx repo (cd REPO_ROOT) with
+    # the self-improve prompt loaded. Ask-only by design — combined with
+    # --edit it exits 2 so a typo can't silently flip the session.
+    self_improve_mode = "--self-improve" in sys.argv
+
+    if self_improve_mode and edit_mode:
+        print(
+            "pxx: --self-improve is ask-only — remove --edit (Tier 2 is suggest-only by design).",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
+    if self_improve_mode:
+        # chdir before any cwd-relative checks (in_git_repo, _git_repo_root,
+        # trusted-paths) so they see the pxx repo as the working tree.
+        os.chdir(REPO_ROOT)
 
     # S3 (#003): trusted-paths gate. Fires only on --edit when the user
     # has populated ~/.config/pxx/trusted-paths. Missing/empty file means
@@ -527,7 +543,9 @@ def main() -> None:
     # the --edit/--big/--anywhere strip, since extract_scope_args needs to
     # see them in argv order to pair flag with value.
     scope_args, argv_after_scope = extract_scope_args(sys.argv[1:])
-    user_args = [a for a in argv_after_scope if a not in ("--edit", "--big", "--anywhere")]
+    user_args = [
+        a for a in argv_after_scope if a not in ("--edit", "--big", "--anywhere", "--self-improve")
+    ]
     in_git_repo = _in_git_repo()
 
     # Resolve scope paths against the repo root. Without a git repo, scope
@@ -579,6 +597,8 @@ def main() -> None:
 
     if edit_mode:
         mode_label = "edit (untrusted path)" if untrusted_override else "edit"
+    elif self_improve_mode:
+        mode_label = "ask (self-improve)"
     else:
         mode_label = "ask (read-only — pass --edit to allow changes)"
     print(
@@ -642,6 +662,8 @@ def main() -> None:
     scope_context = _write_scope_context(scope_prefixes)
     if scope_context is not None:
         extra_reads.append(scope_context)
+    if self_improve_mode:
+        extra_reads.append(SELF_IMPROVE_PROMPT)
 
     args = _build_aider_args(
         aider_bin, model, user_args, in_git_repo, edit_mode, extra_reads=extra_reads

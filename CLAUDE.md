@@ -218,6 +218,17 @@ last review pass. Verify a cited finding against current code before acting.
 (reviewers don't know the user's intent or project history). Use them as
 planning inputs, not commands.
 
+**Reviewer runtime rules — do NOT run pxx in edit mode during review.**
+`pxx --edit` / `pxx --self-fix` trigger #002's safety tag, which stashes
+the user's uncommitted working tree. Multiple agents reviewing
+concurrently can wipe each other's (and the user's) in-flight work.
+Safe invocations during review: `pxx` (ask), `pxx --self-test`,
+`pxx --self-lint`. Forbidden: `pxx --edit`, `pxx --self-fix`,
+`pxx --edit --dry-run`. Full rules + rationale + queries against the
+audit log live in [`../review/claude/claude-pxx-runtime-rules.md`](../review/claude/claude-pxx-runtime-rules.md).
+The same rules apply to Gemini and Codex — the user should mirror this
+paragraph into `GEMINI.md` and Codex's equivalent.
+
 **Proactively notice the same classes of drift the review docs catch:**
 - README claims ↔ code defaults (model names, version pins, command examples)
 - Setup scripts ↔ what they actually install

@@ -11,6 +11,7 @@ import tempfile
 import time
 from pathlib import Path
 
+from pxx import audit
 from pxx.commands_index import CommandInfo, list_commands
 from pxx.endpoints import Endpoint, detect_endpoint
 from pxx.scope import (
@@ -338,6 +339,61 @@ def _git_repo_root() -> Path | None:
         return None
 
 
+def _git_head_sha() -> str | None:
+    """Return HEAD's full SHA-1, or None when not in a git repo (or unborn HEAD)."""
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=2,
+        )
+        if result.returncode != 0:
+            return None
+        return result.stdout.strip() or None
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return None
+
+
+def _determine_session_class(
+    edit_mode: bool,
+    dry_run: bool,
+    self_improve_mode: bool,
+    self_fix_mode: bool,
+) -> str:
+    """Map the boolean flag combinatorics to the single session_class enum (#004).
+
+    Precedence reflects how the flags compose at runtime: --self-fix and
+    --self-improve are exclusive top-level modes (mutex enforced earlier in
+    main()); dry-run is a refinement of edit; --edit alone is plain edit;
+    everything else is ask.
+    """
+    if self_fix_mode:
+        return "self-fix"
+    if self_improve_mode:
+        return "self-improve"
+    if dry_run and edit_mode:
+        return "dry-run"
+    if edit_mode:
+        return "edit"
+    return "ask"
+
+
+def _try_write_session_start(record: dict) -> None:
+    """Write a session_start record, swallowing all errors (#004).
+
+    The audit log is best-effort: a broken log filesystem (read-only home,
+    permission denied, full disk) must not abort pxx startup. Errors are
+    silenced — observable only via the absence of the record on next
+    post-mortem.
+    """
+    try:
+        audit.write_session_start(record)
+    except Exception:  # noqa: BLE001 — intentionally broad
+        pass
+
+
 def _write_commands_context(commands: list[CommandInfo]) -> Path | None:
     """Write the slash-command listing to a tempfile for aider's `--read` context.
 
@@ -500,8 +556,10 @@ def main() -> None:
     # (the test/lint run itself catches any import-time breakage), so they
     # short-circuit at the same level as --list-commands.
     if "--self-test" in sys.argv:
+        _try_write_session_start({"session_class": "self-test", "cwd": str(Path.cwd())})
         sys.exit(_self_test())
     if "--self-lint" in sys.argv:
+        _try_write_session_start({"session_class": "self-lint", "cwd": str(Path.cwd())})
         sys.exit(_self_lint())
 
     # M3 (#002): pre-launch self-sanity. Runs before any other work so a
@@ -757,6 +815,34 @@ def main() -> None:
     args = _build_aider_args(
         aider_bin, model, user_args, in_git_repo, edit_mode, extra_reads=extra_reads
     )
+
+    # #004 step 2: write the session_start record after all state is settled
+    # but before execv hands control off. Best-effort — see _try_write_session_start.
+    repo_root = _git_repo_root() if in_git_repo else None
+    head_sha = _git_head_sha() if in_git_repo else None
+    git_dirty: bool | None = _git_dirty() if in_git_repo else None
+    record: dict = {
+        "session_class": _determine_session_class(
+            edit_mode, dry_run, self_improve_mode, self_fix_mode
+        ),
+        "model": model,
+        "endpoint_name": endpoint.name,
+        "endpoint_url": endpoint.url,
+        "cwd": str(Path.cwd()),
+        "git_repo_root": str(repo_root) if repo_root else None,
+        "git_head_sha": head_sha,
+        "git_dirty": git_dirty,
+        "scope": list(scope_prefixes),
+        "edit_mode": edit_mode,
+        "dry_run": dry_run,
+        "big": big_mode,
+        "autonomous": self_fix_mode,
+        "diff_cap": int(os.environ.get("PXX_DIFF_CAP", "100")),
+        "untrusted_path": untrusted_override,
+        "aider_history_path": ".aider.chat.history.md",
+    }
+    _try_write_session_start(record)
+
     os.execv(aider_bin, args)
 
 

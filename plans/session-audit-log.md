@@ -2,7 +2,7 @@
 
 > Backlog ID: **004**. See [plans/backlog.md](backlog.md) for the inventory.
 >
-> Status: **in-progress**. Blocks: `—`. Blocked by: `—`.
+> Status: **done**. Blocks: `—`. Blocked by: `—`.
 
 ## Context
 

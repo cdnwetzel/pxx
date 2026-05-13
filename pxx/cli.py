@@ -567,6 +567,14 @@ def main() -> None:
     # than a confusing mid-startup crash.
     _self_sanity_check()
 
+    # #004 step 3: best-effort retention pass on the audit log dir.
+    # Cheap (one directory scan) and idempotent. Errors are silenced — a
+    # broken log dir must not abort pxx startup.
+    try:
+        audit.prune_old_logs()
+    except Exception:  # noqa: BLE001 — intentionally broad
+        pass
+
     edit_mode = "--edit" in sys.argv
     big_mode = "--big" in sys.argv
     # S2 (#003): --dry-run is an aider flag (already in its arg parser);

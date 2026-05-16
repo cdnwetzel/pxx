@@ -20,7 +20,6 @@ class DriftResult:
     If ``error`` is present, ``is_synced`` is always False.
     """
 
-    is_synced: bool
     local_sha: str
     remote_sha: str | None
     local_branch: str | None
@@ -30,6 +29,12 @@ class DriftResult:
     @property
     def is_error(self) -> bool:
         return self.error is not None
+
+    @property
+    def is_synced(self) -> bool:
+        if self.is_error:
+            return False
+        return self.local_sha == self.remote_sha
 
 
 DEFAULT_SSH_TARGET = "cwetzel@workstation"
@@ -174,20 +179,18 @@ def print_report(result: DriftResult) -> None:
             print(f"✗ error checking sync: {result.error}", file=sys.stderr)
         return
 
-    if result.is_synced:
-        branch_part = f" ({result.local_branch})" if result.local_branch else ""
-        print(
-            f"✓ Neo and Studio in sync at {result.local_sha[:7]}{branch_part}",
-            file=sys.stderr,
-        )
-        return
+    branch_part = f" ({result.local_branch})" if result.local_branch and result.is_synced else ""
+    print(
+        f"{'✓ Neo and Studio in sync at ' if result.is_synced else '✗ drift detected:'}{result.local_sha[:7]}{branch_part}",
+        file=sys.stderr,
+    )
 
-    print("✗ drift detected:", file=sys.stderr)
-    print(f"    Neo:    {result.local_sha[:7]} {result.local_branch or ''}", file=sys.stderr)
-
-    remote_sha = result.remote_sha[:7] if result.remote_sha else "???????"
-    remote_branch = result.remote_branch or ""
-    print(f"    Studio: {remote_sha} {remote_branch}", file=sys.stderr)
+    # Only print the following when not synced
+    if not result.is_synced:
+        remote_sha = result.remote_sha[:7] if result.remote_sha else "???????"
+        remote_branch = result.remote_branch or ""
+        print(f"    Neo:    {result.local_sha[:7]} {result.local_branch or ''}", file=sys.stderr)
+        print(f"    Studio: {remote_sha} {remote_branch}", file=sys.stderr)
 
     print(file=sys.stderr)
     print("  From Neo: git deliver && rsync ...", file=sys.stderr)

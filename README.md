@@ -172,6 +172,25 @@ uv run ruff format           # format
 
 See `CLAUDE.md` for the full dev workflow and project conventions.
 
+### Auto-restart hint when core modules change
+
+Because pxx is installed `--editable`, edits to `pxx/cli.py` or
+`pxx/endpoints.py` change the source on disk immediately, but the
+already-running aider session keeps the old module objects in memory.
+Two cooperating mechanisms surface that:
+
+- **M1 (post-commit):** install the git hooks once with
+  `pxx --install-hook`. After any commit that touches a "core" pxx
+  module (see `pxx/_core_files.py`), the hook prints a one-line
+  stderr notice reminding you to restart pxx — the current process is
+  running the old code.
+- **M2 (next-launch banner):** when you re-launch pxx from the pxx
+  repo, it compares the previous session's HEAD (from the audit log)
+  to the current HEAD. If a core file changed in that range, the
+  banner reads `pxx: loaded freshly-edited cli.py (commit <sha>)`.
+
+Together: warning at commit time, confirmation at restart time.
+
 ## Environment overrides
 
 | Var | Purpose |

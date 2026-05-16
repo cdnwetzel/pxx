@@ -97,6 +97,20 @@ After editing `cli.py` or `endpoints.py`, the running pxx/aider session still
 has old code in memory — the user must exit and re-launch to test interactively.
 Tests will catch regressions on the pure functions automatically.
 
+Two paired mechanisms surface this staleness (#008):
+
+- **Post-commit hook (M1):** the installer at `scripts/install-precommit-hook.sh`
+  drops a `post-commit` hook that emits a stderr notice when the just-landed
+  commit touched any "core" pxx module. The core-file list lives in
+  `pxx/_core_files.py` and is shared (via a `python3 -c` invocation) by the
+  bash hook so it can never drift from the Python side.
+- **Launch banner (M2):** `cli._emit_core_restart_banner()` runs right after
+  `_self_sanity_check()` in `main()`. It reads the most recent
+  `session_start` record from #004's audit log, diffs the previous HEAD
+  against the current HEAD, and prints
+  `pxx: loaded freshly-edited <name> (commit <sha>)` when a core file
+  appears in the range. Silent outside the pxx repo and on every error.
+
 ## Architecture (the parts that span multiple files)
 
 **`pxx/cli.py`** is the only entry point (`pxx.cli:main`). It:

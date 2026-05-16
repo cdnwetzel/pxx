@@ -443,15 +443,15 @@ def main() -> None:
         else:
             empty_repo = True
 
-    if edit_mode:
+    if self_improve_mode:
+        mode_label = "ask (self-improve)"
+    elif edit_mode:
         parts: list[str] = []
         if untrusted_override:
             parts.append("untrusted path")
         if self_fix_mode:
             parts.append("autonomous")
         mode_label = "edit" + (f" ({', '.join(parts)})" if parts else "")
-    elif self_improve_mode:
-        mode_label = "ask (self-improve)"
     else:
         mode_label = "ask (read-only — pass --edit to allow changes)"
 

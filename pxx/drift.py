@@ -56,12 +56,11 @@ def check_sync(
     local_sha = _get_pxx_local_head()
     if not local_sha:
         return DriftResult(
-            is_synced=False,
             local_sha="unknown",
             remote_sha=None,
             local_branch=None,
             remote_branch=None,
-            error="Could not determine local pxx HEAD.")),
+            error="Could not determine local pxx HEAD."),
         )
 
     local_branch = _get_pxx_local_branch()
@@ -77,13 +76,12 @@ def check_sync(
             error=error,
         )
 
-    is_synced = local_sha == remote_sha
-    return DriftResult(
-        is_synced=is_synced,
-        local_sha=local_sha,
-        remote_sha=remote_sha,
-        local_branch=local_branch,
-        remote_branch=remote_branch,
+    if not result.is_error:
+        result = DriftResult(
+            local_sha=local_sha,
+            remote_sha=remote_sha,
+            local_branch=local_branch,
+            remote_branch=remote_branch,
     )
 
 

@@ -953,6 +953,37 @@ class TestCheckSync:
         assert "drift detected" in err
         assert mock_execv.called
 
+    def test_autocheck_drift_fires_on_self_fix_when_env_set(self, monkeypatch, capsys):
+        import pxx.drift as drift_mod
+
+        res = drift_mod.DriftResult(
+            is_synced=False,
+            local_sha="a",
+            remote_sha="b",
+            local_branch="m",
+            remote_branch="m",
+        )
+        monkeypatch.setattr(drift_mod, "check_sync", lambda: res)
+        monkeypatch.setenv("PXX_AUTOCHECK_DRIFT", "1")
+        # CF-015: --self-fix should also trigger the autocheck
+        monkeypatch.setattr(sys, "argv", ["pxx", "--self-fix", "fix", "--scope", "."])
+
+        # CF-011: Assert execv runs even after warning
+        mock_execv = MagicMock()
+        monkeypatch.setattr(os, "execv", mock_execv)
+
+        monkeypatch.setattr("pxx.cli.detect_endpoint", lambda: Endpoint("n", "u"))
+        monkeypatch.setattr("pxx.cli._find_aider", lambda: "/x/aider")
+        monkeypatch.setattr("pxx.cli._create_safety_tag", lambda: None)
+        # CF-015: Ensure scope resolution returns something so --self-fix check passes
+        monkeypatch.setattr("pxx.cli.extract_scope_args", lambda a: (["."], a))
+        monkeypatch.setattr("pxx.cli.resolve_scopes", lambda _a, _r: ["/resolved"])
+
+        main()
+        _, err = capsys.readouterr()
+        assert "drift detected" in err
+        assert mock_execv.called
+
     def test_no_check_sync_bypasses_autocheck(self, monkeypatch, capsys):
         import pxx.drift as drift_mod
 

@@ -307,7 +307,9 @@ def main() -> None:
     with contextlib.suppress(Exception):
         audit.prune_old_logs()
 
-    edit_mode = "--edit" in sys.argv
+    edit_mode = (
+        "--edit" in sys.argv or "--self-fix" in sys.argv or "--self-improve" in sys.argv
+    )
     big_mode = "--big" in sys.argv
     dry_run = "--dry-run" in sys.argv
     anywhere_mode = "--anywhere" in sys.argv
@@ -323,15 +325,10 @@ def main() -> None:
         if not res.is_synced:
             drift.print_report(res)
 
-    if self_fix_mode:
-        # --self-fix implies --edit; force it on so all downstream
-        # edit-mode logic (safety tag, banner, diff cap, scope gate) fires.
-        edit_mode = True
-
     if self_fix_mode and self_improve_mode:
         print("pxx: --self-fix and --self-improve are mutually exclusive.", file=sys.stderr)
         sys.exit(2)
-    if self_improve_mode and edit_mode:
+    if self_improve_mode and "--edit" in sys.argv:
         print(
             "pxx: --self-improve is ask-only — remove --edit (Tier 2 is suggest-only by design).",
             file=sys.stderr,

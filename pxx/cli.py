@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import importlib
 import os
 import shutil
@@ -388,10 +389,8 @@ def _try_write_session_start(record: dict) -> None:
     silenced — observable only via the absence of the record on next
     post-mortem.
     """
-    try:
+    with contextlib.suppress(Exception):
         audit.write_session_start(record)
-    except Exception:  # noqa: BLE001 — intentionally broad
-        pass
 
 
 def _write_commands_context(commands: list[CommandInfo]) -> Path | None:
@@ -570,10 +569,8 @@ def main() -> None:
     # #004 step 3: best-effort retention pass on the audit log dir.
     # Cheap (one directory scan) and idempotent. Errors are silenced — a
     # broken log dir must not abort pxx startup.
-    try:
+    with contextlib.suppress(Exception):
         audit.prune_old_logs()
-    except Exception:  # noqa: BLE001 — intentionally broad
-        pass
 
     edit_mode = "--edit" in sys.argv
     big_mode = "--big" in sys.argv
@@ -665,9 +662,7 @@ def main() -> None:
     # Tier 3 (#012): inject the self-fix task as --message unless the user
     # already provided one explicitly.
     if self_fix_task:
-        has_message = any(
-            a == "--message" or a.startswith("--message=") for a in user_args
-        )
+        has_message = any(a == "--message" or a.startswith("--message=") for a in user_args)
         if not has_message:
             user_args = ["--message", self_fix_task, *user_args]
     in_git_repo = _in_git_repo()

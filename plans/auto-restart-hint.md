@@ -2,7 +2,7 @@
 
 > Backlog ID: **008**. See [plans/backlog.md](backlog.md) for the inventory.
 >
-> Status: **planned**. Blocks: `—`. Blocked by: `—`.
+> Status: **in-progress**. Blocks: `—`. Blocked by: `—`.
 >
 > Plan content is design-complete; implementation is now queued only
 > behind #004 (which owns the last-seen HEAD record) — #002 (the hook

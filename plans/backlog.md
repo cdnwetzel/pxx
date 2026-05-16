@@ -50,7 +50,8 @@ comparable and scannable.
 | 003 | Scoping & dry-run                    | [scoping-and-dry-run.md](scoping-and-dry-run.md)  | done     | 001      | —          |
 | 004 | Session audit log                    | [session-audit-log.md](session-audit-log.md)      | done     | —        | —          |
 | 005 | Setup-script hardening               | [setup-script-hardening.md](setup-script-hardening.md) | done     | —        | —          |
-| 006 | Cross-machine drift detection        | [cross-machine-drift-detection.md](cross-machine-drift-detection.md) | planned  | —        | —          |
+| 006 | Cross-machine drift detection        | [cross-machine-drift-detection.md](cross-machine-drift-detection.md) | done  | —        | —          |
+
 | 007 | Slash-command discoverability        | [slash-command-discoverability.md](slash-command-discoverability.md) | done     | —        | —          |
 | 008 | Auto-restart hint after self-edits   | [auto-restart-hint.md](auto-restart-hint.md)                         | done     | —        | —          |
 | 009 | VS Code (Continue.dev) integration   | [vscode-continue-integration.md](vscode-continue-integration.md)     | planned  | —        | —          |

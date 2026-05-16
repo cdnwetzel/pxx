@@ -10,7 +10,7 @@ import subprocess
 import sys
 from dataclasses import dataclass
 
-from pxx import safety
+from pxx import _git
 
 
 @dataclass(frozen=True)
@@ -79,9 +79,13 @@ def check_sync(
 
 
 def _get_pxx_local_head() -> str | None:
+    # CF-006: use repo_root to ensure we probe pxx regardless of cwd.
+    root = _git.repo_root()
+    if not root:
+        return None
     try:
         result = subprocess.run(
-            ["git", "-C", str(safety.REPO_ROOT), "rev-parse", "HEAD"],
+            ["git", "-C", str(root), "rev-parse", "HEAD"],
             capture_output=True,
             text=True,
             check=False,
@@ -95,9 +99,12 @@ def _get_pxx_local_head() -> str | None:
 
 
 def _get_pxx_local_branch() -> str | None:
+    root = _git.repo_root()
+    if not root:
+        return None
     try:
         result = subprocess.run(
-            ["git", "-C", str(safety.REPO_ROOT), "rev-parse", "--abbrev-ref", "HEAD"],
+            ["git", "-C", str(root), "rev-parse", "--abbrev-ref", "HEAD"],
             capture_output=True,
             text=True,
             check=False,

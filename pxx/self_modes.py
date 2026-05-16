@@ -1,6 +1,9 @@
 """Dogfooding and self-improvement modes for pxx (#001).
 
-Includes self-test, self-lint, and logic for autonomous self-fix sessions.
+These modes enable pxx to maintain and improve its own source code. By
+providing specialized wrappers for testing, linting, and autonomous
+fixing, pxx can iterate on itself with lower friction while adhering
+to project conventions and safety constraints (like the diff cap).
 """
 
 from __future__ import annotations
@@ -16,7 +19,6 @@ SELF_FIX_DIFF_CAP = 60
 
 def determine_session_class(
     edit_mode: bool,
-    big_mode: bool,
     dry_run: bool,
     self_improve_mode: bool,
     self_fix_mode: bool,

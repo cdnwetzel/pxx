@@ -38,9 +38,20 @@ _git_repo_root = _git.repo_root
 _git_head_sha = _git.head_sha
 _create_safety_tag = safety.create_tag
 _prune_old_safety_tags = safety.prune_old_tags
-_self_sanity_check = lambda m="pxx.endpoints": safety.sanity_check(REPO_ROOT, m)
-_self_test = lambda: self_modes.self_test(REPO_ROOT)
-_self_lint = lambda: self_modes.self_lint(REPO_ROOT)
+
+
+def _self_sanity_check(module_name: str = "pxx.endpoints") -> None:
+    return safety.sanity_check(REPO_ROOT, module_name)
+
+
+def _self_test() -> int:
+    return self_modes.self_test(REPO_ROOT)
+
+
+def _self_lint() -> int:
+    return self_modes.self_lint(REPO_ROOT)
+
+
 _extract_self_fix_task = self_modes.extract_self_fix_task
 _determine_session_class = self_modes.determine_session_class
 SELF_FIX_DIFF_CAP = self_modes.SELF_FIX_DIFF_CAP
@@ -447,7 +458,10 @@ def main() -> None:
     if big_mode and edit_mode and not dry_run:
         print("pxx: --big set — pre-commit diff cap bypassed for this session.", file=sys.stderr)
     elif big_mode and not edit_mode:
-        print("pxx: --big has no effect in ask mode (no commits to gate); ignored.", file=sys.stderr)
+        print(
+            "pxx: --big has no effect in ask mode (no commits to gate); ignored.",
+            file=sys.stderr,
+        )
     elif big_mode and dry_run:
         print(
             "pxx: --big has no effect with --dry-run (no commits will land); ignored.",
@@ -460,7 +474,10 @@ def main() -> None:
             file=sys.stderr,
         )
     elif dry_run and not edit_mode:
-        print("pxx: --dry-run is redundant in ask mode (no writes either way); ignored.", file=sys.stderr)
+        print(
+            "pxx: --dry-run is redundant in ask mode (no writes either way); ignored.",
+            file=sys.stderr,
+        )
 
     if scope_prefixes:
         display = ", ".join(p or "(repo root)" for p in scope_prefixes)
@@ -492,8 +509,8 @@ def main() -> None:
     sha = _git_head_sha() if in_git_repo else None
     git_dirty: bool | None = _git_dirty() if in_git_repo else None
     record: dict = {
-        "session_class": _determine_session_class(
-            edit_mode, big_mode, dry_run, self_improve_mode, self_fix_mode
+        "session_class": self_modes.determine_session_class(
+            edit_mode, dry_run, self_improve_mode, self_fix_mode
         ),
         "model": model,
         "endpoint_name": endpoint.name,

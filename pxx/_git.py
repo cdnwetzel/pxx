@@ -1,7 +1,10 @@
 """Internal git helpers shared across pxx modules.
 
-These are thin wrappers around git CLI calls, primarily used for safety
-checks and metadata collection.
+These helpers centralize git CLI interactions to ensure consistent behavior
+(timeouts, error handling) and to provide a stable internal API for
+metadata collection and safety checks. Using thin wrappers here allows
+modules like `safety` and `drift` to remain focused on logic rather than
+parsing subprocess output.
 """
 
 from __future__ import annotations

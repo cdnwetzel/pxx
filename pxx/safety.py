@@ -1,15 +1,18 @@
 """Safety foundation for pxx (#002).
 
-Includes pre-session sanity checks and local git safety tags to protect
-against broken self-edits.
+This module prevents pxx from launching in a broken state or without a
+recoverable path. Pre-session sanity checks catch import failures (e.g.
+after a bad self-edit), while local-only safety tags ensure the user can
+always `git reset --hard` to the state before a pxx session began. This is
+the primary safety net for autonomous dogfooding.
 """
 
 from __future__ import annotations
 
 import importlib
+import subprocess
 import sys
 import time
-import subprocess
 from pathlib import Path
 
 from pxx import _git

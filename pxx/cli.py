@@ -1,18 +1,20 @@
-"""pxx entry point: detect endpoint, pick model, exec aider."""
+"""pxx: orchestrator for the offline aider workflow.
+
+Detects Ollama endpoints, selects models, applies safety tags, manages
+path-prefix scoping, and dispatches to various dogfooding modes.
+"""
 
 from __future__ import annotations
 
 import contextlib
-import importlib
 import os
 import shutil
 import subprocess
 import sys
 import tempfile
-import time
 from pathlib import Path
 
-from pxx import audit
+from pxx import _git, audit, safety, self_modes
 from pxx._core_files import is_core
 from pxx.commands_index import CommandInfo, list_commands
 from pxx.endpoints import Endpoint, detect_endpoint
@@ -24,6 +26,22 @@ from pxx.scope import (
     resolve_scopes,
     trusted_paths_config_path,
 )
+
+# Compatibility re-exports for moved symbols
+SAFETY_TAG_PREFIX = safety.SAFETY_TAG_PREFIX
+_in_git_repo = _git.is_in_repo
+_git_dirty = _git.is_dirty
+_has_commits = _git.has_commits
+_git_repo_root = _git.repo_root
+_git_head_sha = _git.head_sha
+_create_safety_tag = safety.create_tag
+_prune_old_safety_tags = safety.prune_old_tags
+_self_sanity_check = lambda m="pxx.endpoints": safety.sanity_check(REPO_ROOT, m)
+_self_test = lambda: self_modes.self_test(REPO_ROOT)
+_self_lint = lambda: self_modes.self_lint(REPO_ROOT)
+_extract_self_fix_task = self_modes.extract_self_fix_task
+_determine_session_class = self_modes.determine_session_class
+SELF_FIX_DIFF_CAP = self_modes.SELF_FIX_DIFF_CAP
 
 PKG_DIR = Path(__file__).parent
 REPO_ROOT = PKG_DIR.parent
@@ -61,170 +79,14 @@ def _find_aider() -> str:
     sys.exit(1)
 
 
-def _in_git_repo() -> bool:
-    try:
-        result = subprocess.run(
-            ["git", "rev-parse", "--is-inside-work-tree"],
-            capture_output=True,
-            check=False,
-            timeout=2,
-        )
-        return result.returncode == 0 and result.stdout.strip() == b"true"
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        return False
-
-
+<<<<<<< Updated upstream
+=======
 # ---------------------------------------------------------------------------
 # Safety foundation (#002)
 # ---------------------------------------------------------------------------
 
-SAFETY_TAG_PREFIX = "pxx-pre/"
-SAFETY_TAG_RETENTION_DAYS = 30
 
-
-def _self_sanity_check(module_name: str = "pxx.endpoints") -> None:
-    """Refuse to launch if a critical pxx module fails to import.
-
-    Protects against self-modification (Tier 3 of #001) leaving pxx in a
-    broken state. Without this, a bad self-edit produces a confusing crash
-    mid-startup rather than a clear "your edit broke me" message.
-
-    Exits with status 2 on failure so a wrapper can distinguish "pxx broken"
-    from normal exit codes.
-    """
-    try:
-        importlib.import_module(module_name)
-    except Exception as e:
-        repo_root = REPO_ROOT
-        print(
-            f"pxx: own module `{module_name}` failed to import: {e}\n"
-            f"  pxx may have been broken by a self-edit.\n"
-            f"  Recover with one of:\n"
-            f"    git -C {repo_root} reflog\n"
-            f"    git -C {repo_root} reset --hard <last-known-good>\n"
-            f"    git -C {repo_root} reset --hard pxx-pre/<unix-ts>",
-            file=sys.stderr,
-        )
-        sys.exit(2)
-
-
-def _git_dirty() -> bool:
-    try:
-        # Tracked-but-uncommitted changes (staged or unstaged).
-        diff = subprocess.run(
-            ["git", "status", "--porcelain", "--untracked-files=normal"],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=2,
-        )
-        return diff.returncode == 0 and bool(diff.stdout.strip())
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        return False
-
-
-def _has_commits() -> bool:
-    # Empty repos (``git init`` with no commit yet) have an unborn HEAD;
-    # ``git tag <name>`` fails because there's nothing to point at.
-    try:
-        result = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
-            capture_output=True,
-            check=False,
-            timeout=2,
-        )
-        return result.returncode == 0
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        return False
-
-
-def _create_safety_tag() -> str | None:
-    """Create a local-only safety tag at HEAD; stash dirty state.
-
-    Returns the tag name on success, ``None`` if not in a git repo or git
-    operations fail (best-effort — safety tags are a convenience, not a
-    correctness guarantee).
-
-    Tag namespace `pxx-pre/<unix-ts>` is local-only by design: `git deliver`
-    pushes only `main`, not tags, so safety tags never reach the remotes.
-    """
-    if not _in_git_repo():
-        return None
-
-    ts = int(time.time())
-    tag = f"{SAFETY_TAG_PREFIX}{ts}"
-
-    try:
-        # Stash any uncommitted changes first so the tag points at a clean
-        # HEAD. The stash itself is recoverable via `git stash list`.
-        if _git_dirty():
-            subprocess.run(
-                [
-                    "git",
-                    "stash",
-                    "push",
-                    "--include-untracked",
-                    "--message",
-                    f"{tag}: working state at session start",
-                ],
-                capture_output=True,
-                check=False,
-                timeout=10,
-            )
-
-        # Create the tag at current HEAD.
-        result = subprocess.run(
-            ["git", "tag", tag],
-            capture_output=True,
-            check=False,
-            timeout=2,
-        )
-        if result.returncode != 0:
-            return None
-        return tag
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        return None
-
-
-def _prune_old_safety_tags(retention_days: int = SAFETY_TAG_RETENTION_DAYS) -> None:
-    """Delete `pxx-pre/<ts>` tags older than `retention_days`.
-
-    Best-effort, silent on errors. Tag names embed unix timestamps, so we
-    parse the suffix rather than asking git for tag dates. Malformed tags
-    in the namespace are skipped.
-    """
-    if not _in_git_repo():
-        return
-
-    cutoff = int(time.time()) - (retention_days * 86400)
-
-    try:
-        result = subprocess.run(
-            ["git", "tag", "--list", f"{SAFETY_TAG_PREFIX}*"],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=2,
-        )
-        if result.returncode != 0:
-            return
-        for tag in result.stdout.strip().splitlines():
-            suffix = tag.removeprefix(SAFETY_TAG_PREFIX)
-            try:
-                ts = int(suffix)
-            except ValueError:
-                continue
-            if ts < cutoff:
-                subprocess.run(
-                    ["git", "tag", "-d", tag],
-                    capture_output=True,
-                    check=False,
-                    timeout=2,
-                )
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        return
-
-
+>>>>>>> Stashed changes
 def _build_aider_args(
     aider_bin: str,
     model: str,
@@ -233,21 +95,7 @@ def _build_aider_args(
     edit_mode: bool,
     extra_reads: list[Path] | None = None,
 ) -> list[str]:
-    """Construct the argv to exec into aider with.
-
-    In ask mode (default), pass ``--chat-mode ask`` for explicit read-only
-    behavior. In edit mode, pass **nothing** — aider uses its default edit
-    flow with the edit-format set by ``config/aider.conf.yml`` (currently
-    ``diff``). Explicit ``--chat-mode`` in user_args wins over both.
-
-    Note: in aider 0.86.2, ``--chat-mode`` and ``--edit-format`` are the
-    same argument under two names, and there is no value called ``code``.
-    Passing ``--chat-mode code`` errors out — hence we omit it for edit
-    mode and rely on the config default.
-
-    Optional ``extra_reads`` are passed as additional ``--read`` files
-    after the system prompt (e.g., the commands-context file).
-    """
+    """Construct the argv to exec into aider with."""
     has_chat_mode = any(a == "--chat-mode" or a.startswith("--chat-mode=") for a in user_args)
     chat_mode_args: list[str] = []
     if not has_chat_mode and not edit_mode:
@@ -285,6 +133,8 @@ SCOPE_CONTEXT_FILE = "pxx-scope-context.md"
 """Filename used for the in-session scope-directive context file in $TMPDIR."""
 
 
+<<<<<<< Updated upstream
+=======
 def _write_scope_context(scope_prefixes: list[str]) -> Path | None:
     """Write a scope-directive markdown file for aider's `--read` context.
 
@@ -319,38 +169,6 @@ def _write_scope_context(scope_prefixes: list[str]) -> Path | None:
     return tmp
 
 
-def _git_repo_root() -> Path | None:
-    try:
-        result = subprocess.run(
-            ["git", "rev-parse", "--show-toplevel"],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=2,
-        )
-        if result.returncode != 0:
-            return None
-        return Path(result.stdout.strip())
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        return None
-
-
-def _git_head_sha() -> str | None:
-    try:
-        result = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=2,
-        )
-        if result.returncode != 0:
-            return None
-        return result.stdout.strip() or None
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        return None
-
-
 def _emit_core_restart_banner() -> None:
     """Print a one-line banner if a core pxx module changed since the
     previous session in this repo (#008 M2).
@@ -365,16 +183,16 @@ def _emit_core_restart_banner() -> None:
     the pxx repo, or any subprocess/IO failure. The banner is a
     convenience, never a correctness guarantee.
     """
-    if not _in_git_repo():
+    if not _git.is_in_repo():
         return
-    repo_root = _git_repo_root()
-    if repo_root is None or repo_root.resolve() != REPO_ROOT.resolve():
+    root = _git.repo_root()
+    if root is None or root.resolve() != REPO_ROOT.resolve():
         return
-    cur_sha = _git_head_sha()
+    cur_sha = _git.head_sha()
     if not cur_sha:
         return
     try:
-        prev_sha = audit.last_session_head_for(str(repo_root))
+        prev_sha = audit.last_session_head_for(str(root))
     except Exception:  # noqa: BLE001 — audit lookup is best-effort
         return
     if not prev_sha or prev_sha == cur_sha:
@@ -382,7 +200,7 @@ def _emit_core_restart_banner() -> None:
     try:
         result = subprocess.run(
             ["git", "diff", "--name-only", f"{prev_sha}..{cur_sha}"],
-            cwd=repo_root,
+            cwd=root,
             capture_output=True,
             text=True,
             check=False,
@@ -404,49 +222,15 @@ def _emit_core_restart_banner() -> None:
     )
 
 
-def _determine_session_class(
-    edit_mode: bool,
-    dry_run: bool,
-    self_improve_mode: bool,
-    self_fix_mode: bool,
-) -> str:
-    """Map the boolean flag combinatorics to the single session_class enum (#004).
-
-    Precedence reflects how the flags compose at runtime: --self-fix and
-    --self-improve are exclusive top-level modes (mutex enforced earlier in
-    main()); dry-run is a refinement of edit; --edit alone is plain edit;
-    everything else is ask.
-    """
-    if self_fix_mode:
-        return "self-fix"
-    if self_improve_mode:
-        return "self-improve"
-    if dry_run and edit_mode:
-        return "dry-run"
-    if edit_mode:
-        return "edit"
-    return "ask"
-
-
+>>>>>>> Stashed changes
 def _try_write_session_start(record: dict) -> None:
-    """Write a session_start record, swallowing all errors (#004).
-
-    The audit log is best-effort: a broken log filesystem (read-only home,
-    permission denied, full disk) must not abort pxx startup. Errors are
-    silenced — observable only via the absence of the record on next
-    post-mortem.
-    """
+    """Write a session_start record, swallowing all errors (#004)."""
     with contextlib.suppress(Exception):
         audit.write_session_start(record)
 
 
 def _write_commands_context(commands: list[CommandInfo]) -> Path | None:
-    """Write the slash-command listing to a tempfile for aider's `--read` context.
-
-    Returns the absolute path to the written file, or ``None`` if no commands
-    were found. The file is overwritten on each invocation — fixed filename
-    means at most one stale file exists, and no cleanup is needed.
-    """
+    """Write the slash-command listing to a tempfile for aider's `--read` context."""
     if not commands:
         return None
 
@@ -495,86 +279,83 @@ def _print_command_listing() -> None:
         print(f"  /load {c.path}")
 
 
-def _self_test() -> int:
-    """Run `uv run pytest -q` against the pxx repo, regardless of cwd (#001 T1).
+<<<<<<< Updated upstream
+def _write_scope_context(scope_prefixes: list[str]) -> Path | None:
+    """Write a scope-directive markdown file for aider's `--read` context."""
+    if not scope_prefixes:
+        return None
 
-    Returns the child's exit code. Banner + status line go to stderr so the
-    pytest output on stdout stays clean for piping.
+    tmp = Path(tempfile.gettempdir()) / SCOPE_CONTEXT_FILE
+    lines = [
+        "# SCOPE RESTRICTION",
+        "",
+        "**This session may only edit files under these path prefixes:**",
+        "",
+    ]
+    for p in scope_prefixes:
+        lines.append(f"- `{p or '(repo root)'}`")
+    lines.extend(
+        [
+            "",
+            "If asked to change a file outside this scope, refuse and tell the",
+            "user to widen the scope by re-running pxx with another `--scope <path>`.",
+            "Do not produce SEARCH/REPLACE blocks for out-of-scope files.",
+            "",
+            "If the user's task requires editing files outside this scope, say so",
+            "explicitly and ask them to widen the scope; do not try to work around",
+            "the restriction.",
+        ]
+    )
+    tmp.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return tmp
+
+
+def _emit_core_restart_banner() -> None:
+    """Print a one-line banner if a core pxx module changed since the
+    previous session in this repo (#008 M2).
     """
-    cmd = ["uv", "run", "pytest", "-q"]
-    print(
-        f"pxx: self-test — running `{' '.join(cmd)}` in {REPO_ROOT}",
-        file=sys.stderr,
-    )
-    rc = subprocess.run(cmd, cwd=REPO_ROOT, check=False).returncode
-    status = "passed" if rc == 0 else "failed"
-    print(f"pxx: self-test — {status} ({rc})", file=sys.stderr)
-    return rc
-
-
-def _self_lint() -> int:
-    """Run ruff check and ruff format --check against the pxx repo (#001 T1).
-
-    Both sub-commands always run (don't short-circuit on first failure) so
-    the user sees every violation in one pass. Returns 0 only if both pass;
-    otherwise the combined non-zero is the bitwise OR of the two exit codes
-    — preserving distinguishability if a caller wants to switch on it.
-    """
-    check_cmd = ["uv", "run", "ruff", "check", "."]
-    format_cmd = ["uv", "run", "ruff", "format", "--check", "."]
-
-    print(
-        f"pxx: self-lint — running `{' '.join(check_cmd)}` in {REPO_ROOT}",
-        file=sys.stderr,
-    )
-    check_rc = subprocess.run(check_cmd, cwd=REPO_ROOT, check=False).returncode
-    print(
-        f"pxx: self-lint — running `{' '.join(format_cmd)}` in {REPO_ROOT}",
-        file=sys.stderr,
-    )
-    format_rc = subprocess.run(format_cmd, cwd=REPO_ROOT, check=False).returncode
-
-    combined = check_rc | format_rc
-    print(
-        f"pxx: self-lint — check={check_rc} format={format_rc} combined={combined}",
-        file=sys.stderr,
-    )
-    return combined
-
-
-def _extract_self_fix_task(argv: list[str]) -> tuple[str | None, list[str]]:
-    """Extract the positional task string immediately after ``--self-fix`` (#012).
-
-    The task is the arg immediately following ``--self-fix`` *iff* it does not
-    start with ``-`` (so flag args like ``--scope`` or ``--message`` are NOT
-    swallowed). When the immediate-next slot is a flag, no task is extracted
-    here — the user is expected to provide one via ``--message`` or pxx
-    refuses to run.
-
-    Returns ``(task_or_None, argv_with_task_removed)``. ``--self-fix`` itself
-    stays in argv; only the task slot is consumed.
-    """
+    if not _git.is_in_repo():
+        return
+    root = _git.repo_root()
+    if root is None or root.resolve() != REPO_ROOT.resolve():
+        return
+    cur_sha = _git.head_sha()
+    if not cur_sha:
+        return
     try:
-        idx = argv.index("--self-fix")
-    except ValueError:
-        return None, argv
-    if idx + 1 < len(argv) and not argv[idx + 1].startswith("-"):
-        task = argv[idx + 1]
-        return task, argv[: idx + 1] + argv[idx + 2 :]
-    return None, argv
+        prev_sha = audit.last_session_head_for(str(root))
+    except Exception:  # noqa: BLE001 — audit lookup is best-effort
+        return
+    if not prev_sha or prev_sha == cur_sha:
+        return
+    try:
+        result = subprocess.run(
+            ["git", "diff", "--name-only", f"{prev_sha}..{cur_sha}"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=2,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return
+    if result.returncode != 0:
+        return
+    core_changed = [f for f in result.stdout.strip().splitlines() if is_core(f)]
+    if not core_changed:
+        return
+    short = cur_sha[:7]
+    names = ", ".join(Path(p).name for p in core_changed)
+    print(
+        f"pxx: loaded freshly-edited {names} (commit {short})",
+        file=sys.stderr,
+    )
 
 
-# Tier 3 (#012): tighter diff cap for autonomous sessions (default 60 vs
-# the normal 100). Surfaced as a constant for testability.
-SELF_FIX_DIFF_CAP = 60
-
-
+=======
+>>>>>>> Stashed changes
 def _install_precommit_hook() -> None:
-    """Invoke scripts/install-precommit-hook.sh in the current working dir.
-
-    Used by `pxx --install-hook` to wire the per-repo pre-commit gate
-    (ruff + pytest + diff cap) into the cwd's git repo.
-    """
+    """Invoke scripts/install-precommit-hook.sh in the current working dir."""
     script = REPO_ROOT / "scripts" / "install-precommit-hook.sh"
     if not script.exists():
         print(f"pxx: installer script not found at {script}", file=sys.stderr)
@@ -595,55 +376,43 @@ def main() -> None:
 
     if "--install-hook" in sys.argv:
         _install_precommit_hook()
-        # _install_precommit_hook exits, so we never reach this line.
 
-    # T1 (#001 Dogfooding): portable health-check commands that target the
-    # pxx repo regardless of cwd. They don't need Ollama or the sanity check
-    # (the test/lint run itself catches any import-time breakage), so they
-    # short-circuit at the same level as --list-commands.
     if "--self-test" in sys.argv:
         _try_write_session_start({"session_class": "self-test", "cwd": str(Path.cwd())})
-        sys.exit(_self_test())
+        sys.exit(self_modes.self_test(REPO_ROOT))
     if "--self-lint" in sys.argv:
         _try_write_session_start({"session_class": "self-lint", "cwd": str(Path.cwd())})
-        sys.exit(_self_lint())
+        sys.exit(self_modes.self_lint(REPO_ROOT))
 
-    # M3 (#002): pre-launch self-sanity. Runs before any other work so a
-    # self-edit that broke pxx surfaces a clear recovery message rather
-    # than a confusing mid-startup crash.
-    _self_sanity_check()
+    safety.sanity_check(REPO_ROOT)
+<<<<<<< Updated upstream
+=======
 
     # #008 M2: confirm freshly-edited core modules are now loaded. Silent
     # outside the pxx repo or when nothing core changed since last session.
+>>>>>>> Stashed changes
     _emit_core_restart_banner()
 
-    # #004 step 3: best-effort retention pass on the audit log dir.
-    # Cheap (one directory scan) and idempotent. Errors are silenced — a
-    # broken log dir must not abort pxx startup.
     with contextlib.suppress(Exception):
         audit.prune_old_logs()
 
     edit_mode = "--edit" in sys.argv
     big_mode = "--big" in sys.argv
-    # S2 (#003): --dry-run is an aider flag (already in its arg parser);
-    # we detect it only for banner purposes and let it pass through to
-    # aider naturally — no need to strip it from user_args.
     dry_run = "--dry-run" in sys.argv
-    # S3 (#003): --anywhere is a one-session bypass for the trusted-paths
-    # gate. Stripped from user_args before aider sees it.
     anywhere_mode = "--anywhere" in sys.argv
-    # Tier 2 (#011): --self-improve runs in the pxx repo (cd REPO_ROOT) with
-    # the self-improve prompt loaded. Ask-only by design — combined with
-    # --edit it exits 2 so a typo can't silently flip the session.
     self_improve_mode = "--self-improve" in sys.argv
-    # Tier 3 (#012): --self-fix opens a bounded autonomous --edit --scope
-    # session. Implies --edit; requires --scope; sets PXX_AUTONOMOUS=1 and
-    # PXX_DIFF_CAP=60 in the env for the pre-commit / prepare-commit-msg
-    # hooks to honor. The task slot (if positional) is consumed here so
-    # downstream parsers (extract_scope_args) don't treat it as a path.
     self_fix_mode = "--self-fix" in sys.argv
-    self_fix_task, argv_after_self_fix = _extract_self_fix_task(sys.argv[1:])
+<<<<<<< Updated upstream
+=======
+    self_fix_task, argv_after_self_fix = self_modes.extract_self_fix_task(sys.argv[1:])
+>>>>>>> Stashed changes
 
+    if self_fix_mode and not edit_mode:
+        print("pxx: --self-fix implies --edit; refusing to run in ask mode.", file=sys.stderr)
+        sys.exit(2)
+    if self_fix_mode and self_improve_mode:
+        print("pxx: --self-fix and --self-improve are mutually exclusive.", file=sys.stderr)
+        sys.exit(2)
     if self_improve_mode and edit_mode:
         print(
             "pxx: --self-improve is ask-only — remove --edit (Tier 2 is suggest-only by design).",
@@ -651,29 +420,15 @@ def main() -> None:
         )
         sys.exit(2)
 
-    if self_fix_mode and self_improve_mode:
-        print(
-            "pxx: --self-fix and --self-improve are mutually exclusive "
-            "(autonomous-edit vs suggest-only). Pick one.",
-            file=sys.stderr,
-        )
-        sys.exit(2)
-
+    self_fix_task: str | None = None
+    argv_after_self_fix = sys.argv[1:]
     if self_fix_mode:
-        # --self-fix implies --edit; force it on so all downstream
-        # edit-mode logic (safety tag, banner, diff cap, scope gate) fires.
+        self_fix_task, argv_after_self_fix = self_modes.extract_self_fix_task(argv_after_self_fix)
         edit_mode = True
 
     if self_improve_mode or self_fix_mode:
-        # chdir before any cwd-relative checks (in_git_repo, _git_repo_root,
-        # trusted-paths) so they see the pxx repo as the working tree.
         os.chdir(REPO_ROOT)
 
-    # S3 (#003): trusted-paths gate. Fires only on --edit when the user
-    # has populated ~/.config/pxx/trusted-paths. Missing/empty file means
-    # all paths trusted (opt-in feature; no behavior change by default).
-    # Runs before endpoint detection so a wrong-cwd mistake fails fast,
-    # without paying the ~1s probe cost.
     untrusted_override = False
     if edit_mode:
         trusted_prefixes = load_trusted_paths()
@@ -700,28 +455,22 @@ def main() -> None:
         print(f"pxx: {e}", file=sys.stderr)
         sys.exit(1)
 
-    # S1 (#003): consume --scope <path> (and --scope=<path>) before
-    # the --edit/--big/--anywhere strip, since extract_scope_args needs to
-    # see them in argv order to pair flag with value. Run on the post-
-    # self-fix-task argv so the task string isn't mistaken for a path.
     scope_args, argv_after_scope = extract_scope_args(argv_after_self_fix)
     user_args = [
         a
         for a in argv_after_scope
         if a not in ("--edit", "--big", "--anywhere", "--self-improve", "--self-fix")
     ]
-    # Tier 3 (#012): inject the self-fix task as --message unless the user
-    # already provided one explicitly.
     if self_fix_task:
         has_message = any(a == "--message" or a.startswith("--message=") for a in user_args)
         if not has_message:
             user_args = ["--message", self_fix_task, *user_args]
-    in_git_repo = _in_git_repo()
+<<<<<<< Updated upstream
+=======
+    in_git_repo = _git.is_in_repo()
+>>>>>>> Stashed changes
 
-    # Resolve scope paths against the repo root. Without a git repo, scope
-    # has no enforcement surface (no commits to gate), so we warn and drop
-    # rather than failing — keeps behavior consistent with the no-repo case
-    # for the safety tag in M1.
+    in_git_repo = _git.is_in_repo()
     scope_prefixes: list[str] = []
     if scope_args:
         if not in_git_repo:
@@ -730,24 +479,20 @@ def main() -> None:
                 file=sys.stderr,
             )
         else:
-            repo_root = _git_repo_root()
-            if repo_root is None:
+            root = _git.repo_root()
+            if root is None:
                 print(
                     "pxx: --scope ignored — could not determine git repo root.",
                     file=sys.stderr,
                 )
             else:
                 try:
-                    scope_prefixes = resolve_scopes(scope_args, repo_root)
+                    scope_prefixes = resolve_scopes(scope_args, root)
                 except ValueError as e:
                     print(f"pxx: {e}", file=sys.stderr)
                     sys.exit(1)
                 os.environ["PXX_SCOPE"] = format_for_env(scope_prefixes)
 
-    # Tier 3 (#012): --self-fix refuses to launch without --scope so the
-    # autonomous session can't touch surprising files. Check AFTER scope
-    # resolution so we know whether a real scope landed (vs e.g. --scope
-    # ignored outside a git repo).
     if self_fix_mode and not scope_prefixes:
         print(
             "pxx: --self-fix requires --scope <path>; "
@@ -757,30 +502,25 @@ def main() -> None:
         sys.exit(2)
 
     os.environ["OLLAMA_API_BASE"] = endpoint.url
-    # M4 (#002): --big tells the pre-commit hook to skip the per-session
-    # diff cap. Set the env var before exec so the hook (which runs
-    # later, in the aider-spawned shell) sees it.
     if big_mode:
         os.environ["PXX_ALLOW_BIG_DIFF"] = "1"
-    # Tier 3 (#012): --self-fix sets PXX_AUTONOMOUS=1 so the
-    # prepare-commit-msg hook tags the resulting commit, and tightens the
-    # diff cap to SELF_FIX_DIFF_CAP unless the user explicitly overrode it.
     if self_fix_mode:
         os.environ["PXX_AUTONOMOUS"] = "1"
         if "PXX_DIFF_CAP" not in os.environ:
-            os.environ["PXX_DIFF_CAP"] = str(SELF_FIX_DIFF_CAP)
+            os.environ["PXX_DIFF_CAP"] = str(self_modes.SELF_FIX_DIFF_CAP)
+<<<<<<< Updated upstream
+
+=======
+>>>>>>> Stashed changes
     model = model_for(endpoint)
     aider_bin = _find_aider()
 
-    # M1 (#002): pre-session safety tag for --edit sessions in a git repo
-    # with at least one commit (empty repos have an unborn HEAD and can't
-    # be tagged). Prune old tags first (cheap), then create today's.
     safety_tag: str | None = None
     empty_repo = False
     if edit_mode and in_git_repo:
-        if _has_commits():
-            _prune_old_safety_tags()
-            safety_tag = _create_safety_tag()
+        if _git.has_commits():
+            safety.prune_old_tags()
+            safety_tag = safety.create_tag()
         else:
             empty_repo = True
 
@@ -795,12 +535,13 @@ def main() -> None:
         mode_label = "ask (self-improve)"
     else:
         mode_label = "ask (read-only — pass --edit to allow changes)"
+
     print(
         f"pxx: endpoint={endpoint.name} ({endpoint.url})  model={model}  mode={mode_label}",
         file=sys.stderr,
     )
     if self_fix_mode:
-        cap = os.environ.get("PXX_DIFF_CAP", str(SELF_FIX_DIFF_CAP))
+        cap = os.environ.get("PXX_DIFF_CAP", str(self_modes.SELF_FIX_DIFF_CAP))
         print(
             f"pxx: --self-fix: task={self_fix_task!r}  diff_cap={cap}  "
             f"commits will be tagged [autonomous].",
@@ -817,16 +558,11 @@ def main() -> None:
             "Make at least one commit to enable it.",
             file=sys.stderr,
         )
+
     if big_mode and edit_mode and not dry_run:
-        print(
-            "pxx: --big set — pre-commit diff cap bypassed for this session.",
-            file=sys.stderr,
-        )
+        print("pxx: --big set — pre-commit diff cap bypassed for this session.", file=sys.stderr)
     elif big_mode and not edit_mode:
-        print(
-            "pxx: --big has no effect in ask mode (no commits to gate); ignored.",
-            file=sys.stderr,
-        )
+        print("pxx: --big has no effect in ask mode (no commits to gate); ignored.", file=sys.stderr)
     elif big_mode and dry_run:
         print(
             "pxx: --big has no effect with --dry-run (no commits will land); ignored.",
@@ -839,10 +575,7 @@ def main() -> None:
             file=sys.stderr,
         )
     elif dry_run and not edit_mode:
-        print(
-            "pxx: --dry-run is redundant in ask mode (no writes either way); ignored.",
-            file=sys.stderr,
-        )
+        print("pxx: --dry-run is redundant in ask mode (no writes either way); ignored.", file=sys.stderr)
 
     if scope_prefixes:
         display = ", ".join(p or "(repo root)" for p in scope_prefixes)
@@ -870,21 +603,24 @@ def main() -> None:
         aider_bin, model, user_args, in_git_repo, edit_mode, extra_reads=extra_reads
     )
 
+<<<<<<< Updated upstream
+=======
     # #004 step 2: write the session_start record after all state is settled
     # but before execv hands control off. Best-effort — see _try_write_session_start.
-    repo_root = _git_repo_root() if in_git_repo else None
-    head_sha = _git_head_sha() if in_git_repo else None
-    git_dirty: bool | None = _git_dirty() if in_git_repo else None
+>>>>>>> Stashed changes
+    root = _git.repo_root() if in_git_repo else None
+    sha = _git.head_sha() if in_git_repo else None
+    git_dirty: bool | None = _git.is_dirty() if in_git_repo else None
     record: dict = {
-        "session_class": _determine_session_class(
-            edit_mode, dry_run, self_improve_mode, self_fix_mode
+        "session_class": self_modes.determine_session_class(
+            edit_mode, big_mode, dry_run, self_improve_mode, self_fix_mode
         ),
         "model": model,
         "endpoint_name": endpoint.name,
         "endpoint_url": endpoint.url,
         "cwd": str(Path.cwd()),
-        "git_repo_root": str(repo_root) if repo_root else None,
-        "git_head_sha": head_sha,
+        "git_repo_root": str(root) if root else None,
+        "git_head_sha": sha,
         "git_dirty": git_dirty,
         "scope": list(scope_prefixes),
         "edit_mode": edit_mode,

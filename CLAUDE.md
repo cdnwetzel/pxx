@@ -4,10 +4,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repo is
 
-`pxx` is a thin Python CLI wrapper around [aider](https://aider.chat). It probes
-which Ollama endpoint is reachable, picks a matching model, and `os.execv`s into
-aider with a curated set of flags. Personal, offline-capable, single-developer
-tool. Once aider takes over the process, pxx is out of the picture.
+`pxx` is an orchestrator for a personal, offline-capable [aider](https://aider.chat) 
+workflow. It probes which Ollama endpoint is reachable, picks a matching 
+model, applies safety and scoping gates, and `os.execv`s into aider. Once 
+aider takes over the process, pxx is out of the picture.
 
 Two-machine design:
 - **Studio** (M4 Max, 36GB) hosts Ollama with `devstral:24b` (default) and others
@@ -111,24 +111,34 @@ Two paired mechanisms surface this staleness (#008):
   `pxx: loaded freshly-edited <name> (commit <sha>)` when a core file
   appears in the range. Silent outside the pxx repo and on every error.
 
-## Architecture (the parts that span multiple files)
+## Architecture
 
-**`pxx/cli.py`** is the only entry point (`pxx.cli:main`). It:
+`pxx` is composed of a core orchestrator that dispatches to focused sibling
+modules:
+
+- **`pxx/cli.py`**: The entry point. Handles top-level orchestration, aider 
+  argument assembly, and the final process handoff.
+- **`pxx/endpoints.py`**: Probes and selects Ollama instances.
+- **`pxx/safety.py`**: Manages pre-session sanity checks and local git 
+  safety tags (#002).
+- **`pxx/scope.py`**: Handles path-prefix scoping and trusted-path 
+  gates (#003).
+- **`pxx/self_modes.py`**: Implements dogfooding tiers (test, lint, improve, 
+  fix) (#001).
+- **`pxx/audit.py`**: Records session metadata for post-mortems and 
+  distillation (#004).
+- **`pxx/_git.py`**: Internal git CLI wrappers shared across modules.
+- **`pxx/_core_files.py`**: Registry for auto-restart notifications (#008).
+
+**`pxx/cli.py`** dispatches as follows:
 1. Calls `detect_endpoint()` from `pxx/endpoints.py`
 2. Sets `OLLAMA_API_BASE` from the chosen endpoint
-3. Picks model via `model_for(endpoint)` — only `name == "neo"` gets `NEO_DEFAULT`,
-   everything else (including the explicit `override` endpoint) gets `STUDIO_DEFAULT`.
-   If overriding to a small box via `PXX_OLLAMA_BASE`, the user must also set
-   `PXX_MODEL`, otherwise it will try to load `devstral:24b` (the Studio default).
-4. Parses one pxx-level flag (`--edit`) out of `sys.argv`. Default is ask mode
-   (read-only); `--edit` flips to code mode.
-5. Calls `_build_aider_args()` which assembles the full argv, injecting
-   `--chat-mode ask|code` *unless* the user has already passed `--chat-mode`
-   themselves (explicit user choice wins).
-6. Locates the aider binary (prefers same-venv) and `os.execv`s into it, passing
-   `--read pxx/prompts/system.md`, `--config config/aider.conf.yml`,
-   `--model-settings-file config/model-settings.yml`, plus `--no-git` when cwd
-   is not a git repo.
+3. Picks model via `model_for(endpoint)`.
+4. Executes safety and sanity checks from `pxx/safety.py`.
+5. Resolves and applies scope from `pxx/scope.py`.
+6. Handles dogfooding sub-commands via `pxx/self_modes.py`.
+7. Records session start in `pxx/audit.py`.
+8. Locates the aider binary and `os.execv`s into it.
 
 ## Modes — reviewer first
 

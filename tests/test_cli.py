@@ -895,7 +895,7 @@ class TestCheckSync:
         import pxx.drift as drift_mod
 
         res = drift_mod.DriftResult(
-            is_synced=True, local_sha="a", remote_sha="a", local_branch="m", remote_branch="m"
+            local_sha="a", remote_sha="a", local_branch="m", remote_branch="m"
         )
         monkeypatch.setattr(drift_mod, "check_sync", lambda: res)
         monkeypatch.setattr(sys, "argv", ["pxx", "--check-sync"])
@@ -910,7 +910,6 @@ class TestCheckSync:
         import pxx.drift as drift_mod
 
         res = drift_mod.DriftResult(
-            is_synced=False,
             local_sha="a",
             remote_sha="b",
             local_branch="m",
@@ -929,7 +928,6 @@ class TestCheckSync:
         import pxx.drift as drift_mod
 
         res = drift_mod.DriftResult(
-            is_synced=False,
             local_sha="a",
             remote_sha="b",
             local_branch="m",
@@ -957,7 +955,6 @@ class TestCheckSync:
         import pxx.drift as drift_mod
 
         res = drift_mod.DriftResult(
-            is_synced=False,
             local_sha="a",
             remote_sha="b",
             local_branch="m",

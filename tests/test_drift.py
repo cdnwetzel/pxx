@@ -81,7 +81,6 @@ class TestDrift:
 
     def test_print_report_synced(self, capsys):
         res = drift.DriftResult(
-            is_synced=True,
             local_sha="abcdef12345",
             remote_sha="abcdef12345",
             local_branch="main",
@@ -93,7 +92,6 @@ class TestDrift:
 
     def test_print_report_drift(self, capsys):
         res = drift.DriftResult(
-            is_synced=False,
             local_sha="aaaaaa",
             remote_sha="bbbbbb",
             local_branch="feat",
@@ -108,7 +106,6 @@ class TestDrift:
 
     def test_print_report_timeout(self, capsys):
         res = drift.DriftResult(
-            is_synced=False,
             local_sha="sha",
             remote_sha=None,
             local_branch="b",

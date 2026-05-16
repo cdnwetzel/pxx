@@ -27,6 +27,10 @@ class DriftResult:
     remote_branch: str | None
     error: str | None = None
 
+    @property
+    def is_error(self) -> bool:
+        return self.error is not None
+
 
 DEFAULT_SSH_TARGET = "cwetzel@workstation"
 DEFAULT_REMOTE_PATH = "/Users/you/ai/code_pro/pxx"
@@ -162,7 +166,7 @@ def _get_remote_state(
 
 def print_report(result: DriftResult) -> None:
     """Print the drift report to stderr."""
-    if result.error:
+    if result.is_error:
         # P2 finding: unreachable cases are informational (skipped)
         if "unreachable" in result.error or "timeout" in result.error:
             print(f"? {result.error}; skipping drift check", file=sys.stderr)

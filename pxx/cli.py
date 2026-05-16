@@ -307,9 +307,7 @@ def main() -> None:
     with contextlib.suppress(Exception):
         audit.prune_old_logs()
 
-    edit_mode = (
-        "--edit" in sys.argv or "--self-fix" in sys.argv or "--self-improve" in sys.argv
-    )
+    edit_mode = "--edit" in sys.argv or "--self-fix" in sys.argv or "--self-improve" in sys.argv
     big_mode = "--big" in sys.argv
     dry_run = "--dry-run" in sys.argv
     anywhere_mode = "--anywhere" in sys.argv

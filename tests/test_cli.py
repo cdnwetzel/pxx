@@ -13,6 +13,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -938,17 +939,36 @@ class TestCheckSync:
         monkeypatch.setenv("PXX_AUTOCHECK_DRIFT", "1")
         monkeypatch.setattr(sys, "argv", ["pxx", "--edit"])
 
-        # Stub the rest of main to avoid aider exec
-        monkeypatch.setattr(os, "execv", lambda _bin, args: None)
+        # CF-011: Assert execv runs even after warning
+        mock_execv = MagicMock()
+        monkeypatch.setattr(os, "execv", mock_execv)
+
         monkeypatch.setattr("pxx.cli.detect_endpoint", lambda: Endpoint("n", "u"))
         monkeypatch.setattr("pxx.cli._find_aider", lambda: "/x/aider")
         monkeypatch.setattr("pxx.cli._create_safety_tag", lambda: None)
-        # Skip scope resolution
         monkeypatch.setattr("pxx.cli.extract_scope_args", lambda a: ([], a))
 
         main()
         _, err = capsys.readouterr()
         assert "drift detected" in err
+        assert mock_execv.called
+
+    def test_no_check_sync_bypasses_autocheck(self, monkeypatch, capsys):
+        import pxx.drift as drift_mod
+
+        mock_check = MagicMock()
+        monkeypatch.setattr(drift_mod, "check_sync", mock_check)
+        monkeypatch.setenv("PXX_AUTOCHECK_DRIFT", "1")
+        monkeypatch.setattr(sys, "argv", ["pxx", "--edit", "--no-check-sync"])
+
+        monkeypatch.setattr(os, "execv", lambda _bin, args: None)
+        monkeypatch.setattr("pxx.cli.detect_endpoint", lambda: Endpoint("n", "u"))
+        monkeypatch.setattr("pxx.cli._find_aider", lambda: "/x/aider")
+        monkeypatch.setattr("pxx.cli._create_safety_tag", lambda: None)
+        monkeypatch.setattr("pxx.cli.extract_scope_args", lambda a: ([], a))
+
+        main()
+        assert not mock_check.called
 
 
 class TestListCommandsFlag:

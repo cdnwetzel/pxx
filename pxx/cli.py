@@ -27,7 +27,9 @@ from pxx.scope import (
     trusted_paths_config_path,
 )
 
-# Compatibility re-exports for moved symbols
+# Compatibility re-exports for moved symbols.
+# Tests monkeypatch these names on the cli module, so we must use them
+# internally within this module too.
 SAFETY_TAG_PREFIX = safety.SAFETY_TAG_PREFIX
 _in_git_repo = _git.is_in_repo
 _git_dirty = _git.is_dirty
@@ -215,12 +217,12 @@ def _emit_core_restart_banner() -> None:
     """Print a one-line banner if a core pxx module changed since the
     previous session in this repo (#008 M2).
     """
-    if not _git.is_in_repo():
+    if not _in_git_repo():
         return
-    root = _git.repo_root()
+    root = _git_repo_root()
     if root is None or root.resolve() != REPO_ROOT.resolve():
         return
-    cur_sha = _git.head_sha()
+    cur_sha = _git_head_sha()
     if not cur_sha:
         return
     try:
@@ -278,12 +280,12 @@ def main() -> None:
 
     if "--self-test" in sys.argv:
         _try_write_session_start({"session_class": "self-test", "cwd": str(Path.cwd())})
-        sys.exit(self_modes.self_test(REPO_ROOT))
+        sys.exit(_self_test())
     if "--self-lint" in sys.argv:
         _try_write_session_start({"session_class": "self-lint", "cwd": str(Path.cwd())})
-        sys.exit(self_modes.self_lint(REPO_ROOT))
+        sys.exit(_self_lint())
 
-    safety.sanity_check(REPO_ROOT)
+    _self_sanity_check()
     _emit_core_restart_banner()
 
     with contextlib.suppress(Exception):
@@ -296,9 +298,11 @@ def main() -> None:
     self_improve_mode = "--self-improve" in sys.argv
     self_fix_mode = "--self-fix" in sys.argv
 
-    if self_fix_mode and not edit_mode:
-        print("pxx: --self-fix implies --edit; refusing to run in ask mode.", file=sys.stderr)
-        sys.exit(2)
+    if self_fix_mode:
+        # --self-fix implies --edit; force it on so all downstream
+        # edit-mode logic (safety tag, banner, diff cap, scope gate) fires.
+        edit_mode = True
+
     if self_fix_mode and self_improve_mode:
         print("pxx: --self-fix and --self-improve are mutually exclusive.", file=sys.stderr)
         sys.exit(2)
@@ -312,8 +316,7 @@ def main() -> None:
     self_fix_task: str | None = None
     argv_after_self_fix = sys.argv[1:]
     if self_fix_mode:
-        self_fix_task, argv_after_self_fix = self_modes.extract_self_fix_task(argv_after_self_fix)
-        edit_mode = True
+        self_fix_task, argv_after_self_fix = _extract_self_fix_task(argv_after_self_fix)
 
     if self_improve_mode or self_fix_mode:
         os.chdir(REPO_ROOT)
@@ -355,7 +358,7 @@ def main() -> None:
         if not has_message:
             user_args = ["--message", self_fix_task, *user_args]
 
-    in_git_repo = _git.is_in_repo()
+    in_git_repo = _in_git_repo()
     scope_prefixes: list[str] = []
     if scope_args:
         if not in_git_repo:
@@ -364,7 +367,7 @@ def main() -> None:
                 file=sys.stderr,
             )
         else:
-            root = _git.repo_root()
+            root = _git_repo_root()
             if root is None:
                 print(
                     "pxx: --scope ignored — could not determine git repo root.",
@@ -392,7 +395,7 @@ def main() -> None:
     if self_fix_mode:
         os.environ["PXX_AUTONOMOUS"] = "1"
         if "PXX_DIFF_CAP" not in os.environ:
-            os.environ["PXX_DIFF_CAP"] = str(self_modes.SELF_FIX_DIFF_CAP)
+            os.environ["PXX_DIFF_CAP"] = str(SELF_FIX_DIFF_CAP)
 
     model = model_for(endpoint)
     aider_bin = _find_aider()
@@ -400,9 +403,9 @@ def main() -> None:
     safety_tag: str | None = None
     empty_repo = False
     if edit_mode and in_git_repo:
-        if _git.has_commits():
-            safety.prune_old_tags()
-            safety_tag = safety.create_tag()
+        if _has_commits():
+            _prune_old_safety_tags()
+            safety_tag = _create_safety_tag()
         else:
             empty_repo = True
 
@@ -423,7 +426,7 @@ def main() -> None:
         file=sys.stderr,
     )
     if self_fix_mode:
-        cap = os.environ.get("PXX_DIFF_CAP", str(self_modes.SELF_FIX_DIFF_CAP))
+        cap = os.environ.get("PXX_DIFF_CAP", str(SELF_FIX_DIFF_CAP))
         print(
             f"pxx: --self-fix: task={self_fix_task!r}  diff_cap={cap}  "
             f"commits will be tagged [autonomous].",
@@ -485,11 +488,11 @@ def main() -> None:
         aider_bin, model, user_args, in_git_repo, edit_mode, extra_reads=extra_reads
     )
 
-    root = _git.repo_root() if in_git_repo else None
-    sha = _git.head_sha() if in_git_repo else None
-    git_dirty: bool | None = _git.is_dirty() if in_git_repo else None
+    root = _git_repo_root() if in_git_repo else None
+    sha = _git_head_sha() if in_git_repo else None
+    git_dirty: bool | None = _git_dirty() if in_git_repo else None
     record: dict = {
-        "session_class": self_modes.determine_session_class(
+        "session_class": _determine_session_class(
             edit_mode, big_mode, dry_run, self_improve_mode, self_fix_mode
         ),
         "model": model,

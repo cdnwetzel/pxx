@@ -12,8 +12,8 @@ from pxx import drift
 
 class TestDrift:
     def test_synced_heads_return_synced_result(self, monkeypatch):
-        monkeypatch.setattr("pxx._git.head_sha", lambda: "abc1234")
-        monkeypatch.setattr("pxx.drift._get_local_branch", lambda: "main")
+        monkeypatch.setattr("pxx.drift._get_pxx_local_head", lambda: "abc1234")
+        monkeypatch.setattr("pxx.drift._get_pxx_local_branch", lambda: "main")
 
         def mock_remote(*a, **kw):
             return "abc1234", "main", None
@@ -27,8 +27,8 @@ class TestDrift:
         assert result.error is None
 
     def test_diverged_heads_return_drift_result(self, monkeypatch):
-        monkeypatch.setattr("pxx._git.head_sha", lambda: "local_sha")
-        monkeypatch.setattr("pxx.drift._get_local_branch", lambda: "main")
+        monkeypatch.setattr("pxx.drift._get_pxx_local_head", lambda: "local_sha")
+        monkeypatch.setattr("pxx.drift._get_pxx_local_branch", lambda: "main")
 
         def mock_remote(*a, **kw):
             return "remote_sha", "main", None

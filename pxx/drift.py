@@ -60,14 +60,13 @@ def check_sync(
             remote_sha=None,
             local_branch=None,
             remote_branch=None,
-            error="Could not determine local pxx HEAD."),
+            error="Could not determine local pxx HEAD."
         )
 
     local_branch = _get_pxx_local_branch()
     remote_sha, remote_branch, error = _get_remote_state(ssh_target, remote_path, timeout)
 
     if error:
-        return DriftResult(
         return DriftResult(
             local_sha=local_sha,
             remote_sha=None,
@@ -178,8 +177,9 @@ def print_report(result: DriftResult) -> None:
         return
 
     branch_part = f" ({result.local_branch})" if result.local_branch and result.is_synced else ""
+    status = "✓ Neo and Studio in sync at " if result.is_synced else "✗ drift detected:"
     print(
-        f"{'✓ Neo and Studio in sync at ' if result.is_synced else '✗ drift detected:'}{result.local_sha[:7]}{branch_part}",
+        f"{status}{result.local_sha[:7]}{branch_part}",
         file=sys.stderr,
     )
 

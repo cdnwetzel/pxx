@@ -79,14 +79,6 @@ def _find_aider() -> str:
     sys.exit(1)
 
 
-<<<<<<< Updated upstream
-=======
-# ---------------------------------------------------------------------------
-# Safety foundation (#002)
-# ---------------------------------------------------------------------------
-
-
->>>>>>> Stashed changes
 def _build_aider_args(
     aider_bin: str,
     model: str,
@@ -133,96 +125,6 @@ SCOPE_CONTEXT_FILE = "pxx-scope-context.md"
 """Filename used for the in-session scope-directive context file in $TMPDIR."""
 
 
-<<<<<<< Updated upstream
-=======
-def _write_scope_context(scope_prefixes: list[str]) -> Path | None:
-    """Write a scope-directive markdown file for aider's `--read` context.
-
-    Returns the absolute path written, or ``None`` if no scopes were given.
-    Same overwrite-fixed-filename pattern as ``_write_commands_context``.
-    """
-    if not scope_prefixes:
-        return None
-
-    tmp = Path(tempfile.gettempdir()) / SCOPE_CONTEXT_FILE
-    lines = [
-        "# SCOPE RESTRICTION",
-        "",
-        "**This session may only edit files under these path prefixes:**",
-        "",
-    ]
-    for p in scope_prefixes:
-        lines.append(f"- `{p or '(repo root)'}`")
-    lines.extend(
-        [
-            "",
-            "If asked to change a file outside this scope, refuse and tell the",
-            "user to widen the scope by re-running pxx with another `--scope <path>`.",
-            "Do not produce SEARCH/REPLACE blocks for out-of-scope files.",
-            "",
-            "If the user's task requires editing files outside this scope, say so",
-            "explicitly and ask them to widen the scope; do not try to work around",
-            "the restriction.",
-        ]
-    )
-    tmp.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    return tmp
-
-
-def _emit_core_restart_banner() -> None:
-    """Print a one-line banner if a core pxx module changed since the
-    previous session in this repo (#008 M2).
-
-    Reads the most recent ``session_start`` record from the audit log and
-    compares its ``git_head_sha`` to the current HEAD. If a core file
-    (see :mod:`pxx._core_files`) changed in that SHA range, prints a
-    stderr confirmation that the freshly-edited code is now loaded.
-
-    Silent on every error path: first launch ever, no audit log dir,
-    previous SHA missing or rewound out of history, current cwd outside
-    the pxx repo, or any subprocess/IO failure. The banner is a
-    convenience, never a correctness guarantee.
-    """
-    if not _git.is_in_repo():
-        return
-    root = _git.repo_root()
-    if root is None or root.resolve() != REPO_ROOT.resolve():
-        return
-    cur_sha = _git.head_sha()
-    if not cur_sha:
-        return
-    try:
-        prev_sha = audit.last_session_head_for(str(root))
-    except Exception:  # noqa: BLE001 — audit lookup is best-effort
-        return
-    if not prev_sha or prev_sha == cur_sha:
-        return
-    try:
-        result = subprocess.run(
-            ["git", "diff", "--name-only", f"{prev_sha}..{cur_sha}"],
-            cwd=root,
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=2,
-        )
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        return
-    if result.returncode != 0:
-        # `prev_sha` may have been rebased/garbage-collected out of history.
-        return
-    core_changed = [f for f in result.stdout.strip().splitlines() if is_core(f)]
-    if not core_changed:
-        return
-    short = cur_sha[:7]
-    names = ", ".join(Path(p).name for p in core_changed)
-    print(
-        f"pxx: loaded freshly-edited {names} (commit {short})",
-        file=sys.stderr,
-    )
-
-
->>>>>>> Stashed changes
 def _try_write_session_start(record: dict) -> None:
     """Write a session_start record, swallowing all errors (#004)."""
     with contextlib.suppress(Exception):
@@ -279,7 +181,6 @@ def _print_command_listing() -> None:
         print(f"  /load {c.path}")
 
 
-<<<<<<< Updated upstream
 def _write_scope_context(scope_prefixes: list[str]) -> Path | None:
     """Write a scope-directive markdown file for aider's `--read` context."""
     if not scope_prefixes:
@@ -352,8 +253,6 @@ def _emit_core_restart_banner() -> None:
     )
 
 
-=======
->>>>>>> Stashed changes
 def _install_precommit_hook() -> None:
     """Invoke scripts/install-precommit-hook.sh in the current working dir."""
     script = REPO_ROOT / "scripts" / "install-precommit-hook.sh"
@@ -385,12 +284,6 @@ def main() -> None:
         sys.exit(self_modes.self_lint(REPO_ROOT))
 
     safety.sanity_check(REPO_ROOT)
-<<<<<<< Updated upstream
-=======
-
-    # #008 M2: confirm freshly-edited core modules are now loaded. Silent
-    # outside the pxx repo or when nothing core changed since last session.
->>>>>>> Stashed changes
     _emit_core_restart_banner()
 
     with contextlib.suppress(Exception):
@@ -402,10 +295,6 @@ def main() -> None:
     anywhere_mode = "--anywhere" in sys.argv
     self_improve_mode = "--self-improve" in sys.argv
     self_fix_mode = "--self-fix" in sys.argv
-<<<<<<< Updated upstream
-=======
-    self_fix_task, argv_after_self_fix = self_modes.extract_self_fix_task(sys.argv[1:])
->>>>>>> Stashed changes
 
     if self_fix_mode and not edit_mode:
         print("pxx: --self-fix implies --edit; refusing to run in ask mode.", file=sys.stderr)
@@ -465,10 +354,6 @@ def main() -> None:
         has_message = any(a == "--message" or a.startswith("--message=") for a in user_args)
         if not has_message:
             user_args = ["--message", self_fix_task, *user_args]
-<<<<<<< Updated upstream
-=======
-    in_git_repo = _git.is_in_repo()
->>>>>>> Stashed changes
 
     in_git_repo = _git.is_in_repo()
     scope_prefixes: list[str] = []
@@ -508,10 +393,7 @@ def main() -> None:
         os.environ["PXX_AUTONOMOUS"] = "1"
         if "PXX_DIFF_CAP" not in os.environ:
             os.environ["PXX_DIFF_CAP"] = str(self_modes.SELF_FIX_DIFF_CAP)
-<<<<<<< Updated upstream
 
-=======
->>>>>>> Stashed changes
     model = model_for(endpoint)
     aider_bin = _find_aider()
 
@@ -603,11 +485,6 @@ def main() -> None:
         aider_bin, model, user_args, in_git_repo, edit_mode, extra_reads=extra_reads
     )
 
-<<<<<<< Updated upstream
-=======
-    # #004 step 2: write the session_start record after all state is settled
-    # but before execv hands control off. Best-effort — see _try_write_session_start.
->>>>>>> Stashed changes
     root = _git.repo_root() if in_git_repo else None
     sha = _git.head_sha() if in_git_repo else None
     git_dirty: bool | None = _git.is_dirty() if in_git_repo else None

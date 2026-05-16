@@ -2,7 +2,7 @@
 
 > Backlog ID: **014**. See [plans/backlog.md](backlog.md) for the inventory.
 >
-> Status: **proposed**. Blocks: `—`. Blocked by: `—`.
+> Status: **done**. Blocks: `013`. Blocked by: `—`.
 >
 > Stub drafted in response to Claude review finding **F-009** (sixth pass,
 > 2026-05-13), with corroboration in Codex's eighth-pass observations.

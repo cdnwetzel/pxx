@@ -271,7 +271,8 @@ If a task seems to require editing one of these, stop and ask. The
 - Type hints on every public signature; no `Any` without reason
 - stdlib first; new third-party deps need explicit justification
 - `ruff format` is run after edits — don't fight its style
-- No docstrings unless asked; no comments unless the *why* is non-obvious
+- Docstrings on public functions when the WHY is non-trivial; no docstrings for simple internal helpers
+- No comments unless the *why* is non-obvious
 - No try/except for control flow; no defensive code for impossible inputs
 - Prefer `dataclass`/`TypedDict` over dict-of-anything; `pathlib.Path` over `os.path`
 - Shell scripts: `#!/usr/bin/env bash`, `set -euo pipefail`

@@ -27,6 +27,7 @@ These rules apply when using pxx to edit pxx itself.
 - `ruff format` compatible
 - Shell scripts: `#!/usr/bin/env bash`, `set -euo pipefail`
 - No comments unless the *why* is non-obvious
+- Docstrings on public functions when the WHY is non-trivial; no docstrings for simple internal helpers
 
 ## Testing changes
 

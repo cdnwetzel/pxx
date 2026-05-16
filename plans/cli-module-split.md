@@ -2,7 +2,7 @@
 
 > Backlog ID: **013**. See [plans/backlog.md](backlog.md) for the inventory.
 >
-> Status: **proposed**. Blocks: `—`. Blocked by: `—`.
+> Status: **planned**. Blocks: `—`. Blocked by: `—`.
 >
 > Stub drafted in response to Claude review finding **F-008** (sixth pass,
 > 2026-05-13). The cli.py docstring still says *"detect endpoint, pick model,

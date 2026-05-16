@@ -41,13 +41,8 @@ class CommandInfo:
     """One discovered slash command."""
 
     name: str
-    """Filename stem (e.g. ``audit`` for ``pxx/commands/audit.md``)."""
-
     path: Path
-    """Absolute path to the command file."""
-
     description: str
-    """One-line description extracted from the file's first H1 heading."""
 
 
 def _extract_description(text: str) -> str:

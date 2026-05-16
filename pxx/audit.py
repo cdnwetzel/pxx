@@ -40,29 +40,23 @@ SENSITIVE_ENV_PATTERNS = ("TOKEN", "KEY", "SECRET", "PASSWORD")
 
 
 def log_dir() -> Path:
-    """Return the session log directory: ``${XDG_STATE_HOME:-$HOME/.local/state}/pxx/sessions``."""
     base = os.environ.get("XDG_STATE_HOME") or str(Path.home() / ".local" / "state")
     return Path(base) / "pxx" / "sessions"
 
 
 def todays_log_file(directory: Path | None = None) -> Path:
-    """Return today's JSONL file path (``YYYY-MM-DD.jsonl``)."""
     directory = directory or log_dir()
     return directory / f"{datetime.now().strftime('%Y-%m-%d')}.jsonl"
 
 
 def make_session_id() -> str:
-    """Generate a sortable session ID: ``YYYYMMDDTHHMMSS-<hex4>``.
-
-    Time-prefixed so a lexical sort matches a chronological sort. The 4-hex
-    suffix disambiguates same-second invocations (cron, scripted runs).
-    """
+    # Time-prefixed so a lexical sort matches a chronological sort. The 4-hex
+    # suffix disambiguates same-second invocations (cron, scripted runs).
     ts = datetime.now().strftime("%Y%m%dT%H%M%S")
     return f"{ts}-{secrets.token_hex(2)}"
 
 
 def now_iso() -> str:
-    """Current local time as ISO 8601 with timezone offset."""
     return datetime.now().astimezone().isoformat(timespec="milliseconds")
 
 

@@ -114,7 +114,6 @@ def is_in_scope(filepath: str, scope_prefixes: list[str]) -> bool:
 
 
 def format_for_env(scope_paths: list[str]) -> str:
-    """Format scope paths as colon-separated for the PXX_SCOPE env var."""
     return ":".join(scope_paths)
 
 

@@ -47,7 +47,7 @@ def model_for(endpoint: Endpoint) -> str:
 
 
 def _find_aider() -> str:
-    """Find the aider binary — prefer the one in our own venv."""
+    # Prefer the aider binary in our own venv if it exists.
     same_venv = Path(sys.executable).parent / "aider"
     if same_venv.exists():
         return str(same_venv)
@@ -62,7 +62,6 @@ def _find_aider() -> str:
 
 
 def _in_git_repo() -> bool:
-    """True if cwd is inside a git work tree."""
     try:
         result = subprocess.run(
             ["git", "rev-parse", "--is-inside-work-tree"],
@@ -110,7 +109,6 @@ def _self_sanity_check(module_name: str = "pxx.endpoints") -> None:
 
 
 def _git_dirty() -> bool:
-    """True if cwd's git work tree has uncommitted or untracked changes."""
     try:
         # Tracked-but-uncommitted changes (staged or unstaged).
         diff = subprocess.run(
@@ -126,11 +124,8 @@ def _git_dirty() -> bool:
 
 
 def _has_commits() -> bool:
-    """True iff the current git repo has at least one commit (HEAD resolved).
-
-    Empty repos (``git init`` with no commit yet) have an unborn HEAD;
-    ``git tag <name>`` fails because there's nothing to point at.
-    """
+    # Empty repos (``git init`` with no commit yet) have an unborn HEAD;
+    # ``git tag <name>`` fails because there's nothing to point at.
     try:
         result = subprocess.run(
             ["git", "rev-parse", "HEAD"],
@@ -325,7 +320,6 @@ def _write_scope_context(scope_prefixes: list[str]) -> Path | None:
 
 
 def _git_repo_root() -> Path | None:
-    """Return the absolute Path of the current git repo's top-level, or None."""
     try:
         result = subprocess.run(
             ["git", "rev-parse", "--show-toplevel"],
@@ -342,7 +336,6 @@ def _git_repo_root() -> Path | None:
 
 
 def _git_head_sha() -> str | None:
-    """Return HEAD's full SHA-1, or None when not in a git repo (or unborn HEAD)."""
     try:
         result = subprocess.run(
             ["git", "rev-parse", "HEAD"],

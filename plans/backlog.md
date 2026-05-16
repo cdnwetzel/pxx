@@ -57,8 +57,9 @@ comparable and scannable.
 | 010 | Dogfooding Tier 1 — self-test/lint   | [dogfooding-tier1-self-test-lint.md](dogfooding-tier1-self-test-lint.md) | done | —    | —          |
 | 011 | Dogfooding Tier 2 — self-improve     | [dogfooding-tier2-self-improve.md](dogfooding-tier2-self-improve.md)     | done    | — | —          |
 | 012 | Dogfooding Tier 3 — bounded autonomy | [dogfooding-tier3-bounded-autonomy.md](dogfooding-tier3-bounded-autonomy.md) | done    | — | —          |
-| 013 | Split `cli.py` into modules          | [cli-module-split.md](cli-module-split.md)                                   | proposed | — | —          |
-| 014 | Docstring convention reconciliation  | [docstring-convention-reconciliation.md](docstring-convention-reconciliation.md) | proposed | — | —          |
+| 013 | Split `cli.py` into modules          | [cli-module-split.md](cli-module-split.md)                                   | planned  | — | —          |
+| 014 | Docstring convention reconciliation  | [docstring-convention-reconciliation.md](docstring-convention-reconciliation.md) | done     | 013 | —          |
+
 | 015 | Pre-push autonomous-commit gate      | [pre-push-autonomous-gate.md](pre-push-autonomous-gate.md)                   | proposed | — | —          |
 | 016 | Pre-commit hook body test coverage   | [pre-commit-hook-body-tests.md](pre-commit-hook-body-tests.md)               | proposed | — | —          |
 

@@ -297,3 +297,4 @@ If a task seems to require editing one of these, stop and ask. The
 | `PXX_STUDIO_LAN_URL`   | Override `http://workstation:11434` |
 | `PXX_STUDIO_REMOTE_URL`| Studio's VPN-reachable URL (empty by default) |
 | `PXX_MODEL`            | Force a specific model regardless of endpoint |
+| `PXX_AUTOCHECK_DRIFT`  | Set to `1` to run a drift check before every `--edit` session |

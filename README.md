@@ -215,4 +215,6 @@ Together: warning at commit time, confirmation at restart time.
 | `PXX_OLLAMA_BASE` | Force a specific endpoint URL, skip detection. Uses Studio default model unless `PXX_MODEL` is also set — set both when overriding to a small-memory host |
 | `PXX_STUDIO_LAN_URL` | Override default `http://workstation:11434` |
 | `PXX_STUDIO_REMOTE_URL` | Studio's VPN-reachable URL (work-internal DNS or IP) |
-| `PXX_MODEL` | Force a specific model regardless of endpoint |
+| `PXX_MODEL`            | Force a specific model regardless of endpoint |
+| `PXX_AUTOCHECK_DRIFT`  | Set to `1` to run a drift check before every `--edit` session |
+

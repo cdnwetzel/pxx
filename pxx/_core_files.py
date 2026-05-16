@@ -27,8 +27,15 @@ from __future__ import annotations
 from pathlib import PurePosixPath
 
 CORE_FILES: tuple[str, ...] = (
+    "pxx/_git.py",
+    "pxx/audit.py",
     "pxx/cli.py",
+    "pxx/commands_index.py",
+    "pxx/drift.py",
     "pxx/endpoints.py",
+    "pxx/safety.py",
+    "pxx/scope.py",
+    "pxx/self_modes.py",
 )
 
 

@@ -202,7 +202,8 @@ What Tier 3 itself adds on top:
 - An optional **`pxx --self-fix "<task description>"`** subcommand that
   automates the open-session + close-session loop for unattended runs.
 - A **no-push rule**: Tier 3 commits stay on the local branch. `git deliver`
-  remains a deliberate human action.
+  remains a deliberate human action. It is recommended to run `pxx --check-sync` 
+  before each autonomous session to ensure Neo and Studio are aligned.
 
 Realistic Tier-3 tasks once #002 and #003 land:
 

@@ -16,6 +16,7 @@ from pxx.audit import (
     DEFAULT_RETENTION_DAYS,
     GZIP_AFTER_DAYS,
     is_sensitive_env,
+    last_session_head_for,
     log_dir,
     make_session_id,
     now_iso,
@@ -149,6 +150,72 @@ class TestWriteSessionStart:
         content = log_path.read_text()
         assert content.count("\n") == 1
         assert "\n  " not in content  # no indented continuation lines
+
+
+class TestLastSessionHeadFor:
+    """#008 M2 lookup: find the previous session's git_head_sha for a given repo."""
+
+    def _record(self, **overrides) -> str:
+        rec = {
+            "event": "session_start",
+            "git_repo_root": "/work/pxx",
+            "git_head_sha": "abc1234",
+        }
+        rec.update(overrides)
+        return json.dumps(rec)
+
+    def test_returns_none_when_directory_missing(self, tmp_path):
+        assert last_session_head_for("/work/pxx", directory=tmp_path / "missing") is None
+
+    def test_returns_none_when_directory_empty(self, tmp_path):
+        assert last_session_head_for("/work/pxx", directory=tmp_path) is None
+
+    def test_returns_sha_from_matching_record(self, tmp_path):
+        (tmp_path / "2026-05-15.jsonl").write_text(self._record() + "\n")
+        assert last_session_head_for("/work/pxx", directory=tmp_path) == "abc1234"
+
+    def test_returns_most_recent_record_across_files(self, tmp_path):
+        # Older log file (lexically smaller name).
+        (tmp_path / "2026-05-14.jsonl").write_text(self._record(git_head_sha="old111") + "\n")
+        # Newer log file.
+        (tmp_path / "2026-05-15.jsonl").write_text(self._record(git_head_sha="new222") + "\n")
+        assert last_session_head_for("/work/pxx", directory=tmp_path) == "new222"
+
+    def test_returns_last_record_in_file(self, tmp_path):
+        # Multiple records in one file — take the last (most recent).
+        content = (
+            self._record(git_head_sha="first111")
+            + "\n"
+            + self._record(git_head_sha="second2")
+            + "\n"
+        )
+        (tmp_path / "2026-05-15.jsonl").write_text(content)
+        assert last_session_head_for("/work/pxx", directory=tmp_path) == "second2"
+
+    def test_ignores_records_for_other_repos(self, tmp_path):
+        (tmp_path / "2026-05-15.jsonl").write_text(
+            self._record(git_repo_root="/other/repo", git_head_sha="x") + "\n"
+        )
+        assert last_session_head_for("/work/pxx", directory=tmp_path) is None
+
+    def test_ignores_null_sha(self, tmp_path):
+        (tmp_path / "2026-05-15.jsonl").write_text(self._record(git_head_sha=None) + "\n")
+        assert last_session_head_for("/work/pxx", directory=tmp_path) is None
+
+    def test_ignores_non_session_start_events(self, tmp_path):
+        (tmp_path / "2026-05-15.jsonl").write_text(self._record(event="other") + "\n")
+        assert last_session_head_for("/work/pxx", directory=tmp_path) is None
+
+    def test_skips_corrupt_lines(self, tmp_path):
+        content = "garbage-not-json\n" + self._record(git_head_sha="ok") + "\n"
+        (tmp_path / "2026-05-15.jsonl").write_text(content)
+        assert last_session_head_for("/work/pxx", directory=tmp_path) == "ok"
+
+    def test_ignores_gz_files(self, tmp_path):
+        # Gzipped files are out of scope; only .jsonl is read.
+        (tmp_path / "2026-05-14.jsonl.gz").write_bytes(b"\x1f\x8bnot-decoded")
+        (tmp_path / "2026-05-15.jsonl").write_text(self._record(git_head_sha="live") + "\n")
+        assert last_session_head_for("/work/pxx", directory=tmp_path) == "live"
 
 
 class TestPruneOldLogs:

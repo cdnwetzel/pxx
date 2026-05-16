@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# pxx-managed post-commit hook (template, #008 M1).
+#
+# Installed into .git/hooks/post-commit by scripts/install-precommit-hook.sh.
+# Edit scripts/post-commit-template, not the installed copy.
+#
+# If the just-landed commit modified any pxx "core" module (Python imported
+# by the running pxx/aider process at startup), print one stderr line
+# reminding the user to restart pxx — the running session still holds the
+# OLD code in memory.
+#
+# Core-file list is pulled from pxx._core_files (#008 M3) via python; if
+# pxx is not importable from the current cwd, the hook is a silent no-op.
+
+set -euo pipefail
+
+# Files modified in the just-landed commit. For the root commit (no HEAD~1),
+# diff-tree --root lists files added in that commit.
+changed=$(git diff-tree --no-commit-id --name-only -r --root HEAD 2>/dev/null || true)
+[ -z "$changed" ] && exit 0
+
+# Pull CORE_FILES from pxx (single source of truth, #008 M3). If pxx isn't
+# importable (post-commit hook installed in a non-pxx repo without
+# PYTHONPATH wired up), exit silently — better no notice than a spurious one.
+repo_root=$(git rev-parse --show-toplevel 2>/dev/null || true)
+core_files=""
+if [ -n "$repo_root" ]; then
+    core_files=$(cd "$repo_root" && python3 -c 'from pxx._core_files import CORE_FILES; print("\n".join(CORE_FILES))' 2>/dev/null || true)
+fi
+[ -z "$core_files" ] && exit 0
+
+# Intersect changed × core_files with exact-line match.
+hit=""
+while IFS= read -r c; do
+    [ -z "$c" ] && continue
+    if printf '%s\n' "$changed" | grep -Fx -q "$c"; then
+        hit="${hit}${hit:+ }$c"
+    fi
+done <<< "$core_files"
+
+if [ -n "$hit" ]; then
+    cat >&2 <<EOF
+pxx: this commit modified core pxx modules ($hit).
+     Restart pxx before relying on this session — the current process is
+     running the old code.
+EOF
+fi

@@ -95,6 +95,46 @@ def write_session_start(record: dict, log_path: Path | None = None) -> Path:
     return path
 
 
+def last_session_head_for(
+    repo_root: str,
+    directory: Path | None = None,
+) -> str | None:
+    """Return ``git_head_sha`` from the most recent ``session_start`` record
+    whose ``git_repo_root`` matches ``repo_root`` (#008 M2).
+
+    Scans ``directory`` (default: :func:`log_dir`) in reverse chronological
+    order, reading uncompressed ``.jsonl`` files only. Stops at the first
+    matching record with a non-null ``git_head_sha``. Returns ``None`` when
+    the directory is missing, no record matches, or any line is unreadable
+    (best-effort — the banner check that calls this must never abort startup).
+    """
+    directory = directory or log_dir()
+    if not directory.exists():
+        return None
+    files = sorted(
+        (f for f in directory.iterdir() if f.is_file() and f.suffix == ".jsonl"),
+        reverse=True,
+    )
+    for f in files:
+        try:
+            lines = f.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            continue
+        for line in reversed(lines):
+            try:
+                rec = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if rec.get("event") != "session_start":
+                continue
+            if rec.get("git_repo_root") != repo_root:
+                continue
+            sha = rec.get("git_head_sha")
+            if sha:
+                return sha
+    return None
+
+
 def prune_old_logs(
     retention_days: int | None = None,
     gzip_after_days: int = GZIP_AFTER_DAYS,

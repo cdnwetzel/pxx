@@ -24,6 +24,7 @@ from pxx.cli import (
     STUDIO_DEFAULT,
     _build_aider_args,
     _create_safety_tag,
+    _emit_core_restart_banner,
     _find_aider,
     _git_dirty,
     _has_commits,
@@ -647,9 +648,7 @@ class TestExtractSelfFixTask:
     def test_positional_task_after_self_fix(self):
         from pxx.cli import _extract_self_fix_task
 
-        task, rest = _extract_self_fix_task(
-            ["--self-fix", "fix typo", "--scope", "pxx/cli.py"]
-        )
+        task, rest = _extract_self_fix_task(["--self-fix", "fix typo", "--scope", "pxx/cli.py"])
         assert task == "fix typo"
         assert rest == ["--self-fix", "--scope", "pxx/cli.py"]
 
@@ -657,9 +656,7 @@ class TestExtractSelfFixTask:
         # --message immediately after --self-fix is NOT the task.
         from pxx.cli import _extract_self_fix_task
 
-        task, rest = _extract_self_fix_task(
-            ["--self-fix", "--message", "fix it", "--scope", "x/"]
-        )
+        task, rest = _extract_self_fix_task(["--self-fix", "--message", "fix it", "--scope", "x/"])
         assert task is None
         assert rest == ["--self-fix", "--message", "fix it", "--scope", "x/"]
 
@@ -736,9 +733,7 @@ class TestSelfFixFlag:
         err = capsys.readouterr().err
         assert "mutually exclusive" in err
 
-    def test_self_fix_sets_autonomous_env_and_tightens_diff_cap(
-        self, monkeypatch, tmp_path
-    ):
+    def test_self_fix_sets_autonomous_env_and_tightens_diff_cap(self, monkeypatch, tmp_path):
         from pxx import cli as cli_module
 
         monkeypatch.chdir(tmp_path)
@@ -775,9 +770,7 @@ class TestSelfFixFlag:
         # User's explicit cap wins.
         assert os.environ.get("PXX_DIFF_CAP") == "200"
 
-    def test_self_fix_banner_shows_autonomous_annotation(
-        self, monkeypatch, tmp_path, capsys
-    ):
+    def test_self_fix_banner_shows_autonomous_annotation(self, monkeypatch, tmp_path, capsys):
         from pxx import cli as cli_module
 
         monkeypatch.chdir(tmp_path)
@@ -1235,3 +1228,150 @@ class TestBuildAiderArgsWithExtraReads:
             "/x/aider", "m", [], in_git_repo=True, edit_mode=False, extra_reads=None
         )
         assert args.count("--read") == 1
+
+
+class TestEmitCoreRestartBanner:
+    """#008 M2 banner. Monkeypatches the helper functions cli pulls from
+    ``audit`` / ``subprocess`` to drive the branches without touching git."""
+
+    def _stub_pxx_repo(self, monkeypatch):
+        """Wire _in_git_repo/_git_repo_root to make us look like we're in pxx."""
+        import pxx.cli as cli_mod
+
+        monkeypatch.setattr(cli_mod, "_in_git_repo", lambda: True)
+        monkeypatch.setattr(cli_mod, "_git_repo_root", lambda: cli_mod.REPO_ROOT)
+
+    def test_silent_when_not_in_git_repo(self, monkeypatch, capsys):
+        import pxx.cli as cli_mod
+
+        monkeypatch.setattr(cli_mod, "_in_git_repo", lambda: False)
+        _emit_core_restart_banner()
+        assert capsys.readouterr().err == ""
+
+    def test_silent_when_repo_root_differs_from_pxx(self, monkeypatch, tmp_path, capsys):
+        import pxx.cli as cli_mod
+
+        monkeypatch.setattr(cli_mod, "_in_git_repo", lambda: True)
+        monkeypatch.setattr(cli_mod, "_git_repo_root", lambda: tmp_path)
+        _emit_core_restart_banner()
+        assert capsys.readouterr().err == ""
+
+    def test_silent_when_head_sha_missing(self, monkeypatch, capsys):
+        import pxx.cli as cli_mod
+
+        self._stub_pxx_repo(monkeypatch)
+        monkeypatch.setattr(cli_mod, "_git_head_sha", lambda: None)
+        _emit_core_restart_banner()
+        assert capsys.readouterr().err == ""
+
+    def test_silent_when_prev_sha_unknown(self, monkeypatch, capsys):
+        import pxx.cli as cli_mod
+
+        self._stub_pxx_repo(monkeypatch)
+        monkeypatch.setattr(cli_mod, "_git_head_sha", lambda: "abcdef0")
+        monkeypatch.setattr(cli_mod.audit, "last_session_head_for", lambda r: None)
+        _emit_core_restart_banner()
+        assert capsys.readouterr().err == ""
+
+    def test_silent_when_prev_equals_current(self, monkeypatch, capsys):
+        import pxx.cli as cli_mod
+
+        self._stub_pxx_repo(monkeypatch)
+        monkeypatch.setattr(cli_mod, "_git_head_sha", lambda: "abcdef0")
+        monkeypatch.setattr(cli_mod.audit, "last_session_head_for", lambda r: "abcdef0")
+        _emit_core_restart_banner()
+        assert capsys.readouterr().err == ""
+
+    def test_silent_when_audit_lookup_raises(self, monkeypatch, capsys):
+        import pxx.cli as cli_mod
+
+        self._stub_pxx_repo(monkeypatch)
+        monkeypatch.setattr(cli_mod, "_git_head_sha", lambda: "abcdef0")
+
+        def _boom(_r):
+            raise OSError("disk gone")
+
+        monkeypatch.setattr(cli_mod.audit, "last_session_head_for", _boom)
+        _emit_core_restart_banner()
+        assert capsys.readouterr().err == ""
+
+    def test_silent_when_git_diff_fails(self, monkeypatch, capsys):
+        import pxx.cli as cli_mod
+
+        self._stub_pxx_repo(monkeypatch)
+        monkeypatch.setattr(cli_mod, "_git_head_sha", lambda: "abcdef0")
+        monkeypatch.setattr(cli_mod.audit, "last_session_head_for", lambda r: "fedcba0")
+
+        class _Result:
+            returncode = 128
+            stdout = ""
+
+        monkeypatch.setattr(cli_mod.subprocess, "run", lambda *a, **kw: _Result())
+        _emit_core_restart_banner()
+        assert capsys.readouterr().err == ""
+
+    def test_silent_when_only_non_core_changed(self, monkeypatch, capsys):
+        import pxx.cli as cli_mod
+
+        self._stub_pxx_repo(monkeypatch)
+        monkeypatch.setattr(cli_mod, "_git_head_sha", lambda: "abcdef0")
+        monkeypatch.setattr(cli_mod.audit, "last_session_head_for", lambda r: "fedcba0")
+
+        class _Result:
+            returncode = 0
+            stdout = "README.md\nscripts/doctor.sh\n"
+
+        monkeypatch.setattr(cli_mod.subprocess, "run", lambda *a, **kw: _Result())
+        _emit_core_restart_banner()
+        assert capsys.readouterr().err == ""
+
+    def test_emits_when_core_file_changed(self, monkeypatch, capsys):
+        import pxx.cli as cli_mod
+
+        self._stub_pxx_repo(monkeypatch)
+        monkeypatch.setattr(cli_mod, "_git_head_sha", lambda: "abcdef0123456789")
+        monkeypatch.setattr(cli_mod.audit, "last_session_head_for", lambda r: "fedcba0")
+
+        class _Result:
+            returncode = 0
+            stdout = "pxx/cli.py\nREADME.md\n"
+
+        monkeypatch.setattr(cli_mod.subprocess, "run", lambda *a, **kw: _Result())
+        _emit_core_restart_banner()
+        err = capsys.readouterr().err
+        assert "loaded freshly-edited" in err
+        assert "cli.py" in err
+        assert "abcdef0" in err  # short sha (first 7)
+
+    def test_emits_for_endpoints(self, monkeypatch, capsys):
+        import pxx.cli as cli_mod
+
+        self._stub_pxx_repo(monkeypatch)
+        monkeypatch.setattr(cli_mod, "_git_head_sha", lambda: "abcdef0")
+        monkeypatch.setattr(cli_mod.audit, "last_session_head_for", lambda r: "fedcba0")
+
+        class _Result:
+            returncode = 0
+            stdout = "pxx/endpoints.py\n"
+
+        monkeypatch.setattr(cli_mod.subprocess, "run", lambda *a, **kw: _Result())
+        _emit_core_restart_banner()
+        err = capsys.readouterr().err
+        assert "endpoints.py" in err
+
+    def test_emits_lists_multiple_core_files(self, monkeypatch, capsys):
+        import pxx.cli as cli_mod
+
+        self._stub_pxx_repo(monkeypatch)
+        monkeypatch.setattr(cli_mod, "_git_head_sha", lambda: "abcdef0")
+        monkeypatch.setattr(cli_mod.audit, "last_session_head_for", lambda r: "fedcba0")
+
+        class _Result:
+            returncode = 0
+            stdout = "pxx/cli.py\npxx/endpoints.py\n"
+
+        monkeypatch.setattr(cli_mod.subprocess, "run", lambda *a, **kw: _Result())
+        _emit_core_restart_banner()
+        err = capsys.readouterr().err
+        assert "cli.py" in err
+        assert "endpoints.py" in err

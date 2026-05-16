@@ -13,6 +13,7 @@ import time
 from pathlib import Path
 
 from pxx import audit
+from pxx._core_files import is_core
 from pxx.commands_index import CommandInfo, list_commands
 from pxx.endpoints import Endpoint, detect_endpoint
 from pxx.scope import (
@@ -357,6 +358,59 @@ def _git_head_sha() -> str | None:
         return None
 
 
+def _emit_core_restart_banner() -> None:
+    """Print a one-line banner if a core pxx module changed since the
+    previous session in this repo (#008 M2).
+
+    Reads the most recent ``session_start`` record from the audit log and
+    compares its ``git_head_sha`` to the current HEAD. If a core file
+    (see :mod:`pxx._core_files`) changed in that SHA range, prints a
+    stderr confirmation that the freshly-edited code is now loaded.
+
+    Silent on every error path: first launch ever, no audit log dir,
+    previous SHA missing or rewound out of history, current cwd outside
+    the pxx repo, or any subprocess/IO failure. The banner is a
+    convenience, never a correctness guarantee.
+    """
+    if not _in_git_repo():
+        return
+    repo_root = _git_repo_root()
+    if repo_root is None or repo_root.resolve() != REPO_ROOT.resolve():
+        return
+    cur_sha = _git_head_sha()
+    if not cur_sha:
+        return
+    try:
+        prev_sha = audit.last_session_head_for(str(repo_root))
+    except Exception:  # noqa: BLE001 — audit lookup is best-effort
+        return
+    if not prev_sha or prev_sha == cur_sha:
+        return
+    try:
+        result = subprocess.run(
+            ["git", "diff", "--name-only", f"{prev_sha}..{cur_sha}"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=2,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return
+    if result.returncode != 0:
+        # `prev_sha` may have been rebased/garbage-collected out of history.
+        return
+    core_changed = [f for f in result.stdout.strip().splitlines() if is_core(f)]
+    if not core_changed:
+        return
+    short = cur_sha[:7]
+    names = ", ".join(Path(p).name for p in core_changed)
+    print(
+        f"pxx: loaded freshly-edited {names} (commit {short})",
+        file=sys.stderr,
+    )
+
+
 def _determine_session_class(
     edit_mode: bool,
     dry_run: bool,
@@ -565,6 +619,10 @@ def main() -> None:
     # self-edit that broke pxx surfaces a clear recovery message rather
     # than a confusing mid-startup crash.
     _self_sanity_check()
+
+    # #008 M2: confirm freshly-edited core modules are now loaded. Silent
+    # outside the pxx repo or when nothing core changed since last session.
+    _emit_core_restart_banner()
 
     # #004 step 3: best-effort retention pass on the audit log dir.
     # Cheap (one directory scan) and idempotent. Errors are silenced — a

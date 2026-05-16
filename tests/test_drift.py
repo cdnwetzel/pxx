@@ -5,8 +5,6 @@ from __future__ import annotations
 import subprocess
 from unittest.mock import MagicMock
 
-import pytest
-
 from pxx import drift
 
 
@@ -47,9 +45,7 @@ class TestDrift:
         mock_run.return_value.stdout = "remote_sha\nremote_branch\n"
         monkeypatch.setattr(subprocess, "run", mock_run)
 
-        sha, branch, error = drift._get_remote_state(
-            "user@host", "/path/to/repo", timeout=5.0
-        )
+        sha, branch, error = drift._get_remote_state("user@host", "/path/to/repo", timeout=5.0)
 
         assert sha == "remote_sha"
         assert branch == "remote_branch"

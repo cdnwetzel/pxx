@@ -10,7 +10,7 @@ import subprocess
 import sys
 from dataclasses import dataclass
 
-from pxx import audit, safety
+from pxx import safety
 
 
 @dataclass(frozen=True)

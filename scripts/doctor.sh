@@ -52,3 +52,12 @@ if command -v osx-cpu-temp >/dev/null; then
 else
   echo "  install with: brew install osx-cpu-temp"
 fi
+
+echo
+echo "=== Drift ==="
+# Use the system python3 to run pxx.drift directly if possible, or use pxx CLI
+if command -v pxx >/dev/null; then
+  pxx --check-sync
+else
+  python3 -m pxx.cli --check-sync
+fi

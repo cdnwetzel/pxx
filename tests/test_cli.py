@@ -889,6 +889,68 @@ class TestInstallHookFlag:
         assert "--uninstall" in argv
 
 
+class TestCheckSync:
+    def test_check_sync_exits_0_on_success(self, monkeypatch, capsys):
+        import pxx.drift as drift_mod
+
+        res = drift_mod.DriftResult(
+            is_synced=True, local_sha="a", remote_sha="a", local_branch="m", remote_branch="m"
+        )
+        monkeypatch.setattr(drift_mod, "check_sync", lambda: res)
+        monkeypatch.setattr(sys, "argv", ["pxx", "--check-sync"])
+
+        with pytest.raises(SystemExit) as exc:
+            main()
+        assert exc.value.code == 0
+        _, err = capsys.readouterr()
+        assert "in sync" in err
+
+    def test_check_sync_exits_1_on_drift(self, monkeypatch, capsys):
+        import pxx.drift as drift_mod
+
+        res = drift_mod.DriftResult(
+            is_synced=False,
+            local_sha="a",
+            remote_sha="b",
+            local_branch="m",
+            remote_branch="m",
+        )
+        monkeypatch.setattr(drift_mod, "check_sync", lambda: res)
+        monkeypatch.setattr(sys, "argv", ["pxx", "--check-sync"])
+
+        with pytest.raises(SystemExit) as exc:
+            main()
+        assert exc.value.code == 1
+        _, err = capsys.readouterr()
+        assert "drift detected" in err
+
+    def test_autocheck_drift_fires_on_edit_when_env_set(self, monkeypatch, capsys):
+        import pxx.drift as drift_mod
+
+        res = drift_mod.DriftResult(
+            is_synced=False,
+            local_sha="a",
+            remote_sha="b",
+            local_branch="m",
+            remote_branch="m",
+        )
+        monkeypatch.setattr(drift_mod, "check_sync", lambda: res)
+        monkeypatch.setenv("PXX_AUTOCHECK_DRIFT", "1")
+        monkeypatch.setattr(sys, "argv", ["pxx", "--edit"])
+
+        # Stub the rest of main to avoid aider exec
+        monkeypatch.setattr(os, "execv", lambda _bin, args: None)
+        monkeypatch.setattr("pxx.cli.detect_endpoint", lambda: Endpoint("n", "u"))
+        monkeypatch.setattr("pxx.cli._find_aider", lambda: "/x/aider")
+        monkeypatch.setattr("pxx.cli._create_safety_tag", lambda: None)
+        # Skip scope resolution
+        monkeypatch.setattr("pxx.cli.extract_scope_args", lambda a: ([], a))
+
+        main()
+        _, err = capsys.readouterr()
+        assert "drift detected" in err
+
+
 class TestListCommandsFlag:
     def test_print_command_listing_includes_all_six_commands(self, capsys):
         _print_command_listing()

@@ -129,6 +129,8 @@ modules:
   distillation (#004).
 - **`pxx/_git.py`**: Internal git CLI wrappers shared across modules.
 - **`pxx/_core_files.py`**: Registry for auto-restart notifications (#008).
+- **`pxx/drift.py`**: Probes remote (Studio) HEAD over SSH to detect sync 
+  drift between machines (#006).
 
 **`pxx/cli.py`** dispatches as follows:
 1. Calls `detect_endpoint()` from `pxx/endpoints.py`

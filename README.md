@@ -159,7 +159,24 @@ Copy `config/conventions.md` into each project root as `CONVENTIONS.md`. Aider a
 bash scripts/doctor.sh
 ```
 
-Reports: which endpoints are reachable, memory pressure, loaded models, CPU temp.
+Reports: which endpoints are reachable, memory pressure, loaded models, CPU temp,
+and **cross-machine sync status** (drift detection).
+
+### Cross-machine drift detection
+
+Because `pxx` runs on two machines (Neo and Studio), they can occasionally
+drift out of sync if you forget to `git deliver` / `rsync`.
+
+```bash
+pxx --check-sync     # manual check: Neo HEAD vs Studio HEAD over SSH
+```
+
+Optional auto-check on every `--edit` session:
+- Set `export PXX_AUTOCHECK_DRIFT=1` in `~/.zshrc` to opt-in.
+- `pxx --edit --no-check-sync` bypasses the check for one session.
+
+The check is informational: if drift is detected, `pxx` warns but continues
+launching aider. A hard block would risk workflow traps on flaky networks.
 
 ## Developing pxx itself
 

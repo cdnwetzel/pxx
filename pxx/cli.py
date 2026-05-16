@@ -14,7 +14,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from pxx import _git, audit, safety, self_modes
+from pxx import _git, audit, drift, safety, self_modes
 from pxx._core_files import is_core
 from pxx.commands_index import CommandInfo, list_commands
 from pxx.endpoints import Endpoint, detect_endpoint
@@ -286,6 +286,11 @@ def main() -> None:
         _print_command_listing()
         sys.exit(0)
 
+    if "--check-sync" in sys.argv:
+        res = drift.check_sync()
+        drift.print_report(res)
+        sys.exit(0 if res.is_synced or res.error else 1)
+
     if "--install-hook" in sys.argv:
         _install_precommit_hook()
 
@@ -308,6 +313,15 @@ def main() -> None:
     anywhere_mode = "--anywhere" in sys.argv
     self_improve_mode = "--self-improve" in sys.argv
     self_fix_mode = "--self-fix" in sys.argv
+
+    # #006 M2: optional pre-edit drift check.
+    # Off by default; PXX_AUTOCHECK_DRIFT=1 to opt-in.
+    autocheck = os.environ.get("PXX_AUTOCHECK_DRIFT") == "1"
+    skip_check = "--no-check-sync" in sys.argv
+    if edit_mode and autocheck and not skip_check:
+        res = drift.check_sync()
+        if not res.is_synced:
+            drift.print_report(res)
 
     if self_fix_mode:
         # --self-fix implies --edit; force it on so all downstream
@@ -362,7 +376,16 @@ def main() -> None:
     user_args = [
         a
         for a in argv_after_scope
-        if a not in ("--edit", "--big", "--anywhere", "--self-improve", "--self-fix")
+        if a
+        not in (
+            "--edit",
+            "--big",
+            "--anywhere",
+            "--self-improve",
+            "--self-fix",
+            "--check-sync",
+            "--no-check-sync",
+        )
     ]
     if self_fix_task:
         has_message = any(a == "--message" or a.startswith("--message=") for a in user_args)

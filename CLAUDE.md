@@ -13,8 +13,13 @@ Two-machine design:
 - **Studio** (M4 Max, 36GB) hosts Ollama with `devstral:24b` (default) and others
 - **Neo** (8GB MacBook) runs `pxx` orchestrator; relies entirely on Studio for models (no local fallback)
 
-Endpoint priority (first reachable wins, 1s probe timeout):
-`PXX_OLLAMA_BASE` override → Studio LAN (`workstation.splawoffice.local:11434`, IP `192.168.111.172`) → Studio over VPN.
+**Studio endpoint:** `workstation.splawoffice.local:11434` (IP `192.168.111.172`)
+- Reachable on office LAN directly
+- Reachable over VPN using the same hostname
+- Set `PXX_OLLAMA_BASE` to override (rarely needed)
+
+Endpoint detection (first reachable wins, 1s timeout per probe):
+`PXX_OLLAMA_BASE` override → Studio hostname (LAN or VPN).
 (Neo has no local Ollama; all sessions require Studio connectivity.)
 
 **Security posture:** the Studio binds Ollama to `0.0.0.0:11434` (all

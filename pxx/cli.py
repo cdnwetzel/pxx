@@ -68,9 +68,10 @@ NEO_DEFAULT = "ollama_chat/qwen3:4b"
 
 
 def model_for(endpoint: Endpoint) -> str:
-    # Only the "neo" endpoint name gets NEO_DEFAULT; every other name
-    # (including PXX_OLLAMA_BASE "override") is assumed to be a Studio-class
-    # machine and gets STUDIO_DEFAULT. Override the assumption with PXX_MODEL.
+    # Currently, all endpoints (studio_lan, studio_remote, override) route to STUDIO_DEFAULT.
+    # Neo has no local Ollama, so endpoint.name == "neo" will not occur in practice.
+    # Kept for future-proofing if local Ollama is added to Neo.
+    # Override model selection with PXX_MODEL environment variable.
     override = os.environ.get("PXX_MODEL")
     if override:
         return override

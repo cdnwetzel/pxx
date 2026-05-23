@@ -11,10 +11,11 @@ aider takes over the process, pxx is out of the picture.
 
 Two-machine design:
 - **Studio** (M4 Max, 36GB) hosts Ollama with `devstral:24b` (default) and others
-- **Neo** (8GB MacBook) runs `pxx` itself, with `qwen3:4b` as the offline fallback
+- **Neo** (8GB MacBook) runs `pxx` orchestrator; relies entirely on Studio for models (no local fallback)
 
 Endpoint priority (first reachable wins, 1s probe timeout):
-`PXX_OLLAMA_BASE` override → Studio LAN → Studio over VPN → Neo localhost.
+`PXX_OLLAMA_BASE` override → Studio LAN → Studio over VPN.
+(Neo has no local Ollama; all sessions require Studio connectivity.)
 
 **Security posture:** the Studio binds Ollama to `0.0.0.0:11434` (all
 interfaces). Ollama itself has no authentication, so this is only safe

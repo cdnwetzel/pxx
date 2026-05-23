@@ -1,11 +1,12 @@
 """Detect which Ollama endpoint to use.
 
-Priority: explicit override > Studio LAN > Studio over VPN > Neo localhost.
+Priority: explicit override > Studio LAN > Studio over VPN.
 First reachable wins. 1-second timeout per probe.
 
-LAN = on the office network (e.g. workstation:11434, resolvable via
-corp DNS or mDNS).
-Remote = work DNS resolvable while connected to the SSL VPN.
+All Ollama instances run on the Studio (M4 Max, 36GB).
+- LAN = on the office network (e.g. workstation:11434, resolvable via corp DNS or mDNS)
+- Remote = Studio resolvable while connected to the SSL VPN
+Neo (8GB MacBook) has no local Ollama and must reach the Studio over the network.
 """
 
 from __future__ import annotations
@@ -65,5 +66,5 @@ def detect_endpoint() -> Endpoint:
     raise RuntimeError(
         "No Ollama endpoint reachable. "
         "Bring up the VPN to reach the Studio, "
-        "or start Ollama locally (`brew services start ollama`) for offline fallback."
+        "or confirm Studio is running Ollama on LAN."
     )

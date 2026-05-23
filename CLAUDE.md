@@ -14,7 +14,7 @@ Two-machine design:
 - **Neo** (8GB MacBook) runs `pxx` orchestrator; relies entirely on Studio for models (no local fallback)
 
 Endpoint priority (first reachable wins, 1s probe timeout):
-`PXX_OLLAMA_BASE` override → Studio LAN → Studio over VPN.
+`PXX_OLLAMA_BASE` override → Studio LAN (`workstation.splawoffice.local:11434`, IP `192.168.111.172`) → Studio over VPN.
 (Neo has no local Ollama; all sessions require Studio connectivity.)
 
 **Security posture:** the Studio binds Ollama to `0.0.0.0:11434` (all

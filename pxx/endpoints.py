@@ -19,7 +19,7 @@ from dataclasses import dataclass
 
 PROBE_TIMEOUT_SEC = 1.0
 
-DEFAULT_STUDIO_LAN = "http://workstation:11434"
+DEFAULT_STUDIO_LAN = "http://workstation.splawoffice.local:11434"
 DEFAULT_NEO = "http://localhost:11434"
 
 

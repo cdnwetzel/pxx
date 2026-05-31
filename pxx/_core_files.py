@@ -27,6 +27,7 @@ from __future__ import annotations
 from pathlib import PurePosixPath
 
 CORE_FILES: tuple[str, ...] = (
+    "pxx/_core_files.py",
     "pxx/_git.py",
     "pxx/audit.py",
     "pxx/cli.py",

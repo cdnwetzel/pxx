@@ -66,6 +66,8 @@ def is_sensitive_env(name: str) -> bool:
 
     Exposed for callers that want to audit their own record-construction
     code, e.g., in unit tests asserting no sensitive keys are passed in.
+    Not called internally; privacy contract enforced at the record-construction
+    site in write_session_start() (callers must not pass sensitive keys).
     """
     upper = name.upper()
     return any(p in upper for p in SENSITIVE_ENV_PATTERNS)

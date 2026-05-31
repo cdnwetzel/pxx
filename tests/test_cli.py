@@ -424,7 +424,7 @@ class TestTrustedPathGate:
         from pxx import cli as cli_module
 
         monkeypatch.setattr(
-            cli_module, "detect_endpoint", lambda: Endpoint("neo", "http://x:11434")
+            cli_module, "detect_endpoint", lambda **kwargs: Endpoint("neo", "http://x:11434")
         )
         monkeypatch.setattr(cli_module.os, "execv", lambda *_: None)
         monkeypatch.setattr(cli_module, "_find_aider", lambda: "/x/aider")
@@ -649,7 +649,7 @@ class TestSelfImproveFlag:
         from pxx import cli as cli_module
 
         monkeypatch.setattr(
-            cli_module, "detect_endpoint", lambda: Endpoint("neo", "http://x:11434")
+            cli_module, "detect_endpoint", lambda **kwargs: Endpoint("neo", "http://x:11434")
         )
         monkeypatch.setattr(cli_module.os, "execv", lambda *_: None)
         monkeypatch.setattr(cli_module, "_find_aider", lambda: "/x/aider")
@@ -715,7 +715,7 @@ class TestSelfImproveFlag:
         monkeypatch.chdir(tmp_path)
         monkeypatch.setattr(sys, "argv", ["pxx", "--self-improve"])
         monkeypatch.setattr(
-            cli_module, "detect_endpoint", lambda: Endpoint("neo", "http://x:11434")
+            cli_module, "detect_endpoint", lambda **kwargs: Endpoint("neo", "http://x:11434")
         )
         monkeypatch.setattr(cli_module.os, "execv", fake_execv)
         monkeypatch.setattr(cli_module, "_find_aider", lambda: "/x/aider")
@@ -785,7 +785,7 @@ class TestSelfFixFlag:
         from pxx import cli as cli_module
 
         monkeypatch.setattr(
-            cli_module, "detect_endpoint", lambda: Endpoint("neo", "http://x:11434")
+            cli_module, "detect_endpoint", lambda **kwargs: Endpoint("neo", "http://x:11434")
         )
         monkeypatch.setattr(cli_module.os, "execv", lambda *_: None)
         monkeypatch.setattr(cli_module, "_find_aider", lambda: "/x/aider")
@@ -887,7 +887,7 @@ class TestSelfFixFlag:
         captured: list[list[str]] = []
         monkeypatch.setattr(cli_module.os, "execv", lambda _bin, args: captured.append(args))
         monkeypatch.setattr(
-            cli_module, "detect_endpoint", lambda: Endpoint("neo", "http://x:11434")
+            cli_module, "detect_endpoint", lambda **kwargs: Endpoint("neo", "http://x:11434")
         )
         monkeypatch.setattr(cli_module, "_find_aider", lambda: "/x/aider")
 
@@ -912,7 +912,7 @@ class TestSelfFixFlag:
         captured: list[list[str]] = []
         monkeypatch.setattr(cli_module.os, "execv", lambda _bin, args: captured.append(args))
         monkeypatch.setattr(
-            cli_module, "detect_endpoint", lambda: Endpoint("neo", "http://x:11434")
+            cli_module, "detect_endpoint", lambda **kwargs: Endpoint("neo", "http://x:11434")
         )
         monkeypatch.setattr(cli_module, "_find_aider", lambda: "/x/aider")
 
@@ -949,7 +949,7 @@ class TestSelfFixFlag:
         captured: list[list[str]] = []
         monkeypatch.setattr(cli_module.os, "execv", lambda _bin, args: captured.append(args))
         monkeypatch.setattr(
-            cli_module, "detect_endpoint", lambda: Endpoint("neo", "http://x:11434")
+            cli_module, "detect_endpoint", lambda **kwargs: Endpoint("neo", "http://x:11434")
         )
         monkeypatch.setattr(cli_module, "_find_aider", lambda: "/x/aider")
 
@@ -1034,7 +1034,7 @@ class TestCheckSync:
         mock_execv = MagicMock()
         monkeypatch.setattr(os, "execv", mock_execv)
 
-        monkeypatch.setattr("pxx.cli.detect_endpoint", lambda: Endpoint("n", "u"))
+        monkeypatch.setattr("pxx.cli.detect_endpoint", lambda **kwargs: Endpoint("n", "u"))
         monkeypatch.setattr("pxx.cli._find_aider", lambda: "/x/aider")
         monkeypatch.setattr("pxx.cli._create_safety_tag", lambda: None)
         monkeypatch.setattr("pxx.cli.extract_scope_args", lambda a: ([], a))
@@ -1062,7 +1062,7 @@ class TestCheckSync:
         mock_execv = MagicMock()
         monkeypatch.setattr(os, "execv", mock_execv)
 
-        monkeypatch.setattr("pxx.cli.detect_endpoint", lambda: Endpoint("n", "u"))
+        monkeypatch.setattr("pxx.cli.detect_endpoint", lambda **kwargs: Endpoint("n", "u"))
         monkeypatch.setattr("pxx.cli._find_aider", lambda: "/x/aider")
         monkeypatch.setattr("pxx.cli._create_safety_tag", lambda: None)
         # CF-015: Ensure scope resolution returns something so --self-fix check passes

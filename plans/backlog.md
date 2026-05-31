@@ -113,6 +113,17 @@ comparable and scannable.
   advance to **planned** or **in-progress**.
 - A plan cannot block itself. Cycles are bugs; surface them in PRs.
 
+## Phase 4 Proposed Items (from Gemini Phase 3 review)
+
+| ID  | Title                                | File                                              | Status   | Blocks   | Blocked by |
+| --- | ------------------------------------ | ------------------------------------------------- | -------- | -------- | ---------- |
+| 026 | Process-lifecycle management (subprocess.run) | [process-lifecycle-management.md](process-lifecycle-management.md) | proposed | — | — |
+| 027 | Audit log advisory locking           | [audit-log-locking.md](audit-log-locking.md)     | proposed | — | — |
+| 028 | Git operation timeout standardization | [git-timeout-standardization.md](git-timeout-standardization.md) | proposed | — | — |
+| 029 | Environment variable validation (PXX_DIFF_CAP) | [env-var-validation.md](env-var-validation.md) | proposed | — | — |
+
+See `review/gemini/gemini-phase3.md` for detailed rationale and findings (F-019, F-016, F-018, F-020).
+
 ## Next free ID
 
-`026`
+`030`

@@ -69,7 +69,7 @@ comparable and scannable.
 | 019 | Multi-tier model routing             | [multi-tier-model-routing.md](multi-tier-model-routing.md)                   | done     | —  | 018        |
 | 020 | Workflow state persistence           | [workflow-state-persistence.md](workflow-state-persistence.md)               | done     | 021, 022 | —          |
 | 021 | Review framework integration         | [review-framework-integration.md](review-framework-integration.md)           | done     | —        | 020        |
-| 022 | Light governance gate                | [light-governance-gate.md](light-governance-gate.md)                         | planned  | —        | —          |
+| 022 | Light governance gate                | [light-governance-gate.md](light-governance-gate.md)                         | done     | —        | 020        |
 
 ## Status legend
 

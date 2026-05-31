@@ -14,6 +14,7 @@ from pathlib import Path
 @dataclass(frozen=True)
 class GovernanceViolation:
     """A single governance check failure."""
+
     check: str  # "secrets", "version-sync", "review-pending"
     severity: str  # "error", "warning"
     detail: str
@@ -31,23 +32,35 @@ SECRET_PATTERNS: list[tuple[str, re.Pattern]] = [
 
 
 def scan_staged_secrets(repo_root: Path) -> list[GovernanceViolation]:
-    """Scan staged files for secret patterns.
+    """Scan unpushed commits for secret patterns.
 
-    Gets list of staged files via git diff --cached --name-only,
-    then checks each file against SECRET_PATTERNS.
+    Gets list of files changed in unpushed commits via git diff origin/main..HEAD --name-only.
+    Falls back to HEAD if origin/main doesn't exist (fresh repos).
+    Then checks each file against SECRET_PATTERNS.
     Returns list of violations (severity="error").
     """
     violations = []
 
     try:
+        # Try to scan unpushed commits (origin/main..HEAD)
         result = subprocess.run(
-            ["git", "diff", "--cached", "--name-only"],
+            ["git", "diff", "origin/main..HEAD", "--name-only"],
             cwd=repo_root,
             capture_output=True,
             text=True,
             check=False,
             timeout=5,
         )
+        # If origin/main doesn't exist, fall back to HEAD (fresh repo)
+        if result.returncode != 0:
+            result = subprocess.run(
+                ["git", "diff", "HEAD", "--name-only"],
+                cwd=repo_root,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=5,
+            )
         staged_files = result.stdout.strip().splitlines()
     except (FileNotFoundError, subprocess.TimeoutExpired):
         return violations
@@ -65,11 +78,13 @@ def scan_staged_secrets(repo_root: Path) -> list[GovernanceViolation]:
         for pattern_name, pattern in SECRET_PATTERNS:
             for line_num, line in enumerate(content.splitlines(), 1):
                 if pattern.search(line):
-                    violations.append(GovernanceViolation(
-                        check="secrets",
-                        severity="error",
-                        detail=f"{filepath}:{line_num} matches {pattern_name}",
-                    ))
+                    violations.append(
+                        GovernanceViolation(
+                            check="secrets",
+                            severity="error",
+                            detail=f"{filepath}:{line_num} matches {pattern_name}",
+                        )
+                    )
                     break  # Report once per file per pattern
 
     return violations
@@ -99,21 +114,25 @@ def check_version_sync(repo_root: Path, config: dict) -> list[GovernanceViolatio
 
         full_path = repo_root / filepath
         if not full_path.exists():
-            violations.append(GovernanceViolation(
-                check="version-sync",
-                severity="warning",
-                detail=f"{filepath} not found",
-            ))
+            violations.append(
+                GovernanceViolation(
+                    check="version-sync",
+                    severity="warning",
+                    detail=f"{filepath} not found",
+                )
+            )
             continue
 
         try:
             content = full_path.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
-            violations.append(GovernanceViolation(
-                check="version-sync",
-                severity="error",
-                detail=f"{filepath} read error",
-            ))
+            violations.append(
+                GovernanceViolation(
+                    check="version-sync",
+                    severity="error",
+                    detail=f"{filepath} read error",
+                )
+            )
             continue
 
         version = None
@@ -132,11 +151,13 @@ def check_version_sync(repo_root: Path, config: dict) -> list[GovernanceViolatio
                 data = json.loads(content)
                 version = data.get(key)
             except json.JSONDecodeError:
-                violations.append(GovernanceViolation(
-                    check="version-sync",
-                    severity="error",
-                    detail=f"{filepath} is invalid JSON",
-                ))
+                violations.append(
+                    GovernanceViolation(
+                        check="version-sync",
+                        severity="error",
+                        detail=f"{filepath} is invalid JSON",
+                    )
+                )
                 continue
 
         elif parser.startswith("py-assign:"):
@@ -146,11 +167,13 @@ def check_version_sync(repo_root: Path, config: dict) -> list[GovernanceViolatio
             version = m.group(1) if m else None
 
         if version is None:
-            violations.append(GovernanceViolation(
-                check="version-sync",
-                severity="warning",
-                detail=f"{filepath} (parser={parser}) returned no version",
-            ))
+            violations.append(
+                GovernanceViolation(
+                    check="version-sync",
+                    severity="warning",
+                    detail=f"{filepath} (parser={parser}) returned no version",
+                )
+            )
             continue
 
         if version not in versions:
@@ -161,11 +184,13 @@ def check_version_sync(repo_root: Path, config: dict) -> list[GovernanceViolatio
     # Check for version mismatch
     if len(versions) > 1:
         detail_lines = [f"{v}: {', '.join(files)}" for v, files in versions.items()]
-        violations.append(GovernanceViolation(
-            check="version-sync",
-            severity="error",
-            detail=f"Version mismatch: {'; '.join(detail_lines)}",
-        ))
+        violations.append(
+            GovernanceViolation(
+                check="version-sync",
+                severity="error",
+                detail=f"Version mismatch: {'; '.join(detail_lines)}",
+            )
+        )
 
     return violations
 
@@ -185,18 +210,22 @@ def check_review_verdict(repo_root: Path) -> list[GovernanceViolation]:
         return violations
 
     if state.phase == "review_pending":
-        violations.append(GovernanceViolation(
-            check="review-pending",
-            severity="warning",
-            detail=f"Review pending: {state.review_verdict or 'no verdict yet'}. Run pxx --review",
-        ))
+        violations.append(
+            GovernanceViolation(
+                check="review-pending",
+                severity="warning",
+                detail=f"Review pending: {state.review_verdict or 'no verdict yet'}. Run pxx --review",
+            )
+        )
 
     elif state.phase == "rejected":
-        violations.append(GovernanceViolation(
-            check="review-pending",
-            severity="error",
-            detail="Review rejected. Run pxx --review --heal or pxx --edit to fix",
-        ))
+        violations.append(
+            GovernanceViolation(
+                check="review-pending",
+                severity="error",
+                detail="Review rejected. Run pxx --review --heal or pxx --edit to fix",
+            )
+        )
 
     return violations
 
@@ -206,8 +235,16 @@ def run_governance_check(repo_root: Path) -> int:
 
     Returns 0 if no errors, 1 if any error-severity violations found.
     Warnings are reported but don't fail the check.
+
+    PXX_GOVERNANCE_SKIP env var bypasses checks (tests only; set by pytest).
     """
     if os.environ.get("PXX_GOVERNANCE_SKIP") == "1":
+        if not os.environ.get("PYTEST_CURRENT_TEST"):
+            raise RuntimeError(
+                "PXX_GOVERNANCE_SKIP is reserved for test environments only. "
+                "It is set automatically by pytest via the PYTEST_CURRENT_TEST env var. "
+                "Explicit use outside tests is not permitted."
+            )
         return 0
 
     violations = []

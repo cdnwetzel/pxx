@@ -73,12 +73,11 @@ VLLM_T3_DEFAULT = "qwen3-coder-72b"
 _TIER_MODEL = {
     ("ollama", "t1"): T1_DEFAULT,
     ("ollama", "t2"): STUDIO_DEFAULT,  # fallback if vLLM unavailable
-    ("ollama", "t3"): T1_DEFAULT,      # fallback if vLLM unavailable
-    ("vllm", "t1"): T1_DEFAULT,        # fast path: use Ollama even when vLLM available
+    ("ollama", "t3"): T1_DEFAULT,  # fallback if vLLM unavailable
+    ("vllm", "t1"): T1_DEFAULT,  # fast path: use Ollama even when vLLM available
     ("vllm", "t2"): VLLM_DEFAULT,
     ("vllm", "t3"): VLLM_T3_DEFAULT,
 }
-
 
 
 def model_for(endpoint: Endpoint, tier: str | None = None) -> str:
@@ -86,14 +85,21 @@ def model_for(endpoint: Endpoint, tier: str | None = None) -> str:
     override = os.environ.get("PXX_MODEL")
     if override:
         return override
-    
+
     if tier:
+        # Tier 1 requires Ollama; reject vLLM endpoints
+        if tier == "t1" and endpoint.backend == "vllm":
+            raise RuntimeError(
+                f"--tier t1 requires Ollama endpoint, but {endpoint.name} ({endpoint.backend}) "
+                f"is available. Check Studio connectivity or use --tier t2/t3."
+            )
+
         key = (endpoint.backend, tier)
         if key in _TIER_MODEL:
             return _TIER_MODEL[key]
         # Fallback for unknown tier
         return _TIER_MODEL.get((endpoint.backend, "t2"), STUDIO_DEFAULT)
-    
+
     # No tier specified: use backend-based default
     if endpoint.backend == "vllm":
         return VLLM_DEFAULT
@@ -102,7 +108,7 @@ def model_for(endpoint: Endpoint, tier: str | None = None) -> str:
 
 def _extract_tier(argv: list[str]) -> tuple[str | None, list[str]]:
     """Extract --tier value from argv, return (tier, remaining_argv).
-    
+
     Handles: --tier t1, --tier=t2, or no tier specified.
     """
     tier = None
@@ -121,12 +127,14 @@ def _extract_tier(argv: list[str]) -> tuple[str | None, list[str]]:
             i += 1
     return tier, remaining
 
+
 def _set_backend_env(endpoint: Endpoint) -> None:
     if endpoint.backend == "vllm":
         os.environ["OPENAI_API_BASE"] = endpoint.url + "/v1"
         os.environ.setdefault("OPENAI_API_KEY", "EMPTY")
     else:
         os.environ["OLLAMA_API_BASE"] = endpoint.url
+
 
 def _find_aider() -> str:
     # Prefer the aider binary in our own venv if it exists.
@@ -452,7 +460,7 @@ def main() -> None:
     except RuntimeError as e:
         print(f"pxx: {e}", file=sys.stderr)
         sys.exit(1)
-    
+
     user_args = [
         a
         for a in argv_after_tier

@@ -17,6 +17,7 @@ import os
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
+from pathlib import Path
 
 PROBE_TIMEOUT_SEC = 1.0
 
@@ -29,7 +30,7 @@ DEFAULT_VLLM = "http://workstation.splawoffice.local:8000"
 class Endpoint:
     name: str
     url: str
-    backend: str = "ollama"        # "ollama" | "vllm"
+    backend: str = "ollama"  # "ollama" | "vllm"
     tensor_parallel: bool = False  # informational; True for vLLM TP-2 endpoints
 
 
@@ -37,12 +38,29 @@ def _probe_ollama(url: str) -> bool:
     """Return True iff `url` responds to /api/tags with an Ollama-shaped payload."""
     if not url:
         return False
-    try:
-        with urllib.request.urlopen(f"{url}/api/tags", timeout=PROBE_TIMEOUT_SEC) as resp:
-            data = json.load(resp)
-            return isinstance(data, dict) and "models" in data
-    except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError):
-        return False
+
+    secret_path = Path.home() / ".config/pxx/studio-secret"
+    secret = None
+    if secret_path.exists():
+        import contextlib
+
+        with contextlib.suppress(OSError, ValueError):
+            secret = secret_path.read_text().strip()
+
+    def _try_probe(auth_header: str | None = None) -> bool:
+        probe_url = f"{url}/api/tags"
+        req = urllib.request.Request(probe_url)
+        if auth_header:
+            req.add_header("Authorization", auth_header)
+        try:
+            with urllib.request.urlopen(req, timeout=PROBE_TIMEOUT_SEC) as resp:
+                data = json.load(resp)
+                return isinstance(data, dict) and "models" in data
+        except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError):
+            return False
+
+    # Try with auth if secret available, then fall back to unauthenticated
+    return _try_probe(f"Bearer {secret}") if secret else _try_probe()
 
 
 def _probe_vllm(url: str) -> bool:

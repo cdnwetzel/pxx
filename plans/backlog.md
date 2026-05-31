@@ -151,8 +151,35 @@ See `review/codex/codex-phase3.md` for detailed findings (F-001 HIGH, F-002 MEDI
 
 See `review/copilot/copilot-phase3-review.md` for detailed findings (F-001 HIGH confirmed, F-002–F-008 MEDIUM/LOW).
 
-**CRITICAL:** F-001 is a confirmed security blocker. Commit f170de6 claims fix but code unchanged. Staged secrets still escape the gate if file is modified before commit. Addresses review-agent finding from prior passes (F-005). Must fix before next release.
+## Phase 5: Local-First Integrations & Learnings Loop
+
+**Context:** 9router (token compression), agentmemory (learnings memory), agent-skills (workflow discipline) — evaluated and designed for pxx.
+
+### Critical Path (Tier 4 Learnings Loop) — 5–7 days
+
+| ID  | Title                                | File                                              | Status   | Blocks   | Blocked by |
+| --- | ------------------------------------ | ------------------------------------------------- | -------- | -------- | ---------- |
+| 043 | agentmemory: Persistent memory server setup | [agentmemory-setup.md](agentmemory-setup.md) | proposed | 044 | — |
+| 044 | agentmemory: Daily audit-log indexer | [audit-log-indexer.md](audit-log-indexer.md) | proposed | 045 | 043 |
+| 045 | agentmemory: Pre-session learnings query + MCP | [learnings-query-mcp.md](learnings-query-mcp.md) | proposed | — | 044 |
+
+### Parallel Track (Workflow Discipline) — run during indexer dev
+
+| ID  | Title                                | File                                              | Status   | Blocks   | Blocked by |
+| --- | ------------------------------------ | ------------------------------------------------- | -------- | -------- | ---------- |
+| 046 | agent-skills: Refactor self_modes → YAML | [agent-skills-refactor.md](agent-skills-refactor.md) | proposed | 047 | — |
+| 047 | agent-skills: Slash command integration | [skill-slash-commands.md](skill-slash-commands.md) | proposed | — | 046 |
+
+### Optional Enhancement
+
+| ID  | Title                                | File                                              | Status   | Blocks   | Blocked by |
+| --- | ------------------------------------ | ------------------------------------------------- | -------- | -------- | ---------- |
+| 048 | 9router: Optional token compression layer | [9router-integration.md](9router-integration.md) | proposed | — | — |
+| 049 | Audit log schema evolution (learnings fields) | [audit-schema-evolution.md](audit-schema-evolution.md) | proposed | — | — |
+
+**Total Phase 5:** ~15 days (critical path + parallel + optional)  
+**Start gate:** Phase 4 complete ✓ (382 tests passing, all HIGH+MEDIUM items done)
 
 ## Next free ID
 
-`043`
+`050`

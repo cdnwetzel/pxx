@@ -24,8 +24,11 @@ class GovernanceViolation:
 SECRET_PATTERNS: list[tuple[str, re.Pattern]] = [
     ("api-key-literal", re.compile(r"(?i)(api[_-]?key|apikey)\s*=\s*['\"][^'\"]{8,}['\"]")),
     ("openai-key", re.compile(r"sk-[a-zA-Z0-9]{32,}")),
+    ("anthropic-key", re.compile(r"sk-ant-[a-zA-Z0-9]{32,}")),
+    ("huggingface-token", re.compile(r"hf_[a-zA-Z0-9]{20,}")),
     ("aws-key", re.compile(r"AKIA[0-9A-Z]{16}")),
     ("github-token", re.compile(r"ghp_[a-zA-Z0-9]{36}")),
+    ("bearer-token", re.compile(r"(?i)bearer\s+[a-zA-Z0-9\.\-_]{20,}")),
     ("private-key-pem", re.compile(r"-----BEGIN (?:RSA |EC )?PRIVATE KEY-----")),
     ("generic-password", re.compile(r"(?i)password\s*=\s*['\"][^'\"]{4,}['\"]")),
 ]

@@ -29,6 +29,7 @@ from __future__ import annotations
 import gzip
 import json
 import os
+import re
 import secrets
 import time
 from datetime import datetime
@@ -70,11 +71,24 @@ def is_sensitive_env(name: str) -> bool:
     return any(p in upper for p in SENSITIVE_ENV_PATTERNS)
 
 
+def _scrub_url(url: str) -> str:
+    """Remove credentials from a URL (user:password@host -> host)."""
+    if not url:
+        return url
+    # Match scheme://[user:password@]host[:port][/path]
+    match = re.match(r"^([a-z]+://)((?:[^@]+@)?)(.+)$", url, re.IGNORECASE)
+    if match:
+        scheme, credentials, host_part = match.groups()
+        return scheme + host_part
+    return url
+
+
 def write_session_start(record: dict, log_path: Path | None = None) -> Path:
     """Append a ``session_start`` record to today's log file.
 
     Creates the log directory and file if needed. Fills in defaults for
     ``event``, ``ts``, and ``session_id`` if the caller didn't.
+    Scrubs credentials from endpoint_url before logging.
 
     Returns the path written to. Raises on filesystem errors — callers
     should suppress (the audit log failing must not abort pxx startup).
@@ -84,6 +98,9 @@ def write_session_start(record: dict, log_path: Path | None = None) -> Path:
     record.setdefault("event", "session_start")
     record.setdefault("ts", now_iso())
     record.setdefault("session_id", make_session_id())
+    # Scrub credentials from endpoint_url to prevent leakage
+    if "endpoint_url" in record:
+        record["endpoint_url"] = _scrub_url(record["endpoint_url"])
     with path.open("a", encoding="utf-8") as f:
         f.write(json.dumps(record, separators=(",", ":")) + "\n")
     return path

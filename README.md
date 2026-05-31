@@ -4,10 +4,10 @@ Personal Python coding agent. Thin wrapper over [aider](https://aider.chat). Ful
 
 ## Architecture
 
-- **Heavy end:** Mac Studio `workstation` (M4 Max, 36GB, 410GB/s) runs Ollama. Default model: `devstral:24b` (alternates pulled: `qwen2.5:32b-instruct-q4_K_M`, `qwen3:14b`, `qwen3:8b`)
+- **Heavy end:** Mac Studio `workstation` (M4 Max, 36GB, 410GB/s) runs Ollama. Default model: `ollama_chat/devstral:24b` (see `config/model-settings.yml` for available models and their tuning)
 - **Thin end:** MacBook Neo (A18 Pro, 8GB) runs `pxx`, auto-detects where to send requests
 - **Remote access:** your existing SSL VPN. Nothing exposed to the public internet.
-- **Endpoint priority:** Studio LAN (office) → Studio over VPN (remote) → Neo localhost (offline, `qwen3:4b`)
+- **Endpoint priority (first reachable wins):** vLLM (Machine 1) → Ollama Studio LAN (office) → Ollama Studio over VPN (remote) → Ollama Neo localhost (offline, `qwen3:4b`)
 
 ## Setup
 

@@ -19,7 +19,7 @@ Two-machine design:
 - Set `PXX_OLLAMA_BASE` to override (rarely needed)
 
 Endpoint detection (first reachable wins, 1s timeout per probe):
-`PXX_OLLAMA_BASE` override → Studio hostname (LAN or VPN).
+`PXX_OLLAMA_BASE` override → vLLM (Machine 1) → Ollama Studio LAN → Ollama Studio VPN → Ollama Neo localhost.
 (Neo has no local Ollama; all sessions require Studio connectivity.)
 
 **Security posture:** the Studio binds Ollama to `0.0.0.0:11434` (all

@@ -92,7 +92,7 @@ comparable and scannable.
 | ID  | Title                                | File                                              | Status   | Blocks   | Blocked by |
 | --- | ------------------------------------ | ------------------------------------------------- | -------- | -------- | ---------- |
 | 023 | Test architecture refactor (call → state verification) | [test-refactor-architecture.md](test-refactor-architecture.md) | done | 025 | — |
-| 024 | Python 3.13 ceiling documentation | [python313-ceiling-docs.md](python313-ceiling-docs.md) | proposed | — | — |
+| 024 | Python 3.13 ceiling documentation | [python313-ceiling-docs.md](python313-ceiling-docs.md) | done | — | — |
 | 025 | Environment isolation (OPENAI_API_KEY) | [environment-isolation.md](environment-isolation.md) | done | — | 023 |
 
 ## Status legend

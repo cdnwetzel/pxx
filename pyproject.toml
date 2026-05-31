@@ -2,6 +2,9 @@
 name = "pxx"
 version = "0.1.0"
 description = "Personal offline Python coding agent, thin wrapper over aider."
+# Python 3.13: Not yet tested. asyncio and subprocess behavior changes in 3.13
+# may affect endpoint detection and aider subprocess handling. Conservative
+# ceiling; upgrade after testing with Studio (M4 Max) and Neo (A18) endpoints.
 requires-python = ">=3.11,<3.13"
 dependencies = [
     # Pinned exact — aider releases weekly and can change pxx's wrapped

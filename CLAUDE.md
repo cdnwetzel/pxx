@@ -96,9 +96,8 @@ uv run ruff format
 uv run pytest -q
 ```
 
-Tests cover the pure helper functions in `pxx/cli.py` and `pxx/endpoints.py`
-(`model_for`, `_in_git_repo`, `_find_aider`, `_probe`, `detect_endpoint`).
-They do **not** exercise aider or Ollama — those are integration concerns.
+Tests cover pure helper functions across pxx modules (see `tests/` for full
+coverage). They do **not** exercise aider or Ollama — those are integration concerns.
 
 After editing `cli.py` or `endpoints.py`, the running pxx/aider session still
 has old code in memory — the user must exit and re-launch to test interactively.

@@ -6,7 +6,7 @@ from dataclasses import FrozenInstanceError
 
 import pytest
 
-from pxx.endpoints import Endpoint, _probe, detect_endpoint
+from pxx.endpoints import Endpoint, _candidates, _probe, detect_endpoint
 
 
 class TestProbe:
@@ -136,6 +136,15 @@ class TestDetectEndpointTierPreference:
         result = detect_endpoint(preferred_backend=None)
         # Default behavior: vLLM first
         assert result.backend == "vllm"
+
+
+class TestCandidatesAlias:
+    def test_candidates_returns_tuple_of_endpoints(self):
+        # F-004: _candidates is a backward-compat alias for _ollama_candidates.
+        # Verify it returns a tuple of Endpoint objects.
+        result = _candidates()
+        assert isinstance(result, tuple)
+        assert all(isinstance(ep, Endpoint) for ep in result)
 
 
 class TestEndpointDataclass:

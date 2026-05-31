@@ -27,6 +27,14 @@ from pxx.scope import (
     trusted_paths_config_path,
 )
 
+# Path constants — define first since compat aliases below reference REPO_ROOT.
+PKG_DIR = Path(__file__).parent
+REPO_ROOT = PKG_DIR.parent
+SYSTEM_PROMPT = PKG_DIR / "prompts" / "system.md"
+SELF_IMPROVE_PROMPT = PKG_DIR / "prompts" / "self-improve.md"
+AIDER_CONF = REPO_ROOT / "config" / "aider.conf.yml"
+MODEL_SETTINGS = REPO_ROOT / "config" / "model-settings.yml"
+
 # Compatibility re-exports for moved symbols.
 # Tests monkeypatch these names on the cli module, so we must use them
 # internally within this module too.
@@ -55,13 +63,6 @@ def _self_lint() -> int:
 _extract_self_fix_task = self_modes.extract_self_fix_task
 _determine_session_class = self_modes.determine_session_class
 SELF_FIX_DIFF_CAP = self_modes.SELF_FIX_DIFF_CAP
-
-PKG_DIR = Path(__file__).parent
-REPO_ROOT = PKG_DIR.parent
-SYSTEM_PROMPT = PKG_DIR / "prompts" / "system.md"
-SELF_IMPROVE_PROMPT = PKG_DIR / "prompts" / "self-improve.md"
-AIDER_CONF = REPO_ROOT / "config" / "aider.conf.yml"
-MODEL_SETTINGS = REPO_ROOT / "config" / "model-settings.yml"
 
 STUDIO_DEFAULT = "ollama_chat/devstral:24b"
 NEO_DEFAULT = "ollama_chat/qwen3:4b"

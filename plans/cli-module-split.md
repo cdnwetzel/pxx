@@ -43,7 +43,7 @@ to reflect the actual modular composition.
 
 | Done? | Scenario | Expected outcome | Result |
 | :---: | :--- | :--- | :--- |
-| [x] | All tests pass | ✓ 1378 green | @ea53a0c |
+| [x] | All tests pass | ✓ 273 green | @ea53a0c |
 | [x] | Dogfooding surface intact | `--self-test` etc. work | @ea53a0c |
 | [x] | Original surface intact | `pxx` (ask) and `--edit` work | @ea53a0c |
 | [x] | Re-exports valid | `from pxx.cli import _self_test` works | @ea53a0c |

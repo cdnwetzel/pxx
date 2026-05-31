@@ -2,12 +2,7 @@
 
 from __future__ import annotations
 
-import json
-import os
-from pathlib import Path
-from unittest.mock import MagicMock, patch
-
-import pytest
+from unittest.mock import MagicMock
 
 from pxx.governance import (
     check_review_verdict,
@@ -37,7 +32,11 @@ class TestScanStagedSecrets:
 
         violations = scan_staged_secrets(tmp_path)
         assert len(violations) > 0
-        assert any("api-key" in v.detail.lower() or "secret" in v.detail.lower() for v in violations)
+        has_secret = any(
+            "api-key" in v.detail.lower() or "secret" in v.detail.lower()
+            for v in violations
+        )
+        assert has_secret
 
     def test_detects_github_token(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)

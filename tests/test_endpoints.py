@@ -6,7 +6,7 @@ from dataclasses import FrozenInstanceError
 
 import pytest
 
-from pxx.endpoints import Endpoint, _probe, _probe_ollama, _probe_vllm, detect_endpoint
+from pxx.endpoints import Endpoint, _probe, detect_endpoint
 
 
 class TestProbe:

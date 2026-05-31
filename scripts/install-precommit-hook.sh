@@ -6,10 +6,11 @@
 #   bash scripts/install-precommit-hook.sh --force     # overwrite non-pxx hooks
 #   bash scripts/install-precommit-hook.sh --uninstall # remove pxx hooks
 #
-# Three hooks are installed:
+# Four hooks are installed:
 #   pre-commit          (#002 M2)   ruff + pytest + diff cap + scope gate
 #   prepare-commit-msg  (#012 M2)   prepends [autonomous] when PXX_AUTONOMOUS=1
 #   post-commit         (#008 M1)   restart hint when a pxx core file changes
+#   pre-push            (#015 M1)   gate [autonomous] commits behind env var
 #
 # Templates live in scripts/<hook>-template. This installer copies each
 # (with a marker line) into .git/hooks/<hook> and makes it executable.
@@ -40,6 +41,7 @@ HOOKS=(
     "pre-commit:pre-commit-template"
     "prepare-commit-msg:prepare-commit-msg-template"
     "post-commit:post-commit-template"
+    "pre-push:pre-push-template"
 )
 
 FORCE=0

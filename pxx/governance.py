@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import sys
@@ -194,7 +195,7 @@ def check_review_verdict(repo_root: Path) -> list[GovernanceViolation]:
         violations.append(GovernanceViolation(
             check="review-pending",
             severity="error",
-            detail=f"Review rejected. Run pxx --review --heal or pxx --edit to fix",
+            detail="Review rejected. Run pxx --review --heal or pxx --edit to fix",
         ))
 
     return violations
@@ -242,7 +243,3 @@ def run_governance_check(repo_root: Path) -> int:
         print(f"\npxx: {len(warnings)} warning(s) only", file=sys.stderr)
 
     return 0
-
-
-# Need to import os for environ check
-import os

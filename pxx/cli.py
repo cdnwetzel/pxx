@@ -366,7 +366,8 @@ def main() -> None:
         verdict = review_gate.compute_verdict(findings)
         # Load workflow state and record verdict
         state = workflow.load_state(root) or workflow.WorkflowState()
-        new_state = workflow.transition(state, "approved" if verdict == "APPROVE" else "rejected", review_verdict=verdict)
+        new_phase = "approved" if verdict == "APPROVE" else "rejected"
+        new_state = workflow.transition(state, new_phase, review_verdict=verdict)
         workflow.save_state(new_state, root)
         print(f"pxx: review pass complete. verdict={verdict}.", file=sys.stderr)
         sys.exit(0)
@@ -548,10 +549,11 @@ def main() -> None:
         mode_label = "ask (read-only — pass --edit to allow changes)"
 
     tier_str = f"  tier={tier}" if tier else ""
-    print(
-        f"pxx: endpoint={endpoint.name} ({endpoint.url})  backend={endpoint.backend}{tier_str}  model={model}  mode={mode_label}",
-        file=sys.stderr,
+    banner = (
+        f"pxx: endpoint={endpoint.name} ({endpoint.url})  backend={endpoint.backend}"
+        f"{tier_str}  model={model}  mode={mode_label}"
     )
+    print(banner, file=sys.stderr)
     if self_fix_mode:
         cap = os.environ.get("PXX_DIFF_CAP", str(SELF_FIX_DIFF_CAP))
         print(

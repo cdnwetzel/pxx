@@ -130,19 +130,19 @@ class TestExtractTier:
 
 class TestModelForTier:
     def test_t1_tier_returns_t1_default(self, monkeypatch):
-        from pxx.cli import model_for, T1_DEFAULT
+        from pxx.cli import T1_DEFAULT, model_for
         monkeypatch.delenv("PXX_MODEL", raising=False)
         ep = Endpoint("neo", "http://localhost:11434", backend="ollama")
         assert model_for(ep, tier="t1") == T1_DEFAULT
 
     def test_t2_tier_returns_vllm_default(self, monkeypatch):
-        from pxx.cli import model_for, VLLM_DEFAULT
+        from pxx.cli import VLLM_DEFAULT, model_for
         monkeypatch.delenv("PXX_MODEL", raising=False)
         ep = Endpoint("m1_vllm", "http://x:8000", backend="vllm")
         assert model_for(ep, tier="t2") == VLLM_DEFAULT
 
     def test_t3_tier_returns_t3_default(self, monkeypatch):
-        from pxx.cli import model_for, VLLM_T3_DEFAULT
+        from pxx.cli import VLLM_T3_DEFAULT, model_for
         monkeypatch.delenv("PXX_MODEL", raising=False)
         ep = Endpoint("m1_vllm", "http://x:8000", backend="vllm")
         assert model_for(ep, tier="t3") == VLLM_T3_DEFAULT
@@ -154,7 +154,7 @@ class TestModelForTier:
         assert model_for(ep, tier="t2") == "custom-model"
 
     def test_no_tier_uses_backend_default(self, monkeypatch):
-        from pxx.cli import model_for, VLLM_DEFAULT
+        from pxx.cli import VLLM_DEFAULT, model_for
         monkeypatch.delenv("PXX_MODEL", raising=False)
         ep = Endpoint("m1_vllm", "http://x:8000", backend="vllm")
         assert model_for(ep, tier=None) == VLLM_DEFAULT

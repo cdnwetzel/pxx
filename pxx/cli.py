@@ -14,7 +14,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from pxx import _git, audit, drift, review_gate, safety, self_modes, workflow
+from pxx import _git, audit, drift, governance, review_gate, safety, self_modes, workflow
 from pxx._core_files import is_core
 from pxx.commands_index import CommandInfo, list_commands
 from pxx.endpoints import Endpoint, detect_endpoint
@@ -370,6 +370,13 @@ def main() -> None:
         workflow.save_state(new_state, root)
         print(f"pxx: review pass complete. verdict={verdict}.", file=sys.stderr)
         sys.exit(0)
+
+    if "--check" in sys.argv:
+        root = _git_repo_root()
+        if root is None:
+            print("pxx: --check requires a git repo.", file=sys.stderr)
+            sys.exit(1)
+        sys.exit(governance.run_governance_check(root))
 
     _self_sanity_check()
     _emit_core_restart_banner()

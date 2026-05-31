@@ -67,7 +67,7 @@ comparable and scannable.
 
 | 018 | vLLM backend integration             | [vllm-backend-integration.md](vllm-backend-integration.md)                   | done     | 019 | —          |
 | 019 | Multi-tier model routing             | [multi-tier-model-routing.md](multi-tier-model-routing.md)                   | planned  | —  | 018        |
-| 020 | Workflow state persistence           | [workflow-state-persistence.md](workflow-state-persistence.md)               | planned  | 021, 022 | —          |
+| 020 | Workflow state persistence           | [workflow-state-persistence.md](workflow-state-persistence.md)               | done     | 021, 022 | —          |
 | 021 | Review framework integration         | [review-framework-integration.md](review-framework-integration.md)           | planned  | —  | 020        |
 | 022 | Light governance gate                | [light-governance-gate.md](light-governance-gate.md)                         | planned  | —  | 020        |
 

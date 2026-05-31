@@ -1,0 +1,48 @@
+name: Aider Pin Bump Tests
+
+on:
+  pull_request:
+    paths:
+      - 'pyproject.toml'
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  test-aider-bump:
+    runs-on: macos-latest
+    strategy:
+      matrix:
+        python-version: ['3.11', '3.12']
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v2
+      - name: Set up Python ${{ matrix.python-version }}
+        run: uv python install ${{ matrix.python-version }}
+      - name: Install dependencies
+        run: uv sync --extra dev
+      - name: Lint with ruff
+        run: uv run ruff check .
+      - name: Format check with ruff
+        run: uv run ruff format --check .
+      - name: Run tests
+        run: uv run pytest -q
+        env:
+          PXX_GOVERNANCE_SKIP: '1'
+
+  verify-aider-integration:
+    runs-on: macos-latest
+    needs: test-aider-bump
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v2
+      - name: Set up Python 3.12
+        run: uv python install 3.12
+      - name: Install pxx
+        run: uv sync --extra dev
+      - name: Verify pxx entrypoint
+        run: uv run pxx --list-commands
+      - name: Verify aider integration
+        run: uv run python -c "from pxx.cli import model_for, _build_aider_args; print('Integration OK')"

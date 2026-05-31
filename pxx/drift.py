@@ -11,8 +11,6 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from pxx import _git
-
 # Absolute path to pxx repo root, regardless of cwd. Used for all local probes.
 PXX_ROOT = Path(__file__).resolve().parent.parent
 

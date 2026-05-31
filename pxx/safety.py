@@ -43,11 +43,36 @@ def sanity_check(repo_root: Path, module_name: str = "pxx.endpoints") -> None:
         sys.exit(2)
 
 
+def _has_unmerged_autonomous_commits() -> bool:
+    """Check if there are unpushed [autonomous] commits on the current branch.
+
+    Returns True if the working tree has autonomous commits not yet on origin,
+    False otherwise (or on error). Used to detect concurrent multi-agent sessions
+    (#CF-017). If another agent's autonomous session is in flight, skip stashing
+    to avoid wiping out their work.
+    """
+    try:
+        # Check for commits ahead of origin/<current-branch> that contain [autonomous]
+        result = subprocess.run(
+            ["git", "log", "--oneline", "origin/main..HEAD"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=2,
+        )
+        if result.returncode == 0:
+            return "[autonomous]" in result.stdout
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        pass
+    return False
+
+
 def create_tag() -> str | None:
     """Create a local-only safety tag at HEAD; stash dirty state.
 
     Returns the tag name on success, ``None`` if not in a git repo or git
-    operations fail. Skips stashing during test runs (PYTEST_CURRENT_TEST set).
+    operations fail. Skips stashing if concurrent autonomous sessions are
+    in flight (PYTEST_CURRENT_TEST set, or unmerged [autonomous] commits).
     """
     if not _git.is_in_repo():
         return None
@@ -55,6 +80,12 @@ def create_tag() -> str | None:
     # Skip safety tag stashing during pytest to prevent test runs from stashing
     # developer work (#CF-018). Tests can monkeypatch this function if needed.
     if os.environ.get("PYTEST_CURRENT_TEST"):
+        return None
+
+    # Skip stashing if another agent's autonomous session is in flight (#CF-017).
+    # Unmerged [autonomous] commits indicate an incomplete session; don't wipe
+    # out that work with a concurrent stash.
+    if _has_unmerged_autonomous_commits():
         return None
 
     ts = int(time.time())

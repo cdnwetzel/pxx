@@ -101,6 +101,20 @@ git log --invert-grep --grep '^\[autonomous\]'    # hide them
 `pxx` never invokes `git push` / `git deliver` on its own; that's always
 an explicit human action.
 
+## Flags
+
+| Flag | Purpose |
+|---|---|
+| `--edit` | Enable file changes; auto-commit. Required to write files. |
+| `--big` | Bypass per-commit diff size limit (normally 100 lines, 60 for `--self-fix`). Use sparingly. |
+| `--dry-run` | Describe changes but don't write or commit them. Combines with `--edit` only. |
+| `--anywhere` | Override trusted-paths gate for one session (shows `mode=edit (untrusted path)` in banner). |
+| `--tier t1\|t2\|t3` | Force a specific model tier. `t1` = Ollama (low latency), `t2` = vLLM (higher quality), `t3` = vLLM with max context. Fails if endpoint doesn't support the tier. |
+| `--check` | Validate this repo's readiness to commit: run the governance gate (secret scan, version sync, etc.). Returns non-zero if violations found. Requires a git repo. |
+| `--scope <path>` | Limit the session to files under the path(s). Colon-separated; enforced by pre-commit hook. Required for `--self-fix`. |
+| `--message <text>` | Pre-seed the aider chat with a message (combines with `--self-improve`). |
+| `--no-check-sync` | Skip the drift check even if `PXX_AUTOCHECK_DRIFT=1` is set. |
+
 ## Daily use
 
 ```bash

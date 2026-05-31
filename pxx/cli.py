@@ -110,7 +110,9 @@ def _extract_tier(argv: list[str]) -> tuple[str | None, list[str]]:
     """Extract --tier value from argv, return (tier, remaining_argv).
 
     Handles: --tier t1, --tier=t2, or no tier specified.
+    Raises ValueError if tier is invalid.
     """
+    VALID_TIERS = {"t1", "t2", "t3"}
     tier = None
     remaining = []
     i = 0
@@ -125,6 +127,10 @@ def _extract_tier(argv: list[str]) -> tuple[str | None, list[str]]:
         else:
             remaining.append(arg)
             i += 1
+
+    if tier is not None and tier not in VALID_TIERS:
+        raise ValueError(f"Invalid tier '{tier}'. Must be one of: {', '.join(sorted(VALID_TIERS))}")
+
     return tier, remaining
 
 
@@ -448,7 +454,11 @@ def main() -> None:
                 untrusted_override = True
 
     scope_args, argv_after_scope = extract_scope_args(argv_after_self_fix)
-    tier, argv_after_tier = _extract_tier(argv_after_scope)
+    try:
+        tier, argv_after_tier = _extract_tier(argv_after_scope)
+    except ValueError as e:
+        print(f"pxx: {e}", file=sys.stderr)
+        sys.exit(2)
 
     # Convert tier to preferred_backend for endpoint detection
     preferred_backend = None

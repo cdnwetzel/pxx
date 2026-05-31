@@ -71,6 +71,30 @@ comparable and scannable.
 | 021 | Review framework integration         | [review-framework-integration.md](review-framework-integration.md)           | done     | —        | 020        |
 | 022 | Light governance gate                | [light-governance-gate.md](light-governance-gate.md)                         | done     | —        | 020        |
 
+## Phase Summary
+
+**Phase 2 (Completed):** 14 of 17 review findings fixed (82% coverage)
+- Safety & routing (Plans 002–022): All done
+- Governance & audit (Plans 004, 020–022): All done
+- Multi-tier infrastructure (Plans 010–012, 018–019): All done
+- Code quality (Plans 013–016): Mostly done, #016 in progress
+
+**Phase 3 (In Progress):** 3 items documented, prioritized for future implementation
+- ✅ Done: Test refactor (#023, M-07)
+- Pending: Environment isolation (#025, L-05), Docs comment (#024, L-03)
+
+**v2.1 Production Baseline:** All three HIGH regressions fixed, validated by 4 agents, pushed to main.
+
+---
+
+## Phase 3 Deferred Items
+
+| ID  | Title                                | File                                              | Status   | Blocks   | Blocked by |
+| --- | ------------------------------------ | ------------------------------------------------- | -------- | -------- | ---------- |
+| 023 | Test architecture refactor (call → state verification) | [test-refactor-architecture.md](test-refactor-architecture.md) | done | 025 | — |
+| 024 | Python 3.13 ceiling documentation | [python313-ceiling-docs.md](python313-ceiling-docs.md) | proposed | — | — |
+| 025 | Environment isolation (OPENAI_API_KEY) | [env-var-isolation.md](env-var-isolation.md) | planned | — | 023 |
+
 ## Status legend
 
 - **proposed** — idea captured; not yet committed to implementation
@@ -91,4 +115,4 @@ comparable and scannable.
 
 ## Next free ID
 
-`023`
+`026`

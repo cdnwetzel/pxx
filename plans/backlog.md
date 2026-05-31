@@ -60,7 +60,7 @@ comparable and scannable.
 | 012 | Dogfooding Tier 3 — bounded autonomy | [dogfooding-tier3-bounded-autonomy.md](dogfooding-tier3-bounded-autonomy.md) | done    | — | —          |
 | 013 | Split `cli.py` into modules          | [cli-module-split.md](cli-module-split.md)                                   | done     | — | —          |
 | 014 | Docstring convention reconciliation  | [docstring-convention-reconciliation.md](docstring-convention-reconciliation.md) | done     | — | —          |
-| 017 | Dogfooding Tier 4 — Learnings Loop   | [dogfooding-tier4-learnings-loop.md](dogfooding-tier4-learnings-loop.md)     | proposed | — | 001, 004   |
+| 017 | Dogfooding Tier 4 — Learnings Loop   | [dogfooding-tier4-learnings-loop.md](dogfooding-tier4-learnings-loop.md)     | proposed | — | 001        |
 
 | 015 | Pre-push autonomous-commit gate      | [pre-push-autonomous-gate.md](pre-push-autonomous-gate.md)                   | done | — | —          |
 | 016 | Pre-commit hook body test coverage   | [pre-commit-hook-body-tests.md](pre-commit-hook-body-tests.md)               | in-progress | — | —          |

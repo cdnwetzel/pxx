@@ -80,7 +80,13 @@ def is_sensitive_env(name: str) -> bool:
 
 
 def _scrub_url(url: str) -> str:
-    """Remove credentials from a URL (user:password@host -> host)."""
+    """Remove credentials from a URL (user:password@host -> host).
+
+    Handles Basic auth (user:password) in URLs. Bearer tokens should never
+    appear in URLs (they belong in headers); if they do, a different scrubbing
+    approach would be needed. This function covers Ollama/vLLM endpoints which
+    use header-based auth, not query-param auth.
+    """
     if not url:
         return url
     # Match scheme://[user:password@]host[:port][/path]

@@ -29,6 +29,9 @@ jobs:
       - name: Run tests
         run: uv run pytest -q
         env:
+          # PXX_GOVERNANCE_SKIP=1 bypasses pre-commit governance checks during CI
+          # (see pxx/governance.py enforce_governance_policy()). Tests should not
+          # enforce governance policy; that's a developer-time gate.
           PXX_GOVERNANCE_SKIP: '1'
 
   verify-aider-integration:

@@ -28,6 +28,9 @@ SECRET_PATTERNS: list[tuple[str, re.Pattern]] = [
     ("huggingface-token", re.compile(r"hf_[a-zA-Z0-9]{20,}")),
     ("aws-key", re.compile(r"AKIA[0-9A-Z]{16}")),
     ("github-token", re.compile(r"ghp_[a-zA-Z0-9]{36}")),
+    # Bearer token: intentionally broad to catch OAuth 2.0 tokens. May flag
+    # legitimate test tokens or fixtures in non-secret contexts; false positives
+    # are noise, not security bypass. User can suppress via gitignore if needed.
     ("bearer-token", re.compile(r"(?i)bearer\s+[a-zA-Z0-9\.\-_]{20,}")),
     ("private-key-pem", re.compile(r"-----BEGIN (?:RSA |EC )?PRIVATE KEY-----")),
     ("generic-password", re.compile(r"(?i)password\s*=\s*['\"][^'\"]{4,}['\"]")),
@@ -252,14 +255,16 @@ def run_governance_check(repo_root: Path) -> int:
         try:
             gov_config = json.loads(gov_config_path.read_text(encoding="utf-8"))
             violations.extend(check_version_sync(repo_root, gov_config))
-        except OSError:
+        except OSError as e:
             print(
-                f"pxx WARNING: governance config read error ({gov_config_path})",
+                f"pxx WARNING: governance config read error ({gov_config_path})\n"
+                f"  Check: file permissions, path exists. Details: {e}",
                 file=sys.stderr,
             )
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as e:
             print(
-                f"pxx WARNING: governance config is invalid JSON ({gov_config_path})",
+                f"pxx WARNING: governance config is invalid JSON ({gov_config_path})\n"
+                f"  Run: jq . {gov_config_path} to find syntax errors. Details: {e}",
                 file=sys.stderr,
             )
 

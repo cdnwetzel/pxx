@@ -461,7 +461,8 @@ def main() -> None:
         print(f"pxx: {e}", file=sys.stderr)
         sys.exit(2)
 
-    # Convert tier to preferred_backend for endpoint detection
+    # Convert tier to preferred_backend for endpoint detection.
+    # Tier 1 is Ollama-exclusive (faster startup); Tier 2/3 prefer vLLM if available.
     preferred_backend = None
     if tier:
         preferred_backend = "ollama" if tier == "t1" else "vllm"

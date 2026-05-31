@@ -34,7 +34,7 @@ class TestScanStagedSecrets:
             result.returncode = 0
             return result
 
-        monkeypatch.setattr("subprocess.run", mock_run)
+        monkeypatch.setattr("pxx.governance.subprocess.run", mock_run)
 
         violations = scan_staged_secrets(tmp_path)
         assert len(violations) > 0
@@ -61,7 +61,7 @@ class TestScanStagedSecrets:
             result.returncode = 0
             return result
 
-        monkeypatch.setattr("subprocess.run", mock_run)
+        monkeypatch.setattr("pxx.governance.subprocess.run", mock_run)
 
         violations = scan_staged_secrets(tmp_path)
         assert len(violations) > 0
@@ -84,7 +84,7 @@ class TestScanStagedSecrets:
             result.returncode = 0
             return result
 
-        monkeypatch.setattr("subprocess.run", mock_run)
+        monkeypatch.setattr("pxx.governance.subprocess.run", mock_run)
 
         violations = scan_staged_secrets(tmp_path)
         # Should be empty or only have non-secret violations
@@ -96,7 +96,7 @@ class TestScanStagedSecrets:
         def mock_run(*args, **kwargs):
             raise FileNotFoundError("git not found")
 
-        monkeypatch.setattr("subprocess.run", mock_run)
+        monkeypatch.setattr("pxx.governance.subprocess.run", mock_run)
 
         violations = scan_staged_secrets(tmp_path)
         assert violations == []
@@ -123,7 +123,7 @@ class TestScanStagedSecrets:
             result.returncode = 0
             return result
 
-        monkeypatch.setattr("subprocess.run", mock_run)
+        monkeypatch.setattr("pxx.governance.subprocess.run", mock_run)
 
         # Worktree file is modified to remove secret (but git index still has it)
         secret_file = tmp_path / "config.py"

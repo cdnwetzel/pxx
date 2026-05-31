@@ -12,12 +12,6 @@
     # large enough for multi-file sessions, small enough to stay snappy.
     num_ctx: 32768
 
-- name: ollama_chat/qwen2.5:32b-instruct-q4_K_M
-  edit_format: diff
-  use_repo_map: true
-  extra_params:
-    num_ctx: 16384
-
 - name: ollama_chat/qwen3:4b
   # Neo offline fallback — 8GB ceiling forces tight context
   edit_format: diff

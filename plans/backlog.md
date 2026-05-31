@@ -62,8 +62,8 @@ comparable and scannable.
 | 014 | Docstring convention reconciliation  | [docstring-convention-reconciliation.md](docstring-convention-reconciliation.md) | done     | 013 | —          |
 | 017 | Dogfooding Tier 4 — Learnings Loop   | [dogfooding-tier4-learnings-loop.md](dogfooding-tier4-learnings-loop.md)     | proposed | — | 001, 004   |
 
-| 015 | Pre-push autonomous-commit gate      | [pre-push-autonomous-gate.md](pre-push-autonomous-gate.md)                   | in-progress | — | —          |
-| 016 | Pre-commit hook body test coverage   | [pre-commit-hook-body-tests.md](pre-commit-hook-body-tests.md)               | proposed | — | —          |
+| 015 | Pre-push autonomous-commit gate      | [pre-push-autonomous-gate.md](pre-push-autonomous-gate.md)                   | done | — | —          |
+| 016 | Pre-commit hook body test coverage   | [pre-commit-hook-body-tests.md](pre-commit-hook-body-tests.md)               | in-progress | — | —          |
 
 | 018 | vLLM backend integration             | [vllm-backend-integration.md](vllm-backend-integration.md)                   | done     | —  | —          |
 | 019 | Multi-tier model routing             | [multi-tier-model-routing.md](multi-tier-model-routing.md)                   | done     | —  | 018        |

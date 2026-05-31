@@ -1,0 +1,16 @@
+# Project-level aider overrides for pxx self-development.
+# Loaded automatically by aider when run in this repo.
+# Stacks on top of pxx's global config; does not replace it.
+
+# Always inject the project rules so the model sees the guardrails
+read:
+  - CONVENTIONS.md
+
+# No magic confirmations — explicit yes/no on every prompt
+yes-always: false
+
+# Use the project's dev venv (managed by uv) for lint and test.
+# The global config has bare `ruff` and `pytest`; here we route through
+# uv run so the project's pinned versions are used.
+lint-cmd: "python: uv run ruff check --fix && uv run ruff format"
+test-cmd: "uv run pytest -q"

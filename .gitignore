@@ -1,0 +1,54 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+dist/
+build/
+
+# Virtualenvs
+.venv/
+venv/
+
+# Tool caches
+.ruff_cache/
+.pytest_cache/
+.mypy_cache/
+.tox/
+
+# Coverage
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# Secrets & env (allow .env.example as a template)
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# aider runtime artifacts (the .aider.conf.yml config file IS tracked)
+.aider.chat.history.md
+.aider.input.history
+.aider.llm.history
+.aider*.tags.cache.v*/
+
+# Claude Code hook contains a real ntfy token — keep local per machine
+.claude/hooks/notify.sh
+.claude/*.lock
+
+# Editors / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log

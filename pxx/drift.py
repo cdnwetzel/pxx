@@ -188,7 +188,6 @@ def print_report(result: DriftResult) -> None:
         remote_branch = result.remote_branch or ""
         print(f"    Neo:    {result.local_sha[:7]} {result.local_branch or ''}", file=sys.stderr)
         print(f"    Studio: {remote_sha} {remote_branch}", file=sys.stderr)
-
-    print(file=sys.stderr)
-    print("  From Neo: git deliver && rsync ...", file=sys.stderr)
-    print("  Or from Studio: cd ~/ai/code_pro/pxx && git pull origin main", file=sys.stderr)
+        print(file=sys.stderr)
+        print("  From Neo: git deliver && rsync ...", file=sys.stderr)
+        print("  Or from Studio: cd ~/ai/code_pro/pxx && git pull origin main", file=sys.stderr)

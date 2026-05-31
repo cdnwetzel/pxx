@@ -261,8 +261,16 @@ def run_governance_check(repo_root: Path) -> int:
         try:
             gov_config = json.loads(gov_config_path.read_text(encoding="utf-8"))
             violations.extend(check_version_sync(repo_root, gov_config))
-        except (OSError, json.JSONDecodeError):
-            pass  # Silently skip if config is malformed
+        except OSError:
+            print(
+                f"pxx WARNING: governance config read error ({gov_config_path})",
+                file=sys.stderr,
+            )
+        except json.JSONDecodeError:
+            print(
+                f"pxx WARNING: governance config is invalid JSON ({gov_config_path})",
+                file=sys.stderr,
+            )
 
     # Review verdict (if workflow state exists)
     violations.extend(check_review_verdict(repo_root))

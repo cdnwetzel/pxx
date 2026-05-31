@@ -112,6 +112,32 @@ class TestDetectEndpoint:
         assert result.url == "http://studio-lan-fake:11434"
 
 
+class TestDetectEndpointTierPreference:
+    def test_preferred_backend_ollama_tries_ollama_first(self, monkeypatch):
+        monkeypatch.delenv("PXX_OLLAMA_BASE", raising=False)
+        monkeypatch.setattr("pxx.endpoints._probe_ollama", lambda url: True)
+        monkeypatch.setattr("pxx.endpoints._probe_vllm", lambda url: True)
+        result = detect_endpoint(preferred_backend="ollama")
+        # Should pick Ollama candidate (studio_lan) not vLLM
+        assert result.backend == "ollama"
+
+    def test_preferred_backend_vllm_tries_vllm_first(self, monkeypatch):
+        monkeypatch.delenv("PXX_OLLAMA_BASE", raising=False)
+        monkeypatch.setattr("pxx.endpoints._probe_vllm", lambda url: True)
+        monkeypatch.setattr("pxx.endpoints._probe_ollama", lambda url: True)
+        result = detect_endpoint(preferred_backend="vllm")
+        # Should pick vLLM candidate
+        assert result.backend == "vllm"
+
+    def test_no_preferred_backend_defaults_to_vllm_first(self, monkeypatch):
+        monkeypatch.delenv("PXX_OLLAMA_BASE", raising=False)
+        monkeypatch.setattr("pxx.endpoints._probe_vllm", lambda url: True)
+        monkeypatch.setattr("pxx.endpoints._probe_ollama", lambda url: False)
+        result = detect_endpoint(preferred_backend=None)
+        # Default behavior: vLLM first
+        assert result.backend == "vllm"
+
+
 class TestEndpointDataclass:
     def test_endpoint_is_frozen(self):
         ep = Endpoint("test", "http://x")

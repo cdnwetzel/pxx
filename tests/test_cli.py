@@ -108,6 +108,58 @@ class TestSetBackendEnv:
         assert os.environ["OLLAMA_API_BASE"] == "http://example.com:11434"
 
 
+class TestExtractTier:
+    def test_extract_tier_t1(self):
+        from pxx.cli import _extract_tier
+        tier, remaining = _extract_tier(["--tier", "t1", "--message", "hi"])
+        assert tier == "t1"
+        assert remaining == ["--message", "hi"]
+
+    def test_extract_tier_equals_form(self):
+        from pxx.cli import _extract_tier
+        tier, remaining = _extract_tier(["--tier=t2", "--message", "hi"])
+        assert tier == "t2"
+        assert remaining == ["--message", "hi"]
+
+    def test_no_tier_returns_none(self):
+        from pxx.cli import _extract_tier
+        tier, remaining = _extract_tier(["--message", "hi"])
+        assert tier is None
+        assert remaining == ["--message", "hi"]
+
+
+class TestModelForTier:
+    def test_t1_tier_returns_t1_default(self, monkeypatch):
+        from pxx.cli import model_for, T1_DEFAULT
+        monkeypatch.delenv("PXX_MODEL", raising=False)
+        ep = Endpoint("neo", "http://localhost:11434", backend="ollama")
+        assert model_for(ep, tier="t1") == T1_DEFAULT
+
+    def test_t2_tier_returns_vllm_default(self, monkeypatch):
+        from pxx.cli import model_for, VLLM_DEFAULT
+        monkeypatch.delenv("PXX_MODEL", raising=False)
+        ep = Endpoint("m1_vllm", "http://x:8000", backend="vllm")
+        assert model_for(ep, tier="t2") == VLLM_DEFAULT
+
+    def test_t3_tier_returns_t3_default(self, monkeypatch):
+        from pxx.cli import model_for, VLLM_T3_DEFAULT
+        monkeypatch.delenv("PXX_MODEL", raising=False)
+        ep = Endpoint("m1_vllm", "http://x:8000", backend="vllm")
+        assert model_for(ep, tier="t3") == VLLM_T3_DEFAULT
+
+    def test_pxx_model_overrides_tier(self, monkeypatch):
+        from pxx.cli import model_for
+        monkeypatch.setenv("PXX_MODEL", "custom-model")
+        ep = Endpoint("m1_vllm", "http://x:8000", backend="vllm")
+        assert model_for(ep, tier="t2") == "custom-model"
+
+    def test_no_tier_uses_backend_default(self, monkeypatch):
+        from pxx.cli import model_for, VLLM_DEFAULT
+        monkeypatch.delenv("PXX_MODEL", raising=False)
+        ep = Endpoint("m1_vllm", "http://x:8000", backend="vllm")
+        assert model_for(ep, tier=None) == VLLM_DEFAULT
+
+
 class TestInGitRepo:
     def test_inside_git_repo(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)

@@ -66,20 +66,60 @@ MODEL_SETTINGS = REPO_ROOT / "config" / "model-settings.yml"
 STUDIO_DEFAULT = "ollama_chat/devstral:24b"
 NEO_DEFAULT = "ollama_chat/qwen3:4b"
 VLLM_DEFAULT = "devstral-24b"
+T1_DEFAULT = "ollama_chat/qwen3-coder:7b-q4_K_M"
+VLLM_T3_DEFAULT = "qwen3-coder-72b"
+
+# Tier routing: (backend, tier) -> model name
+_TIER_MODEL = {
+    ("ollama", "t1"): T1_DEFAULT,
+    ("ollama", "t2"): STUDIO_DEFAULT,  # fallback if vLLM unavailable
+    ("ollama", "t3"): T1_DEFAULT,      # fallback if vLLM unavailable
+    ("vllm", "t1"): T1_DEFAULT,        # fast path: use Ollama even when vLLM available
+    ("vllm", "t2"): VLLM_DEFAULT,
+    ("vllm", "t3"): VLLM_T3_DEFAULT,
+}
 
 
-def model_for(endpoint: Endpoint) -> str:
-    # Currently, all endpoints (studio_lan, studio_remote, override) route to STUDIO_DEFAULT.
-    # Neo has no local Ollama, so endpoint.name == "neo" will not occur in practice.
-    # Kept for future-proofing if local Ollama is added to Neo.
+
+def model_for(endpoint: Endpoint, tier: str | None = None) -> str:
     # Override model selection with PXX_MODEL environment variable.
     override = os.environ.get("PXX_MODEL")
     if override:
         return override
+    
+    if tier:
+        key = (endpoint.backend, tier)
+        if key in _TIER_MODEL:
+            return _TIER_MODEL[key]
+        # Fallback for unknown tier
+        return _TIER_MODEL.get((endpoint.backend, "t2"), STUDIO_DEFAULT)
+    
+    # No tier specified: use backend-based default
     if endpoint.backend == "vllm":
         return VLLM_DEFAULT
     return NEO_DEFAULT if endpoint.name == "neo" else STUDIO_DEFAULT
 
+
+def _extract_tier(argv: list[str]) -> tuple[str | None, list[str]]:
+    """Extract --tier value from argv, return (tier, remaining_argv).
+    
+    Handles: --tier t1, --tier=t2, or no tier specified.
+    """
+    tier = None
+    remaining = []
+    i = 0
+    while i < len(argv):
+        arg = argv[i]
+        if arg == "--tier" and i + 1 < len(argv):
+            tier = argv[i + 1]
+            i += 2
+        elif arg.startswith("--tier="):
+            tier = arg.split("=", 1)[1]
+            i += 1
+        else:
+            remaining.append(arg)
+            i += 1
+    return tier, remaining
 
 def _set_backend_env(endpoint: Endpoint) -> None:
     if endpoint.backend == "vllm":
@@ -372,16 +412,23 @@ def main() -> None:
                     sys.exit(1)
                 untrusted_override = True
 
+    # Convert tier to preferred_backend for endpoint detection
+    preferred_backend = None
+    if tier:
+        preferred_backend = "ollama" if tier == "t1" else "vllm"
+    
     try:
-        endpoint = detect_endpoint()
+        endpoint = detect_endpoint(preferred_backend=preferred_backend)
     except RuntimeError as e:
         print(f"pxx: {e}", file=sys.stderr)
         sys.exit(1)
 
     scope_args, argv_after_scope = extract_scope_args(argv_after_self_fix)
+    tier, argv_after_tier = _extract_tier(argv_after_scope)
+    
     user_args = [
         a
-        for a in argv_after_scope
+        for a in argv_after_tier
         if a
         not in (
             "--edit",
@@ -391,8 +438,21 @@ def main() -> None:
             "--self-fix",
             "--check-sync",
             "--no-check-sync",
+            "--tier",
         )
     ]
+    # Also filter out tier values that follow --tier
+    filtered_user_args = []
+    skip_next = False
+    for a in user_args:
+        if skip_next:
+            skip_next = False
+            continue
+        if a == "--tier":
+            skip_next = True
+        elif not a.startswith("--tier="):
+            filtered_user_args.append(a)
+    user_args = filtered_user_args
     if self_fix_task:
         has_message = any(a == "--message" or a.startswith("--message=") for a in user_args)
         if not has_message:
@@ -437,7 +497,7 @@ def main() -> None:
         if "PXX_DIFF_CAP" not in os.environ:
             os.environ["PXX_DIFF_CAP"] = str(SELF_FIX_DIFF_CAP)
 
-    model = model_for(endpoint)
+    model = model_for(endpoint, tier=tier)
     aider_bin = _find_aider()
 
     safety_tag: str | None = None
@@ -461,8 +521,9 @@ def main() -> None:
     else:
         mode_label = "ask (read-only — pass --edit to allow changes)"
 
+    tier_str = f"  tier={tier}" if tier else ""
     print(
-        f"pxx: endpoint={endpoint.name} ({endpoint.url})  backend={endpoint.backend}  model={model}  mode={mode_label}",
+        f"pxx: endpoint={endpoint.name} ({endpoint.url})  backend={endpoint.backend}{tier_str}  model={model}  mode={mode_label}",
         file=sys.stderr,
     )
     if self_fix_mode:

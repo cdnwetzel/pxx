@@ -135,8 +135,24 @@ See `review/gemini/gemini-phase3.md` for detailed rationale and findings (F-019,
 
 See `review/codex/codex-phase3.md` for detailed findings (F-001 HIGH, F-002 MEDIUM, F-003/F-004 LOW).
 
-**CRITICAL:** F-001 is a security issue in the governance gate that allows staged secrets to pass if the file is modified before the gate runs. Should be addressed before next release.
+## Phase 4 High-Priority Items (from Copilot Phase 3 review + consensus)
+
+| ID  | Title                                | File                                              | Status   | Blocks   | Blocked by |
+| --- | ------------------------------------ | ------------------------------------------------- | -------- | -------- | ---------- |
+| 034 | **Fix staged-secret scan (git show, not worktree)** | [staged-secret-scan-fix.md](staged-secret-scan-fix.md) | proposed | 035 | — |
+| 035 | Add governance boundary tests (index/worktree) | [governance-boundary-tests.md](governance-boundary-tests.md) | proposed | — | 034 |
+| 036 | Add subprocess timeouts (self_modes.py) | [subprocess-timeout-consistency.md](subprocess-timeout-consistency.md) | proposed | — | — |
+| 037 | Fix test_governance mock patching (pxx.governance module, not global) | [test-governance-mock-patching.md](test-governance-mock-patching.md) | proposed | — | — |
+| 038 | Add tier/endpoint_backend to audit session-start record | [audit-routing-forensics.md](audit-routing-forensics.md) | proposed | — | — |
+| 039 | README: Document --tier/--check flags; handle ValueError for invalid tier | [cli-flags-documentation.md](cli-flags-documentation.md) | proposed | — | — |
+| 040 | Add autouse PXX_GOVERNANCE_SKIP fixture (conftest.py) | [governance-skip-fixture.md](governance-skip-fixture.md) | proposed | — | — |
+| 041 | Style consistency: review_gate.py check=False | [subprocess-style-consistency.md](subprocess-style-consistency.md) | proposed | — | — |
+| 042 | Standardize git operation timeouts (3s vs 2s) | [git-timeout-standardization.md](git-timeout-standardization.md) | proposed | — | — |
+
+See `review/copilot/copilot-phase3-review.md` for detailed findings (F-001 HIGH confirmed, F-002–F-008 MEDIUM/LOW).
+
+**CRITICAL:** F-001 is a confirmed security blocker. Commit f170de6 claims fix but code unchanged. Staged secrets still escape the gate if file is modified before commit. Addresses review-agent finding from prior passes (F-005). Must fix before next release.
 
 ## Next free ID
 
-`034`
+`043`

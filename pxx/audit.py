@@ -15,12 +15,13 @@ This module is pure: no subprocess calls, no git invocations. The caller
 directory (``~/.local/state/pxx/sessions/``). Consider this when sharing
 session logs or if the machine is multi-user.
 
-**Privacy contract** (enforced by what the record CAN contain):
+**Privacy contract** (shared responsibility):
 
 - No prompts or model responses (aider's history files own those)
 - No file contents or diffs (git owns those)
 - No env vars matching ``*TOKEN*`` / ``*KEY*`` / ``*SECRET*`` / ``*PASSWORD*``
-  (callers must not pass such values into the record dict)
+  (callers must validate their record construction; use :func:`is_sensitive_env`
+  to test whether a string matches sensitive patterns, e.g. in unit tests)
 
 Retention policy:
 

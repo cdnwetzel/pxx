@@ -1300,6 +1300,7 @@ class TestCreateSafetyTag:
     def test_returns_tag_in_git_repo_clean_tree(self, tmp_path, monkeypatch):
         self._init_repo(tmp_path)
         monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
         tag = _create_safety_tag()
         assert tag is not None
         assert tag.startswith(SAFETY_TAG_PREFIX)
@@ -1316,6 +1317,7 @@ class TestCreateSafetyTag:
     def test_returns_tag_with_unix_timestamp_suffix(self, tmp_path, monkeypatch):
         self._init_repo(tmp_path)
         monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
         before = int(time.time())
         tag = _create_safety_tag()
         after = int(time.time())
@@ -1326,6 +1328,7 @@ class TestCreateSafetyTag:
     def test_stashes_dirty_changes(self, tmp_path, monkeypatch):
         self._init_repo(tmp_path)
         monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
         # Make the working tree dirty.
         (tmp_path / "f.txt").write_text("modified")
         (tmp_path / "new-untracked.txt").write_text("brand new")

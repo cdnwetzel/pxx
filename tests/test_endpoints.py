@@ -139,11 +139,11 @@ class TestDetectEndpointTierPreference:
 
 
 class TestCandidatesAlias:
-    def test_candidates_returns_tuple_of_endpoints(self):
+    def test_candidates_returns_list_of_endpoints(self):
         # F-004: _candidates is a backward-compat alias for _ollama_candidates.
-        # Verify it returns a tuple of Endpoint objects.
+        # Verify it returns a list of Endpoint objects.
         result = _candidates()
-        assert isinstance(result, tuple)
+        assert isinstance(result, list)
         assert all(isinstance(ep, Endpoint) for ep in result)
 
 

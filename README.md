@@ -217,4 +217,9 @@ Together: warning at commit time, confirmation at restart time.
 | `PXX_STUDIO_REMOTE_URL` | Studio's VPN-reachable URL (work-internal DNS or IP) |
 | `PXX_MODEL`            | Force a specific model regardless of endpoint |
 | `PXX_AUTOCHECK_DRIFT`  | Set to `1` to run a drift check before every `--edit` session |
+| `PXX_SCOPE`            | Colon-separated list of repo-relative scope paths (e.g. `tests/:pxx/cli.py`); enforced by pre-commit hook if installed |
+| `PXX_ALLOW_BIG_DIFF`   | Set to `1` to bypass the per-commit diff size cap; same effect as `--big` flag |
+| `PXX_DIFF_CAP`         | Override the per-commit diff line limit (default: 100, reduced to 60 for `--self-fix`) |
+| `PXX_AUTONOMOUS`       | Set to `1` during `--self-fix` sessions; causes commits to be tagged with `[autonomous]` prefix |
+| `PXX_LOG_RETENTION_DAYS` | Audit log retention window in days (default: 90); older logs are pruned |
 

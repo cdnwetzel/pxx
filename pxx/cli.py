@@ -650,6 +650,9 @@ def main() -> None:
     root = _git_repo_root() if in_git_repo else None
     sha = _git_head_sha() if in_git_repo else None
     git_dirty: bool | None = _git_dirty() if in_git_repo else None
+    # Privacy contract: this record must not contain sensitive env vars
+    # (TOKEN, KEY, SECRET, PASSWORD). Callers should use audit.is_sensitive_env()
+    # to validate when adding new fields.
     record: dict = {
         "session_class": _determine_session_class(
             edit_mode, dry_run, self_improve_mode, self_fix_mode

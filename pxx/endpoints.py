@@ -16,7 +16,6 @@ import json
 import os
 import urllib.error
 import urllib.request
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -113,12 +112,9 @@ def detect_endpoint(preferred_backend: str | None = None) -> Endpoint:
         ]
 
     for probe_fn, candidates in probe_pairs:
-        # Probe all candidates in parallel, return first that succeeds
-        with ThreadPoolExecutor(max_workers=len(candidates)) as executor:
-            futures = {executor.submit(probe_fn, ep.url): ep for ep in candidates}
-            for future in as_completed(futures):
-                if future.result():
-                    return futures[future]
+        for ep in candidates:
+            if probe_fn(ep.url):
+                return ep
 
     raise RuntimeError(
         "No Ollama or vLLM endpoint reachable. "

@@ -542,7 +542,12 @@ def main() -> None:
         if "PXX_DIFF_CAP" not in os.environ:
             os.environ["PXX_DIFF_CAP"] = str(SELF_FIX_DIFF_CAP)
 
-    model = model_for(endpoint, tier=tier)
+    try:
+        model = model_for(endpoint, tier=tier)
+    except RuntimeError as e:
+        print(f"pxx: {e}", file=sys.stderr)
+        sys.exit(1)
+
     aider_bin = _find_aider()
 
     safety_tag: str | None = None

@@ -35,35 +35,26 @@ SECRET_PATTERNS: list[tuple[str, re.Pattern]] = [
 
 
 def scan_staged_secrets(repo_root: Path) -> list[GovernanceViolation]:
-    """Scan unpushed commits for secret patterns.
+    """Scan staged files (index) for secret patterns.
 
-    Gets list of files changed in unpushed commits via git diff origin/main..HEAD --name-only.
-    Falls back to HEAD if origin/main doesn't exist (fresh repos).
-    Then checks each file against SECRET_PATTERNS.
-    Returns list of violations (severity="error").
+    Gets list of files in the index (staging area) via git diff --cached --name-only.
+    This is a pre-commit check that catches secrets before they are committed.
+    Checks each file against SECRET_PATTERNS and returns violations (severity="error").
+
+    Note: Pre-push scanning of committed objects is a future enhancement.
     """
     violations = []
 
     try:
-        # Try to scan unpushed commits (origin/main..HEAD)
+        # Scan staged files (git index)
         result = subprocess.run(
-            ["git", "diff", "origin/main..HEAD", "--name-only"],
+            ["git", "diff", "--cached", "--name-only"],
             cwd=repo_root,
             capture_output=True,
             text=True,
             check=False,
             timeout=5,
         )
-        # If origin/main doesn't exist, fall back to HEAD (fresh repo)
-        if result.returncode != 0:
-            result = subprocess.run(
-                ["git", "diff", "HEAD", "--name-only"],
-                cwd=repo_root,
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=5,
-            )
         staged_files = result.stdout.strip().splitlines()
     except (FileNotFoundError, subprocess.TimeoutExpired):
         return violations

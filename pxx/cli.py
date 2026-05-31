@@ -651,7 +651,7 @@ def main() -> None:
     sha = _git_head_sha() if in_git_repo else None
     git_dirty: bool | None = _git_dirty() if in_git_repo else None
     record: dict = {
-        "session_class": self_modes.determine_session_class(
+        "session_class": _determine_session_class(
             edit_mode, dry_run, self_improve_mode, self_fix_mode
         ),
         "model": model,

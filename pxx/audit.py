@@ -99,7 +99,12 @@ def write_session_start(record: dict, log_path: Path | None = None) -> Path:
 
     Returns the path written to. Raises on filesystem errors — callers
     should suppress (the audit log failing must not abort pxx startup).
+    Respects PXX_AUDIT_DISABLE=1 to skip logging on shared machines.
     """
+    # Skip audit logging if explicitly disabled (e.g., shared machines, privacy)
+    if os.environ.get("PXX_AUDIT_DISABLE") == "1":
+        return Path()
+
     path = log_path or todays_log_file()
     path.parent.mkdir(parents=True, exist_ok=True)
     record.setdefault("event", "session_start")

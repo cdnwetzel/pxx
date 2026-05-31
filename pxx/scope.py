@@ -211,7 +211,10 @@ def scope_check_main(argv: list[str] | None = None) -> int:
     scope_env = os.environ.get("PXX_SCOPE", "")
     if not scope_env:
         return 0
-    prefixes = [p for p in scope_env.split(":") if p]
+    # Note: Do NOT filter empty strings from split — empty string encodes
+    # repo-root scope (--scope .). is_in_scope() correctly interprets it.
+    # See F-020: mixed scopes like ":tests/" must preserve the empty root entry.
+    prefixes = scope_env.split(":")
     files = [line.strip() for line in sys.stdin.read().splitlines() if line.strip()]
     out_of_scope = [f for f in files if not is_in_scope(f, prefixes)]
     for f in out_of_scope:

@@ -196,6 +196,17 @@ class TestScopeCheckMain:
         assert "tests/a.py" not in out
         assert "docs/c.md" not in out
 
+    def test_mixed_scope_root_and_subdir(self, monkeypatch, capsys):
+        # F-020: --scope . --scope tests/ encodes as ":tests/" (empty + tests/).
+        # The empty string should NOT be filtered out by the hook.
+        monkeypatch.setenv("PXX_SCOPE", ":tests/")
+        monkeypatch.setattr("sys.stdin", io.StringIO("any/file.py\ntests/a.py\n"))
+        rc = scope_check_main(["check"])
+        assert rc == 0
+        # Root scope (empty string) means everything is in scope
+        out = capsys.readouterr().out
+        assert out == ""  # no files out of scope
+
     def test_invalid_subcommand_returns_2(self, monkeypatch, capsys):
         rc = scope_check_main(["unknown"])
         assert rc == 2

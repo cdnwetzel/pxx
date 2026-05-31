@@ -39,6 +39,7 @@ if ! command -v uv >/dev/null; then
 fi
 
 echo "==> Installing Python 3.12 (aider deps don't yet support 3.13+)..."
+# Note: This pins the upper bound defined in pyproject.toml (requires-python = ">=3.11,<3.13").
 _with_check "uv python install 3.12" uv python install 3.12
 
 echo "==> Installing pxx..."

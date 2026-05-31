@@ -33,6 +33,7 @@ CORE_FILES: tuple[str, ...] = (
     "pxx/commands_index.py",
     "pxx/drift.py",
     "pxx/endpoints.py",
+    "pxx/review_gate.py",
     "pxx/safety.py",
     "pxx/scope.py",
     "pxx/self_modes.py",

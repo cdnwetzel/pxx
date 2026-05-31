@@ -14,7 +14,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from pxx import _git, audit, drift, safety, self_modes
+from pxx import _git, audit, drift, review_gate, safety, self_modes, workflow
 from pxx._core_files import is_core
 from pxx.commands_index import CommandInfo, list_commands
 from pxx.endpoints import Endpoint, detect_endpoint
@@ -351,6 +351,25 @@ def main() -> None:
     if "--self-lint" in sys.argv:
         _try_write_session_start({"session_class": "self-lint", "cwd": str(Path.cwd())})
         sys.exit(_self_lint())
+
+    if "--review" in sys.argv:
+        root = _git_repo_root()
+        if root is None:
+            print("pxx: --review requires a git repo.", file=sys.stderr)
+            sys.exit(1)
+        # Run review pass and compute verdict
+        exit_code = review_gate.run_review_pass(root)
+        if exit_code != 0:
+            sys.exit(exit_code)
+        # Collect findings and compute verdict
+        findings = review_gate.collect_active_findings(root)
+        verdict = review_gate.compute_verdict(findings)
+        # Load workflow state and record verdict
+        state = workflow.load_state(root) or workflow.WorkflowState()
+        new_state = workflow.transition(state, "approved" if verdict == "APPROVE" else "rejected", review_verdict=verdict)
+        workflow.save_state(new_state, root)
+        print(f"pxx: review pass complete. verdict={verdict}.", file=sys.stderr)
+        sys.exit(0)
 
     _self_sanity_check()
     _emit_core_restart_banner()

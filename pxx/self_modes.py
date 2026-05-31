@@ -42,7 +42,7 @@ def self_test(repo_root: Path) -> int:
         f"pxx: self-test — running `{' '.join(cmd)}` in {repo_root}",
         file=sys.stderr,
     )
-    rc = subprocess.run(cmd, cwd=repo_root, check=False).returncode
+    rc = subprocess.run(cmd, cwd=repo_root, check=False, timeout=120).returncode
     status = "passed" if rc == 0 else "failed"
     print(f"pxx: self-test — {status} ({rc})", file=sys.stderr)
     return rc
@@ -57,12 +57,16 @@ def self_lint(repo_root: Path) -> int:
         f"pxx: self-lint — running `{' '.join(check_cmd)}` in {repo_root}",
         file=sys.stderr,
     )
-    check_rc = subprocess.run(check_cmd, cwd=repo_root, check=False).returncode
+    check_rc = subprocess.run(
+        check_cmd, cwd=repo_root, check=False, timeout=120
+    ).returncode
     print(
         f"pxx: self-lint — running `{' '.join(format_cmd)}` in {repo_root}",
         file=sys.stderr,
     )
-    format_rc = subprocess.run(format_cmd, cwd=repo_root, check=False).returncode
+    format_rc = subprocess.run(
+        format_cmd, cwd=repo_root, check=False, timeout=120
+    ).returncode
 
     combined = check_rc | format_rc
     print(

@@ -514,8 +514,8 @@ class TestSelfTest:
     def test_self_test_returns_child_returncode_on_pass(self, monkeypatch, capsys):
         calls: list[dict] = []
 
-        def fake_run(cmd, cwd, check):
-            calls.append({"cmd": cmd, "cwd": cwd, "check": check})
+        def fake_run(cmd, cwd, check, timeout=None):
+            calls.append({"cmd": cmd, "cwd": cwd, "check": check, "timeout": timeout})
 
             class R:
                 returncode = 0
@@ -525,7 +525,9 @@ class TestSelfTest:
         monkeypatch.setattr(subprocess, "run", fake_run)
         rc = _self_test()
         assert rc == 0
-        assert calls == [{"cmd": ["uv", "run", "pytest", "-q"], "cwd": REPO_ROOT, "check": False}]
+        assert calls == [
+            {"cmd": ["uv", "run", "pytest", "-q"], "cwd": REPO_ROOT, "check": False, "timeout": 120}
+        ]
         err = capsys.readouterr().err
         assert "self-test — running" in err
         assert "self-test — passed (0)" in err
@@ -577,7 +579,7 @@ class TestSelfLint:
         """Build a fake subprocess.run that returns mapped exit codes."""
         calls: list[list[str]] = []
 
-        def fake_run(cmd, cwd, check):
+        def fake_run(cmd, cwd, check, timeout=None):
             calls.append(cmd)
 
             class R:

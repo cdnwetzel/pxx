@@ -659,7 +659,9 @@ def main() -> None:
             edit_mode, dry_run, self_improve_mode, self_fix_mode
         ),
         "model": model,
+        "tier": tier,
         "endpoint_name": endpoint.name,
+        "endpoint_backend": endpoint.backend,
         "endpoint_url": endpoint.url,
         "cwd": str(Path.cwd()),
         "git_repo_root": str(root) if root else None,

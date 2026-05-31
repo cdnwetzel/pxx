@@ -65,6 +65,7 @@ MODEL_SETTINGS = REPO_ROOT / "config" / "model-settings.yml"
 
 STUDIO_DEFAULT = "ollama_chat/devstral:24b"
 NEO_DEFAULT = "ollama_chat/qwen3:4b"
+VLLM_DEFAULT = "devstral-24b"
 
 
 def model_for(endpoint: Endpoint) -> str:
@@ -75,8 +76,17 @@ def model_for(endpoint: Endpoint) -> str:
     override = os.environ.get("PXX_MODEL")
     if override:
         return override
+    if endpoint.backend == "vllm":
+        return VLLM_DEFAULT
     return NEO_DEFAULT if endpoint.name == "neo" else STUDIO_DEFAULT
 
+
+def _set_backend_env(endpoint: Endpoint) -> None:
+    if endpoint.backend == "vllm":
+        os.environ["OPENAI_API_BASE"] = endpoint.url + "/v1"
+        os.environ.setdefault("OPENAI_API_KEY", "EMPTY")
+    else:
+        os.environ["OLLAMA_API_BASE"] = endpoint.url
 
 def _find_aider() -> str:
     # Prefer the aider binary in our own venv if it exists.
@@ -419,7 +429,7 @@ def main() -> None:
         )
         sys.exit(2)
 
-    os.environ["OLLAMA_API_BASE"] = endpoint.url
+    _set_backend_env(endpoint)
     if big_mode:
         os.environ["PXX_ALLOW_BIG_DIFF"] = "1"
     if self_fix_mode:
@@ -452,7 +462,7 @@ def main() -> None:
         mode_label = "ask (read-only — pass --edit to allow changes)"
 
     print(
-        f"pxx: endpoint={endpoint.name} ({endpoint.url})  model={model}  mode={mode_label}",
+        f"pxx: endpoint={endpoint.name} ({endpoint.url})  backend={endpoint.backend}  model={model}  mode={mode_label}",
         file=sys.stderr,
     )
     if self_fix_mode:

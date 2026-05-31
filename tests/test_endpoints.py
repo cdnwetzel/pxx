@@ -6,7 +6,7 @@ from dataclasses import FrozenInstanceError
 
 import pytest
 
-from pxx.endpoints import Endpoint, _probe, detect_endpoint
+from pxx.endpoints import Endpoint, _probe, _probe_ollama, _probe_vllm, detect_endpoint
 
 
 class TestProbe:
@@ -89,8 +89,9 @@ class TestDetectEndpoint:
         monkeypatch.delenv("PXX_OLLAMA_BASE", raising=False)
         # Mock all probes to fail so we don't depend on whether local
         # Ollama is running during the test.
-        monkeypatch.setattr("pxx.endpoints._probe", lambda url: False)
-        with pytest.raises(RuntimeError, match="No Ollama endpoint reachable"):
+        monkeypatch.setattr("pxx.endpoints._probe_ollama", lambda url: False)
+        monkeypatch.setattr("pxx.endpoints._probe_vllm", lambda url: False)
+        with pytest.raises(RuntimeError, match="No Ollama or vLLM endpoint reachable"):
             detect_endpoint()
 
     def test_first_reachable_candidate_wins(self, monkeypatch):
@@ -99,7 +100,11 @@ class TestDetectEndpoint:
         monkeypatch.setenv("PXX_STUDIO_REMOTE_URL", "http://studio-remote-fake:11434")
         # Make the LAN probe succeed; the others should not even be called.
         monkeypatch.setattr(
-            "pxx.endpoints._probe",
+            "pxx.endpoints._probe_vllm",
+            lambda url: False,
+        )
+        monkeypatch.setattr(
+            "pxx.endpoints._probe_ollama",
             lambda url: url == "http://studio-lan-fake:11434",
         )
         result = detect_endpoint()

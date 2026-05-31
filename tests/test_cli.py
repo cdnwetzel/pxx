@@ -23,6 +23,7 @@ from pxx.cli import (
     REPO_ROOT,
     SAFETY_TAG_PREFIX,
     STUDIO_DEFAULT,
+    VLLM_DEFAULT,
     _build_aider_args,
     _create_safety_tag,
     _emit_core_restart_banner,
@@ -35,6 +36,7 @@ from pxx.cli import (
     _self_lint,
     _self_sanity_check,
     _self_test,
+    _set_backend_env,
     _write_commands_context,
     main,
     model_for,
@@ -65,6 +67,45 @@ class TestModelFor:
         monkeypatch.setenv("PXX_MODEL", "ollama_chat/custom")
         for name in ("neo", "studio_lan", "studio_remote", "override"):
             assert model_for(Endpoint(name, "http://x:11434")) == "ollama_chat/custom"
+
+
+class TestModelForVllm:
+    def test_vllm_endpoint_returns_vllm_default(self, monkeypatch):
+        monkeypatch.delenv("PXX_MODEL", raising=False)
+        ep = Endpoint("m1_vllm", "http://x:8000", backend="vllm")
+        assert model_for(ep) == VLLM_DEFAULT
+
+    def test_pxx_model_override_beats_vllm(self, monkeypatch):
+        monkeypatch.setenv("PXX_MODEL", "my-model")
+        ep = Endpoint("m1_vllm", "http://x:8000", backend="vllm")
+        assert model_for(ep) == "my-model"
+
+
+class TestSetBackendEnv:
+    def test_vllm_sets_openai_api_base(self, monkeypatch):
+        monkeypatch.delenv("OPENAI_API_BASE", raising=False)
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        ep = Endpoint("m1_vllm", "http://example.com:8000", backend="vllm")
+        _set_backend_env(ep)
+        assert os.environ["OPENAI_API_BASE"] == "http://example.com:8000/v1"
+
+    def test_vllm_sets_openai_api_key_if_absent(self, monkeypatch):
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        ep = Endpoint("m1_vllm", "http://x:8000", backend="vllm")
+        _set_backend_env(ep)
+        assert os.environ["OPENAI_API_KEY"] == "EMPTY"
+
+    def test_vllm_does_not_overwrite_existing_openai_api_key(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-existing")
+        ep = Endpoint("m1_vllm", "http://x:8000", backend="vllm")
+        _set_backend_env(ep)
+        assert os.environ["OPENAI_API_KEY"] == "sk-existing"
+
+    def test_ollama_sets_ollama_api_base(self, monkeypatch):
+        monkeypatch.delenv("OLLAMA_API_BASE", raising=False)
+        ep = Endpoint("studio_lan", "http://example.com:11434", backend="ollama")
+        _set_backend_env(ep)
+        assert os.environ["OLLAMA_API_BASE"] == "http://example.com:11434"
 
 
 class TestInGitRepo:

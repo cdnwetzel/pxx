@@ -412,19 +412,19 @@ def main() -> None:
                     sys.exit(1)
                 untrusted_override = True
 
+    scope_args, argv_after_scope = extract_scope_args(argv_after_self_fix)
+    tier, argv_after_tier = _extract_tier(argv_after_scope)
+
     # Convert tier to preferred_backend for endpoint detection
     preferred_backend = None
     if tier:
         preferred_backend = "ollama" if tier == "t1" else "vllm"
-    
+
     try:
         endpoint = detect_endpoint(preferred_backend=preferred_backend)
     except RuntimeError as e:
         print(f"pxx: {e}", file=sys.stderr)
         sys.exit(1)
-
-    scope_args, argv_after_scope = extract_scope_args(argv_after_self_fix)
-    tier, argv_after_tier = _extract_tier(argv_after_scope)
     
     user_args = [
         a

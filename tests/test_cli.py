@@ -1074,7 +1074,7 @@ class TestCheckSync:
         assert "drift detected" in err
         assert mock_execv.called
 
-    def test_no_check_sync_bypasses_autocheck(self, monkeypatch, capsys):
+    def test_no_check_sync_bypasses_autocheck(self, monkeypatch, tmp_path, capsys):
         import pxx.drift as drift_mod
 
         mock_check = MagicMock()
@@ -1083,10 +1083,12 @@ class TestCheckSync:
         monkeypatch.setattr(sys, "argv", ["pxx", "--edit", "--no-check-sync"])
 
         monkeypatch.setattr(os, "execv", lambda _bin, args: None)
-        monkeypatch.setattr("pxx.cli.detect_endpoint", lambda: Endpoint("n", "u"))
+        monkeypatch.setattr("pxx.cli.detect_endpoint", lambda **kwargs: Endpoint("n", "u"))
         monkeypatch.setattr("pxx.cli._find_aider", lambda: "/x/aider")
         monkeypatch.setattr("pxx.cli._create_safety_tag", lambda: None)
+        monkeypatch.setattr("pxx.cli._prune_old_safety_tags", lambda **k: None)
         monkeypatch.setattr("pxx.cli.extract_scope_args", lambda a: ([], a))
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg-empty"))
 
         main()
         assert not mock_check.called

@@ -22,3 +22,13 @@ def _redirect_xdg_state(monkeypatch: pytest.MonkeyPatch, tmp_path_factory) -> Pa
     state_root = tmp_path_factory.mktemp("xdg_state")
     monkeypatch.setenv("XDG_STATE_HOME", str(state_root))
     return state_root / "pxx" / "sessions"
+
+
+@pytest.fixture(autouse=True)
+def _isolate_env_vars(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Clear environment vars that tests modify to prevent cross-test pollution."""
+    monkeypatch.delenv("PXX_DIFF_CAP", raising=False)
+    monkeypatch.delenv("PXX_SCOPE", raising=False)
+    yield
+    monkeypatch.delenv("PXX_DIFF_CAP", raising=False)
+    monkeypatch.delenv("PXX_SCOPE", raising=False)

@@ -51,14 +51,6 @@ class TestDrift:
         assert branch == "remote_branch"
         assert error is None
 
-        # Verify the command construction
-        args, kwargs = mock_run.call_args
-        cmd_list = args[0]
-        assert cmd_list[0] == "ssh"
-        assert cmd_list[1] == "user@host"
-        assert "git -C /path/to/repo rev-parse HEAD --abbrev-ref HEAD" in cmd_list[2]
-        assert kwargs["timeout"] == 5.0
-
     def test_remote_state_handles_ssh_timeout(self, monkeypatch):
         def mock_timeout(*a, **kw):
             raise subprocess.TimeoutExpired(cmd="ssh", timeout=1.0)

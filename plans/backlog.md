@@ -124,6 +124,19 @@ comparable and scannable.
 
 See `review/gemini/gemini-phase3.md` for detailed rationale and findings (F-019, F-016, F-018, F-020).
 
+## Phase 4 Critical Items (from Codex Phase 3 review)
+
+| ID  | Title                                | File                                              | Status   | Blocks   | Blocked by |
+| --- | ------------------------------------ | ------------------------------------------------- | -------- | -------- | ---------- |
+| 030 | Fix staged-secret scan (read index, not worktree) | [staged-secret-scan-fix.md](staged-secret-scan-fix.md) | proposed | 031 | — |
+| 031 | Add index/worktree boundary tests for governance | [governance-boundary-tests.md](governance-boundary-tests.md) | proposed | — | 030 |
+| 032 | Consolidate env cleanup across fixtures | [env-cleanup-consolidation.md](env-cleanup-consolidation.md) | proposed | — | — |
+| 033 | Add type-safety for model_for() tier handling | [model-tier-type-safety.md](model-tier-type-safety.md) | proposed | — | — |
+
+See `review/codex/codex-phase3.md` for detailed findings (F-001 HIGH, F-002 MEDIUM, F-003/F-004 LOW).
+
+**CRITICAL:** F-001 is a security issue in the governance gate that allows staged secrets to pass if the file is modified before the gate runs. Should be addressed before next release.
+
 ## Next free ID
 
-`030`
+`034`

@@ -101,6 +101,39 @@ class TestScanStagedSecrets:
         violations = scan_staged_secrets(tmp_path)
         assert violations == []
 
+    def test_index_worktree_boundary_catches_staged_secret_modified_after(
+        self, tmp_path, monkeypatch
+    ):
+        """Verify scan catches secrets in the index even if worktree file is modified."""
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / ".git").mkdir()
+
+        # Simulate: stage a secret, then modify file to remove it
+        secret_content = 'API_KEY = "sk1234567890abcdefghijklmnopqrstuvwxyz"'
+        safe_content = "# Key was here but removed"
+
+        def mock_run(cmd, *args, **kwargs):
+            result = MagicMock()
+            if cmd[1] == "diff":
+                # git diff --cached --name-only
+                result.stdout = "config.py"
+            elif cmd[1] == "show":
+                # git show :config.py — returns STAGED content (with secret)
+                result.stdout = secret_content
+            result.returncode = 0
+            return result
+
+        monkeypatch.setattr("subprocess.run", mock_run)
+
+        # Worktree file is modified to remove secret (but git index still has it)
+        secret_file = tmp_path / "config.py"
+        secret_file.write_text(safe_content)
+
+        violations = scan_staged_secrets(tmp_path)
+        # Should catch the secret in the INDEX, not the modified worktree
+        assert len(violations) > 0
+        assert any("api-key" in v.detail.lower() for v in violations)
+
 
 class TestCheckVersionSync:
     def test_detects_version_mismatch(self, tmp_path):

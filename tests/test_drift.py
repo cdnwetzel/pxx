@@ -107,3 +107,19 @@ class TestDrift:
         drift.print_report(res)
         out, err = capsys.readouterr()
         assert "? timeout after 5s; skipping drift check" in err
+
+    def test_local_head_from_non_pxx_cwd(self, monkeypatch):
+        # CF-016: verify local head probe works regardless of cwd (#006).
+        # This tests that _get_pxx_local_head() uses PXX_ROOT (absolute path)
+        # and not cwd-dependent git operations.
+        monkeypatch.chdir("/tmp")
+        sha = drift._get_pxx_local_head()
+        assert sha is not None
+        assert len(sha) == 40  # valid git sha1 hex
+
+    def test_local_branch_from_non_pxx_cwd(self, monkeypatch):
+        # CF-016: verify local branch probe works regardless of cwd.
+        monkeypatch.chdir("/tmp")
+        branch = drift._get_pxx_local_branch()
+        assert branch is not None
+        assert isinstance(branch, str)

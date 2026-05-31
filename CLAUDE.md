@@ -71,7 +71,8 @@ When upgrading aider:
 3. Bump `aider-chat==<new>` in `pyproject.toml`.
 4. `uv sync --extra dev` to refresh `.venv/`.
 5. `uv run pytest -q` and `bash scripts/test_lib.sh` for regression.
-6. `pxx --list-commands` and a real session smoke test.
+6. `pxx --list-commands` and a real session smoke test including `--dry-run`
+   to verify aider's `--dry-run` semantics carry through.
 7. Commit `chore(aider): bump to <new>` with a one-line summary of what
    changed in aider and which pxx touch points were verified.
 

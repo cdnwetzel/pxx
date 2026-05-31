@@ -9,8 +9,12 @@ from __future__ import annotations
 import subprocess
 import sys
 from dataclasses import dataclass
+from pathlib import Path
 
 from pxx import _git
+
+# Absolute path to pxx repo root, regardless of cwd. Used for all local probes.
+PXX_ROOT = Path(__file__).resolve().parent.parent
 
 
 @dataclass(frozen=True)
@@ -84,13 +88,10 @@ def check_sync(
 
 
 def _get_pxx_local_head() -> str | None:
-    # CF-006: use repo_root to ensure we probe pxx regardless of cwd.
-    root = _git.repo_root()
-    if not root:
-        return None
+    # CF-016: use PXX_ROOT to ensure we probe pxx regardless of cwd.
     try:
         result = subprocess.run(
-            ["git", "-C", str(root), "rev-parse", "HEAD"],
+            ["git", "-C", str(PXX_ROOT), "rev-parse", "HEAD"],
             capture_output=True,
             text=True,
             check=False,
@@ -104,12 +105,9 @@ def _get_pxx_local_head() -> str | None:
 
 
 def _get_pxx_local_branch() -> str | None:
-    root = _git.repo_root()
-    if not root:
-        return None
     try:
         result = subprocess.run(
-            ["git", "-C", str(root), "rev-parse", "--abbrev-ref", "HEAD"],
+            ["git", "-C", str(PXX_ROOT), "rev-parse", "--abbrev-ref", "HEAD"],
             capture_output=True,
             text=True,
             check=False,

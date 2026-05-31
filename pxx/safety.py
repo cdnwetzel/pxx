@@ -10,6 +10,7 @@ the primary safety net for autonomous dogfooding.
 from __future__ import annotations
 
 import importlib
+import os
 import subprocess
 import sys
 import time
@@ -46,9 +47,14 @@ def create_tag() -> str | None:
     """Create a local-only safety tag at HEAD; stash dirty state.
 
     Returns the tag name on success, ``None`` if not in a git repo or git
-    operations fail.
+    operations fail. Skips stashing during test runs (PYTEST_CURRENT_TEST set).
     """
     if not _git.is_in_repo():
+        return None
+
+    # Skip safety tag stashing during pytest to prevent test runs from stashing
+    # developer work (#CF-018). Tests can monkeypatch this function if needed.
+    if os.environ.get("PYTEST_CURRENT_TEST"):
         return None
 
     ts = int(time.time())

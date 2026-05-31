@@ -675,7 +675,11 @@ def main() -> None:
     }
     _try_write_session_start(record)
 
-    os.execv(aider_bin, args)
+    # Build isolated environment for aider subprocess to prevent OPENAI_API_KEY
+    # from leaking to git hooks or other subprocesses spawned by aider.
+    env = os.environ.copy()
+    env["OPENAI_API_KEY"] = "EMPTY"
+    os.execve(aider_bin, args, env)
 
 
 if __name__ == "__main__":

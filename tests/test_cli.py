@@ -426,7 +426,7 @@ class TestTrustedPathGate:
         monkeypatch.setattr(
             cli_module, "detect_endpoint", lambda **kwargs: Endpoint("neo", "http://x:11434")
         )
-        monkeypatch.setattr(cli_module.os, "execv", lambda *_: None)
+        monkeypatch.setattr(cli_module.os, "execve", lambda *_: None)
         monkeypatch.setattr(cli_module, "_find_aider", lambda: "/x/aider")
 
     def _write_trusted_config(self, tmp_path, monkeypatch, entries: list[Path]) -> Path:
@@ -651,7 +651,7 @@ class TestSelfImproveFlag:
         monkeypatch.setattr(
             cli_module, "detect_endpoint", lambda **kwargs: Endpoint("neo", "http://x:11434")
         )
-        monkeypatch.setattr(cli_module.os, "execv", lambda *_: None)
+        monkeypatch.setattr(cli_module.os, "execve", lambda *_: None)
         monkeypatch.setattr(cli_module, "_find_aider", lambda: "/x/aider")
 
     def test_self_improve_flag_detected_in_argv(self):
@@ -709,7 +709,7 @@ class TestSelfImproveFlag:
 
         captured_args: list[list[str]] = []
 
-        def fake_execv(_bin, args):
+        def fake_execv(_bin, args, env=None):
             captured_args.append(args)
 
         monkeypatch.chdir(tmp_path)
@@ -717,7 +717,7 @@ class TestSelfImproveFlag:
         monkeypatch.setattr(
             cli_module, "detect_endpoint", lambda **kwargs: Endpoint("neo", "http://x:11434")
         )
-        monkeypatch.setattr(cli_module.os, "execv", fake_execv)
+        monkeypatch.setattr(cli_module.os, "execve", fake_execv)
         monkeypatch.setattr(cli_module, "_find_aider", lambda: "/x/aider")
 
         cli_module.main()
@@ -787,7 +787,7 @@ class TestSelfFixFlag:
         monkeypatch.setattr(
             cli_module, "detect_endpoint", lambda **kwargs: Endpoint("neo", "http://x:11434")
         )
-        monkeypatch.setattr(cli_module.os, "execv", lambda *_: None)
+        monkeypatch.setattr(cli_module.os, "execve", lambda *_: None)
         monkeypatch.setattr(cli_module, "_find_aider", lambda: "/x/aider")
         # CRITICAL: --self-fix forces edit_mode=True which triggers the
         # #002 safety-tag block. Without mocking, _create_safety_tag runs
@@ -885,7 +885,7 @@ class TestSelfFixFlag:
         from pxx import cli as cli_module
 
         captured: list[list[str]] = []
-        monkeypatch.setattr(cli_module.os, "execv", lambda _bin, args: captured.append(args))
+        monkeypatch.setattr(cli_module.os, "execve", lambda _bin, args, env=None: captured.append(args))
         monkeypatch.setattr(
             cli_module, "detect_endpoint", lambda **kwargs: Endpoint("neo", "http://x:11434")
         )
@@ -910,7 +910,7 @@ class TestSelfFixFlag:
         from pxx import cli as cli_module
 
         captured: list[list[str]] = []
-        monkeypatch.setattr(cli_module.os, "execv", lambda _bin, args: captured.append(args))
+        monkeypatch.setattr(cli_module.os, "execve", lambda _bin, args, env=None: captured.append(args))
         monkeypatch.setattr(
             cli_module, "detect_endpoint", lambda **kwargs: Endpoint("neo", "http://x:11434")
         )
@@ -947,7 +947,7 @@ class TestSelfFixFlag:
         from pxx import cli as cli_module
 
         captured: list[list[str]] = []
-        monkeypatch.setattr(cli_module.os, "execv", lambda _bin, args: captured.append(args))
+        monkeypatch.setattr(cli_module.os, "execve", lambda _bin, args, env=None: captured.append(args))
         monkeypatch.setattr(
             cli_module, "detect_endpoint", lambda **kwargs: Endpoint("neo", "http://x:11434")
         )
@@ -1032,7 +1032,7 @@ class TestCheckSync:
 
         # CF-011: Assert execv runs even after warning
         mock_execv = MagicMock()
-        monkeypatch.setattr(os, "execv", mock_execv)
+        monkeypatch.setattr(os, "execve", mock_execv)
 
         monkeypatch.setattr("pxx.cli.detect_endpoint", lambda **kwargs: Endpoint("n", "u"))
         monkeypatch.setattr("pxx.cli._find_aider", lambda: "/x/aider")
@@ -1060,7 +1060,7 @@ class TestCheckSync:
 
         # CF-011: Assert execv runs even after warning
         mock_execv = MagicMock()
-        monkeypatch.setattr(os, "execv", mock_execv)
+        monkeypatch.setattr(os, "execve", mock_execv)
 
         monkeypatch.setattr("pxx.cli.detect_endpoint", lambda **kwargs: Endpoint("n", "u"))
         monkeypatch.setattr("pxx.cli._find_aider", lambda: "/x/aider")
@@ -1082,7 +1082,7 @@ class TestCheckSync:
         monkeypatch.setenv("PXX_AUTOCHECK_DRIFT", "1")
         monkeypatch.setattr(sys, "argv", ["pxx", "--edit", "--no-check-sync"])
 
-        monkeypatch.setattr(os, "execv", lambda _bin, args: None)
+        monkeypatch.setattr(os, "execve", lambda _bin, args, env=None: None)
         monkeypatch.setattr("pxx.cli.detect_endpoint", lambda **kwargs: Endpoint("n", "u"))
         monkeypatch.setattr("pxx.cli._find_aider", lambda: "/x/aider")
         monkeypatch.setattr("pxx.cli._create_safety_tag", lambda: None)

@@ -19,12 +19,18 @@ class TestScanStagedSecrets:
 
         # Create a file with an API key
         secret_file = tmp_path / "config.py"
-        secret_file.write_text('API_KEY = "sk1234567890abcdefghijklmnopqrstuvwxyz"')
+        secret_content = 'API_KEY = "sk1234567890abcdefghijklmnopqrstuvwxyz"'
+        secret_file.write_text(secret_content)
 
-        # Mock git diff to return the file as staged
-        def mock_run(*args, **kwargs):
+        # Mock git diff and git show
+        def mock_run(cmd, *args, **kwargs):
             result = MagicMock()
-            result.stdout = "config.py"
+            if cmd[1] == "diff":
+                # git diff --cached --name-only
+                result.stdout = "config.py"
+            elif cmd[1] == "show":
+                # git show :config.py
+                result.stdout = secret_content
             result.returncode = 0
             return result
 
@@ -42,12 +48,16 @@ class TestScanStagedSecrets:
         monkeypatch.chdir(tmp_path)
         (tmp_path / ".git").mkdir()
 
+        secret_content = "ghp_1234567890abcdefghijklmnopqrstuvwxyz1234"
         secret_file = tmp_path / "secrets.txt"
-        secret_file.write_text("ghp_1234567890abcdefghijklmnopqrstuvwxyz1234")
+        secret_file.write_text(secret_content)
 
-        def mock_run(*args, **kwargs):
+        def mock_run(cmd, *args, **kwargs):
             result = MagicMock()
-            result.stdout = "secrets.txt"
+            if cmd[1] == "diff":
+                result.stdout = "secrets.txt"
+            elif cmd[1] == "show":
+                result.stdout = secret_content
             result.returncode = 0
             return result
 
@@ -61,12 +71,16 @@ class TestScanStagedSecrets:
         monkeypatch.chdir(tmp_path)
         (tmp_path / ".git").mkdir()
 
+        safe_content = "print('hello world')"
         safe_file = tmp_path / "safe.py"
-        safe_file.write_text("print('hello world')")
+        safe_file.write_text(safe_content)
 
-        def mock_run(*args, **kwargs):
+        def mock_run(cmd, *args, **kwargs):
             result = MagicMock()
-            result.stdout = "safe.py"
+            if cmd[1] == "diff":
+                result.stdout = "safe.py"
+            elif cmd[1] == "show":
+                result.stdout = safe_content
             result.returncode = 0
             return result
 

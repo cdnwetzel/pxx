@@ -10,6 +10,11 @@ Append-only JSONL log of every pxx session's metadata, written before
 This module is pure: no subprocess calls, no git invocations. The caller
 (``pxx.cli``) composes the record from its own state and passes it in.
 
+**Privacy note:** Log records include absolute file paths (``git_repo_root``,
+``cwd``) and may reveal project structure to anyone with access to the log
+directory (``~/.local/state/pxx/sessions/``). Consider this when sharing
+session logs or if the machine is multi-user.
+
 **Privacy contract** (enforced by what the record CAN contain):
 
 - No prompts or model responses (aider's history files own those)

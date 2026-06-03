@@ -130,7 +130,7 @@ class TestRecallCommand:
         mock_post.return_value.json.return_value = {"observations": []}
 
         handler = SlashCommandHandler()
-        result = handler.execute(
+        handler.execute(
             "recall", "test", repo_root="/repo", cwd="/repo/src"
         )
 

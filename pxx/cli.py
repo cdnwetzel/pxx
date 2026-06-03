@@ -30,6 +30,7 @@ from pxx.scope import (
     resolve_scopes,
     trusted_paths_config_path,
 )
+from pxx.skills import SkillRegistry
 
 # Path constants — define first since compat aliases below reference REPO_ROOT.
 PKG_DIR = Path(__file__).parent
@@ -264,6 +265,21 @@ def _print_command_listing() -> None:
         print(f"  /load {c.path}")
 
 
+def _print_skill_listing() -> None:
+    """Print available agent skills to stdout."""
+    registry = SkillRegistry()
+    skills = registry.discover()
+    if not skills:
+        print("No skills found in pxx/commands/", file=sys.stderr)
+        return
+
+    print(registry.format_list())
+    print()
+    print("Use `/load <path>` in aider to load a skill:")
+    for skill in skills:
+        print(f"  /load {skill.path}")
+
+
 def _write_scope_context(scope_prefixes: list[str]) -> Path | None:
     """Write a scope-directive markdown file for aider's `--read` context."""
     if not scope_prefixes:
@@ -354,6 +370,10 @@ def _install_precommit_hook() -> None:
 def main() -> None:
     if "--list-commands" in sys.argv:
         _print_command_listing()
+        sys.exit(0)
+
+    if "--list-skills" in sys.argv:
+        _print_skill_listing()
         sys.exit(0)
 
     if "--check-sync" in sys.argv:

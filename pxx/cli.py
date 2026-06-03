@@ -19,6 +19,7 @@ from pxx._core_files import is_core
 from pxx.commands_index import CommandInfo, list_commands
 from pxx.endpoints import Endpoint, detect_endpoint
 from pxx.memory import AgentmemoryManager
+from pxx.memory_injection import MemoryInjector
 from pxx.observer import AiderMemoryObserver
 from pxx.router import NineroterManager
 from pxx.scope import (
@@ -411,6 +412,7 @@ def main() -> None:
     self_fix_mode = "--self-fix" in sys.argv
     with_router = "--with-router" in sys.argv
     with_memory = "--with-memory" in sys.argv
+    with_memory_injection = "--with-memory-injection" in sys.argv
 
     # #006 M2: optional pre-edit drift check.
     # Off by default; PXX_AUTOCHECK_DRIFT=1 to opt-in.
@@ -653,7 +655,18 @@ def main() -> None:
         aider_bin, model, user_args, in_git_repo, edit_mode, extra_reads=extra_reads
     )
 
+    # Phase 5 Tier 2: Memory injection into system prompt
     root = _git_repo_root() if in_git_repo else None
+    if with_memory_injection and with_memory:
+        injector = MemoryInjector("http://127.0.0.1:3111")
+        cwd = str(Path.cwd())
+        args = injector.inject_into_aider_args(
+            args, repo_root=root, cwd=cwd, tmp_dir=Path(tempfile.gettempdir())
+        )
+        print(
+            "pxx: memory injection enabled — observations from previous sessions loaded",
+            file=sys.stderr,
+        )
     sha = _git_head_sha() if in_git_repo else None
     git_dirty: bool | None = _git_dirty() if in_git_repo else None
     # Privacy contract: this record must not contain sensitive env vars
@@ -711,7 +724,13 @@ def main() -> None:
 
         # Start observer thread if memory is active
         if with_memory and memory_manager:
-            observer = AiderMemoryObserver(aider_proc, "http://127.0.0.1:3111")
+            cwd = str(Path.cwd())
+            observer = AiderMemoryObserver(
+                aider_proc,
+                "http://127.0.0.1:3111",
+                repo_root=root,
+                cwd=cwd,
+            )
             observer.start()
 
         # Wait for aider to finish

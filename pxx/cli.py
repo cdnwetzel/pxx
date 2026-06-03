@@ -18,6 +18,9 @@ from pxx import _git, audit, drift, governance, review_gate, safety, self_modes,
 from pxx._core_files import is_core
 from pxx.commands_index import CommandInfo, list_commands
 from pxx.endpoints import Endpoint, detect_endpoint
+from pxx.memory import AgentmemoryManager
+from pxx.observer import AiderMemoryObserver
+from pxx.router import NineroterManager
 from pxx.scope import (
     extract_scope_args,
     format_for_env,
@@ -406,6 +409,8 @@ def main() -> None:
     anywhere_mode = "--anywhere" in sys.argv
     self_improve_mode = "--self-improve" in sys.argv
     self_fix_mode = "--self-fix" in sys.argv
+    with_router = "--with-router" in sys.argv
+    with_memory = "--with-memory" in sys.argv
 
     # #006 M2: optional pre-edit drift check.
     # Off by default; PXX_AUTOCHECK_DRIFT=1 to opt-in.
@@ -680,7 +685,73 @@ def main() -> None:
     # from leaking to git hooks or other subprocesses spawned by aider.
     env = os.environ.copy()
     env["OPENAI_API_KEY"] = "EMPTY"
-    os.execve(aider_bin, args, env)
+
+    # Phase 5 Tier 1: supervisor mode for 9router + agentmemory
+    router_manager: NineroterManager | None = None
+    memory_manager: AgentmemoryManager | None = None
+    observer: AiderMemoryObserver | None = None
+
+    try:
+        # Start 9router if requested
+        if with_router:
+            router_manager = NineroterManager()
+            router_manager.start()
+            env["OPENAI_API_BASE"] = "http://127.0.0.1:20128/v1"
+            router_status = "✓" if router_manager.get_status() else "?"
+            print(f"pxx: 9router started (port 20128) {router_status}", file=sys.stderr)
+
+        # Start agentmemory if requested
+        if with_memory:
+            memory_manager = AgentmemoryManager()
+            memory_manager.start()
+            print("pxx: agentmemory started (port 3111)", file=sys.stderr)
+
+        # Launch aider as subprocess (not execve) so we can supervise
+        aider_proc = subprocess.Popen(args, env=env)
+
+        # Start observer thread if memory is active
+        if with_memory and memory_manager:
+            observer = AiderMemoryObserver(aider_proc, "http://127.0.0.1:3111")
+            observer.start()
+
+        # Wait for aider to finish
+        exit_code = aider_proc.wait()
+
+        # Aider finished — clean up subprocesses gracefully
+        if memory_manager:
+            memory_manager.stop()
+        if router_manager:
+            usage = router_manager.get_usage()
+            router_manager.stop()
+            if usage and "total_tokens" in usage:
+                print(
+                    f"pxx: 9router stats — tokens={usage.get('total_tokens', 0)}, "
+                    f"cost=${usage.get('total_cost', 0):.4f}",
+                    file=sys.stderr,
+                )
+
+        sys.exit(exit_code)
+
+    except KeyboardInterrupt:
+        # Clean up on user interrupt
+        if observer:
+            observer.thread = None
+        if memory_manager:
+            memory_manager.stop()
+        if router_manager:
+            router_manager.stop()
+        sys.exit(130)  # Standard exit code for SIGINT
+
+    except Exception as e:
+        # Clean up on error
+        if observer:
+            observer.thread = None
+        if memory_manager:
+            memory_manager.stop()
+        if router_manager:
+            router_manager.stop()
+        print(f"pxx: supervisor error: {e}", file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

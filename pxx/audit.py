@@ -205,3 +205,67 @@ def prune_old_logs(
             gzipped += 1
 
     return (gzipped, deleted)
+
+
+def log_router_event(
+    event_type: str,
+    status: bool = True,
+    usage: dict | None = None,
+    log_path: Path | None = None,
+) -> None:
+    """Log 9router event (start, stop, status) with usage stats.
+
+    Args:
+        event_type: 'router_start', 'router_stop', 'router_status'
+        status: True if operation succeeded
+        usage: Dict with 'total_tokens' and 'total_cost' from /v1/usage
+        log_path: Custom log path (default: today's log)
+    """
+    if os.environ.get("PXX_AUDIT_DISABLE") == "1":
+        return
+
+    path = log_path or todays_log_file()
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    record = {
+        "event": event_type,
+        "ts": now_iso(),
+        "status": status,
+    }
+    if usage:
+        record["usage"] = usage
+
+    with path.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(record, separators=(",", ":")) + "\n")
+
+
+def log_memory_event(
+    event_type: str,
+    status: bool = True,
+    data: dict | None = None,
+    log_path: Path | None = None,
+) -> None:
+    """Log agentmemory event (start, stop, observe, inject).
+
+    Args:
+        event_type: 'memory_start', 'memory_stop', 'memory_observe', 'memory_inject'
+        status: True if operation succeeded
+        data: Dict with context-specific data (e.g., observations_count, tokens_used)
+        log_path: Custom log path (default: today's log)
+    """
+    if os.environ.get("PXX_AUDIT_DISABLE") == "1":
+        return
+
+    path = log_path or todays_log_file()
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    record = {
+        "event": event_type,
+        "ts": now_iso(),
+        "status": status,
+    }
+    if data:
+        record.update(data)
+
+    with path.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(record, separators=(",", ":")) + "\n")

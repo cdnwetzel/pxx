@@ -185,7 +185,7 @@ Example:
 === pxx doctor (extended) ===
 
 Routing & Memory:
-  9router (http://localhost:9000): OK | active_requests=2 | p99=145ms | error_rate=0.0%
+  9router (http://127.0.0.1:20128): OK | active_requests=2 | p99=145ms | error_rate=0.0%
   agentmemory (http://127.0.0.1:3111): OK | observations=342 | size=8.5MB | hit_rate=68.5% | retrieval=42ms
 
 === Run full doctor ===
@@ -194,7 +194,7 @@ Routing & Memory:
 
 **Red flags:**
 
-- `9router: unreachable` — Router is not running. Start it: `9router -listen localhost:9000`
+- `9router: unreachable` — Router is not running. Start it: `9router -listen 127.0.0.1:20128`
 - `agentmemory: unreachable` — agentmemory is not running. Start it: `agentmemory server --port 3111`
 - `error_rate > 5%` — Router is experiencing errors; check logs
 - `hit_rate < 30%` — Memory observations are not relevant; review tuning
@@ -203,7 +203,7 @@ Routing & Memory:
 
 ```bash
 # Router endpoint
-export PXX_ROUTER_API=http://localhost:9000
+export PXX_ROUTER_API=http://127.0.0.1:20128
 
 # Memory endpoint
 export PXX_MEMORY_API=http://127.0.0.1:3111

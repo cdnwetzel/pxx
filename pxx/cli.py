@@ -17,8 +17,10 @@ from pathlib import Path
 from pxx import _git, audit, drift, governance, review_gate, safety, self_modes, workflow
 from pxx._core_files import is_core
 from pxx.commands_index import CommandInfo, list_commands
+from pxx.cost_metrics import CostMetrics, TokenMetrics
 from pxx.endpoints import Endpoint, detect_endpoint
 from pxx.memory import AgentmemoryManager
+from pxx.memory_analytics import MemoryAnalytics
 from pxx.memory_injection import MemoryInjector
 from pxx.observer import AiderMemoryObserver
 from pxx.router import NineroterManager
@@ -745,11 +747,13 @@ def main() -> None:
         # Start observer thread if memory is active
         if with_memory and memory_manager:
             cwd = str(Path.cwd())
+            analytics = MemoryAnalytics()
             observer = AiderMemoryObserver(
                 aider_proc,
                 "http://127.0.0.1:3111",
                 repo_root=root,
                 cwd=cwd,
+                analytics=analytics,
             )
             observer.start()
 
@@ -759,15 +763,35 @@ def main() -> None:
         # Aider finished — clean up subprocesses gracefully
         if memory_manager:
             memory_manager.stop()
+
+        # Print cost summary
+        router_usage = None
         if router_manager:
-            usage = router_manager.get_usage()
+            router_usage = router_manager.get_usage()
             router_manager.stop()
-            if usage and "total_tokens" in usage:
+            if router_usage and "total_tokens" in router_usage:
                 print(
-                    f"pxx: 9router stats — tokens={usage.get('total_tokens', 0)}, "
-                    f"cost=${usage.get('total_cost', 0):.4f}",
+                    f"pxx: 9router stats — tokens={router_usage.get('total_tokens', 0)}, "
+                    f"cost=${router_usage.get('total_cost', 0):.4f}",
                     file=sys.stderr,
                 )
+
+        # Gather cost metrics and print summary
+        if router_usage:
+            cost_metrics = CostMetrics(
+                session_id=audit.make_session_id(),
+                start_time=audit.now_iso(),
+                end_time=audit.now_iso(),
+                tokens=TokenMetrics(
+                    session_id=audit.make_session_id(),
+                    prompt_tokens=router_usage.get("prompt_tokens", 0),
+                    completion_tokens=router_usage.get("completion_tokens", 0),
+                    total_tokens=router_usage.get("total_tokens", 0),
+                    cached_tokens=router_usage.get("cached_tokens", 0),
+                ),
+            )
+            cost_metrics.estimated_cost_usd = router_usage.get("total_cost", 0.0)
+            print("\n" + cost_metrics.get_summary(), file=sys.stderr)
 
         sys.exit(exit_code)
 

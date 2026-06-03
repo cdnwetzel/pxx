@@ -32,34 +32,43 @@ class SkillRegistry:
         """Initialize skill registry.
 
         Args:
-            skills_dir: Directory containing skill files. Defaults to pxx/commands/
+            skills_dir: Primary directory containing skill files. Defaults to pxx/commands/
+                       User-local skills are automatically checked in ~/.config/pxx/commands/
         """
         if skills_dir is None:
             skills_dir = Path(__file__).parent / "commands"
         self.skills_dir = skills_dir
+        self.user_skills_dir = Path.home() / ".config" / "pxx" / "commands"
 
     def discover(self) -> list[Skill]:
         """Discover all available skills.
 
-        Scans the skills directory for .md files, parses headers to extract
-        skill name and description.
+        Scans both user-local and built-in skill directories. User skills take precedence.
 
         Returns:
             List of Skill objects, sorted by name.
         """
         skills = []
+        seen_names: set[str] = set()
 
-        if not self.skills_dir.exists():
-            return skills
+        # Check user-local skills first (~/.config/pxx/commands/)
+        if self.user_skills_dir.exists():
+            for skill_file in sorted(self.user_skills_dir.glob("*.md")):
+                if skill_file.name == "SKILL_TEMPLATE.md":
+                    continue
+                skill = self._parse_skill_file(skill_file)
+                if skill:
+                    skills.append(skill)
+                    seen_names.add(skill.name)
 
-        for skill_file in sorted(self.skills_dir.glob("*.md")):
-            # Skip template
-            if skill_file.name == "SKILL_TEMPLATE.md":
-                continue
-
-            skill = self._parse_skill_file(skill_file)
-            if skill:
-                skills.append(skill)
+        # Then check built-in skills, skipping duplicates
+        if self.skills_dir.exists():
+            for skill_file in sorted(self.skills_dir.glob("*.md")):
+                if skill_file.name == "SKILL_TEMPLATE.md":
+                    continue
+                skill = self._parse_skill_file(skill_file)
+                if skill and skill.name not in seen_names:
+                    skills.append(skill)
 
         return sorted(skills, key=lambda s: s.name)
 

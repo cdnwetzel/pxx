@@ -246,6 +246,80 @@ class TestSkillFormatting:
         assert "Write code" in output
 
 
+class TestUserLocalSkills:
+    """Tests for user-local skill discovery."""
+
+    def test_discover_user_local_skills(self, tmp_path, monkeypatch) -> None:
+        """Test discovering user-local skills from ~/.config/pxx/commands/."""
+        # Create built-in skills dir
+        builtin_dir = tmp_path / "builtin"
+        builtin_dir.mkdir()
+        builtin_file = builtin_dir / "spec.md"
+        builtin_file.write_text("# /spec — Built-in spec\n\nBuilt-in.\n")
+
+        # Create user-local skills dir
+        user_dir = tmp_path / "user_local"
+        user_dir.mkdir()
+        user_file = user_dir / "myskill.md"
+        user_file.write_text("# /myskill — Custom skill\n\nCustom.\n")
+
+        # Mock Path.home() to return our temp directory
+        def mock_home():
+            home = tmp_path / "home"
+            home.mkdir(exist_ok=True)
+            config_dir = home / ".config" / "pxx" / "commands"
+            config_dir.mkdir(parents=True, exist_ok=True)
+            # Create the user skill in the mocked home
+            user_skill = config_dir / "myskill.md"
+            user_skill.write_text("# /myskill — Custom skill\n\nCustom.\n")
+            return home
+
+        monkeypatch.setattr(Path, "home", mock_home)
+
+        # Create registry with built-in dir
+        registry = SkillRegistry(builtin_dir)
+        skills = registry.discover()
+
+        # Should find both built-in and user-local skills
+        skill_names = [s.name for s in skills]
+        assert "/spec" in skill_names
+        assert "/myskill" in skill_names
+
+    def test_user_skills_take_precedence(self, tmp_path, monkeypatch) -> None:
+        """Test that user-local skills override built-in skills."""
+        # Create built-in skills dir with /spec
+        builtin_dir = tmp_path / "builtin"
+        builtin_dir.mkdir()
+        builtin_file = builtin_dir / "spec.md"
+        builtin_file.write_text("# /spec — Built-in version\n\nBuilt-in.\n")
+
+        # Create user-local skills dir with same skill
+        user_dir = tmp_path / "user_local"
+        user_dir.mkdir()
+        user_file = user_dir / "spec.md"
+        user_file.write_text("# /spec — User version\n\nUser custom.\n")
+
+        # Mock Path.home()
+        def mock_home():
+            home = tmp_path / "home"
+            home.mkdir(exist_ok=True)
+            config_dir = home / ".config" / "pxx" / "commands"
+            config_dir.mkdir(parents=True, exist_ok=True)
+            user_skill = config_dir / "spec.md"
+            user_skill.write_text("# /spec — User version\n\nUser custom.\n")
+            return home
+
+        monkeypatch.setattr(Path, "home", mock_home)
+
+        registry = SkillRegistry(builtin_dir)
+        skills = registry.discover()
+
+        # Should have exactly one /spec (the user version)
+        spec_skills = [s for s in skills if s.name == "/spec"]
+        assert len(spec_skills) == 1
+        assert "User version" in spec_skills[0].title
+
+
 class TestSkillObject:
     """Tests for Skill dataclass."""
 

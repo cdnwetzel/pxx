@@ -49,7 +49,7 @@ export PXX_MEMORY_THRESHOLD=0.7  # Only high-confidence observations
 export PXX_MEMORY_LIMIT=3        # Few observations per injection
 
 # Session 2: Measure hit rate
-pxx --list-commands  # See memory_analytics output
+pxx --list-skills  # See available memory commands and skills
 
 # Session 3: Loosen if hit rate is low
 export PXX_MEMORY_THRESHOLD=0.5  # Allow more observations
@@ -58,14 +58,19 @@ export PXX_MEMORY_LIMIT=5        # More observations per injection
 
 #### Rule 2: Monitor Memory Contribution
 
-Use `/recall` slash commands during a session to measure effectiveness:
+Use `/recall` slash command during a session to measure effectiveness:
 
 ```
-/recall authentication bug          # See how many observations match
-/recall build errors | /simplify    # Narrow search with other skills
+/recall authentication bug          # Search for matching observations
+/recall build errors                # Search for observations about build failures
 ```
 
-If `/recall` frequently returns 0 results, lower the threshold or increase the limit.
+**Note:** `/recall` is a memory command (runtime), not a `/load`-able skill. It returns search results during the aider session. If `/recall` frequently returns 0 results, lower `PXX_MEMORY_THRESHOLD` or increase `PXX_MEMORY_LIMIT`.
+
+To refine code after recalling observations, use the `/simplify` or `/refactor` skills separately:
+```
+/load /Users/you/ai/pxx/pxx/commands/simplify.md
+```
 
 #### Rule 3: Balance Context
 

@@ -15,6 +15,9 @@ from threading import Thread
 
 import requests
 
+from pxx.memory_analytics import MemoryAnalytics
+from pxx.memory_commands import SlashCommandHandler
+
 
 class AiderOutputParser:
     """Parse aider stdout to extract tool calls and results."""
@@ -92,6 +95,7 @@ class AiderMemoryObserver:
         memory_api_base: str = "http://127.0.0.1:3111",
         repo_root: str | None = None,
         cwd: str | None = None,
+        analytics: MemoryAnalytics | None = None,
     ):
         self.aider = aider_proc
         self.memory_api = memory_api_base
@@ -99,6 +103,8 @@ class AiderMemoryObserver:
         self.cwd = cwd
         self.thread: Thread | None = None
         self.last_tool_call: dict | None = None
+        self.slash_commands = SlashCommandHandler(memory_api_base)
+        self.analytics = analytics
 
     def start(self) -> None:
         """Start observer thread."""
@@ -114,6 +120,18 @@ class AiderMemoryObserver:
 
         for line in iter(self.aider.stdout.readline, b""):
             line_str = line.decode("utf-8", errors="replace").rstrip("\n")
+
+            # Check for slash commands first
+            cmd_result = self.slash_commands.parse_command(line_str)
+            if cmd_result:
+                cmd_name, cmd_args = cmd_result
+                exec_result = self.slash_commands.execute(
+                    cmd_name, cmd_args,
+                    repo_root=self.repo_root,
+                    cwd=self.cwd,
+                )
+                self._record_slash_command(cmd_name, exec_result)
+                continue
 
             for event_type, payload in parser.parse_stream([line_str]):
                 if event_type == "tool_call":
@@ -251,3 +269,45 @@ class AiderMemoryObserver:
         except requests.RequestException as e:
             # Log but don't block
             print(f"pxx: memory inject error: {e}", file=sys.stderr)
+
+    def _record_slash_command(self, cmd_name: str, result: dict) -> None:
+        """Record slash command execution as an observation.
+
+        Args:
+            cmd_name: Slash command name (recall, remember, forget)
+            result: SlashCommandResult from command execution
+        """
+        success = result.get("success", False)
+        response = result.get("response", "")
+
+        # Record in analytics if available
+        if self.analytics:
+            # For /recall, result_count is in the response summary
+            result_count = len(response.split("\n")) // 3 if success else 0
+            self.analytics.record_command(cmd_name, success, result_count)
+
+        try:
+            payload = {
+                "hook_type": "slash_command",
+                "data": {
+                    "command": cmd_name,
+                    "success": success,
+                    "response_preview": response[:200],
+                },
+                "timestamp": datetime.now().isoformat(),
+            }
+            resp = requests.post(
+                f"{self.memory_api}/mem/observe",
+                json=payload,
+                timeout=2,
+            )
+            if resp.status_code != 200:
+                print(
+                    f"pxx: slash command record failed: {resp.status_code}",
+                    file=sys.stderr,
+                )
+        except requests.RequestException as e:
+            print(
+                f"pxx: slash command record error: {e}",
+                file=sys.stderr,
+            )

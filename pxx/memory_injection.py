@@ -11,12 +11,22 @@ from pathlib import Path
 
 import requests
 
+from pxx.memory_analytics import MemoryAnalytics
+from pxx.memory_tuning import MemoryTuner
+
 
 class MemoryInjector:
     """Query agentmemory and format observations for system prompt injection."""
 
-    def __init__(self, memory_api_base: str = "http://127.0.0.1:3111"):
+    def __init__(
+        self,
+        memory_api_base: str = "http://127.0.0.1:3111",
+        tuner: MemoryTuner | None = None,
+        analytics: MemoryAnalytics | None = None,
+    ):
         self.memory_api = memory_api_base
+        self.tuner = tuner
+        self.analytics = analytics
 
     def retrieve(
         self,
@@ -135,7 +145,8 @@ class MemoryInjector:
         """Retrieve observations and inject into aider args via --read flag.
 
         Queries memory, formats context, writes temp file, and adds
-        --read <path> to the aider command line.
+        --read <path> to the aider command line. Applies tuning if available
+        and records analytics.
 
         Args:
             aider_args: Current aider command line args
@@ -153,9 +164,31 @@ class MemoryInjector:
         if not observations:
             return aider_args
 
+        # Apply tuning if available
+        if self.tuner:
+            tuned, stats = self.tuner.tune_observations(observations)
+            observations = tuned
+
+        # Record retrieval event in analytics
+        if self.analytics:
+            self.analytics.record_retrieval(
+                query="aider-startup",
+                observations=observations,
+            )
+
+        if not observations:
+            return aider_args
+
         tmp_path = self.write_context_file(observations, tmp_dir)
         if not tmp_path:
             return aider_args
+
+        # Record injection event in analytics
+        if self.analytics:
+            context_size = len(self.format_context(observations))
+            self.analytics.record_injection(
+                observations, context_size=context_size
+            )
 
         # Insert --read before other args (after aider binary)
         # Preserve the order: binary, then --read, then other args

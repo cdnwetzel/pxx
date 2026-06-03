@@ -887,7 +887,10 @@ class TestSelfFixFlag:
         from pxx import cli as cli_module
 
         captured: list[list[str]] = []
-        monkeypatch.setattr(cli_module.os, "execve", lambda _bin, args, env=None: captured.append(args))
+        def mock_execve(_bin, args, env=None):
+            captured.append(args)
+
+        monkeypatch.setattr(cli_module.os, "execve", mock_execve)
         monkeypatch.setattr(
             cli_module, "detect_endpoint", lambda **kwargs: Endpoint("neo", "http://x:11434")
         )
@@ -912,7 +915,10 @@ class TestSelfFixFlag:
         from pxx import cli as cli_module
 
         captured: list[list[str]] = []
-        monkeypatch.setattr(cli_module.os, "execve", lambda _bin, args, env=None: captured.append(args))
+        def mock_execve(_bin, args, env=None):
+            captured.append(args)
+
+        monkeypatch.setattr(cli_module.os, "execve", mock_execve)
         monkeypatch.setattr(
             cli_module, "detect_endpoint", lambda **kwargs: Endpoint("neo", "http://x:11434")
         )
@@ -949,7 +955,10 @@ class TestSelfFixFlag:
         from pxx import cli as cli_module
 
         captured: list[list[str]] = []
-        monkeypatch.setattr(cli_module.os, "execve", lambda _bin, args, env=None: captured.append(args))
+        def mock_execve(_bin, args, env=None):
+            captured.append(args)
+
+        monkeypatch.setattr(cli_module.os, "execve", mock_execve)
         monkeypatch.setattr(
             cli_module, "detect_endpoint", lambda **kwargs: Endpoint("neo", "http://x:11434")
         )

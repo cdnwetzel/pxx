@@ -221,7 +221,10 @@ def check_review_verdict(repo_root: Path) -> list[GovernanceViolation]:
             GovernanceViolation(
                 check="review-pending",
                 severity="warning",
-                detail=f"Review pending: {state.review_verdict or 'no verdict yet'}. Run pxx --review",
+                detail=(
+                    f"Review pending: {state.review_verdict or 'no verdict yet'}. "
+                    "Run pxx --review"
+                ),
             )
         )
 

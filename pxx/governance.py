@@ -63,12 +63,22 @@ def scan_staged_secrets(repo_root: Path) -> list[GovernanceViolation]:
         return violations
 
     for filepath in staged_files:
-        full_path = repo_root / filepath
-        if not full_path.exists() or full_path.is_dir():
-            continue
-
         try:
-            content = full_path.read_text(encoding="utf-8")
+            # Read staged content from git index, not working tree.
+            # This ensures secrets are caught before commit, even if the file
+            # is modified after staging.
+            result = subprocess.run(
+                ["git", "show", f":{filepath}"],
+                cwd=repo_root,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=5,
+            )
+            if result.returncode != 0:
+                # File missing from index (e.g., deleted in staging); skip
+                continue
+            content = result.stdout
         except (OSError, UnicodeDecodeError):
             continue
 
@@ -211,7 +221,10 @@ def check_review_verdict(repo_root: Path) -> list[GovernanceViolation]:
             GovernanceViolation(
                 check="review-pending",
                 severity="warning",
-                detail=f"Review pending: {state.review_verdict or 'no verdict yet'}. Run pxx --review",
+                detail=(
+                    f"Review pending: {state.review_verdict or 'no verdict yet'}. "
+                    "Run pxx --review"
+                ),
             )
         )
 

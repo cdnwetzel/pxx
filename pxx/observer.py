@@ -90,10 +90,15 @@ class AiderMemoryObserver:
         self,
         aider_proc: Popen[bytes],
         memory_api_base: str = "http://127.0.0.1:3111",
+        repo_root: str | None = None,
+        cwd: str | None = None,
     ):
         self.aider = aider_proc
         self.memory_api = memory_api_base
+        self.repo_root = repo_root
+        self.cwd = cwd
         self.thread: Thread | None = None
+        self.last_tool_call: dict | None = None
 
     def start(self) -> None:
         """Start observer thread."""
@@ -112,6 +117,8 @@ class AiderMemoryObserver:
 
             for event_type, payload in parser.parse_stream([line_str]):
                 if event_type == "tool_call":
+                    # Store tool call for pairing with result
+                    self.last_tool_call = payload
                     self._send_to_memory(
                         {
                             "hook_type": "pre_tool_use",
@@ -121,6 +128,7 @@ class AiderMemoryObserver:
                     )
 
                 elif event_type == "tool_result":
+                    # Send observe hook
                     self._send_to_memory(
                         {
                             "hook_type": "post_tool_use",
@@ -132,6 +140,21 @@ class AiderMemoryObserver:
                         }
                     )
 
+                    # Pair result with last tool call and inject observation
+                    if self.last_tool_call:
+                        tool_name = self.last_tool_call.get(
+                            "tool_name", "unknown"
+                        )
+                        tool_input = str(
+                            self.last_tool_call.get("arguments", {})
+                        )
+                        tool_output = payload.get("output", "")
+                        obs = self._format_observation(
+                            tool_name, tool_input, tool_output
+                        )
+                        self._inject_observation(obs)
+                        self.last_tool_call = None
+
                 elif event_type == "error":
                     self._send_to_memory(
                         {
@@ -140,6 +163,42 @@ class AiderMemoryObserver:
                             "timestamp": datetime.now().isoformat(),
                         }
                     )
+
+    def _format_observation(
+        self, tool_name: str, tool_input: str, tool_output: str
+    ) -> dict:
+        """Format a tool use as an observation for memory injection.
+
+        Args:
+            tool_name: Name of the tool (e.g., 'execute_bash', 'read_file')
+            tool_input: Input/arguments to the tool
+            tool_output: Output from the tool
+
+        Returns:
+            Observation dict ready for /mem/inject.
+        """
+        # Truncate long outputs to avoid bloating the observation store
+        max_output_len = 500
+        if len(tool_output) > max_output_len:
+            tool_output = tool_output[:max_output_len] + "... (truncated)"
+
+        title = f"Tool use: {tool_name}"
+        content = f"**Tool:** {tool_name}\n"
+        if tool_input:
+            content += f"**Input:** {tool_input}\n"
+        content += f"**Output:** {tool_output}"
+
+        observation = {
+            "title": title,
+            "content": content,
+            "source": f"aider-session:{tool_name}",
+            "metadata": {
+                "tool": tool_name,
+                "repo_root": self.repo_root,
+                "cwd": self.cwd,
+            },
+        }
+        return observation
 
     def _send_to_memory(self, hook_payload: dict) -> None:
         """POST hook event to agentmemory.
@@ -164,3 +223,31 @@ class AiderMemoryObserver:
         except requests.RequestException as e:
             # Log but don't block
             print(f"pxx: memory connection error: {e}", file=sys.stderr)
+
+    def _inject_observation(self, observation: dict) -> None:
+        """POST formatted observation to agentmemory for injection.
+
+        Logs but doesn't block on memory failures.
+
+        Args:
+            observation: Observation dict from _format_observation.
+        """
+        try:
+            payload = {
+                "observations": [observation],
+                "timestamp": datetime.now().isoformat(),
+            }
+            resp = requests.post(
+                f"{self.memory_api}/mem/inject",
+                json=payload,
+                timeout=2,
+            )
+            if resp.status_code != 200:
+                # Log but don't block
+                print(
+                    f"pxx: memory inject failed: {resp.status_code}",
+                    file=sys.stderr,
+                )
+        except requests.RequestException as e:
+            # Log but don't block
+            print(f"pxx: memory inject error: {e}", file=sys.stderr)

@@ -135,7 +135,7 @@ class SlashCommandHandler:
                 payload["filters"]["cwd"] = cwd
 
             resp = requests.post(
-                f"{self.memory_api}/mem/retrieve",
+                f"{self.memory_api}/search",
                 json=payload,
                 timeout=2.0,
             )
@@ -238,7 +238,7 @@ class SlashCommandHandler:
             }
 
             resp = requests.post(
-                f"{self.memory_api}/mem/inject",
+                f"{self.memory_api}/inject",
                 json={"observations": [observation]},
                 timeout=2.0,
             )
@@ -279,33 +279,13 @@ class SlashCommandHandler:
                 "response": "Usage: /forget <observation_id>",
             }
 
-        try:
-            # POST to /mem/forget endpoint
-            resp = requests.post(
-                f"{self.memory_api}/mem/forget",
-                json={"observation_id": args},
-                timeout=2.0,
-            )
-
-            if resp.status_code == 200:
-                return {
-                    "success": True,
-                    "command": "forget",
-                    "response": f"Marked as forgotten: {args}",
-                }
-            else:
-                return {
-                    "success": False,
-                    "command": "forget",
-                    "response": f"Forget failed: HTTP {resp.status_code}",
-                }
-
-        except requests.RequestException as e:
-            return {
-                "success": False,
-                "command": "forget",
-                "response": f"Forget error: {e}",
-            }
+        # TODO: agentmemory does not yet have a /forget endpoint.
+        # For now, return a "not yet implemented" message.
+        return {
+            "success": False,
+            "command": "forget",
+            "response": "/forget not yet implemented (agentmemory endpoint missing)",
+        }
 
     def is_command_line(self, line: str) -> bool:
         """Check if line is a slash command.

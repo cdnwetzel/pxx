@@ -1,6 +1,8 @@
 import httpx
 import os
 import json
+import sys
+import traceback
 from typing import Optional
 
 
@@ -8,6 +10,7 @@ class EndpointRouter:
     """Route requests to primary endpoint with fallback chains."""
 
     def __init__(self):
+        import time
         # Primary endpoint from env var or default
         self.primary = os.getenv(
             "PXX_ROUTER_PRIMARY", "http://workstation.splawoffice.local:11434"
@@ -18,9 +21,20 @@ class EndpointRouter:
         self.fallbacks = [f.strip() for f in fallbacks.split(",") if f.strip()]
 
         self.timeout = 30.0
+        self._endpoint_cache: str | None = None
+        self._cache_time: float = 0
+        self._cache_ttl = 30.0  # Cache for 30 seconds
 
     async def get_endpoint(self) -> Optional[str]:
-        """Find first reachable endpoint."""
+        """Find first reachable endpoint (cached for 30 seconds)."""
+        import time
+
+        # Check cache
+        now = time.time()
+        if self._endpoint_cache and (now - self._cache_time) < self._cache_ttl:
+            return self._endpoint_cache
+
+        # Cache miss: probe endpoints
         endpoints = [self.primary] + self.fallbacks
 
         async with httpx.AsyncClient(timeout=5.0) as client:
@@ -30,6 +44,9 @@ class EndpointRouter:
                         f"{endpoint}/api/tags", follow_redirects=True
                     )
                     if response.status_code == 200:
+                        # Cache the result
+                        self._endpoint_cache = endpoint
+                        self._cache_time = now
                         return endpoint
                 except Exception:
                     pass
@@ -44,6 +61,8 @@ class EndpointRouter:
         body: Optional[bytes] = None,
     ) -> tuple[int, dict, bytes]:
         """Proxy a request to the available endpoint."""
+        sys.stderr.write(f"[PROXY] Starting {method} {path}, body_len={len(body) if body else 0}\n")
+        sys.stderr.flush()
         endpoint = await self.get_endpoint()
         if not endpoint:
             return 503, {}, json.dumps({"error": "No endpoints available"}).encode()
@@ -61,6 +80,9 @@ class EndpointRouter:
 
                 return resp.status_code, dict(resp.headers), resp.content
         except Exception as e:
+            sys.stderr.write(f"[PROXY ERROR] {method} {path}: {e}\n")
+            sys.stderr.write(traceback.format_exc())
+            sys.stderr.flush()
             return 502, {}, json.dumps({"error": str(e)}).encode()
 
     async def list_models(self) -> dict:

@@ -7,6 +7,7 @@ path-prefix scoping, and dispatches to various dogfooding modes.
 from __future__ import annotations
 
 import contextlib
+import logging
 import os
 import shutil
 import subprocess
@@ -22,6 +23,7 @@ from pxx import (
     review_gate,
     safety,
     self_modes,
+    tool_capture,
     workflow,
 )
 from pxx._core_files import is_core
@@ -38,6 +40,8 @@ from pxx.scope import (
     resolve_scopes,
     trusted_paths_config_path,
 )
+
+logger = logging.getLogger(__name__)
 
 # Path constants — define first since compat aliases below reference REPO_ROOT.
 PKG_DIR = Path(__file__).parent
@@ -758,6 +762,21 @@ def main() -> None:
 
         # Wait for aider to finish
         exit_code = aider_proc.wait()
+
+        # Capture tool calls from aider session (Phase 6.4)
+        if with_memory and exit_code == 0 and root:
+            try:
+                project_scope = scope_prefixes[0] if scope_prefixes else "default"
+                captured = tool_capture.capture_session_tools(
+                    sha, root, project=project_scope
+                )
+                if captured > 0:
+                    print(
+                        f"pxx: captured {captured} observations from aider session",
+                        file=sys.stderr,
+                    )
+            except Exception as e:
+                logger.warning(f"Failed to capture tool calls: {e}")
 
         # Aider finished — clean up subprocesses gracefully
         if memory_manager:

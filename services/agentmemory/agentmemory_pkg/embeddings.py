@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from typing import Optional
 
 import numpy as np
@@ -12,14 +13,18 @@ logger = logging.getLogger(__name__)
 
 # Global model instance (lazy-loaded)
 _model: Optional[SentenceTransformer] = None
+_model_lock = threading.Lock()
 
 
 def get_model() -> SentenceTransformer:
-    """Get or initialize the embedding model."""
+    """Get or initialize the embedding model (thread-safe)."""
     global _model
     if _model is None:
-        logger.info("Loading sentence-transformers model (all-MiniLM-L6-v2)...")
-        _model = SentenceTransformer("all-MiniLM-L6-v2")
+        with _model_lock:
+            # Double-check pattern: model might have been loaded by another thread
+            if _model is None:
+                logger.info("Loading sentence-transformers model (all-MiniLM-L6-v2)...")
+                _model = SentenceTransformer("all-MiniLM-L6-v2")
     return _model
 
 

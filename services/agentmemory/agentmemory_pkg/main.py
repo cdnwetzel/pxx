@@ -37,11 +37,11 @@ async def store_observation(request: Request):
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    project = data.get("project")
+    project = data.get("project", "default")  # Use "default" if not specified
     content = data.get("content")
 
-    if not project or not content:
-        raise HTTPException(status_code=400, detail="Missing project or content")
+    if not content:
+        raise HTTPException(status_code=400, detail="Missing content")
 
     obs = store.store(project, content)
 
@@ -61,12 +61,9 @@ async def search_observations(request: Request):
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    project = data.get("project")
+    project = data.get("project", "default")  # Use "default" if not specified
     query = data.get("query", "")
     limit = data.get("limit", 10)
-
-    if not project:
-        raise HTTPException(status_code=400, detail="Missing project")
 
     observations = store.get_by_project(project)
     ranked = search_engine.search(query, observations, limit=limit, min_score=0.0)
@@ -97,13 +94,10 @@ async def inject_observations(request: Request):
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    project = data.get("project")
+    project = data.get("project", "default")  # Use "default" if not specified
     query = data.get("query", "")
     limit = data.get("limit", 5)
     max_chars = data.get("max_chars", 8000)
-
-    if not project:
-        raise HTTPException(status_code=400, detail="Missing project")
 
     observations = store.get_by_project(project)
     ranked = search_engine.search(query, observations, limit=limit)

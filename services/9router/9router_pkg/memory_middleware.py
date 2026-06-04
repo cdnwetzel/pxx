@@ -139,7 +139,8 @@ class MemoryMiddleware:
         self.memory_client = AgentmemoryClient(memory_api_base)
         self.command_matcher = SlashCommandMatcher()
         self.enabled = True
-        self.project_root = os.getenv("PXX_PROJECT_ROOT")  # For per-project scoping
+        # For per-project scoping; use "default" if not specified
+        self.project_root = os.getenv("PXX_PROJECT_ROOT", "default")
 
     async def on_request(self, request_body: dict) -> dict:
         """Process outgoing request before it reaches the LLM.

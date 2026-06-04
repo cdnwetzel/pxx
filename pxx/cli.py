@@ -721,13 +721,12 @@ def main() -> None:
     env = os.environ.copy()
     env["OPENAI_API_KEY"] = "EMPTY"
 
-    # Phase 5 Tier 1: supervisor mode for 9router + agentmemory
+    # Phase 5 Tier 1: Optional service infrastructure
     router_manager: NineroterManager | None = None
     memory_manager: AgentmemoryManager | None = None
-    observer: AiderMemoryObserver | None = None
 
     try:
-        # Start 9router if requested
+        # Start 9router if requested (routes requests at network layer)
         if with_router:
             router_manager = NineroterManager()
             router_manager.start()
@@ -735,36 +734,31 @@ def main() -> None:
             router_status = "✓" if router_manager.get_status() else "?"
             print(f"pxx: 9router started (port 20128) {router_status}", file=sys.stderr)
 
-        # Start agentmemory if requested
+        # Start agentmemory if requested (infrastructure only; runtime observation not yet implemented)
         if with_memory:
             memory_manager = AgentmemoryManager()
             memory_manager.start()
-            print("pxx: agentmemory started (port 3111)", file=sys.stderr)
-
-        # Launch aider as subprocess (not execve) so we can supervise
-        aider_proc = subprocess.Popen(args, env=env)
-
-        # Start observer thread if memory is active
-        if with_memory and memory_manager:
-            cwd = str(Path.cwd())
-            analytics = MemoryAnalytics()
-            observer = AiderMemoryObserver(
-                aider_proc,
-                "http://127.0.0.1:3111",
-                repo_root=root,
-                cwd=cwd,
-                analytics=analytics,
+            print(
+                "pxx: agentmemory started (port 3111, infrastructure mode)",
+                file=sys.stderr,
             )
-            observer.start()
+
+        # Launch aider with Popen (no stdout capture) to preserve terminal TTY
+        # Aider inherits stdin/stdout/stderr, giving it full interactive terminal access.
+        # Note: Runtime memory capture via observer is blocked pending solution to:
+        # 1. TTY preservation (aider is a TUI and needs isatty()=true)
+        # 2. Output format (aider's tool_calls are internal, not serialized to stdout)
+        # See pxx/observer.py for details on what needs to be solved.
+        aider_proc = subprocess.Popen(args, env=env)
 
         # Wait for aider to finish
         exit_code = aider_proc.wait()
 
-        # Aider finished — clean up subprocesses gracefully
+        # Clean up services after aider exits
         if memory_manager:
             memory_manager.stop()
 
-        # Print cost summary
+        # Print 9router statistics if available
         router_usage = None
         if router_manager:
             router_usage = router_manager.get_usage()
@@ -776,29 +770,10 @@ def main() -> None:
                     file=sys.stderr,
                 )
 
-        # Gather cost metrics and print summary
-        if router_usage:
-            cost_metrics = CostMetrics(
-                session_id=audit.make_session_id(),
-                start_time=audit.now_iso(),
-                end_time=audit.now_iso(),
-                tokens=TokenMetrics(
-                    session_id=audit.make_session_id(),
-                    prompt_tokens=router_usage.get("prompt_tokens", 0),
-                    completion_tokens=router_usage.get("completion_tokens", 0),
-                    total_tokens=router_usage.get("total_tokens", 0),
-                    cached_tokens=router_usage.get("cached_tokens", 0),
-                ),
-            )
-            cost_metrics.estimated_cost_usd = router_usage.get("total_cost", 0.0)
-            print("\n" + cost_metrics.get_summary(), file=sys.stderr)
-
         sys.exit(exit_code)
 
     except KeyboardInterrupt:
-        # Clean up on user interrupt
-        if observer:
-            observer.thread = None
+        # Clean up on user interrupt (Ctrl+C)
         if memory_manager:
             memory_manager.stop()
         if router_manager:
@@ -807,13 +782,11 @@ def main() -> None:
 
     except Exception as e:
         # Clean up on error
-        if observer:
-            observer.thread = None
         if memory_manager:
             memory_manager.stop()
         if router_manager:
             router_manager.stop()
-        print(f"pxx: supervisor error: {e}", file=sys.stderr)
+        print(f"pxx: service error: {e}", file=sys.stderr)
         sys.exit(1)
 
 

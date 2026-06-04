@@ -1,7 +1,25 @@
 """Observer pattern for aider output monitoring and agentmemory integration.
 
-Watches aider subprocess stdout/stderr, parses tool calls and results,
-and sends hook events to agentmemory for persistent memory capture.
+⚠️ STATUS: Infrastructure only. Runtime observation is BLOCKED pending two issues:
+
+1. TTY Problem: aider is a TUI that requires isatty()=true for terminal rendering.
+   Capturing stdout via PIPE breaks the UI. Requires PTY support to solve.
+
+2. Output Format Problem: AiderOutputParser looks for:
+   - {"tool_name": ...} JSON — aider never serializes tool_calls to stdout
+   - <tool_result>...</tool_result> tags — aider never writes these to stdout
+   Tool calls are internal API objects, not human-readable output. Real aider
+   output is rich-rendered text with no structured data.
+
+NEXT STEPS (post-Phase-5):
+- Investigate .aider.chat.history.md (aider's post-session output log) as an
+  alternative observation mechanism. This captures structured conversation data
+  without fighting the terminal emulation problem.
+- If real-time observation is required, implement PTY support + agent API hooks
+  instead of stdout scraping.
+
+For now, the service lifecycle (start/stop) works correctly. Memory injection
+(reading prior observations at session start) may work. Runtime capture does not.
 """
 
 from __future__ import annotations

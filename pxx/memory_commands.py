@@ -1,7 +1,21 @@
 """Memory-aware slash commands for aider sessions (/recall, /remember, /forget).
 
-Parses aider output for slash commands, executes them against agentmemory,
-and returns formatted responses for injection back into the session.
+⚠️ STATUS: Implemented but NOT WIRED. The handler parses and executes commands,
+but there is no integration point in the supervisor loop that connects:
+1. User typing /recall in aider's stdin prompt
+2. This handler intercepting and executing the command
+3. The result being returned to the user in the aider session
+
+The handler was designed to parse commands from stdout, but user-typed commands
+go to stdin, not stdout. The supervisor's observer thread (which would need to
+read/write bidirectionally with aider) is currently disabled due to TTY issues.
+
+NEXT STEPS (post-Phase-5):
+- Implement slash commands via aider's stdin hook (if aider supports custom hooks)
+- Or: execute slash commands post-session via .aider.chat.history.md analysis
+- Or: wire stdin/stdout bidirectionally via PTY support in the supervisor
+
+For now, this module is infrastructure-ready but not connected.
 """
 
 from __future__ import annotations

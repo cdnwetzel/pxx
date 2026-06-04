@@ -1,1 +1,5 @@
 .aider*
+__pycache__/
+*.pyc
+.claude/worktrees/
+temp-phase1/

@@ -1,0 +1,6 @@
+aider-chat>=0.45.0
+requests>=2.31.0
+
+[dev]
+pytest>=7.0
+ruff>=0.1.0

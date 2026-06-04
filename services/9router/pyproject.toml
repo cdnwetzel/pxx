@@ -4,11 +4,17 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "9router"
-version = "0.1.0"
+version = "1.0.0"
 description = "Request router for pxx aider orchestration"
+readme = "README.md"
 requires-python = ">=3.11"
-authors = [{name = "pxx"}]
 license = {text = "MIT"}
+authors = [{name = "pxx"}]
+keywords = ["router", "routing", "aider", "pxx"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Programming Language :: Python :: 3",
+]
 dependencies = [
     "fastapi>=0.104.0",
     "uvicorn[standard]>=0.24.0",

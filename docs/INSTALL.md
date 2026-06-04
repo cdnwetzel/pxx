@@ -2,29 +2,47 @@
 
 Get pxx and its services running in minutes.
 
-## Quick Start (3 commands)
+## Quick Start
 
+**Prerequisites:**
+- Python 3.11+ (`python --version`)
+- Ollama running and reachable (default: `http://workstation.splawoffice.local:11434`)
+  - Set `PXX_OLLAMA_BASE` to override
+
+**Installation (from source):**
 ```bash
-# 1. Install pxx
-pip install pxx
+# Clone and install pxx
+git clone https://github.com/cdnwetzel/pxx
+cd pxx
+pip install -e .
 
-# 2. Install optional services (for memory enhancement)
-pip install agentmemory 9router
-
-# 3. Run with memory enabled
-pxx --edit --with-memory
+# Install optional services (for memory + routing)
+cd services/agentmemory && pip install -e . && cd ../..
+cd services/9router && pip install -e . && cd ../..
 ```
 
-That's it! Pxx will start both services automatically.
+**Verify:**
+```bash
+pxx --list-commands     # Should show available commands
+```
+
+**First run:**
+```bash
+# Auto-starts agentmemory and 9router in supervisor mode
+pxx --edit --with-memory
+```
 
 ## Detailed Installation
 
 ### Prerequisites
 
-- Python 3.11+
-- Ollama (for local LLM inference)
-- Git (for version control)
-- pip or uv (package managers)
+- **Python 3.11+** — `python --version`
+- **Ollama** — Running locally or on network (required for inference)
+  - Studio: `http://workstation.splawoffice.local:11434` (LAN or VPN)
+  - Local: Ollama on your machine for fallback
+  - Override: Set `PXX_OLLAMA_BASE=<url>` to specify endpoint
+- **Git** (optional) — For version control
+- **pip or uv** — Package installation
 
 ### Option A: Install as User Tool
 

@@ -45,15 +45,28 @@ STATE_PATH=~/.pxx/memory.db
 
     def start(self) -> None:
         """Start agentmemory subprocess and wait for health check."""
-        env = os.environ.copy()
-        env["DOTENV_PATH"] = str(self.config_path)
+        import sys
 
-        self.process = subprocess.Popen(
-            ["agentmemory"],
-            env=env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
+        env = os.environ.copy()
+        env["PXX_MEMORY_PORT"] = "3111"
+        env["PXX_MEMORY_HOST"] = "127.0.0.1"
+
+        # Try console script first (installed mode), then Python module (dev mode)
+        try:
+            self.process = subprocess.Popen(
+                ["agentmemory"],
+                env=env,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except FileNotFoundError:
+            # Dev mode: run as Python module
+            self.process = subprocess.Popen(
+                [sys.executable, "-m", "agentmemory_pkg.main"],
+                env=env,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
 
         # Wait for port 3111 to be ready
         self._wait_for_ready(timeout=5)

@@ -24,16 +24,28 @@ class NineroterManager:
 
     def start(self) -> None:
         """Start 9router subprocess and wait for health check."""
-        env = os.environ.copy()
-        env["NINE_ROUTER_CONFIG"] = str(self.config_path)
-        env["NODE_ENV"] = "production"
+        import sys
 
-        self.process = subprocess.Popen(
-            ["9router"],
-            env=env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
+        env = os.environ.copy()
+        env["PXX_ROUTER_PORT"] = "20128"
+        env["PXX_ROUTER_HOST"] = "127.0.0.1"
+
+        # Try console script first (installed mode), then Python module (dev mode)
+        try:
+            self.process = subprocess.Popen(
+                ["nine-router"],
+                env=env,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except FileNotFoundError:
+            # Dev mode: run as Python module
+            self.process = subprocess.Popen(
+                [sys.executable, "-m", "9router_pkg.main"],
+                env=env,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
 
         # Wait for port 20128 to be ready
         self._wait_for_ready(timeout=5)

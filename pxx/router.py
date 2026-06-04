@@ -32,6 +32,7 @@ class NineroterManager:
 
         # Try console script first (installed mode), then Python module (dev mode)
         self.process = None
+        last_error = None
 
         # Try 1: console script (production install)
         try:
@@ -43,7 +44,8 @@ class NineroterManager:
             )
             self._wait_for_ready(timeout=5)
             return
-        except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
+        except (FileNotFoundError, OSError, subprocess.TimeoutExpired) as e:
+            last_error = e
             pass
 
         # Try 2: uv run (dev mode with uv)
@@ -56,19 +58,26 @@ class NineroterManager:
             )
             self._wait_for_ready(timeout=5)
             return
-        except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
+        except (FileNotFoundError, OSError, subprocess.TimeoutExpired) as e:
+            last_error = e
             pass
 
         # Try 3: direct Python module (if in venv)
-        self.process = subprocess.Popen(
-            [sys.executable, "-m", "9router_pkg.main"],
-            env=env,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
+        try:
+            self.process = subprocess.Popen(
+                [sys.executable, "-m", "9router_pkg.main"],
+                env=env,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            self._wait_for_ready(timeout=5)
+            return
+        except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
+            pass
 
-        # Wait for port 20128 to be ready
-        self._wait_for_ready(timeout=5)
+        # If we get here, all methods failed
+        if last_error:
+            raise RuntimeError(f"9router failed to start: {last_error}")
 
     def stop(self) -> None:
         """Gracefully terminate 9router subprocess."""

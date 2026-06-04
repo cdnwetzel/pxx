@@ -52,6 +52,9 @@ STATE_PATH=~/.pxx/memory.db
         env["PXX_MEMORY_HOST"] = "127.0.0.1"
 
         # Try console script first (installed mode), then Python module (dev mode)
+        self.process = None
+
+        # Try 1: console script (production install)
         try:
             self.process = subprocess.Popen(
                 ["agentmemory"],
@@ -59,24 +62,31 @@ STATE_PATH=~/.pxx/memory.db
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
-        except (FileNotFoundError, OSError):
-            # Dev mode: run as Python module using uv run
-            try:
-                self.process = subprocess.Popen(
-                    ["uv", "run", "-m", "agentmemory_pkg.main"],
-                    env=env,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    cwd=os.path.dirname(os.path.dirname(__file__)),
-                )
-            except (FileNotFoundError, OSError):
-                # Fallback: direct Python module (if in venv)
-                self.process = subprocess.Popen(
-                    [sys.executable, "-m", "agentmemory_pkg.main"],
-                    env=env,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                )
+            self._wait_for_ready(timeout=5)
+            return
+        except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
+            pass
+
+        # Try 2: uv run (dev mode with uv)
+        try:
+            self.process = subprocess.Popen(
+                ["uv", "run", "-m", "agentmemory_pkg.main"],
+                env=env,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            self._wait_for_ready(timeout=5)
+            return
+        except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
+            pass
+
+        # Try 3: direct Python module (if in venv)
+        self.process = subprocess.Popen(
+            [sys.executable, "-m", "agentmemory_pkg.main"],
+            env=env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
 
         # Wait for port 3111 to be ready
         self._wait_for_ready(timeout=5)

@@ -1,201 +1,118 @@
+"""9router: Simple OpenAI-compatible proxy."""
+
 import json
+import logging
 import os
-import time
-from contextlib import asynccontextmanager
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
-from .router import EndpointRouter
-from .metrics import metrics
-from .memory_middleware import MemoryMiddleware
+import requests
 
+# Configure logging
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
 
-router = EndpointRouter()
-memory_middleware: MemoryMiddleware | None = None
+OLLAMA_BASE = os.getenv("PXX_OLLAMA_BASE", "http://workstation.splawoffice.local:11434")
 
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Startup and shutdown."""
-    global memory_middleware
-    print("9router starting...")
-    # Initialize memory middleware (enabled by default, disable via env var)
-    if os.getenv("PXX_MEMORY_ENABLED", "1") == "1":
-        memory_middleware = MemoryMiddleware()
-        print("9router: memory middleware enabled")
-    yield
-    print("9router shutting down...")
-
-
-app = FastAPI(title="9router", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="9router", version="0.1.0")
+print(f"[STARTUP] 9router app created, forwarding to {OLLAMA_BASE}")
 
 
 @app.get("/health")
 async def health_check():
     """Health check endpoint."""
-    endpoint = await router.get_endpoint()
-    if endpoint:
-        return {"status": "healthy", "endpoint": endpoint}
-    return JSONResponse({"status": "unhealthy", "endpoint": None}, status_code=503)
+    try:
+        resp = requests.get(f"{OLLAMA_BASE}/api/tags", timeout=2)
+        if resp.status_code == 200:
+            return {"status": "healthy", "endpoint": OLLAMA_BASE}
+    except Exception as e:
+        logger.error(f"Health check failed: {e}")
+    return JSONResponse({"status": "unhealthy"}, status_code=503)
+
+
+@app.get("/test")
+async def test_endpoint():
+    """Test endpoint."""
+    return {"status": "ok", "service": "9router"}
 
 
 @app.get("/v1/models")
 async def list_models():
     """List available models."""
-    models = await router.list_models()
-    return models
+    try:
+        resp = requests.get(f"{OLLAMA_BASE}/api/tags", timeout=5)
+        if resp.status_code == 200:
+            data = resp.json()
+            models = data.get("models", [])
+            return {
+                "object": "list",
+                "data": [{"id": m["name"], "object": "model"} for m in models],
+            }
+    except Exception as e:
+        logger.error(f"list_models error: {e}")
+    return {"object": "list", "data": []}
 
 
 @app.post("/v1/chat/completions")
 async def chat_completions(request: Request):
-    """Proxy chat completion requests with memory middleware."""
+    """Proxy chat completions to Ollama."""
     try:
         body_bytes = await request.body()
         request_body = json.loads(body_bytes)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        logger.debug(f"Request received: model={request_body.get('model')}")
 
-    metrics.record_request_start()
-    start = time.time()
+        # Forward to Ollama (disable streaming to get complete responses)
+        logger.debug(f"Forwarding to {OLLAMA_BASE}/api/chat")
+        request_body["stream"] = False  # Ensure we get complete response
+        resp = requests.post(
+            f"{OLLAMA_BASE}/api/chat",
+            json=request_body,
+            timeout=300,
+        )
+        logger.debug(f"Ollama responded with status {resp.status_code}")
 
-    try:
-        # Apply memory middleware: inject context and detect commands
-        if memory_middleware:
-            request_body = await memory_middleware.on_request(request_body)
+        if resp.status_code != 200:
+            return JSONResponse({"error": "Ollama error"}, status_code=resp.status_code)
 
-        # Check for slash commands (handled by middleware)
-        cmd_result = request_body.pop("_pxx_slash_command", None)
-        if cmd_result:
-            cmd_name, cmd_args = cmd_result
-            # Execute slash command and return synthetic response
-            result = await memory_middleware.handle_slash_command(cmd_name, cmd_args)
-            elapsed = time.time() - start
-            metrics.record_request_end(elapsed, error=False)
+        # Parse single JSON response from Ollama
+        try:
+            last_response = resp.json()
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse Ollama response: {e}")
+            return JSONResponse({"error": "Invalid JSON from Ollama"}, status_code=502)
 
-            # Return as LLM response format
-            return JSONResponse(
+        # Convert Ollama response to OpenAI format
+        message_content = last_response.get("message", {}).get("content", "")
+        openai_resp = {
+            "id": "chatcmpl-9router",
+            "object": "chat.completion",
+            "created": int(__import__("time").time()),
+            "model": request_body.get("model"),
+            "choices": [
                 {
-                    "id": f"pxx-cmd-{cmd_name}",
-                    "object": "chat.completion",
-                    "created": int(time.time()),
-                    "model": request_body.get("model", "unknown"),
-                    "choices": [
-                        {
-                            "index": 0,
-                            "message": {
-                                "role": "assistant",
-                                "content": result["message"],
-                            },
-                            "finish_reason": "stop",
-                        }
-                    ],
-                    "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": message_content,
+                    },
+                    "finish_reason": "stop",
                 }
-            )
-
-        # Re-serialize modified request for proxy
-        body_bytes = json.dumps(request_body).encode()
-
-        # Update headers for modified body (Content-Length changed)
-        proxy_headers = dict(request.headers)
-        proxy_headers["Content-Length"] = str(len(body_bytes))
-
-        # Forward to LLM endpoint
-        status, headers, content = await router.proxy_request(
-            method="POST",
-            path="/v1/chat/completions",
-            headers=proxy_headers,
-            body=body_bytes,
-        )
-
-        elapsed = time.time() - start
-        metrics.record_request_end(elapsed, error=status >= 400)
-
-        # Parse response for middleware processing
-        response_body: dict = {}
-        try:
-            if status == 200 and content:
-                response_body = json.loads(content)
-        except Exception:
-            pass
-
-        # Apply memory middleware: capture observations from response
-        if memory_middleware and status == 200:
-            await memory_middleware.on_response(request_body, response_body)
-
-        # Track tokens if present in response
-        try:
-            if status == 200 and response_body:
-                if "usage" in response_body:
-                    total = response_body["usage"].get("total_tokens", 0)
-                    # Estimate cached tokens (would need actual cache tracking)
-                    cached = int(total * 0.1)  # placeholder
-                    metrics.record_tokens(total, cached)
-        except Exception:
-            pass
-
-        filtered_headers = {
-            k: v for k, v in headers.items() if k.lower() != "content-encoding"
+            ],
+            "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
         }
-        return JSONResponse(
-            response_body if response_body else {},
-            status_code=status,
-            headers=filtered_headers,
-        )
+        logger.debug(f"Returning response with content: {message_content[:50]}...")
+        return JSONResponse(openai_resp)
 
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Request error: {e}")
+        return JSONResponse({"error": f"Ollama unreachable: {e}"}, status_code=502)
+    except json.JSONDecodeError as e:
+        logger.error(f"JSON error: {e}")
+        return JSONResponse({"error": f"Invalid request JSON: {e}"}, status_code=400)
     except Exception as e:
-        elapsed = time.time() - start
-        metrics.record_request_end(elapsed, error=True)
-        raise HTTPException(status_code=502, detail=str(e))
-
-
-@app.get("/v1/models/{model_name}")
-async def get_model(model_name: str):
-    """Get model info."""
-    endpoint = await router.get_endpoint()
-    if not endpoint:
-        raise HTTPException(status_code=503, detail="No endpoints available")
-
-    try:
-        import httpx
-
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.get(f"{endpoint}/api/show/{model_name}")
-            if resp.status_code == 200:
-                return resp.json()
-    except Exception:
-        pass
-
-    raise HTTPException(status_code=404, detail="Model not found")
-
-
-@app.get("/v1/usage")
-async def get_usage():
-    """Get router usage stats."""
-    return metrics.to_dict()
-
-
-@app.get("/status")
-async def status():
-    """Get router status and metrics."""
-    endpoint = await router.get_endpoint()
-    return {
-        "available": endpoint is not None,
-        "endpoint": endpoint,
-        "primary": router.primary,
-        "fallbacks": router.fallbacks,
-        "metrics": metrics.to_dict(),
-    }
-
-
-def main():
-    """Run the 9router service."""
-    import uvicorn
-
-    host = os.getenv("PXX_ROUTER_HOST", "127.0.0.1")
-    port = int(os.getenv("PXX_ROUTER_PORT", "20128"))
-
-    uvicorn.run(app, host=host, port=port)
+        logger.error(f"Unexpected error: {e}", exc_info=True)
+        return JSONResponse({"error": str(e)}, status_code=500)
 
 
 if __name__ == "__main__":
-    main()
+    import uvicorn
+    uvicorn.run(app, host="127.0.0.1", port=20128)

@@ -95,11 +95,15 @@ async def chat_completions(request: Request):
         # Re-serialize modified request for proxy
         body_bytes = json.dumps(request_body).encode()
 
+        # Update headers for modified body (Content-Length changed)
+        proxy_headers = dict(request.headers)
+        proxy_headers["Content-Length"] = str(len(body_bytes))
+
         # Forward to LLM endpoint
         status, headers, content = await router.proxy_request(
             method="POST",
             path="/v1/chat/completions",
-            headers=dict(request.headers),
+            headers=proxy_headers,
             body=body_bytes,
         )
 

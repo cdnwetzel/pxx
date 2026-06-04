@@ -38,14 +38,24 @@ class NineroterManager:
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
-        except FileNotFoundError:
-            # Dev mode: run as Python module
-            self.process = subprocess.Popen(
-                [sys.executable, "-m", "9router_pkg.main"],
-                env=env,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
+        except (FileNotFoundError, OSError):
+            # Dev mode: run as Python module using uv run
+            try:
+                self.process = subprocess.Popen(
+                    ["uv", "run", "-m", "9router_pkg.main"],
+                    env=env,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    cwd=os.path.dirname(os.path.dirname(__file__)),
+                )
+            except (FileNotFoundError, OSError):
+                # Fallback: direct Python module (if in venv)
+                self.process = subprocess.Popen(
+                    [sys.executable, "-m", "9router_pkg.main"],
+                    env=env,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
 
         # Wait for port 20128 to be ready
         self._wait_for_ready(timeout=5)

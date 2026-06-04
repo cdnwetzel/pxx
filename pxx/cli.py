@@ -516,6 +516,8 @@ def main() -> None:
             "--check-sync",
             "--no-check-sync",
             "--tier",
+            "--with-router",
+            "--with-memory",
         )
     ]
     # Also filter out tier values that follow --tier

@@ -1,9 +1,0 @@
-ollama_chat/devstral:24b:
-  max_input_tokens: 8192
-  max_output_tokens: 2048
-ollama_chat/qwen2.5:32b-instruct-q4_K_M:
-  max_input_tokens: 8192
-  max_output_tokens: 2048
-ollama_chat/qwen3:4b:
-  max_input_tokens: 2048
-  max_output_tokens: 512

@@ -17,11 +17,11 @@ SCHEMA_VERSION = 1
 @dataclass
 class WorkflowState:
     version: int = SCHEMA_VERSION
-    phase: str = "idle"                 # idle|generating|review_pending|approved|rejected
+    phase: str = "idle"  # idle|generating|review_pending|approved|rejected
     session_id: str | None = None
     session_start_sha: str | None = None
     session_end_sha: str | None = None
-    review_verdict: str | None = None   # APPROVE|REVISE|REJECT
+    review_verdict: str | None = None  # APPROVE|REVISE|REJECT
     review_pass_sha: str | None = None
     scope: list[str] = field(default_factory=list)
     edit_mode: bool = False
@@ -58,6 +58,7 @@ def save_state(state: WorkflowState, repo_root: Path) -> None:
 
 def transition(state: WorkflowState, new_phase: str, **updates) -> WorkflowState:
     from pxx import audit
+
     d = asdict(state)
     d["phase"] = new_phase
     d["ts_phase_changed"] = audit.now_iso()
@@ -74,8 +75,9 @@ def resume_state(repo_root: Path) -> int:
     if state.phase == "generating":
         commits = _commits_since(repo_root, state.session_start_sha)
         if commits:
-            new_state = transition(state, "review_pending",
-                                   session_end_sha=_head_sha(repo_root))
+            new_state = transition(
+                state, "review_pending", session_end_sha=_head_sha(repo_root)
+            )
             save_state(new_state, repo_root)
             print(
                 f"pxx: session produced {len(commits)} commit(s). "
@@ -124,7 +126,11 @@ def _commits_since(repo_root: Path, base_sha: str | None) -> list[str]:
     try:
         r = subprocess.run(
             ["git", "log", "--oneline", f"{base_sha}..HEAD"],
-            cwd=repo_root, capture_output=True, text=True, check=False, timeout=3,
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=3,
         )
         return [ln for ln in r.stdout.strip().splitlines() if ln]
     except (FileNotFoundError, subprocess.TimeoutExpired):
@@ -135,7 +141,11 @@ def _head_sha(repo_root: Path) -> str | None:
     try:
         r = subprocess.run(
             ["git", "rev-parse", "HEAD"],
-            cwd=repo_root, capture_output=True, text=True, check=False, timeout=3,
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=3,
         )
         return r.stdout.strip() or None
     except (FileNotFoundError, subprocess.TimeoutExpired):

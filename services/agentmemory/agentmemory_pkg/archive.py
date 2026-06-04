@@ -93,15 +93,17 @@ class ArchiveManager:
                     # Count lines in archive
                     count = sum(1 for _ in open(archive_file))
 
-                    archives.append({
-                        "path": str(archive_file),
-                        "date": date_dir.name,
-                        "count": count,
-                        "size_kb": file_size_kb,
-                        "modified": datetime.fromtimestamp(
-                            archive_file.stat().st_mtime
-                        ).isoformat(),
-                    })
+                    archives.append(
+                        {
+                            "path": str(archive_file),
+                            "date": date_dir.name,
+                            "count": count,
+                            "size_kb": file_size_kb,
+                            "modified": datetime.fromtimestamp(
+                                archive_file.stat().st_mtime
+                            ).isoformat(),
+                        }
+                    )
                 except Exception as e:
                     logger.warning(f"Error reading archive {archive_file}: {e}")
 
@@ -134,9 +136,7 @@ class ArchiveManager:
             "newest_archive": max(dates) if dates else None,
         }
 
-    def search_archive(
-        self, query: str, limit: int = 10
-    ) -> list[dict]:
+    def search_archive(self, query: str, limit: int = 10) -> list[dict]:
         """Search archived observations (simple substring search).
 
         Args:
@@ -157,8 +157,10 @@ class ArchiveManager:
                             return results
 
                         record = json.loads(line)
-                        if (query_lower in record["content"].lower()
-                            or query_lower in record["id"].lower()):
+                        if (
+                            query_lower in record["content"].lower()
+                            or query_lower in record["id"].lower()
+                        ):
                             record["archive_file"] = str(archive_file)
                             results.append(record)
             except Exception as e:

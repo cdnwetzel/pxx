@@ -68,7 +68,9 @@ def _probe_vllm(url: str) -> bool:
     if not url:
         return False
     try:
-        with urllib.request.urlopen(f"{url}/v1/models", timeout=PROBE_TIMEOUT_SEC) as resp:
+        with urllib.request.urlopen(
+            f"{url}/v1/models", timeout=PROBE_TIMEOUT_SEC
+        ) as resp:
             data = json.load(resp)
             return isinstance(data, dict) and isinstance(data.get("data"), list)
     except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError):
@@ -80,7 +82,9 @@ _probe = _probe_ollama  # backward-compat alias for test monkeypatches
 
 def _ollama_candidates() -> list[Endpoint]:
     return [
-        Endpoint("studio_lan", os.environ.get("PXX_STUDIO_LAN_URL", DEFAULT_STUDIO_LAN)),
+        Endpoint(
+            "studio_lan", os.environ.get("PXX_STUDIO_LAN_URL", DEFAULT_STUDIO_LAN)
+        ),
         Endpoint("studio_remote", os.environ.get("PXX_STUDIO_REMOTE_URL", "")),
         Endpoint("neo", DEFAULT_NEO),
     ]

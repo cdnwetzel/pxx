@@ -737,7 +737,10 @@ def main() -> None:
                 router_manager._start_with_retries(max_attempts=3)
                 env["OPENAI_API_BASE"] = "http://127.0.0.1:20128/v1"
                 router_status = "✓" if router_manager.get_status() else "?"
-                print(f"pxx: 9router started (port 20128) {router_status}", file=sys.stderr)
+                print(
+                    f"pxx: 9router started (port 20128) {router_status}",
+                    file=sys.stderr,
+                )
             except RuntimeError as e:
                 print(f"pxx: failed to start 9router: {e}", file=sys.stderr)
                 sys.exit(1)

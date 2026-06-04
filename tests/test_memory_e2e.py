@@ -2,10 +2,7 @@
 
 import subprocess
 import time
-import tempfile
-from pathlib import Path
 import httpx
-import json
 
 
 class TestMemoryCycleE2E:
@@ -81,8 +78,7 @@ class TestMemoryCycleE2E:
             )
 
         assert search_response.status_code == 200, (
-            f"Search failed: {search_response.status_code} "
-            f"{search_response.text}"
+            f"Search failed: {search_response.status_code} {search_response.text}"
         )
 
         search_results = search_response.json()
@@ -90,14 +86,16 @@ class TestMemoryCycleE2E:
 
         print(f"Observations in memory: {len(observations)}")
         for i, obs in enumerate(observations):
-            print(f"  {i+1}. {obs.get('title', 'untitled')} "
-                  f"(score: {obs.get('score', 0):.2f})")
+            print(
+                f"  {i + 1}. {obs.get('title', 'untitled')} "
+                f"(score: {obs.get('score', 0):.2f})"
+            )
             print(f"     Content: {obs.get('content', '')[:100]}...")
 
         # Verify at least one observation was captured
-        assert (
-            len(observations) > 0
-        ), "No observations found in memory after Session 1 — memory capture failed"
+        assert len(observations) > 0, (
+            "No observations found in memory after Session 1 — memory capture failed"
+        )
 
         # Verify it's about a tool (bash, ls, file)
         all_content = "\n".join([obs.get("content", "") for obs in observations])
@@ -106,7 +104,7 @@ class TestMemoryCycleE2E:
             for word in ["bash", "ls", "file", "tool", "directory"]
         ), f"Observation content doesn't reference tool execution: {all_content}"
 
-        print(f"✓ Observation stored successfully")
+        print("✓ Observation stored successfully")
 
         # ============ SESSION 2: Verify memory injection ============
         print("\n=== Session 2: Verify memory injection ===")
@@ -174,8 +172,8 @@ class TestMemoryCycleE2E:
             f"Output: {session2_output[-1000:]}"
         )
 
-        print(f"✓ Memory injection validated")
-        print(f"✓ E2E memory cycle test PASSED")
+        print("✓ Memory injection validated")
+        print("✓ E2E memory cycle test PASSED")
 
     def test_agentmemory_directly_stores_and_retrieves(self):
         """
@@ -213,8 +211,7 @@ class TestMemoryCycleE2E:
             )
 
             assert search_resp.status_code == 200, (
-                f"Search failed: {search_resp.status_code} "
-                f"{search_resp.text}"
+                f"Search failed: {search_resp.status_code} {search_resp.text}"
             )
 
             results = search_resp.json()

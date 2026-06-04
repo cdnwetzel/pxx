@@ -181,7 +181,9 @@ def prune_old_logs(
     Silently no-ops if the directory doesn't exist (first run).
     """
     if retention_days is None:
-        retention_days = int(os.environ.get("PXX_LOG_RETENTION_DAYS", str(DEFAULT_RETENTION_DAYS)))
+        retention_days = int(
+            os.environ.get("PXX_LOG_RETENTION_DAYS", str(DEFAULT_RETENTION_DAYS))
+        )
     directory = directory or log_dir()
     if not directory.exists():
         return (0, 0)

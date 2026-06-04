@@ -130,9 +130,7 @@ def test_memory_health_check_success(mock_get: Mock) -> None:
     result = manager.health_check()
 
     assert result is True
-    mock_get.assert_called_once_with(
-        "http://127.0.0.1:3111/health", timeout=2
-    )
+    mock_get.assert_called_once_with("http://127.0.0.1:3111/health", timeout=2)
 
 
 @patch("pxx.memory.requests.get")

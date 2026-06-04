@@ -56,8 +56,7 @@ class AiderOutputParser:
 
             # Error patterns
             if any(
-                marker in line.lower()
-                for marker in ["error", "exception", "traceback"]
+                marker in line.lower() for marker in ["error", "exception", "traceback"]
             ):
                 yield ("error", {"message": line})
 

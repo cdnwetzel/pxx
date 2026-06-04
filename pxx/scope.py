@@ -150,7 +150,9 @@ def load_trusted_paths(config_path: Path | None = None) -> list[str]:
     return out
 
 
-def is_path_trusted(target: Path, trusted_prefixes: list[str]) -> tuple[bool, str | None]:
+def is_path_trusted(
+    target: Path, trusted_prefixes: list[str]
+) -> tuple[bool, str | None]:
     """Check whether ``target`` lies under any trusted prefix.
 
     Returns ``(trusted, closest_match)``:
@@ -206,7 +208,9 @@ def scope_check_main(argv: list[str] | None = None) -> int:
     """
     argv = argv if argv is not None else sys.argv[1:]
     if not argv or argv[0] != "check":
-        print("usage: python3 -m pxx.scope check  < stdin-list-of-files", file=sys.stderr)
+        print(
+            "usage: python3 -m pxx.scope check  < stdin-list-of-files", file=sys.stderr
+        )
         return 2
     scope_env = os.environ.get("PXX_SCOPE", "")
     if not scope_env:

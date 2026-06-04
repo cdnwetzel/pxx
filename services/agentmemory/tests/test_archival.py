@@ -1,6 +1,5 @@
 """Tests for observation archival."""
 
-import pytest
 import json
 import tempfile
 from pathlib import Path

@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import threading
+from pathlib import Path
 from typing import Optional
 
 import numpy as np
@@ -17,9 +19,7 @@ try:
     HNSWLIB_AVAILABLE = True
 except ImportError:
     HNSWLIB_AVAILABLE = False
-    logger.warning(
-        "hnswlib not available — vector index will use brute-force search"
-    )
+    logger.warning("hnswlib not available — vector index will use brute-force search")
 
 
 class VectorIndex:
@@ -58,9 +58,7 @@ class VectorIndex:
         )
         self.index.set_ef(50)  # ef parameter for search
 
-    def add_embedding(
-        self, obs_id: str, embedding: list[float]
-    ) -> None:
+    def add_embedding(self, obs_id: str, embedding: list[float]) -> None:
         """Add observation embedding to index.
 
         Args:
@@ -114,7 +112,9 @@ class VectorIndex:
         try:
             query_array = np.array([query_embedding], dtype=np.float32)
             with self.lock:
-                labels, distances = self.index.knn_query(query_array, k=min(k, self.next_id))
+                labels, distances = self.index.knn_query(
+                    query_array, k=min(k, self.next_id)
+                )
 
             # Convert distances to similarity scores
             # HNSW uses cosine distance, convert to similarity: 1 - distance
@@ -171,3 +171,92 @@ class VectorIndex:
         for obs_id, embedding in embeddings.items():
             self.add_embedding(obs_id, embedding)
         logger.info(f"Rebuilt vector index with {len(embeddings)} embeddings")
+
+    def save(self, path: str | Path) -> bool:
+        """Persist index to disk.
+
+        Args:
+            path: Directory to save index files (creates if missing)
+
+        Returns:
+            True if successful, False otherwise
+        """
+        if not self.enabled or not self.index:
+            return False
+
+        try:
+            path = Path(path)
+            path.mkdir(parents=True, exist_ok=True)
+
+            with self.lock:
+                # Save HNSW index
+                index_file = path / "hnsw.idx"
+                self.index.save_index(str(index_file))
+
+                # Save metadata and mappings
+                metadata = {
+                    "dimension": self.dimension,
+                    "max_elements": self.max_elements,
+                    "next_id": self.next_id,
+                    "id_map": {str(k): v for k, v in self.id_map.items()},
+                    "reverse_map": self.reverse_map,
+                }
+                meta_file = path / "metadata.json"
+                meta_file.write_text(json.dumps(metadata))
+
+                logger.info(f"Saved vector index to {path}")
+                return True
+        except Exception as e:
+            logger.error(f"Error saving vector index: {e}")
+            return False
+
+    def load(self, path: str | Path) -> bool:
+        """Load index from disk.
+
+        Args:
+            path: Directory containing index files
+
+        Returns:
+            True if successful, False otherwise
+        """
+        if not self.enabled:
+            return False
+
+        try:
+            path = Path(path)
+            if not path.exists():
+                return False
+
+            meta_file = path / "metadata.json"
+            if not meta_file.exists():
+                return False
+
+            metadata = json.loads(meta_file.read_text())
+
+            # Validate schema
+            if metadata["dimension"] != self.dimension:
+                logger.warning(
+                    f"Schema mismatch: loaded dimension {metadata['dimension']} != "
+                    f"current {self.dimension}. Rebuild required."
+                )
+                return False
+
+            with self.lock:
+                # Load HNSW index
+                index_file = path / "hnsw.idx"
+                self.index = hnswlib.Index(space="cosine", dim=self.dimension)
+                self.index.load_index(str(index_file))
+                self.index.set_ef(50)
+
+                # Restore mappings
+                self.id_map = {int(k): v for k, v in metadata["id_map"].items()}
+                self.reverse_map = metadata["reverse_map"]
+                self.next_id = metadata["next_id"]
+
+                logger.info(
+                    f"Loaded vector index from {path} ({self.next_id} embeddings)"
+                )
+                return True
+        except Exception as e:
+            logger.error(f"Error loading vector index: {e}")
+            return False

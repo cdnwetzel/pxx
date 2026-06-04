@@ -5,7 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-import pytest
 
 from pxx.memory_injection import MemoryInjector
 
@@ -64,6 +63,7 @@ class TestMemoryInjector:
     def test_retrieve_timeout(self, mock_post: Mock) -> None:
         """Test retrieve() handles timeout gracefully."""
         import requests
+
         mock_post.side_effect = requests.Timeout("Connection timeout")
 
         injector = MemoryInjector()
@@ -241,9 +241,7 @@ class TestMemoryInjector:
         with patch.object(
             injector,
             "retrieve",
-            return_value={
-                "observations": [{"title": "Test", "content": "Test"}]
-            },
+            return_value={"observations": [{"title": "Test", "content": "Test"}]},
         ):
             with patch.object(
                 injector,

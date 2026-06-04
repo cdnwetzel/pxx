@@ -99,13 +99,15 @@ class MemoryInjector:
             lines.append(content)
             lines.append("")
 
-        lines.extend([
-            "---",
-            "",
-            "Use these observations to understand past context, but verify any",
-            "facts or patterns before relying on them in the current session.",
-            "",
-        ])
+        lines.extend(
+            [
+                "---",
+                "",
+                "Use these observations to understand past context, but verify any",
+                "facts or patterns before relying on them in the current session.",
+                "",
+            ]
+        )
 
         return "\n".join(lines)
 
@@ -186,9 +188,7 @@ class MemoryInjector:
         # Record injection event in analytics
         if self.analytics:
             context_size = len(self.format_context(observations))
-            self.analytics.record_injection(
-                observations, context_size=context_size
-            )
+            self.analytics.record_injection(observations, context_size=context_size)
 
         # Insert --read before other args (after aider binary)
         # Preserve the order: binary, then --read, then other args

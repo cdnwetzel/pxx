@@ -5,7 +5,6 @@ from __future__ import annotations
 from subprocess import Popen
 from unittest.mock import Mock, patch
 
-import pytest
 
 from pxx.observer import AiderMemoryObserver
 
@@ -16,9 +15,7 @@ class TestObservationFormatting:
     def test_format_observation_basic(self) -> None:
         """Test basic observation formatting."""
         mock_proc = Mock(spec=Popen)
-        observer = AiderMemoryObserver(
-            mock_proc, repo_root="/repo", cwd="/repo/src"
-        )
+        observer = AiderMemoryObserver(mock_proc, repo_root="/repo", cwd="/repo/src")
 
         obs = observer._format_observation(
             "execute_bash",
@@ -35,9 +32,7 @@ class TestObservationFormatting:
     def test_format_observation_includes_metadata(self) -> None:
         """Test observation includes project context metadata."""
         mock_proc = Mock(spec=Popen)
-        observer = AiderMemoryObserver(
-            mock_proc, repo_root="/repo", cwd="/repo/src"
-        )
+        observer = AiderMemoryObserver(mock_proc, repo_root="/repo", cwd="/repo/src")
 
         obs = observer._format_observation("read_file", "test.py", "content")
 
@@ -116,6 +111,7 @@ class TestObservationInjection:
     ) -> None:
         """Test injection handles timeout gracefully."""
         import requests
+
         mock_post.side_effect = requests.Timeout("timeout")
         mock_proc = Mock(spec=Popen)
         observer = AiderMemoryObserver(mock_proc)
@@ -158,9 +154,7 @@ class TestToolCallResultPairing:
         """Test observer injects observation when result received."""
         mock_post.return_value.status_code = 200
         mock_proc = Mock(spec=Popen)
-        observer = AiderMemoryObserver(
-            mock_proc, repo_root="/repo", cwd="/repo"
-        )
+        observer = AiderMemoryObserver(mock_proc, repo_root="/repo", cwd="/repo")
 
         # Simulate tool call followed by result
         tool_call = {"tool_name": "execute_bash", "arguments": {"cmd": "ls"}}
@@ -176,8 +170,7 @@ class TestToolCallResultPairing:
 
         # Should have POSTed to /mem/inject
         inject_calls = [
-            call for call in mock_post.call_args_list
-            if "/mem/inject" in str(call)
+            call for call in mock_post.call_args_list if "/mem/inject" in str(call)
         ]
         assert len(inject_calls) > 0
 

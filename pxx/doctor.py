@@ -5,13 +5,9 @@ Extends scripts/doctor.sh with runtime diagnostics for router, memory, and aider
 
 from __future__ import annotations
 
-import json
 import os
-import subprocess
-import sys
 from dataclasses import dataclass
 from datetime import datetime
-from pathlib import Path
 
 import requests
 
@@ -41,7 +37,7 @@ class RouterStats:
         if self.latency_p99 is not None:
             parts.append(f"p99={self.latency_p99:.0f}ms")
         if self.error_rate is not None:
-            parts.append(f"error_rate={self.error_rate*100:.1f}%")
+            parts.append(f"error_rate={self.error_rate * 100:.1f}%")
 
         return " | ".join(parts) if len(parts) > 1 else parts[0]
 
@@ -72,7 +68,7 @@ class MemoryStats:
         if self.total_size_mb is not None:
             parts.append(f"size={self.total_size_mb:.1f}MB")
         if self.hit_rate is not None:
-            parts.append(f"hit_rate={self.hit_rate*100:.1f}%")
+            parts.append(f"hit_rate={self.hit_rate * 100:.1f}%")
         if self.avg_retrieval_ms is not None:
             parts.append(f"retrieval={self.avg_retrieval_ms:.0f}ms")
 
@@ -103,7 +99,13 @@ class Doctor:
             RouterStats with availability and metrics.
         """
         if not self.router_api:
-            return RouterStats(available=False, endpoint=None, active_requests=None, latency_p99=None, error_rate=None)
+            return RouterStats(
+                available=False,
+                endpoint=None,
+                active_requests=None,
+                latency_p99=None,
+                error_rate=None,
+            )
 
         try:
             resp = requests.get(
@@ -111,7 +113,13 @@ class Doctor:
                 timeout=2,
             )
             if resp.status_code != 200:
-                return RouterStats(available=False, endpoint=self.router_api, active_requests=None, latency_p99=None, error_rate=None)
+                return RouterStats(
+                    available=False,
+                    endpoint=self.router_api,
+                    active_requests=None,
+                    latency_p99=None,
+                    error_rate=None,
+                )
 
             data = resp.json()
             return RouterStats(
@@ -122,7 +130,13 @@ class Doctor:
                 error_rate=data.get("error_rate"),
             )
         except (requests.RequestException, ValueError):
-            return RouterStats(available=False, endpoint=self.router_api, active_requests=None, latency_p99=None, error_rate=None)
+            return RouterStats(
+                available=False,
+                endpoint=self.router_api,
+                active_requests=None,
+                latency_p99=None,
+                error_rate=None,
+            )
 
     def check_memory(self) -> MemoryStats:
         """Check agentmemory health.
@@ -132,7 +146,12 @@ class Doctor:
         """
         if not self.memory_api:
             return MemoryStats(
-                available=False, endpoint=None, observation_count=None, total_size_mb=None, hit_rate=None, avg_retrieval_ms=None
+                available=False,
+                endpoint=None,
+                observation_count=None,
+                total_size_mb=None,
+                hit_rate=None,
+                avg_retrieval_ms=None,
             )
 
         try:
@@ -142,7 +161,12 @@ class Doctor:
             )
             if resp.status_code != 200:
                 return MemoryStats(
-                    available=False, endpoint=self.memory_api, observation_count=None, total_size_mb=None, hit_rate=None, avg_retrieval_ms=None
+                    available=False,
+                    endpoint=self.memory_api,
+                    observation_count=None,
+                    total_size_mb=None,
+                    hit_rate=None,
+                    avg_retrieval_ms=None,
                 )
 
             data = resp.json()
@@ -157,7 +181,12 @@ class Doctor:
             )
         except (requests.RequestException, ValueError):
             return MemoryStats(
-                available=False, endpoint=self.memory_api, observation_count=None, total_size_mb=None, hit_rate=None, avg_retrieval_ms=None
+                available=False,
+                endpoint=self.memory_api,
+                observation_count=None,
+                total_size_mb=None,
+                hit_rate=None,
+                avg_retrieval_ms=None,
             )
 
     def print_report(self) -> None:

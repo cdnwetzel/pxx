@@ -2,7 +2,7 @@
 
 import pytest
 import importlib
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 # Import modules using importlib (due to digit prefix)
 _middleware_mod = importlib.import_module("9router_pkg.memory_middleware")
@@ -26,7 +26,7 @@ class TestSlashCommandMatcher:
 
     def test_detect_recall_multiline(self):
         """Detect /recall in multiline text."""
-        text = "some context\n/recall \"bug fix\"\nmore text"
+        text = 'some context\n/recall "bug fix"\nmore text'
         result = self.matcher.detect(text)
         assert result == ("recall", "bug fix")
 
@@ -37,7 +37,7 @@ class TestSlashCommandMatcher:
 
     def test_detect_forget_command(self):
         """Detect /forget id command."""
-        result = self.matcher.detect('/forget obs_id_123')
+        result = self.matcher.detect("/forget obs_id_123")
         assert result == ("forget", "obs_id_123")
 
     def test_no_command_detected(self):
@@ -348,6 +348,7 @@ class TestMemoryMiddleware:
 
         # Should return unchanged even with enabled search
         import asyncio
+
         result = asyncio.run(self.middleware.on_request(request))
 
         assert result == request

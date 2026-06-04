@@ -153,9 +153,7 @@ class TestSizeLimiting:
 
     def test_limit_by_size_within_limit(self) -> None:
         """Test no limiting when within context budget."""
-        tuner = MemoryTuner(
-            max_context_chars=8000, leave_context_headroom=2000
-        )
+        tuner = MemoryTuner(max_context_chars=8000, leave_context_headroom=2000)
         obs = [
             {
                 "title": "A",
@@ -168,9 +166,7 @@ class TestSizeLimiting:
 
     def test_limit_by_size_exceeds_limit(self) -> None:
         """Test limiting when exceeding context budget."""
-        tuner = MemoryTuner(
-            max_context_chars=1000, leave_context_headroom=500
-        )
+        tuner = MemoryTuner(max_context_chars=1000, leave_context_headroom=500)
         obs = [
             {
                 "title": "A",
@@ -187,9 +183,7 @@ class TestSizeLimiting:
 
     def test_limit_by_size_respects_headroom(self) -> None:
         """Test headroom is preserved."""
-        tuner = MemoryTuner(
-            max_context_chars=2000, leave_context_headroom=1000
-        )
+        tuner = MemoryTuner(max_context_chars=2000, leave_context_headroom=1000)
         obs = [{"title": "Big", "content": "x" * 1500}]
         result, size = tuner.limit_by_size(obs, base_context_size=100)
         # 100 + ~1600 = 1700, which is <= 1000 (max - headroom) - should fit

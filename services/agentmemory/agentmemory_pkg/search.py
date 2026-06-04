@@ -7,7 +7,7 @@ class BM25Ranker:
 
     def __init__(self, k1: float = 1.5, b: float = 0.75):
         self.k1 = k1  # Term frequency saturation point
-        self.b = b    # Length normalization parameter
+        self.b = b  # Length normalization parameter
         self.avg_doc_length = 0
         self.doc_freqs = {}
         self.idf_cache = {}
@@ -28,8 +28,9 @@ class BM25Ranker:
         # Pre-calculate IDF values
         for token in self.doc_freqs:
             idf = math.log(
-                (self.num_docs - self.doc_freqs[token] + 0.5) /
-                (self.doc_freqs[token] + 0.5) + 1
+                (self.num_docs - self.doc_freqs[token] + 0.5)
+                / (self.doc_freqs[token] + 0.5)
+                + 1
             )
             self.idf_cache[token] = idf
 
@@ -51,10 +52,7 @@ class BM25Ranker:
                 continue
 
             # IDF (inverse document frequency)
-            idf = self.idf_cache.get(
-                token,
-                math.log((self.num_docs + 1) / 1.0)
-            )
+            idf = self.idf_cache.get(token, math.log((self.num_docs + 1) / 1.0))
 
             # BM25 formula
             numerator = idf * tf * (self.k1 + 1)
@@ -94,9 +92,11 @@ class SearchEngine:
         self.vector_index = None
         try:
             from .vector_index import VectorIndex
+
             self.vector_index = VectorIndex()
         except Exception as e:
             import logging
+
             logging.warning(f"Vector index unavailable: {e}")
 
     def search(
@@ -115,10 +115,7 @@ class SearchEngine:
             return self._hybrid_search(query, observations, limit, min_score)
         else:
             ranked = self.ranker.rank(query, observations)
-            return [
-                (obs, score) for obs, score in ranked
-                if score >= min_score
-            ][:limit]
+            return [(obs, score) for obs, score in ranked if score >= min_score][:limit]
 
     def _hybrid_search(
         self,
@@ -148,9 +145,7 @@ class SearchEngine:
 
         # Vector search (skip observations without embeddings)
         vector_scores = {}
-        obs_with_embeddings = [
-            obs for obs in observations if obs.embedding is not None
-        ]
+        obs_with_embeddings = [obs for obs in observations if obs.embedding is not None]
 
         if obs_with_embeddings:
             try:
@@ -164,9 +159,7 @@ class SearchEngine:
                     vector_results = self.vector_index.search(
                         query_embedding, k=len(obs_with_embeddings)
                     )
-                    max_vector = max(
-                        (score for _, score in vector_results), default=0
-                    )
+                    max_vector = max((score for _, score in vector_results), default=0)
                     if max_vector > 0:
                         vector_scores = {
                             obs_id: score / max_vector
@@ -179,9 +172,7 @@ class SearchEngine:
                         query,
                         [(obs.id, obs.embedding) for obs in obs_with_embeddings],
                     )
-                    max_vector = max(
-                        (score for _, score in vector_results), default=0
-                    )
+                    max_vector = max((score for _, score in vector_results), default=0)
                     if max_vector > 0:
                         vector_scores = {
                             obs_id: score / max_vector
@@ -208,7 +199,4 @@ class SearchEngine:
         ]
         results.sort(key=lambda x: x[1], reverse=True)
 
-        return [
-            (obs, score) for obs, score in results
-            if score >= min_score
-        ][:limit]
+        return [(obs, score) for obs, score in results if score >= min_score][:limit]

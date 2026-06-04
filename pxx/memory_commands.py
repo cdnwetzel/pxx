@@ -222,7 +222,7 @@ class SlashCommandHandler:
             return {
                 "success": False,
                 "command": "remember",
-                "response": 'Title and content cannot be empty',
+                "response": "Title and content cannot be empty",
             }
 
         try:

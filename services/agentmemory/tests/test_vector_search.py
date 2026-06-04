@@ -1,7 +1,6 @@
 """Tests for vector search and hybrid search."""
 
 import pytest
-import numpy as np
 from agentmemory_pkg import embeddings
 from agentmemory_pkg.storage import Observation
 from agentmemory_pkg.search import SearchEngine

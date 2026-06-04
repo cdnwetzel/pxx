@@ -31,6 +31,7 @@ class CommandHandler:
         """
         observations = self.store.get_by_project(project)
         from .search import SearchEngine
+
         engine = SearchEngine()
         ranked = engine.search(query, observations, limit=limit)
 

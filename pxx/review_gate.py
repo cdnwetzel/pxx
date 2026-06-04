@@ -13,6 +13,7 @@ from pathlib import Path
 @dataclass(frozen=True)
 class Finding:
     """A single code review finding (F-NNN)."""
+
     id: str
     severity: str  # P0, P1, P2
     state: str  # proposed, open, in-progress, resolved, wontfix, superseded
@@ -32,6 +33,7 @@ def _get_claude_bin() -> str | None:
         return override
     # Try shutil.which but handle import locally
     import shutil
+
     return shutil.which("claude")
 
 
@@ -83,13 +85,15 @@ def parse_findings(md_content: str) -> list[Finding]:
         if " in " in description:
             _, location = description.rsplit(" in ", 1)
 
-        findings.append(Finding(
-            id=finding_id,
-            severity=severity,
-            state=state,
-            location=location,
-            description=description,
-        ))
+        findings.append(
+            Finding(
+                id=finding_id,
+                severity=severity,
+                state=state,
+                location=location,
+                description=description,
+            )
+        )
     return findings
 
 

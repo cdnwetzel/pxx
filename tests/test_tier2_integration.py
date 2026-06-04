@@ -5,7 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-import pytest
 
 from pxx.memory_injection import MemoryInjector
 from pxx.observer import AiderMemoryObserver
@@ -40,16 +39,20 @@ class TestTier2EndToEnd:
         aider_args = ["aider", "--model", "gpt-4"]
 
         # Mock the retrieve method to return observations
-        with patch.object(injector, "retrieve", return_value={
-            "observations": [
-                {
-                    "title": "Previous session observation",
-                    "content": "Fixed a bug in auth.py",
-                    "source": "previous-session",
-                    "score": 0.9,
-                }
-            ]
-        }):
+        with patch.object(
+            injector,
+            "retrieve",
+            return_value={
+                "observations": [
+                    {
+                        "title": "Previous session observation",
+                        "content": "Fixed a bug in auth.py",
+                        "source": "previous-session",
+                        "score": 0.9,
+                    }
+                ]
+            },
+        ):
             args_with_memory = injector.inject_into_aider_args(
                 aider_args, repo_root="/repo", cwd="/repo"
             )
@@ -65,9 +68,7 @@ class TestTier2EndToEnd:
 
         # Step 2: Observer captures tool use
         mock_proc = Mock()
-        observer = AiderMemoryObserver(
-            mock_proc, repo_root="/repo", cwd="/repo"
-        )
+        observer = AiderMemoryObserver(mock_proc, repo_root="/repo", cwd="/repo")
 
         # Simulate tool call and result
         tool_call = {"tool_name": "execute_bash", "arguments": {"cmd": "ls"}}
@@ -92,7 +93,8 @@ class TestTier2EndToEnd:
         assert mock_observer_post.call_count >= 1
         # Find the inject call
         inject_calls = [
-            call for call in mock_observer_post.call_args_list
+            call
+            for call in mock_observer_post.call_args_list
             if "/mem/inject" in str(call)
         ]
         assert len(inject_calls) > 0
@@ -150,9 +152,7 @@ class TestTier2EndToEnd:
         assert obs["metadata"]["tool"] == "read_file"
 
     @patch("pxx.memory_injection.requests.post")
-    def test_memory_injection_graceful_degradation(
-        self, mock_post: Mock
-    ) -> None:
+    def test_memory_injection_graceful_degradation(self, mock_post: Mock) -> None:
         """Test memory injection gracefully degrades if memory unavailable."""
         mock_post.return_value.status_code = 500  # Simulate error
 
@@ -164,11 +164,10 @@ class TestTier2EndToEnd:
         assert result == aider_args
 
     @patch("pxx.observer.requests.post")
-    def test_observation_injection_graceful_degradation(
-        self, mock_post: Mock
-    ) -> None:
+    def test_observation_injection_graceful_degradation(self, mock_post: Mock) -> None:
         """Test observation injection doesn't block aider on failure."""
         import requests
+
         mock_post.side_effect = requests.Timeout()
 
         mock_proc = Mock()
@@ -201,9 +200,7 @@ class TestTier2Integration:
         # Memory would have observer capturing tool use
         # Together: aider uses compressed tokens + observations recorded
 
-        obs = observer._format_observation(
-            "execute_bash", "ls", "file1\nfile2"
-        )
+        obs = observer._format_observation("execute_bash", "ls", "file1\nfile2")
         assert obs["title"]
         assert obs["content"]
 

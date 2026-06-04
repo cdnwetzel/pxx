@@ -113,9 +113,7 @@ def test_router_get_usage_success(mock_get: Mock) -> None:
 
     assert result["total_tokens"] == 5000
     assert result["total_cost"] == 0.05
-    mock_get.assert_called_once_with(
-        "http://127.0.0.1:20128/v1/usage", timeout=2
-    )
+    mock_get.assert_called_once_with("http://127.0.0.1:20128/v1/usage", timeout=2)
 
 
 @patch("pxx.router.requests.get")
@@ -142,9 +140,7 @@ def test_router_get_status_success(mock_get: Mock) -> None:
 
     assert result["active_provider"] == "openai"
     assert "fallback_chain" in result
-    mock_get.assert_called_once_with(
-        "http://127.0.0.1:20128/v1/status", timeout=2
-    )
+    mock_get.assert_called_once_with("http://127.0.0.1:20128/v1/status", timeout=2)
 
 
 @patch("pxx.router.requests.get")

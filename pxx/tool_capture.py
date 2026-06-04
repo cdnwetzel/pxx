@@ -32,9 +32,7 @@ def get_git_diff_since(commit_sha: str) -> str:
         return ""
 
 
-def extract_observations_from_diff(
-    diff_stat: str, project_root: Path
-) -> list[str]:
+def extract_observations_from_diff(diff_stat: str, project_root: Path) -> list[str]:
     """Extract meaningful observations from git diff output.
 
     Args:
@@ -80,9 +78,9 @@ def extract_observations_from_diff(
                 # Format: "10 insertions(+), 5 deletions(-)"
                 for token in tokens:
                     if token.isdigit():
-                        if "insertions" in changes[:changes.index(token)]:
+                        if "insertions" in changes[: changes.index(token)]:
                             insertions = int(token)
-                        elif "deletions" in changes[:changes.index(token)]:
+                        elif "deletions" in changes[: changes.index(token)]:
                             deletions = int(token)
             else:
                 # Format: "10 ++++---" (visual bar)
@@ -90,9 +88,7 @@ def extract_observations_from_diff(
                 if tokens and tokens[0].isdigit():
                     total = int(tokens[0])
                     # Count the visual bar
-                    plus_minus = "".join(
-                        t for t in tokens[1:] if set(t) <= {"+", "-"}
-                    )
+                    plus_minus = "".join(t for t in tokens[1:] if set(t) <= {"+", "-"})
                     if plus_minus:
                         num_plus = plus_minus.count("+")
                         num_minus = plus_minus.count("-")
@@ -150,9 +146,7 @@ def post_observations_to_memory(
                 posted += 1
                 logger.debug(f"Posted observation: {obs}")
             else:
-                logger.warning(
-                    f"Failed to post observation: {resp.status_code}"
-                )
+                logger.warning(f"Failed to post observation: {resp.status_code}")
         except requests.RequestException as e:
             logger.warning(f"Error posting observation: {e}")
 

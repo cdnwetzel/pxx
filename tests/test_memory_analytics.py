@@ -166,9 +166,7 @@ class TestColdObservations:
 
         # Create observations without accessing them
         access1 = ObservationAccess("obs-1")
-        access1.first_access = (
-            datetime.now() - timedelta(days=10)
-        ).isoformat()
+        access1.first_access = (datetime.now() - timedelta(days=10)).isoformat()
         analytics.observation_access["obs-1"] = access1
 
         cold = analytics.cold_observations(days_inactive=7, min_age_days=1)
@@ -199,10 +197,13 @@ class TestStatistics:
     def test_retrieval_stats(self) -> None:
         """Test retrieval statistics."""
         analytics = MemoryAnalytics()
-        analytics.record_retrieval("q1", [
-            {"id": "obs-1", "score": 0.9},
-            {"id": "obs-2", "score": 0.8},
-        ])
+        analytics.record_retrieval(
+            "q1",
+            [
+                {"id": "obs-1", "score": 0.9},
+                {"id": "obs-2", "score": 0.8},
+            ],
+        )
         analytics.record_retrieval("q2", [{"id": "obs-3", "score": 0.7}])
 
         stats = analytics.retrieval_stats()
@@ -214,7 +215,9 @@ class TestStatistics:
         """Test injection statistics."""
         analytics = MemoryAnalytics()
         analytics.record_injection([{"id": "obs-1"}], context_size=1000)
-        analytics.record_injection([{"id": "obs-2"}, {"id": "obs-3"}], context_size=2000)
+        analytics.record_injection(
+            [{"id": "obs-2"}, {"id": "obs-3"}], context_size=2000
+        )
 
         stats = analytics.injection_stats()
         assert stats["total_injections"] == 2

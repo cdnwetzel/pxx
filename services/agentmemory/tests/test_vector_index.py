@@ -1,5 +1,8 @@
 """Tests for HNSW vector index."""
 
+import tempfile
+from pathlib import Path
+
 import pytest
 from agentmemory_pkg.vector_index import VectorIndex, HNSWLIB_AVAILABLE
 
@@ -155,7 +158,9 @@ class TestVectorIndex:
         def add_embeddings():
             for i in range(10):
                 embedding = [0.1 * (i + 1)] * 384
-                index.add_embedding(f"obs-{threading.current_thread().name}-{i}", embedding)
+                index.add_embedding(
+                    f"obs-{threading.current_thread().name}-{i}", embedding
+                )
 
         threads = [
             threading.Thread(target=add_embeddings, name=f"thread-{i}")
@@ -184,3 +189,91 @@ class TestVectorIndex:
 
         results = index.search(embedding, k=10)
         assert results == []
+
+    def test_save_and_load_persistence(self):
+        """Test saving and loading index from disk."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Create and populate index
+            index1 = VectorIndex(dimension=384)
+            embeddings = {
+                "obs-1": [0.1] * 384,
+                "obs-2": [0.2] * 384,
+                "obs-3": [0.3] * 384,
+            }
+            index1.rebuild(embeddings)
+            assert index1.get_size() == 3
+
+            # Save to disk
+            save_path = Path(tmpdir) / "vector_index"
+            assert index1.save(str(save_path))
+            assert (save_path / "hnsw.idx").exists()
+            assert (save_path / "metadata.json").exists()
+
+            # Load into new index
+            index2 = VectorIndex(dimension=384)
+            assert index2.load(str(save_path))
+            assert index2.get_size() == 3
+
+            # Verify embeddings can still be searched
+            results = index2.search([0.15] * 384, k=3)
+            assert len(results) == 3
+            # Should find obs-1 as top result (closest to 0.15)
+            assert results[0][0] == "obs-1"
+
+    def test_load_nonexistent_path(self):
+        """Test loading from nonexistent path."""
+        index = VectorIndex(dimension=384)
+        assert not index.load("/nonexistent/path")
+
+    def test_schema_mismatch_on_load(self):
+        """Test that schema mismatches are detected."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Create and save index with dimension 384
+            index1 = VectorIndex(dimension=384)
+            index1.add_embedding("obs-1", [0.1] * 384)
+            save_path = Path(tmpdir) / "vector_index"
+            index1.save(str(save_path))
+
+            # Try to load with different dimension
+            index2 = VectorIndex(dimension=768)  # Different dimension
+            assert not index2.load(str(save_path))  # Should fail
+
+    def test_rebuild_after_many_deletions(self):
+        """Test that index can be rebuilt after deletions.
+
+        Note: HNSW doesn't support true deletion, so get_size() (next_id)
+        remains unchanged. Instead, rebuild() clears and repopulates.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Create index with embeddings
+            index1 = VectorIndex(dimension=384)
+            embeddings = {f"obs-{i}": [float(i) / 100] * 384 for i in range(10)}
+            index1.rebuild(embeddings)
+
+            # Simulate deletions from mappings
+            for i in range(5):
+                index1.remove_embedding(f"obs-{i}")
+
+            # Verify mappings cleaned up
+            for i in range(5):
+                assert f"obs-{i}" not in index1.reverse_map
+
+            # But size (next_id) unchanged because HNSW doesn't support deletion
+            assert index1.get_size() == 10
+
+            # Rebuild with only remaining embeddings (clears and repopulates)
+            remaining = {f"obs-{i}": [float(i) / 100] * 384 for i in range(5, 10)}
+            index1.rebuild(remaining)
+            assert index1.get_size() == 5
+
+            # Save and load
+            save_path = Path(tmpdir) / "vector_index"
+            index1.save(str(save_path))
+
+            index2 = VectorIndex(dimension=384)
+            index2.load(str(save_path))
+            assert index2.get_size() == 5
+
+            # Verify only 5 embeddings accessible
+            assert len(index2.id_map) == 5
+            assert len(index2.reverse_map) == 5

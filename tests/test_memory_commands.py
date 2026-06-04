@@ -130,9 +130,7 @@ class TestRecallCommand:
         mock_post.return_value.json.return_value = {"observations": []}
 
         handler = SlashCommandHandler()
-        handler.execute(
-            "recall", "test", repo_root="/repo", cwd="/repo/src"
-        )
+        handler.execute("recall", "test", repo_root="/repo", cwd="/repo/src")
 
         # Verify context was included in POST
         args, kwargs = mock_post.call_args

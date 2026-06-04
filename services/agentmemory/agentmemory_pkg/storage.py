@@ -10,6 +10,7 @@ from dataclasses import dataclass
 @dataclass
 class Observation:
     """Stored observation."""
+
     id: str
     project: str
     content: str
@@ -71,7 +72,9 @@ class ObservationStore:
                 pass  # Column already exists
             conn.commit()
 
-    def store(self, project: str, content: str, ttl_days: int | None = None) -> Observation:
+    def store(
+        self, project: str, content: str, ttl_days: int | None = None
+    ) -> Observation:
         """Store a new observation with embedding and TTL."""
         from . import embeddings as emb_module
         from datetime import timedelta
@@ -84,9 +87,7 @@ class ObservationStore:
         if ttl_days is None:
             ttl_days = self._get_project_ttl(project)
         if ttl_days > 0:
-            expires_at = (
-                datetime.utcnow() + timedelta(days=ttl_days)
-            ).isoformat()
+            expires_at = (datetime.utcnow() + timedelta(days=ttl_days)).isoformat()
 
         # Generate embedding for the content
         try:
@@ -95,6 +96,7 @@ class ObservationStore:
         except Exception as e:
             # Graceful degradation if embedding fails
             import logging
+
             logging.warning(f"Failed to generate embedding: {e}")
             embedding_json = None
 
@@ -107,7 +109,8 @@ class ObservationStore:
                     "VALUES (?, ?, ?, ?, ?, 0, ?, ?)"
                 )
                 conn.execute(
-                    query, (obs_id, project, content, now, now, embedding_json, expires_at)
+                    query,
+                    (obs_id, project, content, now, now, embedding_json, expires_at),
                 )
                 conn.commit()
         except sqlite3.IntegrityError:
@@ -207,7 +210,7 @@ class ObservationStore:
                 ORDER BY last_accessed DESC
                 LIMIT ?
                 """,
-                (project, f"%{query_lower}%", f"%{query_lower}%", limit)
+                (project, f"%{query_lower}%", f"%{query_lower}%", limit),
             ).fetchall()
 
         return [
@@ -225,9 +228,7 @@ class ObservationStore:
     def delete(self, obs_id: str) -> bool:
         """Delete an observation."""
         with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.execute(
-                "DELETE FROM observations WHERE id = ?", (obs_id,)
-            )
+            cursor = conn.execute("DELETE FROM observations WHERE id = ?", (obs_id,))
             conn.commit()
             return cursor.rowcount > 0
 
@@ -249,7 +250,7 @@ class ObservationStore:
                 FROM observations
                 WHERE project = ?
                 """,
-                (project,)
+                (project,),
             ).fetchone()
 
             count = row[0] or 0
@@ -261,9 +262,7 @@ class ObservationStore:
             "size_mb": size_bytes / (1024 * 1024),
         }
 
-    def cleanup_expired(
-        self, dry_run: bool = False, archive_manager=None
-    ) -> dict:
+    def cleanup_expired(self, dry_run: bool = False, archive_manager=None) -> dict:
         """Delete expired observations across all projects.
 
         Args:
@@ -298,7 +297,7 @@ class ObservationStore:
                 archive_result = None
                 if archive_manager and expired_rows:
                     # Convert rows to Observation objects for archival
-                    from . import embeddings as emb_module
+
                     obs_list = [
                         Observation(
                             id=row[0],

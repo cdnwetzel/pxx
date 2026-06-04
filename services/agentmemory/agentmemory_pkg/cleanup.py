@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 import threading
-import time
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
@@ -51,9 +50,7 @@ class CleanupManager:
         self.thread = threading.Thread(target=self._run, daemon=True)
         self.thread.name = "agentmemory-cleanup"
         self.thread.start()
-        logger.info(
-            f"Cleanup thread started (interval={self.interval_seconds}s)"
-        )
+        logger.info(f"Cleanup thread started (interval={self.interval_seconds}s)")
 
     def stop(self) -> None:
         """Stop the cleanup thread gracefully."""

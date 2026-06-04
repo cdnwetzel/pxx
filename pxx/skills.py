@@ -91,9 +91,7 @@ class SkillRegistry:
             return None
 
         # Match header: # /name — description
-        header_match = re.match(
-            r"^#\s+(/[\w-]+)\s*—\s*(.+?)$", content, re.MULTILINE
-        )
+        header_match = re.match(r"^#\s+(/[\w-]+)\s*—\s*(.+?)$", content, re.MULTILINE)
         if not header_match:
             return None
 

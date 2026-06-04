@@ -127,7 +127,9 @@ class TestSupervisorFlags:
                         with patch("pxx.cli._build_aider_args", return_value=["aider"]):
                             with patch("pxx.cli._in_git_repo", return_value=False):
                                 with patch("pxx.cli._try_write_session_start"):
-                                    with patch.dict("os.environ", {}, clear=False) as env:
+                                    with patch.dict(
+                                        "os.environ", {}, clear=False
+                                    ) as env:
                                         try:
                                             main()
                                         except SystemExit:

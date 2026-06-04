@@ -10,7 +10,7 @@ class EndpointRouter:
     """Route requests to primary endpoint with fallback chains."""
 
     def __init__(self):
-        import time
+
         # Primary endpoint from env var or default
         self.primary = os.getenv(
             "PXX_ROUTER_PRIMARY", "http://workstation.splawoffice.local:11434"
@@ -61,7 +61,9 @@ class EndpointRouter:
         body: Optional[bytes] = None,
     ) -> tuple[int, dict, bytes]:
         """Proxy a request to the available endpoint."""
-        sys.stderr.write(f"[PROXY] Starting {method} {path}, body_len={len(body) if body else 0}\n")
+        sys.stderr.write(
+            f"[PROXY] Starting {method} {path}, body_len={len(body) if body else 0}\n"
+        )
         sys.stderr.flush()
         endpoint = await self.get_endpoint()
         if not endpoint:

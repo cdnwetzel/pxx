@@ -1,9 +1,6 @@
 """Simple LRU cache for search results (performance optimization)."""
 
-from functools import lru_cache
-from typing import Tuple
 import hashlib
-import json
 
 
 class SearchCache:
@@ -55,9 +52,7 @@ class SearchCache:
 
     def invalidate_project(self, project: str) -> None:
         """Invalidate all cache entries for a project."""
-        keys_to_delete = [
-            k for k in self._cache.keys() if k.startswith(project)
-        ]
+        keys_to_delete = [k for k in self._cache.keys() if k.startswith(project)]
         for k in keys_to_delete:
             self._cache.pop(k, None)
 

@@ -1,11 +1,6 @@
 """Smoke tests for Phase 5 supervisor mode (9router + agentmemory)."""
 
-import os
-import sys
-import subprocess
 import time
-from pathlib import Path
-from unittest.mock import patch, MagicMock
 
 
 class TestSupervisorModeServices:
@@ -100,7 +95,9 @@ class TestSupervisorModeServices:
                 if data.get("data"):
                     model_ids = [m["id"] for m in data["data"]]
                 else:
-                    model_ids = [m.get("name", m.get("id", "")) for m in data.get("models", [])]
+                    model_ids = [
+                        m.get("name", m.get("id", "")) for m in data.get("models", [])
+                    ]
                 assert "devstral:24b" in model_ids
 
         finally:

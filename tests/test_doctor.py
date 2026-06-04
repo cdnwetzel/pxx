@@ -228,7 +228,10 @@ class TestDoctorSummary:
 class TestDoctorEnvVars:
     """Tests for environment variable configuration."""
 
-    @patch.dict("os.environ", {"PXX_ROUTER_API": "http://router:9000", "PXX_MEMORY_API": "http://mem:3111"})
+    @patch.dict(
+        "os.environ",
+        {"PXX_ROUTER_API": "http://router:9000", "PXX_MEMORY_API": "http://mem:3111"},
+    )
     def test_doctor_from_env(self) -> None:
         """Test doctor initialization from environment."""
         doctor = Doctor()
@@ -238,7 +241,9 @@ class TestDoctorEnvVars:
 
     def test_doctor_override_env(self) -> None:
         """Test doctor parameters override environment."""
-        doctor = Doctor(router_api="http://custom:9000", memory_api="http://custom:3111")
+        doctor = Doctor(
+            router_api="http://custom:9000", memory_api="http://custom:3111"
+        )
 
         assert doctor.router_api == "http://custom:9000"
         assert doctor.memory_api == "http://custom:3111"

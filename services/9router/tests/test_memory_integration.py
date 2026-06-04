@@ -3,7 +3,7 @@
 import pytest
 import importlib
 import json
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import AsyncMock, patch
 from fastapi.testclient import TestClient
 
 # Import modules using importlib (due to digit prefix)
@@ -122,24 +122,32 @@ class TestSlashCommandInterception:
         _main_mod.memory_middleware.memory_client.search = AsyncMock(return_value=[])
 
         # Mock the router to avoid actual network calls
-        with patch.object(_main_mod.router, "proxy_request", new_callable=AsyncMock) as mock:
+        with patch.object(
+            _main_mod.router, "proxy_request", new_callable=AsyncMock
+        ) as mock:
             # Return a normal LLM response
             mock.return_value = (
                 200,
                 {"content-type": "application/json"},
-                json.dumps({
-                    "id": "llm_123",
-                    "object": "chat.completion",
-                    "model": "devstral:24b",
-                    "choices": [
-                        {
-                            "index": 0,
-                            "message": {"role": "assistant", "content": "Hello"},
-                            "finish_reason": "stop",
-                        }
-                    ],
-                    "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
-                }).encode(),
+                json.dumps(
+                    {
+                        "id": "llm_123",
+                        "object": "chat.completion",
+                        "model": "devstral:24b",
+                        "choices": [
+                            {
+                                "index": 0,
+                                "message": {"role": "assistant", "content": "Hello"},
+                                "finish_reason": "stop",
+                            }
+                        ],
+                        "usage": {
+                            "prompt_tokens": 10,
+                            "completion_tokens": 5,
+                            "total_tokens": 15,
+                        },
+                    }
+                ).encode(),
             )
 
             # Send normal request
@@ -177,22 +185,26 @@ class TestSlashCommandInterception:
         )
 
         # Mock the router to capture what request it receives
-        with patch.object(_main_mod.router, "proxy_request", new_callable=AsyncMock) as mock:
+        with patch.object(
+            _main_mod.router, "proxy_request", new_callable=AsyncMock
+        ) as mock:
             mock.return_value = (
                 200,
                 {"content-type": "application/json"},
-                json.dumps({
-                    "id": "llm_123",
-                    "object": "chat.completion",
-                    "model": "devstral:24b",
-                    "choices": [
-                        {
-                            "index": 0,
-                            "message": {"role": "assistant", "content": "Response"},
-                            "finish_reason": "stop",
-                        }
-                    ],
-                }).encode(),
+                json.dumps(
+                    {
+                        "id": "llm_123",
+                        "object": "chat.completion",
+                        "model": "devstral:24b",
+                        "choices": [
+                            {
+                                "index": 0,
+                                "message": {"role": "assistant", "content": "Response"},
+                                "finish_reason": "stop",
+                            }
+                        ],
+                    }
+                ).encode(),
             )
 
             # Send request
@@ -231,34 +243,42 @@ class TestSlashCommandInterception:
         )
 
         # Mock the router to return response with tool calls
-        with patch.object(_main_mod.router, "proxy_request", new_callable=AsyncMock) as mock:
+        with patch.object(
+            _main_mod.router, "proxy_request", new_callable=AsyncMock
+        ) as mock:
             mock.return_value = (
                 200,
                 {"content-type": "application/json"},
-                json.dumps({
-                    "id": "llm_123",
-                    "object": "chat.completion",
-                    "model": "devstral:24b",
-                    "choices": [
-                        {
-                            "index": 0,
-                            "message": {
-                                "role": "assistant",
-                                "tool_calls": [
-                                    {
-                                        "id": "call_123",
-                                        "function": {
-                                            "name": "bash",
-                                            "arguments": '{"command": "ls -la"}',
-                                        },
-                                    }
-                                ],
-                            },
-                            "finish_reason": "tool_calls",
-                        }
-                    ],
-                    "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
-                }).encode(),
+                json.dumps(
+                    {
+                        "id": "llm_123",
+                        "object": "chat.completion",
+                        "model": "devstral:24b",
+                        "choices": [
+                            {
+                                "index": 0,
+                                "message": {
+                                    "role": "assistant",
+                                    "tool_calls": [
+                                        {
+                                            "id": "call_123",
+                                            "function": {
+                                                "name": "bash",
+                                                "arguments": '{"command": "ls -la"}',
+                                            },
+                                        }
+                                    ],
+                                },
+                                "finish_reason": "tool_calls",
+                            }
+                        ],
+                        "usage": {
+                            "prompt_tokens": 10,
+                            "completion_tokens": 5,
+                            "total_tokens": 15,
+                        },
+                    }
+                ).encode(),
             )
 
             # Send request
@@ -275,7 +295,9 @@ class TestSlashCommandInterception:
             # Should have captured tool call as observation
             assert response.status_code == 200
             _main_mod.memory_middleware.memory_client.store_observation.assert_called_once()
-            call_args = _main_mod.memory_middleware.memory_client.store_observation.call_args
+            call_args = (
+                _main_mod.memory_middleware.memory_client.store_observation.call_args
+            )
             obs = call_args[0][0]
             assert obs["title"] == "Tool use: bash"
             assert "bash" in obs["content"]
@@ -286,22 +308,26 @@ class TestSlashCommandInterception:
         _main_mod.memory_middleware = None
 
         # Mock the router
-        with patch.object(_main_mod.router, "proxy_request", new_callable=AsyncMock) as mock:
+        with patch.object(
+            _main_mod.router, "proxy_request", new_callable=AsyncMock
+        ) as mock:
             mock.return_value = (
                 200,
                 {"content-type": "application/json"},
-                json.dumps({
-                    "id": "llm_123",
-                    "object": "chat.completion",
-                    "model": "devstral:24b",
-                    "choices": [
-                        {
-                            "index": 0,
-                            "message": {"role": "assistant", "content": "Hello"},
-                            "finish_reason": "stop",
-                        }
-                    ],
-                }).encode(),
+                json.dumps(
+                    {
+                        "id": "llm_123",
+                        "object": "chat.completion",
+                        "model": "devstral:24b",
+                        "choices": [
+                            {
+                                "index": 0,
+                                "message": {"role": "assistant", "content": "Hello"},
+                                "finish_reason": "stop",
+                            }
+                        ],
+                    }
+                ).encode(),
             )
 
             # Send request
@@ -326,7 +352,9 @@ class TestSlashCommandInterception:
         _main_mod.memory_middleware = MemoryMiddleware()
 
         # Mock router endpoint check
-        with patch.object(_main_mod.router, "get_endpoint", new_callable=AsyncMock) as mock:
+        with patch.object(
+            _main_mod.router, "get_endpoint", new_callable=AsyncMock
+        ) as mock:
             mock.return_value = "http://localhost:11434"
 
             response = client.get("/health")
@@ -341,7 +369,9 @@ class TestSlashCommandInterception:
         _main_mod.memory_middleware = MemoryMiddleware()
 
         # Mock router models
-        with patch.object(_main_mod.router, "list_models", new_callable=AsyncMock) as mock:
+        with patch.object(
+            _main_mod.router, "list_models", new_callable=AsyncMock
+        ) as mock:
             mock.return_value = {
                 "models": [
                     {"name": "devstral:24b", "modified_at": "2026-01-01"},

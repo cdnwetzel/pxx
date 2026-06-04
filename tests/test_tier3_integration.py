@@ -67,6 +67,7 @@ class TestThresholdApplication:
         # Check the file contains only high-relevance observation
         read_idx = result.index("--read")
         from pathlib import Path
+
         context_file = Path(result[read_idx + 1])
         content = context_file.read_text()
         assert "High" in content
@@ -91,6 +92,7 @@ class TestThresholdApplication:
             # Check file contains only 3 observations
             read_idx = result.index("--read")
             from pathlib import Path
+
             context_file = Path(result[read_idx + 1])
             content = context_file.read_text()
             # Count headers: "## 1.", "## 2.", "## 3."
@@ -181,12 +183,12 @@ class TestAnalyticsQueries:
 
         # Create old observation
         from datetime import datetime, timedelta
-        access = MemoryAnalytics().observation_access.get(
-            "obs-1"
-        ) or type("Access", (), {"obs_id": "obs-1", "first_access": None})()
-        access.first_access = (
-            datetime.now() - timedelta(days=10)
-        ).isoformat()
+
+        access = (
+            MemoryAnalytics().observation_access.get("obs-1")
+            or type("Access", (), {"obs_id": "obs-1", "first_access": None})()
+        )
+        access.first_access = (datetime.now() - timedelta(days=10)).isoformat()
 
         # Can't directly test cold_observations without complex setup
         # But verify the method exists and works
@@ -213,9 +215,7 @@ class TestTier3FullIntegration:
 
     @patch("pxx.memory_injection.requests.post")
     @patch("pxx.memory_commands.requests.post")
-    def test_full_tier3_flow(
-        self, mock_cmd_post: Mock, mock_inj_post: Mock
-    ) -> None:
+    def test_full_tier3_flow(self, mock_cmd_post: Mock, mock_inj_post: Mock) -> None:
         """Test complete Tier 3 flow: injection + commands + analytics."""
         # Setup injection mock
         mock_inj_post.return_value.status_code = 200
@@ -249,6 +249,7 @@ class TestTier3FullIntegration:
 
         # Verify context file contains only high-score observation
         from pathlib import Path
+
         read_idx = result.index("--read")
         context_file = Path(result[read_idx + 1])
         content = context_file.read_text()
@@ -261,9 +262,7 @@ class TestTier3FullIntegration:
         analytics = MemoryAnalytics()
         tuner = MemoryTuner()
         injector = MemoryInjector(tuner=tuner, analytics=analytics)
-        observer = AiderMemoryObserver(
-            Mock(), analytics=analytics
-        )  # Tier 2+3
+        observer = AiderMemoryObserver(Mock(), analytics=analytics)  # Tier 2+3
 
         # All components initialized successfully
         assert analytics is not None

@@ -17,7 +17,9 @@ from .memory_middleware import MemoryMiddleware
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
-OLLAMA_BASE = os.getenv("PXX_OLLAMA_BASE", "http://workstation.splawoffice.local:11434")
+OLLAMA_BASE = os.getenv(
+    "PXX_OLLAMA_BASE", "http://workstation.splawoffice.local:11434"
+)
 
 # Memory middleware (optional, disabled by default via env var)
 memory_middleware: Optional[MemoryMiddleware] = None
@@ -107,12 +109,18 @@ async def chat_completions(request: Request):
                             "index": 0,
                             "message": {
                                 "role": "assistant",
-                                "content": result.get("message", result.get("error", "")),
+                                "content": result.get(
+                                    "message", result.get("error", "")
+                                ),
                             },
                             "finish_reason": "stop",
                         }
                     ],
-                    "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+                    "usage": {
+                        "prompt_tokens": 0,
+                        "completion_tokens": 0,
+                        "total_tokens": 0,
+                    },
                 }
             )
 
@@ -174,6 +182,7 @@ async def chat_completions(request: Request):
 def main():
     """Entry point for 9router console script."""
     import uvicorn
+
     uvicorn.run(app, host="127.0.0.1", port=20128)
 
 

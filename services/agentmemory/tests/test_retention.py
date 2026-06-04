@@ -1,10 +1,9 @@
 """Tests for observation retention and cleanup."""
 
-import pytest
 import tempfile
 from pathlib import Path
 from datetime import datetime, timedelta
-from agentmemory_pkg.storage import Observation, ObservationStore
+from agentmemory_pkg.storage import ObservationStore
 from agentmemory_pkg.cleanup import CleanupManager
 
 
@@ -135,9 +134,7 @@ class TestCleanup:
             obs = store.store("test", "content")
 
             # Expire it
-            expired_time = (
-                datetime.utcnow() - timedelta(days=2)
-            ).isoformat()
+            expired_time = (datetime.utcnow() - timedelta(days=2)).isoformat()
             import sqlite3
 
             with sqlite3.connect(db_path) as conn:
@@ -167,9 +164,7 @@ class TestCleanup:
             obs3 = store.store("project1", "content 3")
 
             # Expire observations in both projects
-            expired_time = (
-                datetime.utcnow() - timedelta(days=2)
-            ).isoformat()
+            expired_time = (datetime.utcnow() - timedelta(days=2)).isoformat()
             import sqlite3
 
             with sqlite3.connect(db_path) as conn:

@@ -95,11 +95,15 @@ class CostMetrics:
             Estimated cost in USD.
         """
         prompt_cost = (self.tokens.prompt_tokens / 1000) * prompt_cost_per_1k
-        completion_cost = (self.tokens.completion_tokens / 1000) * completion_cost_per_1k
+        completion_cost = (
+            self.tokens.completion_tokens / 1000
+        ) * completion_cost_per_1k
 
         # Apply cache discount if available
         if self.tokens.cached_tokens > 0:
-            cache_discount = (self.tokens.cached_tokens / 1000) * prompt_cost_per_1k * 0.9
+            cache_discount = (
+                (self.tokens.cached_tokens / 1000) * prompt_cost_per_1k * 0.9
+            )
             prompt_cost -= cache_discount
 
         return max(0.0, prompt_cost + completion_cost)
@@ -150,10 +154,12 @@ class CostMetrics:
         if self.tokens.cached_tokens > 0:
             lines.append(
                 f"Cache: {self.tokens.cached_tokens} tokens cached "
-                f"({self.tokens.cache_hit_rate*100:.1f}% hit rate)"
+                f"({self.tokens.cache_hit_rate * 100:.1f}% hit rate)"
             )
 
-        lines.append(f"Memory: {self.memory_observations_count} observations, {self.memory_total_mb:.1f}MB")
+        lines.append(
+            f"Memory: {self.memory_observations_count} observations, {self.memory_total_mb:.1f}MB"
+        )
 
         if self.router_requests_count > 0:
             lines.append(

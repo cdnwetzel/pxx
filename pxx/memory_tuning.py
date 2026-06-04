@@ -27,16 +27,10 @@ class MemoryTuneConfig:
             MemoryTuneConfig with values from env or defaults.
         """
         return cls(
-            min_relevance_score=float(
-                os.getenv("PXX_MEMORY_THRESHOLD", "0.5")
-            ),
+            min_relevance_score=float(os.getenv("PXX_MEMORY_THRESHOLD", "0.5")),
             max_observations=int(os.getenv("PXX_MEMORY_LIMIT", "5")),
-            max_context_chars=int(
-                os.getenv("PXX_MEMORY_MAX_CONTEXT", "8000")
-            ),
-            leave_context_headroom=int(
-                os.getenv("PXX_MEMORY_HEADROOM", "2000")
-            ),
+            max_context_chars=int(os.getenv("PXX_MEMORY_MAX_CONTEXT", "8000")),
+            leave_context_headroom=int(os.getenv("PXX_MEMORY_HEADROOM", "2000")),
         )
 
     def __post_init__(self) -> None:
@@ -127,10 +121,7 @@ class MemoryTuner:
         Returns:
             (filtered_observations, total_size) tuple
         """
-        max_size = (
-            self.config.max_context_chars
-            - self.config.leave_context_headroom
-        )
+        max_size = self.config.max_context_chars - self.config.leave_context_headroom
 
         result = []
         total_size = base_context_size

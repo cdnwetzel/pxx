@@ -1,5 +1,6 @@
 import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 from fastapi import FastAPI, HTTPException, Request
 from .storage import ObservationStore
 from .commands import CommandHandler
@@ -7,6 +8,7 @@ from .search import SearchEngine
 from .cache import SearchCache
 from .cleanup import CleanupManager
 from .archive import ArchiveManager
+from .vector_index import VectorIndex
 
 
 # Global instances
@@ -14,7 +16,12 @@ store = ObservationStore(
     default_ttl_days=int(os.environ.get("AGENTMEMORY_RETENTION_DAYS", "90"))
 )
 handler = CommandHandler(store)
+
+# Create vector index with persistence support
+vector_index = VectorIndex()
 search_engine = SearchEngine()
+search_engine.vector_index = vector_index  # Share the index instance
+
 search_cache = SearchCache(maxsize=128)
 archive_manager = ArchiveManager()
 cleanup_manager = CleanupManager(
@@ -28,10 +35,24 @@ cleanup_manager = CleanupManager(
 async def lifespan(app: FastAPI):
     """Startup and shutdown."""
     print("agentmemory starting...")
+
+    # Load persisted vector index if it exists
+    index_dir = Path.home() / ".pxx" / "vector_index"
+    if index_dir.exists():
+        if vector_index.load(str(index_dir)):
+            print(f"Loaded vector index from {index_dir}")
+        else:
+            print(f"Failed to load vector index from {index_dir}, will rebuild")
+
     cleanup_manager.start()
     yield
     print("agentmemory shutting down...")
     cleanup_manager.stop()
+
+    # Save vector index on shutdown
+    index_dir = Path.home() / ".pxx" / "vector_index"
+    if vector_index.save(str(index_dir)):
+        print(f"Saved vector index to {index_dir}")
 
 
 app = FastAPI(title="agentmemory", version="0.1.0", lifespan=lifespan)
@@ -195,7 +216,9 @@ async def forget_observation(observation_id: str):
     obs = store._get_by_id(observation_id)
     deleted = store.delete(observation_id)
     if not deleted:
-        raise HTTPException(status_code=404, detail=f"Observation {observation_id} not found")
+        raise HTTPException(
+            status_code=404, detail=f"Observation {observation_id} not found"
+        )
 
     # Invalidate cache if deletion succeeded
     if obs:

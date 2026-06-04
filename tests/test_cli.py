@@ -111,18 +111,21 @@ class TestSetBackendEnv:
 class TestExtractTier:
     def test_extract_tier_t1(self):
         from pxx.cli import _extract_tier
+
         tier, remaining = _extract_tier(["--tier", "t1", "--message", "hi"])
         assert tier == "t1"
         assert remaining == ["--message", "hi"]
 
     def test_extract_tier_equals_form(self):
         from pxx.cli import _extract_tier
+
         tier, remaining = _extract_tier(["--tier=t2", "--message", "hi"])
         assert tier == "t2"
         assert remaining == ["--message", "hi"]
 
     def test_no_tier_returns_none(self):
         from pxx.cli import _extract_tier
+
         tier, remaining = _extract_tier(["--message", "hi"])
         assert tier is None
         assert remaining == ["--message", "hi"]
@@ -131,30 +134,35 @@ class TestExtractTier:
 class TestModelForTier:
     def test_t1_tier_returns_t1_default(self, monkeypatch):
         from pxx.cli import T1_DEFAULT, model_for
+
         monkeypatch.delenv("PXX_MODEL", raising=False)
         ep = Endpoint("neo", "http://localhost:11434", backend="ollama")
         assert model_for(ep, tier="t1") == T1_DEFAULT
 
     def test_t2_tier_returns_vllm_default(self, monkeypatch):
         from pxx.cli import VLLM_DEFAULT, model_for
+
         monkeypatch.delenv("PXX_MODEL", raising=False)
         ep = Endpoint("m1_vllm", "http://x:8000", backend="vllm")
         assert model_for(ep, tier="t2") == VLLM_DEFAULT
 
     def test_t3_tier_returns_t3_default(self, monkeypatch):
         from pxx.cli import VLLM_T3_DEFAULT, model_for
+
         monkeypatch.delenv("PXX_MODEL", raising=False)
         ep = Endpoint("m1_vllm", "http://x:8000", backend="vllm")
         assert model_for(ep, tier="t3") == VLLM_T3_DEFAULT
 
     def test_pxx_model_overrides_tier(self, monkeypatch):
         from pxx.cli import model_for
+
         monkeypatch.setenv("PXX_MODEL", "custom-model")
         ep = Endpoint("m1_vllm", "http://x:8000", backend="vllm")
         assert model_for(ep, tier="t2") == "custom-model"
 
     def test_no_tier_uses_backend_default(self, monkeypatch):
         from pxx.cli import VLLM_DEFAULT, model_for
+
         monkeypatch.delenv("PXX_MODEL", raising=False)
         ep = Endpoint("m1_vllm", "http://x:8000", backend="vllm")
         assert model_for(ep, tier=None) == VLLM_DEFAULT
@@ -219,7 +227,9 @@ class TestBuildAiderArgs:
         assert "--chat-mode=help" in args
 
     def test_no_git_flag_added_when_outside_repo(self):
-        args = _build_aider_args("/x/aider", "m", [], in_git_repo=False, edit_mode=False)
+        args = _build_aider_args(
+            "/x/aider", "m", [], in_git_repo=False, edit_mode=False
+        )
         assert "--no-git" in args
 
     def test_no_git_flag_skipped_when_inside_repo(self):
@@ -375,7 +385,9 @@ class TestScopeFlag:
         assert "`pxx/cli.py`" in content
         assert "refuse" in content.lower()
 
-    def test_write_scope_context_returns_none_when_no_scopes(self, tmp_path, monkeypatch):
+    def test_write_scope_context_returns_none_when_no_scopes(
+        self, tmp_path, monkeypatch
+    ):
         monkeypatch.setattr("tempfile.gettempdir", lambda: str(tmp_path))
         from pxx import cli
 
@@ -424,7 +436,9 @@ class TestTrustedPathGate:
         from pxx import cli as cli_module
 
         monkeypatch.setattr(
-            cli_module, "detect_endpoint", lambda **kwargs: Endpoint("neo", "http://x:11434")
+            cli_module,
+            "detect_endpoint",
+            lambda **kwargs: Endpoint("neo", "http://x:11434"),
         )
         monkeypatch.setattr(cli_module.os, "execve", lambda *_: None)
         monkeypatch.setattr(cli_module, "_find_aider", lambda: "/x/aider")
@@ -438,7 +452,9 @@ class TestTrustedPathGate:
         cfg.write_text("\n".join(str(e) for e in entries) + "\n")
         return cfg
 
-    def test_edit_outside_trusted_path_blocks_without_anywhere(self, tmp_path, monkeypatch, capsys):
+    def test_edit_outside_trusted_path_blocks_without_anywhere(
+        self, tmp_path, monkeypatch, capsys
+    ):
         from pxx import cli as cli_module
 
         trusted = tmp_path / "trusted-zone"
@@ -459,7 +475,9 @@ class TestTrustedPathGate:
         assert "--anywhere" in err
         assert str(cfg) in err
 
-    def test_edit_outside_trusted_path_allowed_with_anywhere(self, tmp_path, monkeypatch, capsys):
+    def test_edit_outside_trusted_path_allowed_with_anywhere(
+        self, tmp_path, monkeypatch, capsys
+    ):
         from pxx import cli as cli_module
 
         trusted = tmp_path / "trusted-zone"
@@ -476,7 +494,9 @@ class TestTrustedPathGate:
         err = capsys.readouterr().err
         assert "mode=edit (untrusted path)" in err
 
-    def test_edit_inside_trusted_path_allowed_without_anywhere(self, tmp_path, monkeypatch, capsys):
+    def test_edit_inside_trusted_path_allowed_without_anywhere(
+        self, tmp_path, monkeypatch, capsys
+    ):
         from pxx import cli as cli_module
 
         trusted = tmp_path / "trusted-zone"
@@ -492,7 +512,9 @@ class TestTrustedPathGate:
         assert "mode=edit" in err
         assert "untrusted path" not in err
 
-    def test_no_trusted_paths_config_allows_anywhere(self, tmp_path, monkeypatch, capsys):
+    def test_no_trusted_paths_config_allows_anywhere(
+        self, tmp_path, monkeypatch, capsys
+    ):
         from pxx import cli as cli_module
 
         monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg-empty"))
@@ -526,7 +548,12 @@ class TestSelfTest:
         rc = _self_test()
         assert rc == 0
         assert calls == [
-            {"cmd": ["uv", "run", "pytest", "-q"], "cwd": REPO_ROOT, "check": False, "timeout": 120}
+            {
+                "cmd": ["uv", "run", "pytest", "-q"],
+                "cwd": REPO_ROOT,
+                "check": False,
+                "timeout": 120,
+            }
         ]
         err = capsys.readouterr().err
         assert "self-test — running" in err
@@ -651,7 +678,9 @@ class TestSelfImproveFlag:
         from pxx import cli as cli_module
 
         monkeypatch.setattr(
-            cli_module, "detect_endpoint", lambda **kwargs: Endpoint("neo", "http://x:11434")
+            cli_module,
+            "detect_endpoint",
+            lambda **kwargs: Endpoint("neo", "http://x:11434"),
         )
         monkeypatch.setattr(cli_module.os, "execve", lambda *_: None)
         monkeypatch.setattr(cli_module, "_find_aider", lambda: "/x/aider")
@@ -665,12 +694,16 @@ class TestSelfImproveFlag:
 
         _, after = extract_scope_args(["--self-improve", "--message", "focus on cli"])
         user_args = [
-            a for a in after if a not in ("--edit", "--big", "--anywhere", "--self-improve")
+            a
+            for a in after
+            if a not in ("--edit", "--big", "--anywhere", "--self-improve")
         ]
         assert "--self-improve" not in user_args
         assert user_args == ["--message", "focus on cli"]
 
-    def test_self_improve_combined_with_edit_exits_2(self, monkeypatch, tmp_path, capsys):
+    def test_self_improve_combined_with_edit_exits_2(
+        self, monkeypatch, tmp_path, capsys
+    ):
         from pxx import cli as cli_module
 
         monkeypatch.chdir(tmp_path)
@@ -684,7 +717,9 @@ class TestSelfImproveFlag:
         assert "ask-only" in err
         assert "--edit" in err
 
-    def test_self_improve_banner_shows_self_improve_mode(self, monkeypatch, tmp_path, capsys):
+    def test_self_improve_banner_shows_self_improve_mode(
+        self, monkeypatch, tmp_path, capsys
+    ):
         from pxx import cli as cli_module
 
         monkeypatch.chdir(tmp_path)
@@ -717,7 +752,9 @@ class TestSelfImproveFlag:
         monkeypatch.chdir(tmp_path)
         monkeypatch.setattr(sys, "argv", ["pxx", "--self-improve"])
         monkeypatch.setattr(
-            cli_module, "detect_endpoint", lambda **kwargs: Endpoint("neo", "http://x:11434")
+            cli_module,
+            "detect_endpoint",
+            lambda **kwargs: Endpoint("neo", "http://x:11434"),
         )
         monkeypatch.setattr(cli_module.os, "execve", fake_execv)
         monkeypatch.setattr(cli_module, "_find_aider", lambda: "/x/aider")
@@ -744,7 +781,9 @@ class TestExtractSelfFixTask:
     def test_positional_task_after_self_fix(self):
         from pxx.cli import _extract_self_fix_task
 
-        task, rest = _extract_self_fix_task(["--self-fix", "fix typo", "--scope", "pxx/cli.py"])
+        task, rest = _extract_self_fix_task(
+            ["--self-fix", "fix typo", "--scope", "pxx/cli.py"]
+        )
         assert task == "fix typo"
         assert rest == ["--self-fix", "--scope", "pxx/cli.py"]
 
@@ -752,7 +791,9 @@ class TestExtractSelfFixTask:
         # --message immediately after --self-fix is NOT the task.
         from pxx.cli import _extract_self_fix_task
 
-        task, rest = _extract_self_fix_task(["--self-fix", "--message", "fix it", "--scope", "x/"])
+        task, rest = _extract_self_fix_task(
+            ["--self-fix", "--message", "fix it", "--scope", "x/"]
+        )
         assert task is None
         assert rest == ["--self-fix", "--message", "fix it", "--scope", "x/"]
 
@@ -787,7 +828,9 @@ class TestSelfFixFlag:
         from pxx import cli as cli_module
 
         monkeypatch.setattr(
-            cli_module, "detect_endpoint", lambda **kwargs: Endpoint("neo", "http://x:11434")
+            cli_module,
+            "detect_endpoint",
+            lambda **kwargs: Endpoint("neo", "http://x:11434"),
         )
         monkeypatch.setattr(cli_module.os, "execve", lambda *_: None)
         monkeypatch.setattr(cli_module, "_find_aider", lambda: "/x/aider")
@@ -829,7 +872,9 @@ class TestSelfFixFlag:
         err = capsys.readouterr().err
         assert "mutually exclusive" in err
 
-    def test_self_fix_sets_autonomous_env_and_tightens_diff_cap(self, monkeypatch, tmp_path):
+    def test_self_fix_sets_autonomous_env_and_tightens_diff_cap(
+        self, monkeypatch, tmp_path
+    ):
         from pxx import cli as cli_module
 
         monkeypatch.chdir(tmp_path)
@@ -866,7 +911,9 @@ class TestSelfFixFlag:
         # User's explicit cap wins.
         assert os.environ.get("PXX_DIFF_CAP") == "200"
 
-    def test_self_fix_banner_shows_autonomous_annotation(self, monkeypatch, tmp_path, capsys):
+    def test_self_fix_banner_shows_autonomous_annotation(
+        self, monkeypatch, tmp_path, capsys
+    ):
         from pxx import cli as cli_module
 
         monkeypatch.chdir(tmp_path)
@@ -887,12 +934,15 @@ class TestSelfFixFlag:
         from pxx import cli as cli_module
 
         captured: list[list[str]] = []
+
         def mock_execve(_bin, args, env=None):
             captured.append(args)
 
         monkeypatch.setattr(cli_module.os, "execve", mock_execve)
         monkeypatch.setattr(
-            cli_module, "detect_endpoint", lambda **kwargs: Endpoint("neo", "http://x:11434")
+            cli_module,
+            "detect_endpoint",
+            lambda **kwargs: Endpoint("neo", "http://x:11434"),
         )
         monkeypatch.setattr(cli_module, "_find_aider", lambda: "/x/aider")
 
@@ -915,12 +965,15 @@ class TestSelfFixFlag:
         from pxx import cli as cli_module
 
         captured: list[list[str]] = []
+
         def mock_execve(_bin, args, env=None):
             captured.append(args)
 
         monkeypatch.setattr(cli_module.os, "execve", mock_execve)
         monkeypatch.setattr(
-            cli_module, "detect_endpoint", lambda **kwargs: Endpoint("neo", "http://x:11434")
+            cli_module,
+            "detect_endpoint",
+            lambda **kwargs: Endpoint("neo", "http://x:11434"),
         )
         monkeypatch.setattr(cli_module, "_find_aider", lambda: "/x/aider")
 
@@ -955,12 +1008,15 @@ class TestSelfFixFlag:
         from pxx import cli as cli_module
 
         captured: list[list[str]] = []
+
         def mock_execve(_bin, args, env=None):
             captured.append(args)
 
         monkeypatch.setattr(cli_module.os, "execve", mock_execve)
         monkeypatch.setattr(
-            cli_module, "detect_endpoint", lambda **kwargs: Endpoint("neo", "http://x:11434")
+            cli_module,
+            "detect_endpoint",
+            lambda **kwargs: Endpoint("neo", "http://x:11434"),
         )
         monkeypatch.setattr(cli_module, "_find_aider", lambda: "/x/aider")
 
@@ -1045,7 +1101,9 @@ class TestCheckSync:
         mock_execv = MagicMock()
         monkeypatch.setattr(os, "execve", mock_execv)
 
-        monkeypatch.setattr("pxx.cli.detect_endpoint", lambda **kwargs: Endpoint("n", "u"))
+        monkeypatch.setattr(
+            "pxx.cli.detect_endpoint", lambda **kwargs: Endpoint("n", "u")
+        )
         monkeypatch.setattr("pxx.cli._find_aider", lambda: "/x/aider")
         monkeypatch.setattr("pxx.cli._create_safety_tag", lambda: None)
         monkeypatch.setattr("pxx.cli.extract_scope_args", lambda a: ([], a))
@@ -1073,7 +1131,9 @@ class TestCheckSync:
         mock_execv = MagicMock()
         monkeypatch.setattr(os, "execve", mock_execv)
 
-        monkeypatch.setattr("pxx.cli.detect_endpoint", lambda **kwargs: Endpoint("n", "u"))
+        monkeypatch.setattr(
+            "pxx.cli.detect_endpoint", lambda **kwargs: Endpoint("n", "u")
+        )
         monkeypatch.setattr("pxx.cli._find_aider", lambda: "/x/aider")
         monkeypatch.setattr("pxx.cli._create_safety_tag", lambda: None)
         # CF-015: Ensure scope resolution returns something so --self-fix check passes
@@ -1094,7 +1154,9 @@ class TestCheckSync:
         monkeypatch.setattr(sys, "argv", ["pxx", "--edit", "--no-check-sync"])
 
         monkeypatch.setattr(os, "execve", lambda _bin, args, env=None: None)
-        monkeypatch.setattr("pxx.cli.detect_endpoint", lambda **kwargs: Endpoint("n", "u"))
+        monkeypatch.setattr(
+            "pxx.cli.detect_endpoint", lambda **kwargs: Endpoint("n", "u")
+        )
         monkeypatch.setattr("pxx.cli._find_aider", lambda: "/x/aider")
         monkeypatch.setattr("pxx.cli._create_safety_tag", lambda: None)
         monkeypatch.setattr("pxx.cli._prune_old_safety_tags", lambda **k: None)
@@ -1179,11 +1241,15 @@ class TestCommandsContext:
         assert "/load /t.md" in content
         assert "tests" in content
 
-    def test_content_includes_routing_directive_and_example(self, tmp_path, monkeypatch):
+    def test_content_includes_routing_directive_and_example(
+        self, tmp_path, monkeypatch
+    ):
         """The context must instruct task-routing, not just list commands."""
         monkeypatch.setattr(tempfile, "gettempdir", lambda: str(tmp_path))
         commands = [
-            CommandInfo(name="typecheck", path=Path("/tc.md"), description="type hints"),
+            CommandInfo(
+                name="typecheck", path=Path("/tc.md"), description="type hints"
+            ),
         ]
         result = _write_commands_context(commands)
         content = result.read_text(encoding="utf-8")
@@ -1198,11 +1264,15 @@ class TestCommandsContext:
     def test_file_overwritten_on_each_call(self, tmp_path, monkeypatch):
         monkeypatch.setattr(tempfile, "gettempdir", lambda: str(tmp_path))
         # First write — single command.
-        _write_commands_context([CommandInfo(name="x", path=Path("/x.md"), description="d1")])
+        _write_commands_context(
+            [CommandInfo(name="x", path=Path("/x.md"), description="d1")]
+        )
         first = (tmp_path / COMMANDS_CONTEXT_FILE).read_text()
         assert "/load /x.md" in first
         # Second write — different command. Old content must be gone.
-        _write_commands_context([CommandInfo(name="y", path=Path("/y.md"), description="d2")])
+        _write_commands_context(
+            [CommandInfo(name="y", path=Path("/y.md"), description="d2")]
+        )
         second = (tmp_path / COMMANDS_CONTEXT_FILE).read_text()
         assert "/load /y.md" in second
         assert "/load /x.md" not in second
@@ -1467,7 +1537,9 @@ class TestEmitCoreRestartBanner:
         _emit_core_restart_banner()
         assert capsys.readouterr().err == ""
 
-    def test_silent_when_repo_root_differs_from_pxx(self, monkeypatch, tmp_path, capsys):
+    def test_silent_when_repo_root_differs_from_pxx(
+        self, monkeypatch, tmp_path, capsys
+    ):
         import pxx.cli as cli_mod
 
         monkeypatch.setattr(cli_mod, "_in_git_repo", lambda: True)

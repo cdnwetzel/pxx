@@ -120,10 +120,19 @@ class NineroterManager:
             try:
                 self.start()
                 return
-            except (RuntimeError, FileNotFoundError, OSError, subprocess.TimeoutExpired) as e:
+            except (
+                RuntimeError,
+                FileNotFoundError,
+                OSError,
+                subprocess.TimeoutExpired,
+            ) as e:
                 attempt += 1
                 if attempt >= max_attempts:
-                    raise RuntimeError(f"Failed to start service after {max_attempts} attempts: {e}")
-                wait_time = min(2 ** attempt + random.random(), 60)
-                print(f"Retrying in {wait_time:.2f} seconds... (attempt {attempt}/{max_attempts})")
+                    raise RuntimeError(
+                        f"Failed to start service after {max_attempts} attempts: {e}"
+                    )
+                wait_time = min(2**attempt + random.random(), 60)
+                print(
+                    f"Retrying in {wait_time:.2f} seconds... (attempt {attempt}/{max_attempts})"
+                )
                 time.sleep(wait_time)

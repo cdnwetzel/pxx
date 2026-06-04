@@ -66,7 +66,9 @@ def check_sync(
         )
 
     local_branch = _get_pxx_local_branch()
-    remote_sha, remote_branch, error = _get_remote_state(ssh_target, remote_path, timeout)
+    remote_sha, remote_branch, error = _get_remote_state(
+        ssh_target, remote_path, timeout
+    )
 
     if error:
         return DriftResult(
@@ -171,7 +173,9 @@ def print_report(result: DriftResult) -> None:
             print(f"✗ error checking sync: {result.error}", file=sys.stderr)
         return
 
-    branch_part = f" ({result.local_branch})" if result.local_branch and result.is_synced else ""
+    branch_part = (
+        f" ({result.local_branch})" if result.local_branch and result.is_synced else ""
+    )
     status = "✓ Neo and Studio in sync at " if result.is_synced else "✗ drift detected:"
     print(
         f"{status}{result.local_sha[:7]}{branch_part}",
@@ -182,8 +186,14 @@ def print_report(result: DriftResult) -> None:
     if not result.is_synced:
         remote_sha = result.remote_sha[:7] if result.remote_sha else "???????"
         remote_branch = result.remote_branch or ""
-        print(f"    Neo:    {result.local_sha[:7]} {result.local_branch or ''}", file=sys.stderr)
+        print(
+            f"    Neo:    {result.local_sha[:7]} {result.local_branch or ''}",
+            file=sys.stderr,
+        )
         print(f"    Studio: {remote_sha} {remote_branch}", file=sys.stderr)
         print(file=sys.stderr)
         print("  From Neo: git deliver && rsync ...", file=sys.stderr)
-        print("  Or from Studio: cd ~/ai/code_pro/pxx && git pull origin main", file=sys.stderr)
+        print(
+            "  Or from Studio: cd ~/ai/code_pro/pxx && git pull origin main",
+            file=sys.stderr,
+        )

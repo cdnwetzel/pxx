@@ -194,8 +194,7 @@ class TestAPI:
     def test_store_observation_api(self, client):
         """Test storing observation via API."""
         response = client.post(
-            "/observations",
-            json={"project": "proj1", "content": "Test content"}
+            "/observations", json={"project": "proj1", "content": "Test content"}
         )
         assert response.status_code == 200
         assert response.json()["id"] is not None
@@ -204,15 +203,11 @@ class TestAPI:
         """Test search via API."""
         # Store first
         client.post(
-            "/observations",
-            json={"project": "proj1", "content": "Python programming"}
+            "/observations", json={"project": "proj1", "content": "Python programming"}
         )
 
         # Search
-        response = client.post(
-            "/search",
-            json={"project": "proj1", "query": "Python"}
-        )
+        response = client.post("/search", json={"project": "proj1", "query": "Python"})
         assert response.status_code == 200
         assert len(response.json()["results"]) > 0
 
@@ -223,8 +218,8 @@ class TestAPI:
             json={
                 "project": "proj1",
                 "command": "remember",
-                "args": {"title": "Test", "content": "Content"}
-            }
+                "args": {"title": "Test", "content": "Content"},
+            },
         )
         assert response.status_code == 200
         assert response.json()["id"] is not None
@@ -233,8 +228,7 @@ class TestAPI:
         """Test project stats endpoint."""
         # Store something first
         client.post(
-            "/observations",
-            json={"project": "proj1", "content": "Some content"}
+            "/observations", json={"project": "proj1", "content": "Some content"}
         )
 
         response = client.get("/project/proj1/stats")
@@ -244,10 +238,7 @@ class TestAPI:
     def test_delete_project_api(self, client):
         """Test project deletion via API."""
         # Store something
-        client.post(
-            "/observations",
-            json={"project": "proj1", "content": "To delete"}
-        )
+        client.post("/observations", json={"project": "proj1", "content": "To delete"})
 
         response = client.delete("/project/proj1")
         assert response.status_code == 200

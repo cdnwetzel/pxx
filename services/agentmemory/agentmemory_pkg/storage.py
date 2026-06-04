@@ -38,6 +38,7 @@ class ObservationStore:
     def _init_db(self):
         """Initialize database schema."""
         with sqlite3.connect(self.db_path) as conn:
+            # Create main observations table
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS observations (
                     id TEXT PRIMARY KEY,
@@ -51,6 +52,18 @@ class ObservationStore:
                     UNIQUE(project, content)
                 )
             """)
+
+            # Add columns if they don't exist (backward compatibility)
+            try:
+                conn.execute("ALTER TABLE observations ADD COLUMN embedding TEXT")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
+            try:
+                conn.execute("ALTER TABLE observations ADD COLUMN expires_at TEXT")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
+
+            # Create indexes (safe to run multiple times)
             conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_project ON observations(project)
             """)
@@ -60,16 +73,21 @@ class ObservationStore:
             conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_expires ON observations(expires_at)
             """)
-            # Add embedding column if it doesn't exist (backward compatibility)
-            try:
-                conn.execute("ALTER TABLE observations ADD COLUMN embedding TEXT")
-            except sqlite3.OperationalError:
-                pass  # Column already exists
-            # Add expires_at column if it doesn't exist (backward compatibility)
-            try:
-                conn.execute("ALTER TABLE observations ADD COLUMN expires_at TEXT")
-            except sqlite3.OperationalError:
-                pass  # Column already exists
+
+            # BM25 index tables
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS bm25_index (
+                    term TEXT PRIMARY KEY,
+                    doc_freq INTEGER NOT NULL,
+                    idf REAL NOT NULL
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS bm25_metadata (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL
+                )
+            """)
             conn.commit()
 
     def store(
@@ -231,6 +249,85 @@ class ObservationStore:
             cursor = conn.execute("DELETE FROM observations WHERE id = ?", (obs_id,))
             conn.commit()
             return cursor.rowcount > 0
+            # Invalidate BM25 index
+            conn.execute("DELETE FROM bm25_index")
+            conn.execute("DELETE FROM bm25_metadata")
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def save_bm25_index(self, term_freq: dict, idf_cache: dict, num_docs: int, avg_doc_length: float) -> bool:
+        """Persist BM25 index to database."""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                # Clear old index
+                conn.execute("DELETE FROM bm25_index")
+                conn.execute("DELETE FROM bm25_metadata")
+
+                # Save metadata
+                conn.execute(
+                    "INSERT INTO bm25_metadata (key, value) VALUES (?, ?)",
+                    ("num_docs", str(num_docs)),
+                )
+                conn.execute(
+                    "INSERT INTO bm25_metadata (key, value) VALUES (?, ?)",
+                    ("avg_doc_length", str(avg_doc_length)),
+                )
+
+                # Save index
+                for term, (doc_freq, idf) in [(t, (term_freq.get(t, 0), idf_cache.get(t, 0))) for t in idf_cache]:
+                    conn.execute(
+                        "INSERT INTO bm25_index (term, doc_freq, idf) VALUES (?, ?, ?)",
+                        (term, doc_freq, idf),
+                    )
+
+                conn.commit()
+                return True
+        except Exception as e:
+            import logging
+            logging.error(f"Error saving BM25 index: {e}")
+            return False
+
+    def load_bm25_index(self) -> tuple[dict, dict, int, float] | None:
+        """Load BM25 index from database."""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                # Load metadata
+                meta_rows = conn.execute(
+                    "SELECT key, value FROM bm25_metadata"
+                ).fetchall()
+                if not meta_rows:
+                    return None
+
+                metadata = {k: v for k, v in meta_rows}
+                num_docs = int(metadata.get("num_docs", "0"))
+                avg_doc_length = float(metadata.get("avg_doc_length", "0"))
+
+                # Load index
+                rows = conn.execute(
+                    "SELECT term, doc_freq, idf FROM bm25_index"
+                ).fetchall()
+
+                term_freq = {row[0]: row[1] for row in rows}
+                idf_cache = {row[0]: row[2] for row in rows}
+
+                return term_freq, idf_cache, num_docs, avg_doc_length
+        except Exception as e:
+            import logging
+            logging.error(f"Error loading BM25 index: {e}")
+            return None
+
+    def invalidate_bm25_index(self) -> bool:
+        """Clear BM25 index (called when observations change)."""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.execute("DELETE FROM bm25_index")
+                conn.execute("DELETE FROM bm25_metadata")
+                conn.commit()
+                return True
+        except Exception as e:
+            import logging
+            logging.error(f"Error invalidating BM25 index: {e}")
+            return False
 
     def delete_project(self, project: str) -> int:
         """Delete all observations for a project."""

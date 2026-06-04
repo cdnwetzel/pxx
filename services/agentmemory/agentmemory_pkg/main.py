@@ -19,8 +19,8 @@ handler = CommandHandler(store)
 
 # Create vector index with persistence support
 vector_index = VectorIndex()
-search_engine = SearchEngine()
-search_engine.vector_index = vector_index  # Share the index instance
+search_engine = SearchEngine(store=store)
+search_engine.vector_index = vector_index  # Share the vector index instance
 
 search_cache = SearchCache(maxsize=128)
 archive_manager = ArchiveManager()
@@ -36,23 +36,30 @@ async def lifespan(app: FastAPI):
     """Startup and shutdown."""
     print("agentmemory starting...")
 
-    # Load persisted vector index if it exists
+    # Load persisted vector index
     index_dir = Path.home() / ".pxx" / "vector_index"
     if index_dir.exists():
         if vector_index.load(str(index_dir)):
             print(f"Loaded vector index from {index_dir}")
         else:
-            print(f"Failed to load vector index from {index_dir}, will rebuild")
+            print(f"Failed to load vector index, will rebuild")
+
+    # Load persisted BM25 index
+    if search_engine.load_bm25_index_from_store():
+        print("Loaded BM25 index from database")
 
     cleanup_manager.start()
     yield
     print("agentmemory shutting down...")
     cleanup_manager.stop()
 
-    # Save vector index on shutdown
+    # Save indexes on shutdown
     index_dir = Path.home() / ".pxx" / "vector_index"
     if vector_index.save(str(index_dir)):
         print(f"Saved vector index to {index_dir}")
+
+    if search_engine.save_bm25_index_to_store():
+        print("Saved BM25 index to database")
 
 
 app = FastAPI(title="agentmemory", version="0.1.0", lifespan=lifespan)
@@ -80,6 +87,7 @@ async def store_observation(request: Request):
 
     obs = store.store(project, content)
     search_cache.invalidate_project(project)
+    search_engine.invalidate_bm25_index()  # Invalidate on new observation
 
     return {
         "id": obs.id,
@@ -220,9 +228,10 @@ async def forget_observation(observation_id: str):
             status_code=404, detail=f"Observation {observation_id} not found"
         )
 
-    # Invalidate cache if deletion succeeded
+    # Invalidate cache and indexes if deletion succeeded
     if obs:
         search_cache.invalidate_project(obs.project)
+        search_engine.invalidate_bm25_index()
 
     return {
         "id": observation_id,
@@ -276,6 +285,11 @@ async def trigger_cleanup(request: Request):
 
     dry_run = data.get("dry_run", False)
     result = store.cleanup_expired(dry_run=dry_run, archive_manager=archive_manager)
+
+    # Invalidate BM25 index on cleanup if not dry run
+    if not dry_run and result.get("deleted_count", 0) > 0:
+        search_engine.invalidate_bm25_index()
+        search_cache._cache.clear()  # Clear search cache too
 
     return {
         "cleanup_triggered": True,

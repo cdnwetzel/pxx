@@ -63,14 +63,21 @@ class BM25Ranker:
         return score
 
     def rank(
-        self, query: str, observations: list[Observation]
+        self, query: str, observations: list[Observation], use_cache: bool = True
     ) -> list[tuple[Observation, float]]:
-        """Rank observations by relevance to query."""
+        """Rank observations by relevance to query.
+
+        Args:
+            query: Search query
+            observations: Observations to rank
+            use_cache: If True, only re-index if doc count changed
+        """
         if not observations:
             return []
 
-        # Re-index on each ranking (simple approach; could optimize)
-        self.index_documents([obs.content for obs in observations])
+        # Only re-index if doc count changed (or no cache)
+        if not use_cache or self.num_docs != len(observations):
+            self.index_documents([obs.content for obs in observations])
 
         results = []
         for obs in observations:
@@ -86,8 +93,9 @@ class BM25Ranker:
 class SearchEngine:
     """High-level search interface for observations."""
 
-    def __init__(self):
+    def __init__(self, store=None):
         self.ranker = BM25Ranker()
+        self.store = store
         # Optional vector index for fast similarity search
         self.vector_index = None
         try:
@@ -98,6 +106,39 @@ class SearchEngine:
             import logging
 
             logging.warning(f"Vector index unavailable: {e}")
+
+    def load_bm25_index_from_store(self) -> bool:
+        """Load persisted BM25 index from database."""
+        if not self.store:
+            return False
+
+        result = self.store.load_bm25_index()
+        if result:
+            term_freq, idf_cache, num_docs, avg_doc_length = result
+            self.ranker.doc_freqs = term_freq
+            self.ranker.idf_cache = idf_cache
+            self.ranker.num_docs = num_docs
+            self.ranker.avg_doc_length = avg_doc_length
+            return True
+        return False
+
+    def save_bm25_index_to_store(self) -> bool:
+        """Persist BM25 index to database."""
+        if not self.store:
+            return False
+
+        return self.store.save_bm25_index(
+            self.ranker.doc_freqs,
+            self.ranker.idf_cache,
+            self.ranker.num_docs,
+            self.ranker.avg_doc_length,
+        )
+
+    def invalidate_bm25_index(self) -> bool:
+        """Invalidate cached BM25 index."""
+        if not self.store:
+            return False
+        return self.store.invalidate_bm25_index()
 
     def search(
         self,

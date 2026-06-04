@@ -55,7 +55,12 @@ class AgentmemoryClient:
                 )
                 if resp.status_code == 200:
                     data = resp.json()
-                    return data.get("observations", [])
+                    import logging
+                    logging.debug(f"[AgentmemoryClient.search] response keys: {data.keys()}")
+                    # agentmemory returns "results", not "observations"
+                    results = data.get("results", [])
+                    logging.debug(f"[AgentmemoryClient.search] found {len(results)} results")
+                    return results
         except Exception:
             pass
         return []
@@ -175,10 +180,14 @@ class MemoryMiddleware:
         # Query memory for context injection
         user_query = last_msg.get("content", "") if messages else ""
         if user_query:
+            # Use lower min_score for better recall (BM25 scores can be low)
             observations = await self.memory_client.search(
-                user_query, limit=3, min_score=0.3, project_root=self.project_root
+                user_query, limit=3, min_score=0.0, project_root=self.project_root
             )
+            import logging
+            logger = logging.getLogger(__name__)
             if observations:
+                logger.info(f"[on_request] Found {len(observations)} observations to inject")
                 # Inject into system prompt
                 system_prompt = self._build_memory_injection_prompt(observations)
                 # Insert after existing system message if present
@@ -187,6 +196,9 @@ class MemoryMiddleware:
                     messages[0]["content"] = f"{existing}\n\n{system_prompt}"
                 else:
                     messages.insert(0, {"role": "system", "content": system_prompt})
+                logger.info(f"[on_request] Injected observations into system prompt")
+            else:
+                logger.debug(f"[on_request] No observations found for query: {user_query[:50]}")
 
         return request_body
 
@@ -206,11 +218,19 @@ class MemoryMiddleware:
 
         try:
             tool_calls = self.command_matcher.extract_tool_calls(response_body)
+            import logging
+            logger = logging.getLogger(__name__)
+            if tool_calls:
+                logger.info(f"[on_response] Captured {len(tool_calls)} tool calls")
             for tool_call in tool_calls:
                 obs = self._format_tool_observation(tool_call)
                 # Fire and forget; don't block on memory store
                 await self.memory_client.store_observation(obs)
-        except Exception:
+                logger.info(f"[on_response] Stored observation: {obs.get('title', '?')}")
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"[on_response] Error: {e}")
             # Silently ignore errors; don't block response
             pass
 

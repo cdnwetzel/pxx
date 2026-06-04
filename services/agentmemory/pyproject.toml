@@ -14,6 +14,9 @@ dependencies = [
     "uvicorn[standard]>=0.24.0",
 ]
 
+[project.scripts]
+agentmemory = "agentmemory_pkg.main:main"
+
 [project.optional-dependencies]
 dev = [
     "pytest>=7.0",

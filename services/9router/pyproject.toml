@@ -12,8 +12,11 @@ license = {text = "MIT"}
 dependencies = [
     "fastapi>=0.104.0",
     "uvicorn[standard]>=0.24.0",
-    "requests>=2.31.0",
+    "httpx>=0.25.0",
 ]
+
+[project.scripts]
+nine-router = "nine_router_pkg.main:main"
 
 [project.optional-dependencies]
 dev = [

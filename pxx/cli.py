@@ -14,14 +14,20 @@ import sys
 import tempfile
 from pathlib import Path
 
-from pxx import _git, audit, drift, governance, review_gate, safety, self_modes, workflow
+from pxx import (
+    _git,
+    audit,
+    drift,
+    governance,
+    review_gate,
+    safety,
+    self_modes,
+    workflow,
+)
 from pxx._core_files import is_core
 from pxx.commands_index import CommandInfo, list_commands
-from pxx.cost_metrics import CostMetrics, TokenMetrics
 from pxx.endpoints import Endpoint, detect_endpoint
 from pxx.memory import AgentmemoryManager
-from pxx.memory_analytics import MemoryAnalytics
-from pxx.memory_injection import MemoryInjector
 from pxx.observer import AiderMemoryObserver
 from pxx.router import NineroterManager
 from pxx.scope import (
@@ -32,7 +38,6 @@ from pxx.scope import (
     resolve_scopes,
     trusted_paths_config_path,
 )
-from pxx.skills import SkillRegistry
 
 # Path constants — define first since compat aliases below reference REPO_ROOT.
 PKG_DIR = Path(__file__).parent
@@ -98,8 +103,9 @@ def model_for(endpoint: Endpoint, tier: str | None = None) -> str:
         # Tier 1 requires Ollama; reject vLLM endpoints
         if tier == "t1" and endpoint.backend == "vllm":
             raise RuntimeError(
-                f"--tier t1 requires Ollama endpoint, but {endpoint.name} ({endpoint.backend}) "
-                f"is available. Check Studio connectivity or use --tier t2/t3."
+                f"--tier t1 requires Ollama endpoint, but "
+                f"{endpoint.name} ({endpoint.backend}) is available. "
+                f"Check Studio connectivity or use --tier t2/t3."
             )
 
         key = (endpoint.backend, tier)
@@ -137,7 +143,9 @@ def _extract_tier(argv: list[str]) -> tuple[str | None, list[str]]:
             i += 1
 
     if tier is not None and tier not in VALID_TIERS:
-        raise ValueError(f"Invalid tier '{tier}'. Must be one of: {', '.join(sorted(VALID_TIERS))}")
+        raise ValueError(
+            f"Invalid tier '{tier}'. Must be one of: {', '.join(sorted(VALID_TIERS))}"
+        )
 
     return tier, remaining
 
@@ -174,7 +182,9 @@ def _build_aider_args(
     extra_reads: list[Path] | None = None,
 ) -> list[str]:
     """Construct the argv to exec into aider with."""
-    has_chat_mode = any(a == "--chat-mode" or a.startswith("--chat-mode=") for a in user_args)
+    has_chat_mode = any(
+        a == "--chat-mode" or a.startswith("--chat-mode=") for a in user_args
+    )
     chat_mode_args: list[str] = []
     if not has_chat_mode and not edit_mode:
         # Only inject in ask mode. Edit mode lets aider use its default +
@@ -237,8 +247,11 @@ def _write_commands_context(commands: list[CommandInfo]) -> Path | None:
         "## Example",
         "",
         'User: "Add type hints to this function"',
-        f'You: "Try `/load {example.path}` — it is tuned for exactly this kind of task.',
-        '     Share the function if you want me to apply hints directly instead."',
+        (
+            f'You: "Try `/load {example.path}` — it is tuned for exactly '
+            f"this kind of task. Share the function if you want me to apply "
+            f'hints directly instead."'
+        ),
         "",
         "## Commands",
         "",
@@ -265,21 +278,6 @@ def _print_command_listing() -> None:
     print("Paste-ready /load lines:")
     for c in commands:
         print(f"  /load {c.path}")
-
-
-def _print_skill_listing() -> None:
-    """Print available agent skills to stdout."""
-    registry = SkillRegistry()
-    skills = registry.discover()
-    if not skills:
-        print("No skills found in pxx/commands/", file=sys.stderr)
-        return
-
-    print(registry.format_list())
-    print()
-    print("Use `/load <path>` in aider to load a skill:")
-    for skill in skills:
-        print(f"  /load {skill.path}")
 
 
 def _write_scope_context(scope_prefixes: list[str]) -> Path | None:
@@ -374,10 +372,6 @@ def main() -> None:
         _print_command_listing()
         sys.exit(0)
 
-    if "--list-skills" in sys.argv:
-        _print_skill_listing()
-        sys.exit(0)
-
     if "--check-sync" in sys.argv:
         res = drift.check_sync()
         drift.print_report(res)
@@ -426,7 +420,9 @@ def main() -> None:
     with contextlib.suppress(Exception):
         audit.prune_old_logs()
 
-    edit_mode = "--edit" in sys.argv or "--self-fix" in sys.argv or "--self-improve" in sys.argv
+    edit_mode = (
+        "--edit" in sys.argv or "--self-fix" in sys.argv or "--self-improve" in sys.argv
+    )
     big_mode = "--big" in sys.argv
     dry_run = "--dry-run" in sys.argv
     anywhere_mode = "--anywhere" in sys.argv
@@ -434,7 +430,6 @@ def main() -> None:
     self_fix_mode = "--self-fix" in sys.argv
     with_router = "--with-router" in sys.argv
     with_memory = "--with-memory" in sys.argv
-    with_memory_injection = "--with-memory-injection" in sys.argv
 
     # #006 M2: optional pre-edit drift check.
     # Off by default; PXX_AUTOCHECK_DRIFT=1 to opt-in.
@@ -446,11 +441,17 @@ def main() -> None:
             drift.print_report(res)
 
     if self_fix_mode and self_improve_mode:
-        print("pxx: --self-fix and --self-improve are mutually exclusive.", file=sys.stderr)
+        print(
+            "pxx: --self-fix and --self-improve are mutually exclusive.",
+            file=sys.stderr,
+        )
         sys.exit(2)
     if self_improve_mode and "--edit" in sys.argv:
         print(
-            "pxx: --self-improve is ask-only — remove --edit (Tier 2 is suggest-only by design).",
+            (
+                "pxx: --self-improve is ask-only — remove --edit "
+                "(Tier 2 is suggest-only by design)."
+            ),
             file=sys.stderr,
         )
         sys.exit(2)
@@ -530,7 +531,9 @@ def main() -> None:
             filtered_user_args.append(a)
     user_args = filtered_user_args
     if self_fix_task:
-        has_message = any(a == "--message" or a.startswith("--message=") for a in user_args)
+        has_message = any(
+            a == "--message" or a.startswith("--message=") for a in user_args
+        )
         if not has_message:
             user_args = ["--message", self_fix_task, *user_args]
 
@@ -617,7 +620,8 @@ def main() -> None:
         )
     if safety_tag:
         print(
-            f"pxx: safety tag {safety_tag} — undo session with: git reset --hard {safety_tag}",
+            f"pxx: safety tag {safety_tag} — undo session with: "
+            f"git reset --hard {safety_tag}",
             file=sys.stderr,
         )
     elif empty_repo:
@@ -628,7 +632,10 @@ def main() -> None:
         )
 
     if big_mode and edit_mode and not dry_run:
-        print("pxx: --big set — pre-commit diff cap bypassed for this session.", file=sys.stderr)
+        print(
+            "pxx: --big set — pre-commit diff cap bypassed for this session.",
+            file=sys.stderr,
+        )
     elif big_mode and not edit_mode:
         print(
             "pxx: --big has no effect in ask mode (no commits to gate); ignored.",
@@ -642,7 +649,8 @@ def main() -> None:
 
     if dry_run and edit_mode:
         print(
-            "pxx: --dry-run set — aider will describe changes but not write or commit them.",
+            "pxx: --dry-run set — aider will describe changes but not "
+            "write or commit them.",
             file=sys.stderr,
         )
     elif dry_run and not edit_mode:
@@ -677,18 +685,7 @@ def main() -> None:
         aider_bin, model, user_args, in_git_repo, edit_mode, extra_reads=extra_reads
     )
 
-    # Phase 5 Tier 2: Memory injection into system prompt
     root = _git_repo_root() if in_git_repo else None
-    if with_memory_injection and with_memory:
-        injector = MemoryInjector("http://127.0.0.1:3111")
-        cwd = str(Path.cwd())
-        args = injector.inject_into_aider_args(
-            args, repo_root=root, cwd=cwd, tmp_dir=Path(tempfile.gettempdir())
-        )
-        print(
-            "pxx: memory injection enabled — observations from previous sessions loaded",
-            file=sys.stderr,
-        )
     sha = _git_head_sha() if in_git_repo else None
     git_dirty: bool | None = _git_dirty() if in_git_repo else None
     # Privacy contract: this record must not contain sensitive env vars
@@ -721,65 +718,56 @@ def main() -> None:
     env = os.environ.copy()
     env["OPENAI_API_KEY"] = "EMPTY"
 
-    # Phase 5 Tier 1: Optional service infrastructure
+    # Phase 5 Tier 1: supervisor mode for 9router + agentmemory
     router_manager: NineroterManager | None = None
     memory_manager: AgentmemoryManager | None = None
+    observer: AiderMemoryObserver | None = None
 
     try:
-        # Start 9router if requested (routes requests at network layer)
+        # Start 9router if requested
         if with_router:
             router_manager = NineroterManager()
-            # Pass repo root for project scoping in memory middleware
-            if root:
-                env["PXX_PROJECT_ROOT"] = str(root)
-            router_manager.start(env=env)
+            router_manager.start()
             env["OPENAI_API_BASE"] = "http://127.0.0.1:20128/v1"
             router_status = "✓" if router_manager.get_status() else "?"
             print(f"pxx: 9router started (port 20128) {router_status}", file=sys.stderr)
 
-        # Start agentmemory if requested (infrastructure only; runtime observation not yet implemented)
+        # Start agentmemory if requested
         if with_memory:
-            # Pass repo root for project scoping
-            if root:
-                env["PXX_PROJECT_ROOT"] = str(root)
             memory_manager = AgentmemoryManager()
-            memory_manager.start(env=env)
-            print(
-                "pxx: agentmemory started (port 3111, infrastructure mode)",
-                file=sys.stderr,
-            )
+            memory_manager.start()
+            print("pxx: agentmemory started (port 3111)", file=sys.stderr)
 
-        # Launch aider with Popen (no stdout capture) to preserve terminal TTY
-        # Aider inherits stdin/stdout/stderr, giving it full interactive terminal access.
-        # Note: Runtime memory capture via observer is blocked pending solution to:
-        # 1. TTY preservation (aider is a TUI and needs isatty()=true)
-        # 2. Output format (aider's tool_calls are internal, not serialized to stdout)
-        # See pxx/observer.py for details on what needs to be solved.
+        # Launch aider as subprocess (not execve) so we can supervise
         aider_proc = subprocess.Popen(args, env=env)
+
+        # Start observer thread if memory is active
+        if with_memory and memory_manager:
+            observer = AiderMemoryObserver(aider_proc, "http://127.0.0.1:3111")
+            observer.start()
 
         # Wait for aider to finish
         exit_code = aider_proc.wait()
 
-        # Clean up services after aider exits
+        # Aider finished — clean up subprocesses gracefully
         if memory_manager:
             memory_manager.stop()
-
-        # Print 9router statistics if available
-        router_usage = None
         if router_manager:
-            router_usage = router_manager.get_usage()
+            usage = router_manager.get_usage()
             router_manager.stop()
-            if router_usage and "total_tokens" in router_usage:
+            if usage and "total_tokens" in usage:
                 print(
-                    f"pxx: 9router stats — tokens={router_usage.get('total_tokens', 0)}, "
-                    f"cost=${router_usage.get('total_cost', 0):.4f}",
+                    f"pxx: 9router stats — tokens={usage.get('total_tokens', 0)}, "
+                    f"cost=${usage.get('total_cost', 0):.4f}",
                     file=sys.stderr,
                 )
 
         sys.exit(exit_code)
 
     except KeyboardInterrupt:
-        # Clean up on user interrupt (Ctrl+C)
+        # Clean up on user interrupt
+        if observer:
+            observer.thread = None
         if memory_manager:
             memory_manager.stop()
         if router_manager:
@@ -788,11 +776,13 @@ def main() -> None:
 
     except Exception as e:
         # Clean up on error
+        if observer:
+            observer.thread = None
         if memory_manager:
             memory_manager.stop()
         if router_manager:
             router_manager.stop()
-        print(f"pxx: service error: {e}", file=sys.stderr)
+        print(f"pxx: supervisor error: {e}", file=sys.stderr)
         sys.exit(1)
 
 

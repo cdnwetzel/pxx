@@ -22,7 +22,10 @@ class GovernanceViolation:
 
 # Built-in secret patterns (stdlib only, no regex-heavy fingerprinting)
 SECRET_PATTERNS: list[tuple[str, re.Pattern]] = [
-    ("api-key-literal", re.compile(r"(?i)(api[_-]?key|apikey)\s*=\s*['\"][^'\"]{8,}['\"]")),
+    (
+        "api-key-literal",
+        re.compile(r"(?i)(api[_-]?key|apikey)\s*=\s*['\"][^'\"]{8,}['\"]"),
+    ),
     ("openai-key", re.compile(r"sk-[a-zA-Z0-9]{32,}")),
     ("anthropic-key", re.compile(r"sk-ant-[a-zA-Z0-9]{32,}")),
     ("huggingface-token", re.compile(r"hf_[a-zA-Z0-9]{20,}")),
@@ -63,22 +66,12 @@ def scan_staged_secrets(repo_root: Path) -> list[GovernanceViolation]:
         return violations
 
     for filepath in staged_files:
+        full_path = repo_root / filepath
+        if not full_path.exists() or full_path.is_dir():
+            continue
+
         try:
-            # Read staged content from git index, not working tree.
-            # This ensures secrets are caught before commit, even if the file
-            # is modified after staging.
-            result = subprocess.run(
-                ["git", "show", f":{filepath}"],
-                cwd=repo_root,
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=5,
-            )
-            if result.returncode != 0:
-                # File missing from index (e.g., deleted in staging); skip
-                continue
-            content = result.stdout
+            content = full_path.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             continue
 
@@ -223,7 +216,7 @@ def check_review_verdict(repo_root: Path) -> list[GovernanceViolation]:
                 severity="warning",
                 detail=(
                     f"Review pending: {state.review_verdict or 'no verdict yet'}. "
-                    "Run pxx --review"
+                    f"Run pxx --review"
                 ),
             )
         )
@@ -252,7 +245,8 @@ def run_governance_check(repo_root: Path) -> int:
         if not os.environ.get("PYTEST_CURRENT_TEST"):
             raise RuntimeError(
                 "PXX_GOVERNANCE_SKIP is reserved for test environments only. "
-                "It is set automatically by pytest via the PYTEST_CURRENT_TEST env var. "
+                "It is set automatically by pytest via the "
+                "PYTEST_CURRENT_TEST env var. "
                 "Explicit use outside tests is not permitted."
             )
         return 0
@@ -293,7 +287,10 @@ def run_governance_check(repo_root: Path) -> int:
         print(f"pxx {prefix}: {v.check}: {v.detail}", file=sys.stderr)
 
     if errors:
-        print(f"\npxx: {len(errors)} error(s), {len(warnings)} warning(s)", file=sys.stderr)
+        print(
+            f"\npxx: {len(errors)} error(s), {len(warnings)} warning(s)",
+            file=sys.stderr,
+        )
         return 1
 
     if warnings:

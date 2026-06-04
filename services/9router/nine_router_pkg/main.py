@@ -171,6 +171,11 @@ async def chat_completions(request: Request):
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
-if __name__ == "__main__":
+def main():
+    """Entry point for 9router console script."""
     import uvicorn
     uvicorn.run(app, host="127.0.0.1", port=20128)
+
+
+if __name__ == "__main__":
+    main()

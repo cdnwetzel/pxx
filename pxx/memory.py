@@ -47,10 +47,8 @@ STATE_PATH=~/.pxx/memory.db
         """Start agentmemory subprocess and wait for health check.
 
         Args:
-            env: Optional environment dict to merge with os.environ (for project root, etc.)
+            env: Optional environment dict to merge with os.environ.
         """
-        import sys
-
         if env is None:
             env = os.environ.copy()
         else:
@@ -58,23 +56,27 @@ STATE_PATH=~/.pxx/memory.db
             merged = os.environ.copy()
             merged.update(env)
             env = merged
-        env["PXX_MEMORY_PORT"] = "3111"
+
         env["PXX_MEMORY_HOST"] = "127.0.0.1"
+        env["PXX_MEMORY_PORT"] = "3111"
+        env["DOTENV_PATH"] = str(self.config_path)
 
         # Try console script first (installed mode), then Python module (dev mode)
         self.process = None
+        last_error = None
 
         # Try 1: console script (production install)
         try:
             self.process = subprocess.Popen(
-                ["agentmemory"],
+                ["agentmemory", "server"],
                 env=env,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
             self._wait_for_ready(timeout=5)
             return
-        except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
+        except (FileNotFoundError, OSError, subprocess.TimeoutExpired) as e:
+            last_error = e
             pass
 
         # Try 2: uv run (dev mode with uv)
@@ -84,22 +86,16 @@ STATE_PATH=~/.pxx/memory.db
                 env=env,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
+                cwd="/Users/you/ai/pxx/services/agentmemory",
             )
             self._wait_for_ready(timeout=5)
             return
-        except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
+        except (FileNotFoundError, OSError, subprocess.TimeoutExpired) as e2:
+            last_error = e2
             pass
 
-        # Try 3: direct Python module (if in venv)
-        self.process = subprocess.Popen(
-            [sys.executable, "-m", "agentmemory_pkg.main"],
-            env=env,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-
-        # Wait for port 3111 to be ready
-        self._wait_for_ready(timeout=5)
+        # Both failed
+        raise RuntimeError(f"Failed to start agentmemory: {last_error}")
 
     def stop(self) -> None:
         """Gracefully terminate agentmemory subprocess."""

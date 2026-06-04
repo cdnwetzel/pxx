@@ -14,7 +14,7 @@ setup(
     ],
     entry_points={
         "console_scripts": [
-            "nine-router=9router_pkg.main:main",
+            "nine-router=nine_router_pkg.main:main",
         ],
     },
     classifiers=[

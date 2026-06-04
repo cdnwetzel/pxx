@@ -26,10 +26,8 @@ class NineroterManager:
         """Start 9router subprocess and wait for health check.
 
         Args:
-            env: Optional environment dict to merge with os.environ (for project root, etc.)
+            env: Optional environment dict to merge with os.environ.
         """
-        import sys
-
         if env is None:
             env = os.environ.copy()
         else:
@@ -37,6 +35,7 @@ class NineroterManager:
             merged = os.environ.copy()
             merged.update(env)
             env = merged
+
         env["PXX_ROUTER_PORT"] = "20128"
         env["PXX_ROUTER_HOST"] = "127.0.0.1"
 
@@ -61,33 +60,20 @@ class NineroterManager:
         # Try 2: uv run (dev mode with uv)
         try:
             self.process = subprocess.Popen(
-                ["uv", "run", "-m", "9router_pkg.main"],
+                ["uv", "run", "-m", "nine_router_pkg.main"],
                 env=env,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
+                cwd="/Users/you/ai/pxx/services/9router",
             )
             self._wait_for_ready(timeout=5)
             return
-        except (FileNotFoundError, OSError, subprocess.TimeoutExpired) as e:
-            last_error = e
+        except (FileNotFoundError, OSError, subprocess.TimeoutExpired) as e2:
+            last_error = e2
             pass
 
-        # Try 3: direct Python module (if in venv)
-        try:
-            self.process = subprocess.Popen(
-                [sys.executable, "-m", "9router_pkg.main"],
-                env=env,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-            self._wait_for_ready(timeout=5)
-            return
-        except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
-            pass
-
-        # If we get here, all methods failed
-        if last_error:
-            raise RuntimeError(f"9router failed to start: {last_error}")
+        # Both failed
+        raise RuntimeError(f"Failed to start 9router: {last_error}")
 
     def stop(self) -> None:
         """Gracefully terminate 9router subprocess."""

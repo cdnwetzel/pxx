@@ -18,17 +18,20 @@ class Observation:
     access_count: int
     score: float = 0.0
     embedding: list[float] | None = None
+    expires_at: str | None = None
 
 
 class ObservationStore:
-    """SQLite-based observation storage."""
+    """SQLite-based observation storage with TTL support."""
 
-    def __init__(self, db_path: str = None):
+    def __init__(self, db_path: str = None, default_ttl_days: int = 90):
         if db_path is None:
             db_path = os.path.expanduser("~/.pxx/memory.db")
 
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self.default_ttl_days = default_ttl_days
+        self.project_ttls: dict[str, int] = {}  # Per-project TTL overrides
         self._init_db()
 
     def _init_db(self):
@@ -43,6 +46,7 @@ class ObservationStore:
                     last_accessed TEXT NOT NULL,
                     access_count INTEGER DEFAULT 0,
                     embedding TEXT,
+                    expires_at TEXT,
                     UNIQUE(project, content)
                 )
             """)
@@ -52,19 +56,37 @@ class ObservationStore:
             conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_created ON observations(created_at)
             """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_expires ON observations(expires_at)
+            """)
             # Add embedding column if it doesn't exist (backward compatibility)
             try:
                 conn.execute("ALTER TABLE observations ADD COLUMN embedding TEXT")
             except sqlite3.OperationalError:
                 pass  # Column already exists
+            # Add expires_at column if it doesn't exist (backward compatibility)
+            try:
+                conn.execute("ALTER TABLE observations ADD COLUMN expires_at TEXT")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
             conn.commit()
 
-    def store(self, project: str, content: str) -> Observation:
-        """Store a new observation with embedding."""
+    def store(self, project: str, content: str, ttl_days: int | None = None) -> Observation:
+        """Store a new observation with embedding and TTL."""
         from . import embeddings as emb_module
+        from datetime import timedelta
 
         obs_id = f"obs-{hashlib.md5(f'{project}{content}'.encode()).hexdigest()[:12]}"
         now = datetime.utcnow().isoformat()
+
+        # Calculate expiration time
+        expires_at = None
+        if ttl_days is None:
+            ttl_days = self._get_project_ttl(project)
+        if ttl_days > 0:
+            expires_at = (
+                datetime.utcnow() + timedelta(days=ttl_days)
+            ).isoformat()
 
         # Generate embedding for the content
         try:
@@ -80,10 +102,13 @@ class ObservationStore:
             with sqlite3.connect(self.db_path) as conn:
                 query = (
                     "INSERT INTO observations "
-                    "(id, project, content, created_at, last_accessed, access_count, embedding) "
-                    "VALUES (?, ?, ?, ?, ?, 0, ?)"
+                    "(id, project, content, created_at, last_accessed, "
+                    "access_count, embedding, expires_at) "
+                    "VALUES (?, ?, ?, ?, ?, 0, ?, ?)"
                 )
-                conn.execute(query, (obs_id, project, content, now, now, embedding_json))
+                conn.execute(
+                    query, (obs_id, project, content, now, now, embedding_json, expires_at)
+                )
                 conn.commit()
         except sqlite3.IntegrityError:
             # Already exists, update access time
@@ -97,11 +122,22 @@ class ObservationStore:
 
         return self._get_by_id(obs_id)
 
+    def _get_project_ttl(self, project: str) -> int:
+        """Get TTL for a project (uses override or default)."""
+        return self.project_ttls.get(project, self.default_ttl_days)
+
+    def set_project_ttl(self, project: str, ttl_days: int) -> None:
+        """Set TTL for a specific project."""
+        if ttl_days <= 0:
+            self.project_ttls.pop(project, None)
+        else:
+            self.project_ttls[project] = ttl_days
+
     def _get_by_id(self, obs_id: str) -> Observation:
         """Get observation by ID."""
         query = (
             "SELECT id, project, content, created_at, last_accessed, "
-            "access_count, embedding FROM observations WHERE id = ?"
+            "access_count, embedding, expires_at FROM observations WHERE id = ?"
         )
         with sqlite3.connect(self.db_path) as conn:
             row = conn.execute(query, (obs_id,)).fetchone()
@@ -121,6 +157,7 @@ class ObservationStore:
                 last_accessed=row[4],
                 access_count=row[5],
                 embedding=embedding,
+                expires_at=row[7],
             )
         return None
 
@@ -128,7 +165,7 @@ class ObservationStore:
         """Get all observations for a project."""
         query = (
             "SELECT id, project, content, created_at, last_accessed, "
-            "access_count, embedding FROM observations WHERE project = ? "
+            "access_count, embedding, expires_at FROM observations WHERE project = ? "
             "ORDER BY last_accessed DESC"
         )
         with sqlite3.connect(self.db_path) as conn:
@@ -151,6 +188,7 @@ class ObservationStore:
                     last_accessed=row[4],
                     access_count=row[5],
                     embedding=embedding,
+                    expires_at=row[7],
                 )
             )
         return observations
@@ -221,4 +259,52 @@ class ObservationStore:
             "project": project,
             "observation_count": count,
             "size_mb": size_bytes / (1024 * 1024),
+        }
+
+    def cleanup_expired(self, dry_run: bool = False) -> dict:
+        """Delete expired observations across all projects.
+
+        Args:
+            dry_run: If True, only count what would be deleted
+
+        Returns:
+            Statistics: count deleted, space freed, projects affected
+        """
+        now = datetime.utcnow().isoformat()
+
+        with sqlite3.connect(self.db_path) as conn:
+            # Find expired observations
+            expired = conn.execute(
+                """
+                SELECT id, project, LENGTH(content)
+                FROM observations
+                WHERE expires_at IS NOT NULL AND expires_at < ?
+                """,
+                (now,),
+            ).fetchall()
+
+            if dry_run:
+                # Just count
+                count = len(expired)
+                size_freed = sum(row[2] for row in expired)
+                projects = set(row[1] for row in expired)
+            else:
+                # Delete them
+                expired_ids = [row[0] for row in expired]
+                if expired_ids:
+                    placeholders = ",".join("?" * len(expired_ids))
+                    conn.execute(
+                        f"DELETE FROM observations WHERE id IN ({placeholders})",
+                        expired_ids,
+                    )
+                    conn.commit()
+                count = len(expired_ids)
+                size_freed = sum(row[2] for row in expired)
+                projects = set(row[1] for row in expired)
+
+        return {
+            "expired_count": count,
+            "size_freed_mb": size_freed / (1024 * 1024),
+            "projects_affected": list(projects),
+            "dry_run": dry_run,
         }

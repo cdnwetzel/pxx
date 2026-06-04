@@ -5,21 +5,31 @@ from .storage import ObservationStore
 from .commands import CommandHandler
 from .search import SearchEngine
 from .cache import SearchCache
+from .cleanup import CleanupManager
 
 
 # Global instances
-store = ObservationStore()
+store = ObservationStore(
+    default_ttl_days=int(os.environ.get("AGENTMEMORY_RETENTION_DAYS", "90"))
+)
 handler = CommandHandler(store)
 search_engine = SearchEngine()
 search_cache = SearchCache(maxsize=128)
+cleanup_manager = CleanupManager(
+    store,
+    interval_seconds=int(os.environ.get("AGENTMEMORY_CLEANUP_INTERVAL", "3600")),
+    enabled=os.environ.get("AGENTMEMORY_CLEANUP_ENABLED", "true").lower() == "true",
+)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup and shutdown."""
     print("agentmemory starting...")
+    cleanup_manager.start()
     yield
     print("agentmemory shutting down...")
+    cleanup_manager.stop()
 
 
 app = FastAPI(title="agentmemory", version="0.1.0", lifespan=lifespan)
@@ -217,6 +227,73 @@ async def status():
         "service": "agentmemory",
         "version": "0.1.0",
         "status": "healthy",
+    }
+
+
+@app.get("/cleanup")
+async def cleanup_status(dry_run: bool = True):
+    """Get cleanup status or perform cleanup.
+
+    Args:
+        dry_run: If True, only report what would be deleted
+    """
+    result = store.cleanup_expired(dry_run=dry_run)
+    return result
+
+
+@app.post("/cleanup")
+async def trigger_cleanup(request: Request):
+    """Trigger immediate cleanup of expired observations."""
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
+
+    dry_run = data.get("dry_run", False)
+    result = store.cleanup_expired(dry_run=dry_run)
+
+    return {
+        "cleanup_triggered": True,
+        "dry_run": dry_run,
+        "result": result,
+    }
+
+
+@app.get("/retention/config")
+async def get_retention_config():
+    """Get retention configuration."""
+    return {
+        "default_ttl_days": store.default_ttl_days,
+        "project_overrides": store.project_ttls.copy(),
+        "cleanup_enabled": cleanup_manager.enabled,
+        "cleanup_interval_seconds": cleanup_manager.interval_seconds,
+        "cleanup_stats": cleanup_manager.get_stats(),
+    }
+
+
+@app.post("/retention/config")
+async def set_retention_config(request: Request):
+    """Set retention configuration for a project."""
+    try:
+        data = await request.json()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    project = data.get("project")
+    ttl_days = data.get("ttl_days")
+
+    if not project or ttl_days is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Missing project or ttl_days",
+        )
+
+    store.set_project_ttl(project, ttl_days)
+
+    return {
+        "project": project,
+        "ttl_days": ttl_days if ttl_days > 0 else "default",
+        "message": "Retention config updated",
     }
 
 

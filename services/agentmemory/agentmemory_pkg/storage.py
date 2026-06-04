@@ -261,22 +261,26 @@ class ObservationStore:
             "size_mb": size_bytes / (1024 * 1024),
         }
 
-    def cleanup_expired(self, dry_run: bool = False) -> dict:
+    def cleanup_expired(
+        self, dry_run: bool = False, archive_manager=None
+    ) -> dict:
         """Delete expired observations across all projects.
 
         Args:
             dry_run: If True, only count what would be deleted
+            archive_manager: Optional ArchiveManager for archival before deletion
 
         Returns:
-            Statistics: count deleted, space freed, projects affected
+            Statistics: count deleted, space freed, projects affected, archive info
         """
         now = datetime.utcnow().isoformat()
 
         with sqlite3.connect(self.db_path) as conn:
             # Find expired observations
-            expired = conn.execute(
+            expired_rows = conn.execute(
                 """
-                SELECT id, project, LENGTH(content)
+                SELECT id, project, content, created_at, last_accessed,
+                       access_count, expires_at
                 FROM observations
                 WHERE expires_at IS NOT NULL AND expires_at < ?
                 """,
@@ -285,12 +289,32 @@ class ObservationStore:
 
             if dry_run:
                 # Just count
-                count = len(expired)
-                size_freed = sum(row[2] for row in expired)
-                projects = set(row[1] for row in expired)
+                count = len(expired_rows)
+                size_freed = sum(len(row[2]) for row in expired_rows)
+                projects = set(row[1] for row in expired_rows)
+                archive_result = None
             else:
+                # Archive before deletion
+                archive_result = None
+                if archive_manager and expired_rows:
+                    # Convert rows to Observation objects for archival
+                    from . import embeddings as emb_module
+                    obs_list = [
+                        Observation(
+                            id=row[0],
+                            project=row[1],
+                            content=row[2],
+                            created_at=row[3],
+                            last_accessed=row[4],
+                            access_count=row[5],
+                            expires_at=row[6],
+                        )
+                        for row in expired_rows
+                    ]
+                    archive_result = archive_manager.archive_observations(obs_list)
+
                 # Delete them
-                expired_ids = [row[0] for row in expired]
+                expired_ids = [row[0] for row in expired_rows]
                 if expired_ids:
                     placeholders = ",".join("?" * len(expired_ids))
                     conn.execute(
@@ -299,12 +323,17 @@ class ObservationStore:
                     )
                     conn.commit()
                 count = len(expired_ids)
-                size_freed = sum(row[2] for row in expired)
-                projects = set(row[1] for row in expired)
+                size_freed = sum(len(row[2]) for row in expired_rows)
+                projects = set(row[1] for row in expired_rows)
 
-        return {
+        result = {
             "expired_count": count,
             "size_freed_mb": size_freed / (1024 * 1024),
             "projects_affected": list(projects),
             "dry_run": dry_run,
         }
+
+        if archive_result:
+            result["archive"] = archive_result
+
+        return result

@@ -90,6 +90,14 @@ class SearchEngine:
 
     def __init__(self):
         self.ranker = BM25Ranker()
+        # Optional vector index for fast similarity search
+        self.vector_index = None
+        try:
+            from .vector_index import VectorIndex
+            self.vector_index = VectorIndex()
+        except Exception as e:
+            import logging
+            logging.warning(f"Vector index unavailable: {e}")
 
     def search(
         self,
@@ -122,6 +130,7 @@ class SearchEngine:
         """Hybrid search combining BM25 + vector similarity.
 
         Weighting: 40% BM25, 60% vector similarity.
+        Uses HNSW index if available for fast approximate search.
         """
         from . import embeddings as emb_module
 
@@ -140,25 +149,44 @@ class SearchEngine:
         # Vector search (skip observations without embeddings)
         vector_scores = {}
         obs_with_embeddings = [
-            (obs, obs.embedding)
-            for obs in observations
-            if obs.embedding is not None
+            obs for obs in observations if obs.embedding is not None
         ]
 
         if obs_with_embeddings:
             try:
-                vector_results = emb_module.vector_search(
-                    query, [(obs.id, emb) for obs, emb in obs_with_embeddings]
-                )
-                # Normalize to 0-1 range
-                max_vector = max(
-                    (score for _, score in vector_results), default=0
-                )
-                if max_vector > 0:
-                    vector_scores = {
-                        obs_id: score / max_vector
-                        for obs_id, score in vector_results
-                    }
+                # Try HNSW index first (fast, ~O(log n))
+                if (
+                    self.vector_index
+                    and self.vector_index.enabled
+                    and self.vector_index.get_size() > 0
+                ):
+                    query_embedding = emb_module.embed_text(query)
+                    vector_results = self.vector_index.search(
+                        query_embedding, k=len(obs_with_embeddings)
+                    )
+                    max_vector = max(
+                        (score for _, score in vector_results), default=0
+                    )
+                    if max_vector > 0:
+                        vector_scores = {
+                            obs_id: score / max_vector
+                            for obs_id, score in vector_results
+                        }
+                else:
+                    # Fallback to brute-force search (O(n))
+                    query_embedding = emb_module.embed_text(query)
+                    vector_results = emb_module.vector_search(
+                        query,
+                        [(obs.id, obs.embedding) for obs in obs_with_embeddings],
+                    )
+                    max_vector = max(
+                        (score for _, score in vector_results), default=0
+                    )
+                    if max_vector > 0:
+                        vector_scores = {
+                            obs_id: score / max_vector
+                            for obs_id, score in vector_results
+                        }
             except Exception:
                 # Graceful degradation if vector search fails
                 pass

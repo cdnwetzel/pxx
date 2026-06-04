@@ -6,6 +6,7 @@ from .commands import CommandHandler
 from .search import SearchEngine
 from .cache import SearchCache
 from .cleanup import CleanupManager
+from .archive import ArchiveManager
 
 
 # Global instances
@@ -15,6 +16,7 @@ store = ObservationStore(
 handler = CommandHandler(store)
 search_engine = SearchEngine()
 search_cache = SearchCache(maxsize=128)
+archive_manager = ArchiveManager()
 cleanup_manager = CleanupManager(
     store,
     interval_seconds=int(os.environ.get("AGENTMEMORY_CLEANUP_INTERVAL", "3600")),
@@ -237,7 +239,7 @@ async def cleanup_status(dry_run: bool = True):
     Args:
         dry_run: If True, only report what would be deleted
     """
-    result = store.cleanup_expired(dry_run=dry_run)
+    result = store.cleanup_expired(dry_run=dry_run, archive_manager=archive_manager)
     return result
 
 
@@ -250,7 +252,7 @@ async def trigger_cleanup(request: Request):
         data = {}
 
     dry_run = data.get("dry_run", False)
-    result = store.cleanup_expired(dry_run=dry_run)
+    result = store.cleanup_expired(dry_run=dry_run, archive_manager=archive_manager)
 
     return {
         "cleanup_triggered": True,
@@ -294,6 +296,39 @@ async def set_retention_config(request: Request):
         "project": project,
         "ttl_days": ttl_days if ttl_days > 0 else "default",
         "message": "Retention config updated",
+    }
+
+
+@app.get("/archive/list")
+async def list_archives():
+    """List all archives."""
+    archives = archive_manager.list_archives()
+    return {
+        "archives": archives,
+        "count": len(archives),
+    }
+
+
+@app.get("/archive/stats")
+async def archive_stats():
+    """Get archive statistics."""
+    stats = archive_manager.get_archive_stats()
+    return stats
+
+
+@app.get("/archive/search")
+async def search_archive(query: str, limit: int = 10):
+    """Search archived observations.
+
+    Args:
+        query: Search query (substring)
+        limit: Max results to return
+    """
+    results = archive_manager.search_archive(query, limit=limit)
+    return {
+        "query": query,
+        "results": results,
+        "count": len(results),
     }
 
 

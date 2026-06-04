@@ -22,11 +22,21 @@ class NineroterManager:
         self.process: subprocess.Popen[bytes] | None = None
         self.api_base = "http://127.0.0.1:20128"
 
-    def start(self) -> None:
-        """Start 9router subprocess and wait for health check."""
+    def start(self, env: dict[str, str] | None = None) -> None:
+        """Start 9router subprocess and wait for health check.
+
+        Args:
+            env: Optional environment dict to merge with os.environ (for project root, etc.)
+        """
         import sys
 
-        env = os.environ.copy()
+        if env is None:
+            env = os.environ.copy()
+        else:
+            # Merge with current environment
+            merged = os.environ.copy()
+            merged.update(env)
+            env = merged
         env["PXX_ROUTER_PORT"] = "20128"
         env["PXX_ROUTER_HOST"] = "127.0.0.1"
 

@@ -26,6 +26,7 @@ class AgentmemoryClient:
         query: str,
         limit: int = 3,
         min_score: float = 0.3,
+        project_root: str | None = None,
     ) -> list[dict]:
         """Search memory for relevant observations.
 
@@ -33,19 +34,24 @@ class AgentmemoryClient:
             query: Search term
             limit: Max results to return
             min_score: Minimum BM25 score threshold
+            project_root: Optional project root for scoping observations
 
         Returns:
             List of observation dicts with title, content, score.
         """
         try:
+            payload = {
+                "query": query,
+                "limit": limit,
+                "min_score": min_score,
+            }
+            if project_root:
+                payload["project_root"] = project_root
+
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 resp = await client.post(
                     f"{self.api_base}/search",
-                    json={
-                        "query": query,
-                        "limit": limit,
-                        "min_score": min_score,
-                    },
+                    json=payload,
                 )
                 if resp.status_code == 200:
                     data = resp.json()
@@ -129,9 +135,11 @@ class MemoryMiddleware:
     """Main middleware: inject/capture memory around LLM requests."""
 
     def __init__(self, memory_api_base: str = "http://127.0.0.1:3111"):
+        import os
         self.memory_client = AgentmemoryClient(memory_api_base)
         self.command_matcher = SlashCommandMatcher()
         self.enabled = True
+        self.project_root = os.getenv("PXX_PROJECT_ROOT")  # For per-project scoping
 
     async def on_request(self, request_body: dict) -> dict:
         """Process outgoing request before it reaches the LLM.
@@ -167,7 +175,7 @@ class MemoryMiddleware:
         user_query = last_msg.get("content", "") if messages else ""
         if user_query:
             observations = await self.memory_client.search(
-                user_query, limit=3, min_score=0.3
+                user_query, limit=3, min_score=0.3, project_root=self.project_root
             )
             if observations:
                 # Inject into system prompt
@@ -219,7 +227,9 @@ class MemoryMiddleware:
             Response dict with status and message.
         """
         if command == "recall":
-            observations = await self.memory_client.search(args, limit=5)
+            # Use middleware's project_root if not provided
+            project = repo_root or self.project_root
+            observations = await self.memory_client.search(args, limit=5, project_root=project)
             if not observations:
                 return {
                     "status": "success",

@@ -43,11 +43,21 @@ STATE_PATH=~/.pxx/memory.db
 """
         self.config_path.write_text(config_content)
 
-    def start(self) -> None:
-        """Start agentmemory subprocess and wait for health check."""
+    def start(self, env: dict[str, str] | None = None) -> None:
+        """Start agentmemory subprocess and wait for health check.
+
+        Args:
+            env: Optional environment dict to merge with os.environ (for project root, etc.)
+        """
         import sys
 
-        env = os.environ.copy()
+        if env is None:
+            env = os.environ.copy()
+        else:
+            # Merge with current environment
+            merged = os.environ.copy()
+            merged.update(env)
+            env = merged
         env["PXX_MEMORY_PORT"] = "3111"
         env["PXX_MEMORY_HOST"] = "127.0.0.1"
 

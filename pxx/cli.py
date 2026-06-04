@@ -729,15 +729,21 @@ def main() -> None:
         # Start 9router if requested (routes requests at network layer)
         if with_router:
             router_manager = NineroterManager()
-            router_manager.start()
+            # Pass repo root for project scoping in memory middleware
+            if root:
+                env["PXX_PROJECT_ROOT"] = str(root)
+            router_manager.start(env=env)
             env["OPENAI_API_BASE"] = "http://127.0.0.1:20128/v1"
             router_status = "✓" if router_manager.get_status() else "?"
             print(f"pxx: 9router started (port 20128) {router_status}", file=sys.stderr)
 
         # Start agentmemory if requested (infrastructure only; runtime observation not yet implemented)
         if with_memory:
+            # Pass repo root for project scoping
+            if root:
+                env["PXX_PROJECT_ROOT"] = str(root)
             memory_manager = AgentmemoryManager()
-            memory_manager.start()
+            memory_manager.start(env=env)
             print(
                 "pxx: agentmemory started (port 3111, infrastructure mode)",
                 file=sys.stderr,

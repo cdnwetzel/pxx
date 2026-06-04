@@ -4,12 +4,14 @@ from fastapi import FastAPI, HTTPException, Request
 from .storage import ObservationStore
 from .commands import CommandHandler
 from .search import SearchEngine
+from .cache import SearchCache
 
 
 # Global instances
 store = ObservationStore()
 handler = CommandHandler(store)
 search_engine = SearchEngine()
+search_cache = SearchCache(maxsize=128)
 
 
 @asynccontextmanager
@@ -37,13 +39,14 @@ async def store_observation(request: Request):
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    project = data.get("project", "default")  # Use "default" if not specified
+    project = data.get("project", "default")
     content = data.get("content")
 
     if not content:
         raise HTTPException(status_code=400, detail="Missing content")
 
     obs = store.store(project, content)
+    search_cache.invalidate_project(project)
 
     return {
         "id": obs.id,
@@ -61,14 +64,19 @@ async def search_observations(request: Request):
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    project = data.get("project", "default")  # Use "default" if not specified
+    project = data.get("project", "default")
     query = data.get("query", "")
     limit = data.get("limit", 10)
+
+    # Check cache first
+    cached = search_cache.get(project, query, limit, min_score=0.0)
+    if cached:
+        return cached
 
     observations = store.get_by_project(project)
     ranked = search_engine.search(query, observations, limit=limit, min_score=0.0)
 
-    return {
+    result = {
         "query": query,
         "project": project,
         "results": [
@@ -84,6 +92,11 @@ async def search_observations(request: Request):
         ],
         "count": len(ranked),
     }
+
+    # Cache the result
+    search_cache.set(project, query, result, limit)
+
+    return result
 
 
 @app.post("/inject")
@@ -132,6 +145,7 @@ async def project_stats(project: str):
 async def delete_project(project: str):
     """Delete all observations for a project."""
     count = store.delete_project(project)
+    search_cache.invalidate_project(project)
     return {
         "project": project,
         "deleted": count,
@@ -160,6 +174,40 @@ async def execute_command(request: Request):
         raise HTTPException(status_code=400, detail=result["error"])
 
     return result
+
+
+@app.delete("/forget/{observation_id}")
+async def forget_observation(observation_id: str):
+    """Delete a specific observation (forget it)."""
+    # Get observation first to find its project for cache invalidation
+    obs = store._get_by_id(observation_id)
+    deleted = store.delete(observation_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail=f"Observation {observation_id} not found")
+
+    # Invalidate cache if deletion succeeded
+    if obs:
+        search_cache.invalidate_project(obs.project)
+
+    return {
+        "id": observation_id,
+        "message": "Observation deleted",
+    }
+
+
+@app.get("/metrics")
+async def metrics():
+    """Get service metrics and performance statistics."""
+    return {
+        "service": "agentmemory",
+        "version": "0.1.0",
+        "cache": {
+            "size": len(search_cache._cache),
+            "maxsize": search_cache.maxsize,
+            "utilization": f"{len(search_cache._cache) / search_cache.maxsize * 100:.1f}%",
+        },
+        "status": "healthy",
+    }
 
 
 @app.get("/status")

@@ -12,6 +12,8 @@ license = {text = "MIT"}
 dependencies = [
     "fastapi>=0.104.0",
     "uvicorn[standard]>=0.24.0",
+    "sentence-transformers>=2.2.0",
+    "numpy>=1.21.0",
 ]
 
 [project.scripts]

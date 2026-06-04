@@ -1,5 +1,6 @@
 import sqlite3
 import os
+import json
 import hashlib
 from pathlib import Path
 from datetime import datetime
@@ -16,6 +17,7 @@ class Observation:
     last_accessed: str
     access_count: int
     score: float = 0.0
+    embedding: list[float] | None = None
 
 
 class ObservationStore:
@@ -40,6 +42,7 @@ class ObservationStore:
                     created_at TEXT NOT NULL,
                     last_accessed TEXT NOT NULL,
                     access_count INTEGER DEFAULT 0,
+                    embedding TEXT,
                     UNIQUE(project, content)
                 )
             """)
@@ -49,21 +52,38 @@ class ObservationStore:
             conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_created ON observations(created_at)
             """)
+            # Add embedding column if it doesn't exist (backward compatibility)
+            try:
+                conn.execute("ALTER TABLE observations ADD COLUMN embedding TEXT")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
             conn.commit()
 
     def store(self, project: str, content: str) -> Observation:
-        """Store a new observation."""
+        """Store a new observation with embedding."""
+        from . import embeddings as emb_module
+
         obs_id = f"obs-{hashlib.md5(f'{project}{content}'.encode()).hexdigest()[:12]}"
         now = datetime.utcnow().isoformat()
+
+        # Generate embedding for the content
+        try:
+            embedding = emb_module.embed_text(content)
+            embedding_json = json.dumps(embedding)
+        except Exception as e:
+            # Graceful degradation if embedding fails
+            import logging
+            logging.warning(f"Failed to generate embedding: {e}")
+            embedding_json = None
 
         try:
             with sqlite3.connect(self.db_path) as conn:
                 query = (
                     "INSERT INTO observations "
-                    "(id, project, content, created_at, last_accessed, access_count) "
-                    "VALUES (?, ?, ?, ?, ?, 0)"
+                    "(id, project, content, created_at, last_accessed, access_count, embedding) "
+                    "VALUES (?, ?, ?, ?, ?, 0, ?)"
                 )
-                conn.execute(query, (obs_id, project, content, now, now))
+                conn.execute(query, (obs_id, project, content, now, now, embedding_json))
                 conn.commit()
         except sqlite3.IntegrityError:
             # Already exists, update access time
@@ -81,12 +101,18 @@ class ObservationStore:
         """Get observation by ID."""
         query = (
             "SELECT id, project, content, created_at, last_accessed, "
-            "access_count FROM observations WHERE id = ?"
+            "access_count, embedding FROM observations WHERE id = ?"
         )
         with sqlite3.connect(self.db_path) as conn:
             row = conn.execute(query, (obs_id,)).fetchone()
 
         if row:
+            embedding = None
+            if row[6]:
+                try:
+                    embedding = json.loads(row[6])
+                except (json.JSONDecodeError, TypeError):
+                    pass
             return Observation(
                 id=row[0],
                 project=row[1],
@@ -94,6 +120,7 @@ class ObservationStore:
                 created_at=row[3],
                 last_accessed=row[4],
                 access_count=row[5],
+                embedding=embedding,
             )
         return None
 
@@ -101,23 +128,32 @@ class ObservationStore:
         """Get all observations for a project."""
         query = (
             "SELECT id, project, content, created_at, last_accessed, "
-            "access_count FROM observations WHERE project = ? "
+            "access_count, embedding FROM observations WHERE project = ? "
             "ORDER BY last_accessed DESC"
         )
         with sqlite3.connect(self.db_path) as conn:
             rows = conn.execute(query, (project,)).fetchall()
 
-        return [
-            Observation(
-                id=row[0],
-                project=row[1],
-                content=row[2],
-                created_at=row[3],
-                last_accessed=row[4],
-                access_count=row[5],
+        observations = []
+        for row in rows:
+            embedding = None
+            if row[6]:
+                try:
+                    embedding = json.loads(row[6])
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            observations.append(
+                Observation(
+                    id=row[0],
+                    project=row[1],
+                    content=row[2],
+                    created_at=row[3],
+                    last_accessed=row[4],
+                    access_count=row[5],
+                    embedding=embedding,
+                )
             )
-            for row in rows
-        ]
+        return observations
 
     def search(self, project: str, query: str, limit: int = 10) -> list[Observation]:
         """Search observations in a project."""

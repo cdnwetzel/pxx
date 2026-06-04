@@ -97,15 +97,90 @@ class SearchEngine:
         observations: list[Observation],
         limit: int = 10,
         min_score: float = 0.0,
+        use_hybrid: bool = True,
     ) -> list[tuple[Observation, float]]:
-        """Search and rank observations."""
+        """Search and rank observations using BM25 or hybrid BM25+vector."""
         if not observations:
             return []
 
-        ranked = self.ranker.rank(query, observations)
+        if use_hybrid:
+            return self._hybrid_search(query, observations, limit, min_score)
+        else:
+            ranked = self.ranker.rank(query, observations)
+            return [
+                (obs, score) for obs, score in ranked
+                if score >= min_score
+            ][:limit]
 
-        # Filter by minimum score and limit
+    def _hybrid_search(
+        self,
+        query: str,
+        observations: list[Observation],
+        limit: int = 10,
+        min_score: float = 0.0,
+    ) -> list[tuple[Observation, float]]:
+        """Hybrid search combining BM25 + vector similarity.
+
+        Weighting: 40% BM25, 60% vector similarity.
+        """
+        from . import embeddings as emb_module
+
+        # BM25 ranking
+        bm25_results = self.ranker.rank(query, observations)
+        bm25_scores = {obs.id: score for obs, score in bm25_results}
+
+        # Normalize BM25 scores to 0-1 range
+        max_bm25 = max(bm25_scores.values()) if bm25_scores else 1.0
+        if max_bm25 == 0:
+            max_bm25 = 1.0
+        bm25_scores = {
+            obs_id: score / max_bm25 for obs_id, score in bm25_scores.items()
+        }
+
+        # Vector search (skip observations without embeddings)
+        vector_scores = {}
+        obs_with_embeddings = [
+            (obs, obs.embedding)
+            for obs in observations
+            if obs.embedding is not None
+        ]
+
+        if obs_with_embeddings:
+            try:
+                vector_results = emb_module.vector_search(
+                    query, [(obs.id, emb) for obs, emb in obs_with_embeddings]
+                )
+                # Normalize to 0-1 range
+                max_vector = max(
+                    (score for _, score in vector_results), default=0
+                )
+                if max_vector > 0:
+                    vector_scores = {
+                        obs_id: score / max_vector
+                        for obs_id, score in vector_results
+                    }
+            except Exception:
+                # Graceful degradation if vector search fails
+                pass
+
+        # Combine scores: 40% BM25 + 60% vector
+        combined_scores = {}
+        for obs in observations:
+            bm25 = bm25_scores.get(obs.id, 0.0)
+            vector = vector_scores.get(obs.id, 0.0)
+            combined = 0.4 * bm25 + 0.6 * vector
+            if combined > 0:
+                combined_scores[obs.id] = combined
+
+        # Sort by combined score and return
+        results = [
+            (obs, combined_scores[obs.id])
+            for obs in observations
+            if obs.id in combined_scores
+        ]
+        results.sort(key=lambda x: x[1], reverse=True)
+
         return [
-            (obs, score) for obs, score in ranked
+            (obs, score) for obs, score in results
             if score >= min_score
         ][:limit]

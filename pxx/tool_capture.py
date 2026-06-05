@@ -106,8 +106,14 @@ def extract_observations_from_diff(diff_stat: str, project_root: Path) -> list[d
                         insertions = total
 
         # Create base observation
+        action = "edited"
+        if insertions > 0 and deletions == 0:
+            action = "added code to"
+        elif deletions > 0 and insertions == 0:
+            action = "removed code from"
+
         obs: dict[str, any] = {
-            "content": f"Aider edited {filepath} ({insertions}+ {deletions}-)",
+            "content": f"Aider {action} {filepath} ({insertions}+ {deletions}-)",
             "metadata": {
                 "files_changed": [{"path": filepath, "lines_added": insertions, "lines_removed": deletions}]
             }

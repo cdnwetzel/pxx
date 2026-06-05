@@ -39,7 +39,10 @@ class AiderOutputParser:
             if line.startswith("{") and '"tool_name"' in line:
                 try:
                     obj = json.loads(line)
-                    if "tool_name" in obj:
+                    # Handle both old and new observation formats
+                    if isinstance(obj, dict) and "content" in obj:
+                        yield ("tool_call", {"content": obj["content"]})
+                    elif "tool_name" in obj:
                         yield ("tool_call", obj)
                 except json.JSONDecodeError:
                     pass
@@ -111,10 +114,12 @@ class AiderMemoryObserver:
 
             for event_type, payload in parser.parse_stream([line_str]):
                 if event_type == "tool_call":
+                    # Handle both old and new observation formats
+                    data = payload.get("content", payload)
                     self._send_to_memory(
                         {
                             "hook_type": "pre_tool_use",
-                            "data": payload,
+                            "data": data,
                             "timestamp": datetime.now().isoformat(),
                         }
                     )

@@ -42,7 +42,7 @@ def extract_observations_from_diff(diff_stat: str, project_root: Path) -> list[d
     Returns:
         List of observation dictionaries with metadata
     """
-    observations = []
+    observations: list[dict] = []
 
     if not diff_stat.strip():
         return observations
@@ -118,7 +118,8 @@ def extract_observations_from_diff(diff_stat: str, project_root: Path) -> list[d
             file_diff = unified_diff.split(f"diff --git a/{filepath}")[1].split("diff --git")[0]
             obs["metadata"].update(parse_code_changes(file_diff, filepath))
 
-        observations.append(obs)
+        # For backward compatibility, also store just the content
+        observations.append({"content": obs["content"], "metadata": obs.get("metadata", {})})
 
     return observations
 

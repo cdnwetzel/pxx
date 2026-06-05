@@ -93,7 +93,8 @@ class ObservationStore:
             conn.commit()
 
     def store(
-        self, project: str, content: str, ttl_days: int | None = None
+        self, project: str, content: str, metadata: dict | None = None,
+        ttl_days: int | None = None
     ) -> Observation:
         """Store a new observation with embedding and TTL."""
         from . import embeddings as emb_module

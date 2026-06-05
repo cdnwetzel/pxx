@@ -9,25 +9,40 @@ workflow. It probes which Ollama endpoint is reachable, picks a matching
 model, applies safety and scoping gates, and `os.execv`s into aider. Once 
 aider takes over the process, pxx is out of the picture.
 
-Two-machine design:
-- **Studio** (M4 Max, 36GB) hosts Ollama with `devstral:24b` (default) and others
-- **Neo** (8GB MacBook) runs `pxx` orchestrator; relies entirely on Studio for models (no local fallback)
+Fleet (as of 2026-06-05 — `pxx` now runs **on the Mac Studio itself**, which
+folded in the orchestrator role the 8GB "Neo" MacBook used to hold):
 
-**Studio endpoint:** `workstation.splawoffice.local:11434` (IP `192.168.111.172`)
-- Reachable on office LAN directly
-- Reachable over VPN using the same hostname
-- Set `PXX_OLLAMA_BASE` to override (rarely needed)
+- **Mac Studio** (`workstation`, M4 Max, 36GB) — runs `pxx` *and* Ollama
+  locally (`devstral:24b` default, plus `qwen2.5:32b`, `qwen2.5-coder:7b`).
+  Orchestrator and primary inference host are now the same machine.
+- **T5810** (`gpu-node-1`, 2× RTX A4500 20GB, NVLink) — remote vLLM
+  serving `qwen2.5-coder-14b-coder-lora` (+`coder-lora-prod` LoRA) behind an
+  audit-proxy on `:8003`. **SSH-only**: the office router NATs only port 22
+  to it, so it is reached through a persistent SSH local-forward
+  (`deploy/launchd/local.pxx.gpu-node-1-vllm-tunnel.plist` → `127.0.0.1:8003`).
+  Used for tier-2/3 sessions.
+- **inference-node** (RHEL 10) — a separate inference node (vLLM with legal
+  LoRAs on `:8000`, Ollama on `:11434`). Not used by pxx today; it already
+  runs the systemd twin of the Studio tunnel (`psagent-coder-tunnel.service`).
+
+The Asrock RTX 3060Ti is not part of the fleet; pxx never referenced it.
+
+**Studio Ollama endpoint:** `workstation.splawoffice.local:11434` — now
+resolves to localhost (this host *is* `workstation`). Set
+`PXX_OLLAMA_BASE` to override (rarely needed); `PXX_VLLM_URL` overrides the
+T5810 tunnel URL.
 
 Endpoint detection (first reachable wins, 1s timeout per probe):
-`PXX_OLLAMA_BASE` override → Studio hostname (LAN or VPN).
-(Neo has no local Ollama; all sessions require Studio connectivity.)
+`PXX_OLLAMA_BASE` override → vLLM (T5810 via tunnel) → Studio Ollama
+(LAN/VPN). Tier 1 forces local Ollama; tier 2/3 prefer the T5810 vLLM when
+the tunnel is up, else fall back to Studio Ollama.
 
-**Security posture:** the Studio binds Ollama to `0.0.0.0:11434` (all
-interfaces). Ollama itself has no authentication, so this is only safe
-because the network boundary is the auth layer: trusted LAN at the office,
-SSL VPN for remote access, no public-internet exposure. If the Studio
-ever moves to an untrusted network, change `OLLAMA_HOST` to
-`127.0.0.1:11434` first (see inline note in `scripts/setup-studio.sh`).
+**Security posture:** the Studio binds Ollama to `0.0.0.0:11434` and the
+T5810 audit-proxy binds `0.0.0.0:8003`, both with no authentication. This is
+only safe because the network boundary is the auth layer: trusted LAN at the
+office, SSL VPN for remote, and for the T5810 the SSH tunnel *is* the
+boundary (only port 22 is exposed). If the Studio ever moves to an untrusted
+network, set Ollama's `OLLAMA_HOST` to `127.0.0.1:11434` first.
 
 ### Phase 5 Infrastructure (Tier 1-4)
 

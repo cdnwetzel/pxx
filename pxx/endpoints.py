@@ -1,13 +1,18 @@
 """Detect which Ollama or vLLM endpoint to use.
 
-Priority: explicit override > vLLM (Machine 1) > Ollama Studio LAN > Ollama Studio over VPN.
+Priority: explicit override > vLLM (T5810) > Ollama Studio LAN > Ollama Studio over VPN.
 First reachable wins. 1-second timeout per probe.
 
-Ollama instances: Studio (M4 Max, 36GB) + optional local on Neo.
-vLLM: Machine 1 (Xeon + 2× RTX A4500, optional).
-- LAN = on the office network (e.g. workstation:11434, resolvable via corp DNS or mDNS)
+Ollama: the Mac Studio (M4 Max, 36GB) runs Ollama locally; pxx now runs on
+the Studio itself, so "studio" and "local" are the same machine.
+vLLM: the T5810 (2× RTX A4500 20GB, NVLink) serves qwen2.5-coder-14b-coder-lora
+behind an audit-proxy on :8003. The T5810 is SSH-only (office NAT forwards
+only port 22), so it is reached through a persistent SSH local-forward
+(launchd `local.pxx.gpu-node-1-vllm-tunnel` -> 127.0.0.1:8003). See
+deploy/launchd/. Set PXX_VLLM_URL to override.
+- LAN = on the office network (workstation:11434, resolvable via corp DNS or mDNS)
 - Remote = Studio resolvable while connected to the SSL VPN
-- vLLM = OpenAI-compatible endpoint on Machine 1 (default: :8000)
+- vLLM = OpenAI-compatible endpoint reached via the SSH tunnel (default: 127.0.0.1:8003)
 """
 
 from __future__ import annotations
@@ -23,7 +28,7 @@ PROBE_TIMEOUT_SEC = 1.0
 
 DEFAULT_STUDIO_LAN = "http://workstation.splawoffice.local:11434"
 DEFAULT_NEO = "http://localhost:11434"
-DEFAULT_VLLM = "http://workstation.splawoffice.local:8000"
+DEFAULT_VLLM = "http://127.0.0.1:8003"  # T5810 audit-proxy via SSH tunnel
 
 
 @dataclass(frozen=True)

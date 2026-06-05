@@ -82,9 +82,14 @@ SELF_FIX_DIFF_CAP = self_modes.SELF_FIX_DIFF_CAP
 
 STUDIO_DEFAULT = "ollama_chat/devstral:24b"
 NEO_DEFAULT = "ollama_chat/qwen3:4b"
-VLLM_DEFAULT = "devstral-24b"
-T1_DEFAULT = "ollama_chat/qwen3-coder:7b-q4_K_M"
-VLLM_T3_DEFAULT = "qwen3-coder-72b"
+# vLLM models are served by the T5810 (2x A4500) audit-proxy, reached through
+# the SSH tunnel (see deploy/launchd/). litellm needs the openai/ prefix to
+# route a bare OpenAI-compatible endpoint via OPENAI_API_BASE.
+VLLM_DEFAULT = "openai/qwen2.5-coder-14b-coder-lora"
+T1_DEFAULT = "ollama_chat/qwen2.5-coder:7b"
+# No larger coder model is deployed in the fleet yet; t3 aliases the 14b
+# until one exists. Repoint when a bigger vLLM model lands.
+VLLM_T3_DEFAULT = "openai/qwen2.5-coder-14b-coder-lora"
 
 # Tier routing: (backend, tier) -> model name
 _TIER_MODEL = {

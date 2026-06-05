@@ -32,7 +32,7 @@ def get_git_diff_since(commit_sha: str) -> str:
         return ""
 
 
-def extract_observations_from_diff(diff_stat: str, project_root: Path) -> list[str]:
+def extract_observations_from_diff(diff_stat: str, project_root: Path) -> list[dict]:
     """Extract meaningful observations from git diff output.
 
     Args:
@@ -40,12 +40,25 @@ def extract_observations_from_diff(diff_stat: str, project_root: Path) -> list[s
         project_root: Root directory of the project
 
     Returns:
-        List of observation strings to store
+        List of observation dictionaries with metadata
     """
     observations = []
 
     if not diff_stat.strip():
         return observations
+
+    # Get full diff for parsing function/class boundaries
+    try:
+        result = subprocess.run(
+            ["git", "diff", "--unified=0"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        unified_diff = result.stdout if result.returncode == 0 else ""
+    except Exception as e:
+        logger.warning(f"Failed to get git diff: {e}")
+        unified_diff = ""
 
     # Parse diff stat output: "path/to/file.py | 10 +---"
     lines = diff_stat.strip().split("\n")
@@ -67,15 +80,10 @@ def extract_observations_from_diff(diff_stat: str, project_root: Path) -> list[s
         # Extract +/- counts
         tokens = changes.split()
         if len(tokens) >= 1:
-            # Parse different formats:
-            # Format 1: "10 ++++---" (git diff --stat)
-            # Format 2: "10 insertions(+), 5 deletions(-)"
             insertions = 0
             deletions = 0
 
-            # Try to find numeric counts (insertions, deletions)
             if "insertions" in changes:
-                # Format: "10 insertions(+), 5 deletions(-)"
                 for token in tokens:
                     if token.isdigit():
                         if "insertions" in changes[: changes.index(token)]:
@@ -83,48 +91,113 @@ def extract_observations_from_diff(diff_stat: str, project_root: Path) -> list[s
                         elif "deletions" in changes[: changes.index(token)]:
                             deletions = int(token)
             else:
-                # Format: "10 ++++---" (visual bar)
-                # The first token should be the total count
                 if tokens and tokens[0].isdigit():
                     total = int(tokens[0])
-                    # Count the visual bar
                     plus_minus = "".join(t for t in tokens[1:] if set(t) <= {"+", "-"})
                     if plus_minus:
                         num_plus = plus_minus.count("+")
                         num_minus = plus_minus.count("-")
                         if num_plus + num_minus > 0:
-                            # Proportionally distribute total across +/-
                             insertions = (total * num_plus) // (num_plus + num_minus)
                             deletions = total - insertions
                         else:
-                            # No +/- found, assume all insertions
                             insertions = total
                     else:
-                        # No +/- bar found, assume all insertions
                         insertions = total
 
-            # Create observation
-            action = "edited"
-            if insertions > 0 and deletions == 0:
-                action = "added code to"
-            elif deletions > 0 and insertions == 0:
-                action = "removed code from"
+        # Create base observation
+        obs: dict[str, any] = {
+            "content": f"Aider edited {filepath} ({insertions}+ {deletions}-)",
+            "metadata": {
+                "files_changed": [{"path": filepath, "lines_added": insertions, "lines_removed": deletions}]
+            }
+        }
 
-            obs = f"Aider {action} {filepath} ({insertions}+ {deletions}-)"
-            observations.append(obs)
+        # Parse unified diff for function/class changes
+        if filepath in unified_diff:
+            file_diff = unified_diff.split(f"diff --git a/{filepath}")[1].split("diff --git")[0]
+            obs["metadata"].update(parse_code_changes(file_diff, filepath))
+
+        observations.append(obs)
 
     return observations
 
+def parse_code_changes(diff_text: str, filepath: str) -> dict:
+    """Parse unified diff to extract function/class changes."""
+    metadata = {"functions": [], "classes": []}
+
+    # Regex patterns for Python code
+    func_pattern = re.compile(r'^\+.*?def\s+(\w+)\(.*?\)')
+    class_pattern = re.compile(r'^\+.*?class\s+(\w+)\s*\(.*?\)')
+
+    lines = diff_text.split('\n')
+    current_function = None
+    current_class = None
+    start_line = 0
+
+    for i, line in enumerate(lines):
+        func_match = func_pattern.match(line)
+        class_match = class_pattern.match(line)
+
+        if func_match and not current_class:
+            # Found a function definition at the root level
+            func_name = func_match.group(1)
+            current_function = {"name": func_name, "line_range": (i+1, i+1), "change": "add"}
+            metadata["functions"].append(current_function)
+
+        elif class_match:
+            # Found a class definition
+            class_name = class_match.group(1)
+            if not current_class:
+                # New class at root level or nested in another class
+                current_class = {"name": class_name, "line_range": (i+1, i+1), "change": "add"}
+                metadata["classes"].append(current_class)
+
+        elif line.startswith('+'):
+            # Inside a function or class
+            if current_function:
+                current_function["line_range"] = (current_function["line_range"][0], i+1)
+            elif current_class:
+                current_class["line_range"] = (current_class["line_range"][0], i+1)
+
+    return metadata
+
+def extract_test_names(output: str) -> dict:
+    """Extract test names from test output."""
+    tests = {"passed": [], "failed": [], "regressions": []}
+
+    # Simple regex patterns for common test frameworks
+    passed_patterns = [
+        re.compile(r'passed\s+(\w+)'),
+        re.compile(r'\.\s*(\w+)\s+\(.*?\)')
+    ]
+    failed_patterns = [
+        re.compile(r'failed\s+(\w+)'),
+        re.compile(r'F\s*(\w+)\s+\(.*?\)')
+    ]
+
+    for line in output.split('\n'):
+        for pattern in passed_patterns:
+            match = pattern.search(line)
+            if match:
+                tests["passed"].append(match.group(1))
+        for pattern in failed_patterns:
+            match = pattern.search(line)
+            if match:
+                tests["failed"].append(match.group(1))
+
+    return tests
+
 
 def post_observations_to_memory(
-    observations: list[str],
+    observations: list[dict],
     memory_url: str = "http://127.0.0.1:3111",
     project: str = "default",
 ) -> int:
     """Post observations to agentmemory service.
 
     Args:
-        observations: List of observation strings
+        observations: List of observation dictionaries with metadata
         memory_url: Base URL of agentmemory service
         project: Project scope for observations
 
@@ -135,16 +208,16 @@ def post_observations_to_memory(
         return 0
 
     posted = 0
-    for obs in observations:
+    for obs_data in observations:
         try:
             resp = requests.post(
                 f"{memory_url}/observations",
-                json={"project": project, "content": obs},
+                json={"project": project, "content": obs_data["content"], "metadata": obs_data.get("metadata")},
                 timeout=5,
             )
             if resp.status_code == 200:
                 posted += 1
-                logger.debug(f"Posted observation: {obs}")
+                logger.debug(f"Posted observation: {obs_data['content']}")
             else:
                 logger.warning(f"Failed to post observation: {resp.status_code}")
         except requests.RequestException as e:

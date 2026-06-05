@@ -20,6 +20,7 @@ class Observation:
     score: float = 0.0
     embedding: list[float] | None = None
     expires_at: str | None = None
+    metadata: dict | None = None
 
 
 class ObservationStore:
@@ -49,6 +50,7 @@ class ObservationStore:
                     access_count INTEGER DEFAULT 0,
                     embedding TEXT,
                     expires_at TEXT,
+                    metadata TEXT,  -- JSON string
                     UNIQUE(project, content)
                 )
             """)
@@ -120,15 +122,22 @@ class ObservationStore:
 
         try:
             with sqlite3.connect(self.db_path) as conn:
+                metadata_json = None
+                if metadata:
+                    try:
+                        metadata_json = json.dumps(metadata)
+                    except Exception as e:
+                        logging.warning(f"Failed to serialize metadata: {e}")
+
                 query = (
                     "INSERT INTO observations "
                     "(id, project, content, created_at, last_accessed, "
-                    "access_count, embedding, expires_at) "
-                    "VALUES (?, ?, ?, ?, ?, 0, ?, ?)"
+                    "access_count, embedding, expires_at, metadata) "
+                    "VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?)"
                 )
                 conn.execute(
                     query,
-                    (obs_id, project, content, now, now, embedding_json, expires_at),
+                    (obs_id, project, content, now, now, embedding_json, expires_at, metadata_json),
                 )
                 conn.commit()
         except sqlite3.IntegrityError:
@@ -170,6 +179,13 @@ class ObservationStore:
                     embedding = json.loads(row[6])
                 except (json.JSONDecodeError, TypeError):
                     pass
+            metadata = None
+            if row[8]:
+                try:
+                    metadata = json.loads(row[8])
+                except (json.JSONDecodeError, TypeError):
+                    pass
+
             return Observation(
                 id=row[0],
                 project=row[1],
@@ -179,6 +195,7 @@ class ObservationStore:
                 access_count=row[5],
                 embedding=embedding,
                 expires_at=row[7],
+                metadata=metadata,
             )
         return None
 
@@ -200,6 +217,13 @@ class ObservationStore:
                     embedding = json.loads(row[6])
                 except (json.JSONDecodeError, TypeError):
                     pass
+            metadata = None
+            if row[8]:
+                try:
+                    metadata = json.loads(row[8])
+                except (json.JSONDecodeError, TypeError):
+                    pass
+
             observations.append(
                 Observation(
                     id=row[0],
@@ -210,6 +234,7 @@ class ObservationStore:
                     access_count=row[5],
                     embedding=embedding,
                     expires_at=row[7],
+                    metadata=metadata,
                 )
             )
         return observations
@@ -358,6 +383,65 @@ class ObservationStore:
             "observation_count": count,
             "size_mb": size_bytes / (1024 * 1024),
         }
+
+    def get_by_function(self, function_name: str) -> list[Observation]:
+        """Get observations containing a specific function."""
+        query = """
+            SELECT id, project, content, created_at, last_accessed,
+                   access_count, embedding, expires_at, metadata
+            FROM observations
+            WHERE metadata LIKE ?
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            rows = conn.execute(query, (f"%\"name\":\"{function_name}\"%",)).fetchall()
+
+        return self._rows_to_observations(rows)
+
+    def get_by_file(self, file_path: str) -> list[Observation]:
+        """Get observations for a specific file."""
+        query = """
+            SELECT id, project, content, created_at, last_accessed,
+                   access_count, embedding, expires_at, metadata
+            FROM observations
+            WHERE metadata LIKE ?
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            rows = conn.execute(query, (f"%\"path\":\"{file_path}\"%",)).fetchall()
+
+        return self._rows_to_observations(rows)
+
+    def _rows_to_observations(self, rows: list[tuple]) -> list[Observation]:
+        """Convert database rows to Observation objects."""
+        observations = []
+        for row in rows:
+            metadata = None
+            if row[8]:
+                try:
+                    metadata = json.loads(row[8])
+                except (json.JSONDecodeError, TypeError):
+                    pass
+
+            embedding = None
+            if row[6]:
+                try:
+                    embedding = json.loads(row[6])
+                except (json.JSONDecodeError, TypeError):
+                    pass
+
+            observations.append(
+                Observation(
+                    id=row[0],
+                    project=row[1],
+                    content=row[2],
+                    created_at=row[3],
+                    last_accessed=row[4],
+                    access_count=row[5],
+                    embedding=embedding,
+                    expires_at=row[7],
+                    metadata=metadata,
+                )
+            )
+        return observations
 
     def cleanup_expired(self, dry_run: bool = False, archive_manager=None) -> dict:
         """Delete expired observations across all projects.

@@ -50,6 +50,7 @@ SYSTEM_PROMPT = PKG_DIR / "prompts" / "system.md"
 SELF_IMPROVE_PROMPT = PKG_DIR / "prompts" / "self-improve.md"
 AIDER_CONF = REPO_ROOT / "config" / "aider.conf.yml"
 MODEL_SETTINGS = REPO_ROOT / "config" / "model-settings.yml"
+MODEL_METADATA = REPO_ROOT / "config" / "model-metadata.json"
 
 # Compatibility re-exports for moved symbols.
 # Tests monkeypatch these names on the cli module, so we must use them
@@ -204,6 +205,21 @@ def _build_aider_args(
     for p in extra_reads or []:
         extra_read_args.extend(["--read", str(p)])
 
+    # Pass aider's model config files only when present, so a checkout missing
+    # one can't break the launch. model-settings.yml carries per-model edit
+    # format + Ollama num_ctx; model-metadata.json informs aider of the T5810
+    # vLLM's hard 16k context window (it has no litellm metadata otherwise).
+    settings_args = (
+        ["--model-settings-file", str(MODEL_SETTINGS)]
+        if MODEL_SETTINGS.exists()
+        else []
+    )
+    metadata_args = (
+        ["--model-metadata-file", str(MODEL_METADATA)]
+        if MODEL_METADATA.exists()
+        else []
+    )
+
     args = [
         aider_bin,
         "--model",
@@ -213,8 +229,8 @@ def _build_aider_args(
         *extra_read_args,
         "--config",
         str(AIDER_CONF),
-        "--model-settings-file",
-        str(MODEL_SETTINGS),
+        *settings_args,
+        *metadata_args,
         *chat_mode_args,
     ]
     if not in_git_repo:

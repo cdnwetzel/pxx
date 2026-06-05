@@ -1,0 +1,11 @@
+{
+  "openai/qwen2.5-coder-14b-coder-lora": {
+    "max_tokens": 4096,
+    "max_input_tokens": 12288,
+    "max_output_tokens": 4096,
+    "input_cost_per_token": 0,
+    "output_cost_per_token": 0,
+    "litellm_provider": "openai",
+    "mode": "chat"
+  }
+}

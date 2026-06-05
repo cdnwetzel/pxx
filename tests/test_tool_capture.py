@@ -10,10 +10,10 @@ def test_extract_observations_from_simple_edit():
     diff_stat = "pxx/cli.py | 5 +++--"
     obs = extract_observations_from_diff(diff_stat, Path.cwd())
     assert len(obs) == 1
-    assert "cli.py" in obs[0]
-    assert "edited" in obs[0]
+    assert "cli.py" in obs[0]["content"]
+    assert "edited" in obs[0]["content"]
     # Format "5 +++--" has 3 + and 2 -, proportionally maps to 3+ 2- in 5 lines
-    assert "3+ 2-" in obs[0]
+    assert "3+ 2-" in obs[0]["content"]
 
 
 def test_extract_observations_additions_only():
@@ -21,8 +21,8 @@ def test_extract_observations_additions_only():
     diff_stat = "services/9router/main.py | 10 +++++"
     obs = extract_observations_from_diff(diff_stat, Path.cwd())
     assert len(obs) == 1
-    assert "added code to" in obs[0]
-    assert "10+ 0-" in obs[0]
+    assert "added code to" in obs[0]["content"]
+    assert "10+ 0-" in obs[0]["content"]
 
 
 def test_extract_observations_deletions_only():
@@ -30,8 +30,8 @@ def test_extract_observations_deletions_only():
     diff_stat = "pxx/memory.py | 3 ---"
     obs = extract_observations_from_diff(diff_stat, Path.cwd())
     assert len(obs) == 1
-    assert "removed code from" in obs[0]
-    assert "0+ 3-" in obs[0]
+    assert "removed code from" in obs[0]["content"]
+    assert "0+ 3-" in obs[0]["content"]
 
 
 def test_skip_docs_and_config():
@@ -42,7 +42,7 @@ def test_skip_docs_and_config():
     docs/guide.txt | 3 +--"""
     obs = extract_observations_from_diff(diff_stat, Path.cwd())
     assert len(obs) == 1
-    assert "cli.py" in obs[0]
+    assert "cli.py" in obs[0]["content"]
 
 
 def test_multiple_code_files():
@@ -52,9 +52,9 @@ def test_multiple_code_files():
     services/agentmemory/main.py | 2 +-"""
     obs = extract_observations_from_diff(diff_stat, Path.cwd())
     assert len(obs) == 3
-    assert any("cli.py" in o for o in obs)
-    assert any("router.py" in o for o in obs)
-    assert any("agentmemory" in o for o in obs)
+    assert any("cli.py" in o["content"] for o in obs)
+    assert any("router.py" in o["content"] for o in obs)
+    assert any("agentmemory" in o["content"] for o in obs)
 
 
 def test_empty_diff():

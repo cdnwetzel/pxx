@@ -168,7 +168,7 @@ class ObservationStore:
         """Get observation by ID."""
         query = (
             "SELECT id, project, content, created_at, last_accessed, "
-            "access_count, embedding, expires_at FROM observations WHERE id = ?"
+            "access_count, embedding, expires_at, metadata FROM observations WHERE id = ?"
         )
         with sqlite3.connect(self.db_path) as conn:
             row = conn.execute(query, (obs_id,)).fetchone()
@@ -204,7 +204,7 @@ class ObservationStore:
         """Get all observations for a project."""
         query = (
             "SELECT id, project, content, created_at, last_accessed, "
-            "access_count, embedding, expires_at FROM observations WHERE project = ? "
+            "access_count, embedding, expires_at, metadata FROM observations WHERE project = ? "
             "ORDER BY last_accessed DESC"
         )
         with sqlite3.connect(self.db_path) as conn:

@@ -108,9 +108,31 @@ uv run pytest -q          # unit suite + T1b integration (skips if PG/Ollama dow
 uv run ruff check
 ```
 
+## T4 — perpetual refresh
+
+`docs-sme-refresh` crawls every source in `src/docs_rag_sme/sources.toml`
+(curated stdlib pages + your PyPI deps + relevant PEPs) and ingests with
+delta-skip — unchanged pages cost nothing (a full no-op refresh of ~50 sources
+runs in ~1.5s).
+
+```bash
+uv run docs-sme-refresh           # one delta-refresh pass (JSONL to stdout)
+uv run docs-sme-refresh --force   # re-ingest everything
+# Edit the source list (or point elsewhere):
+$EDITOR src/docs_rag_sme/sources.toml      # or DOCS_SME_SOURCES=/path/to.toml
+```
+
+Daily timer on the Studio (launchd):
+
+```bash
+cp deploy/launchd/local.docs-sme-refresh.plist ~/Library/LaunchAgents/
+# fix the absolute paths inside, then:
+launchctl load ~/Library/LaunchAgents/local.docs-sme-refresh.plist
+```
+
 ## Roadmap
 
-T0 forwarder ✅ → T1 ingestion (allowlist crawler + pgvector) ✅ →
-**T2 hybrid retrieval + rerank + inject** (next) → T3 version-aware filter →
-T4 systemd timer → T5 `pxx --with-docs` + model A/B.
+T0 forwarder ✅ → T1 ingestion ✅ → T2 hybrid retrieval + inject ✅ →
+T2b bge reranker ✅ → T3 version-aware filter ✅ → `pxx --with-docs` ✅ →
+T4 refresh timer ✅. Remaining: the model A/B (§6 of the plan).
 Tracked in `pxx/plans/docs-rag-sme.md`.

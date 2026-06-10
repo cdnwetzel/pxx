@@ -51,6 +51,7 @@ def proxy_client() -> httpx.AsyncClient:
     # Inject the in-process upstream client instead of opening a real socket.
     proxy.state.client = upstream_client
     proxy.state.retriever = None
+    proxy.state.session_version = None
     proxy.router.lifespan_context = _noop_lifespan
     return httpx.AsyncClient(transport=httpx.ASGITransport(app=proxy), base_url="http://proxy")
 
@@ -94,3 +95,15 @@ async def test_healthz_is_local(proxy_client):
     async with proxy_client as c:
         r = await c.get("/healthz")
     assert r.json()["status"] == "ok"
+
+
+@pytest.mark.asyncio
+async def test_control_context_sets_session_version(proxy_client):
+    async with proxy_client as c:
+        assert (await c.get("/control/context")).json()["python_version"] is None
+        r = await c.post("/control/context", json={"python_version": "3.12"})
+        assert r.json()["python_version"] == "3.12"
+        assert (await c.get("/control/context")).json()["python_version"] == "3.12"
+        # Empty clears it.
+        r = await c.post("/control/context", json={"python_version": ""})
+        assert r.json()["python_version"] is None

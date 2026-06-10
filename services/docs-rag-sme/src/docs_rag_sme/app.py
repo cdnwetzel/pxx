@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -44,6 +45,9 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         timeout=httpx.Timeout(settings.timeout, connect=5.0),
     )
     app.state.retriever = None
+    # Current session's Python version for version-aware retrieval (T3). Set by
+    # `pxx --with-docs` via POST /control/context; single active project assumed.
+    app.state.session_version = os.environ.get("DOCS_SME_PY_VERSION") or None
     if settings.retrieval:
         try:
             # I/O at startup (DB connect + embedder) — a real failure mode, not
@@ -60,7 +64,9 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
             await run_in_threadpool(app.state.retriever.close)
 
 
-def augment_chat_body(raw_body: bytes, retriever: Retriever) -> tuple[bytes, int]:
+def augment_chat_body(
+    raw_body: bytes, retriever: Retriever, python_version: str | None = None
+) -> tuple[bytes, int]:
     """Parse, augment the message list, re-serialise. Returns (body, n_injected).
     Any failure returns the original body untouched — augmentation is best-effort
     and must never break a chat request."""
@@ -69,7 +75,7 @@ def augment_chat_body(raw_body: bytes, retriever: Retriever) -> tuple[bytes, int
         messages = payload.get("messages")
         if not isinstance(messages, list):
             return raw_body, 0
-        new_messages, n = augment_messages(messages, retriever)
+        new_messages, n = augment_messages(messages, retriever, python_version=python_version)
         if n == 0:
             return raw_body, 0
         payload["messages"] = new_messages
@@ -121,7 +127,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "status": "ok",
             "upstream": settings.upstream,
             "retrieval": app.state.retriever is not None,
+            "session_version": app.state.session_version,
         }
+
+    @app.get("/control/context")
+    async def get_context() -> dict[str, object]:
+        return {"python_version": app.state.session_version}
+
+    @app.post("/control/context")
+    async def set_context(request: Request) -> dict[str, object]:
+        body = await request.json()
+        # Empty/null clears the filter (retrieve across versions).
+        app.state.session_version = (body or {}).get("python_version") or None
+        log.info("docs-sme: session python_version=%s", app.state.session_version)
+        return {"python_version": app.state.session_version}
 
     @app.post("/v1/chat/completions")
     async def chat_completions(request: Request) -> Response:
@@ -129,7 +148,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         injected = 0
         retriever: Retriever | None = app.state.retriever
         if retriever is not None:
-            raw, injected = await run_in_threadpool(augment_chat_body, raw, retriever)
+            raw, injected = await run_in_threadpool(
+                augment_chat_body, raw, retriever, app.state.session_version
+            )
         resp = await _forward(app, request, "v1/chat/completions", raw)
         resp.headers["X-Docs-SME-Injected"] = str(injected)
         return resp

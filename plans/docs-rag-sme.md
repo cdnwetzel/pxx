@@ -2,12 +2,12 @@
 
 > Backlog ID: 009
 
-> **Status:** `in-progress` — T0 + T1 + T2 + T2b + T3 + `pxx --with-docs`
-> landed. Validated live against a real model: through the SME, qwen2.5-coder
-> corrected its own incomplete `asyncio.TaskGroup.create_task` signature
-> (added the `context=` param it didn't know) using the real 3.12 docs.
-> Version filter is default-safe (no matching version → 0 injected). Next: T4
-> (perpetual delta-refresh timer). Code lives at `services/docs-rag-sme/`.
+> **Status:** `in-progress` — T0–T4 + T2b + `pxx --with-docs` all landed and
+> validated live. Through the SME, qwen2.5-coder corrected its own incomplete
+> `asyncio.TaskGroup.create_task` signature (added the `context=` param it
+> didn't know) from the real 3.12 docs. Store holds 1715 chunks across stdlib +
+> deps + PEPs. **Only the model A/B (§6) remains.** Code lives at
+> `services/docs-rag-sme/`.
 >
 > **Depends on:** nothing in-repo. Sits *beside* the existing T5810 vLLM +
 > audit-proxy stack; pxx changes are limited to one endpoint override and
@@ -225,9 +225,12 @@ several official doc pages alongside the repo map.
 - **T3 — Version-aware filter:** ✅ session version via /control/context
   (single active project assumed); retrieval filters by it; default-safe
   (no match → inject nothing, never wrong-version). Verified live.
-- **T4 — Timer + delta refresh:** the "perpetual" part (launchd/systemd). **← next**
+- **T4 — Timer + delta refresh:** ✅ `docs-sme-refresh` over a curated
+  sources.toml (stdlib + deps + PEPs); launchd daily timer on the Studio.
+  Verified live: 48 ingested / 1666 chunks first run, full 49-skip in ~1.5s
+  on re-run.
 - **T5 — `pxx --with-docs`:** ✅ flag routes aider through the SME + posts the
-  resolved Python version. Model A/B (§6) still open.
+  resolved Python version. **Model A/B (§6) is the last open item.**
 
 ---
 

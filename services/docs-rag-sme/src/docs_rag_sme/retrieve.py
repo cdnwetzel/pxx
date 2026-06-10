@@ -68,6 +68,10 @@ class Retriever:
             self.conn, query_text, qv, k=_CANDIDATES, candidates=_CANDIDATES,
             python_version=python_version,
         )
+        # Default-safe (plan §7): a version filter that returns nothing is
+        # better than injecting wrong-version docs — so we do NOT widen the
+        # search on an empty version-filtered result. Callers that want the
+        # unfiltered fallback pass python_version=None explicitly.
         return self.reranker.rerank(query_text, hits, top_k=_TOP_K)
 
     def close(self) -> None:
@@ -95,12 +99,14 @@ def inject_context(messages: list[dict], context: str) -> list[dict]:
     return [*messages[:last_user_idx], ctx_msg, *messages[last_user_idx:]]
 
 
-def augment_messages(messages: list[dict], retriever: Retriever) -> tuple[list[dict], int]:
+def augment_messages(
+    messages: list[dict], retriever: Retriever, python_version: str | None = None
+) -> tuple[list[dict], int]:
     """Return (possibly-augmented messages, n_chunks_injected)."""
     query = last_user_text(messages)
     if not is_augmentable(query):
         return messages, 0
-    hits = retriever.retrieve(query)
+    hits = retriever.retrieve(query, python_version=python_version)
     if not hits:
         return messages, 0
     return inject_context(messages, format_context(hits)), len(hits)

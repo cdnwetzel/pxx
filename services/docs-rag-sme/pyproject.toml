@@ -27,6 +27,7 @@ rerank = [
 [project.scripts]
 docs-sme = "docs_rag_sme.app:run"
 docs-sme-ingest = "docs_rag_sme.ingest.cli:main"
+docs-sme-refresh = "docs_rag_sme.ingest.refresh:main"
 
 [build-system]
 requires = ["hatchling"]

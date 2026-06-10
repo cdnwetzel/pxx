@@ -6,7 +6,12 @@
 PyPI — installable and usable by someone who is not the author, on a machine
 that is not the Studio.
 
-**Status:** `planned`
+**Status:** `done` (PyPI-**ready**) — decided **Option B** (core on PyPI;
+services are a repo-clone feature). 10.1–10.5 complete and verified by a
+clean-venv install dry-run; `twine check` passes on sdist + wheel. The only
+remaining step is the actual `twine upload`, which is a deliberate, irreversible
+user action (needs a PyPI token + explicit go-ahead) and is intentionally not
+automated.
 
 **Today's reality (cited):** pxx is a personal/offline tool with vestigial
 publish scaffolding. It's on PyPI at **0.0.9** while local is **1.0.0** (the
@@ -59,7 +64,7 @@ the dev fallback (now relative — `pxx/router.py:_SERVICE_DIR`).
       a generic default (`localhost:11434`) or none; document the env overrides.
 - [ ] `pxx/_core_files.py:49` — cosmetic `/Users/...` docstring example → generic.
 
-**Effort:** ~0.5 day. **Status:** `in-progress`
+**Effort:** ~0.5 day. **Status:** `done` (commit caea71f)
 
 ## Phase 10.2: Services packaging (per the crux decision)
 
@@ -73,7 +78,7 @@ raises RuntimeError — verify the user message is friendly). Minimal.
 `pxx-`), publish them, add `[project.optional-dependencies]` extras, and wire
 pxx to their console scripts only.
 
-**Effort:** B ≈ 0.5 day; A ≈ 2-3 days. **Status:** `planned`
+**Effort:** B ≈ 0.5 day. **Status:** `done` (Option B; commits f2f0c9c, 88a0375)
 
 ## Phase 10.3: Metadata, license, version hygiene
 
@@ -89,7 +94,7 @@ pxx to their console scripts only.
 - [ ] Re-check classifiers: `Python :: 3.13` is claimed but install is pinned to
       3.12 (`CLAUDE.md`); validate or drop.
 
-**Effort:** ~0.5 day. **Status:** `planned`
+**Effort:** ~0.5 day. **Status:** `done` (commit 82eb15e; packaged the .md assets)
 
 ## Phase 10.4: User-facing docs
 
@@ -103,7 +108,7 @@ pxx to their console scripts only.
       README must not depend on it.
 - [ ] Document the services story per the crux decision.
 
-**Effort:** ~1 day. **Status:** `planned`
+**Effort:** ~1 day. **Status:** `done` (commit 82eac22)
 
 ## Phase 10.5: Build + publish dry-run
 
@@ -116,7 +121,7 @@ pxx to their console scripts only.
       optional features degrade gracefully (or work, per Option A).
 - [ ] TestPyPI upload + install before the real PyPI release.
 
-**Effort:** ~0.5 day. **Status:** `planned`
+**Effort:** ~0.5 day. **Status:** `done` (commit 82eb15e; packaged the .md assets)
 
 ---
 

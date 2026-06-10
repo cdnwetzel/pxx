@@ -19,10 +19,21 @@ def test_gate_fires_on_doc_relevant_text():
     assert is_augmentable("what changed in the latest asyncio API")
 
 
+def test_gate_fires_on_bare_module_names():
+    # Regression for the §6 A/B finding: bare module mentions (no dot) must
+    # still trigger retrieval.
+    assert is_augmentable("how does sqlite3 row_factory work")
+    assert is_augmentable("which contextlib decorator makes an async context manager")
+    assert is_augmentable("batching with itertools in python")
+
+
 def test_gate_skips_plain_chatter():
     assert not is_augmentable("hello")
     assert not is_augmentable("thanks, that works")
     assert not is_augmentable("")
+    # Common English words that happen to be stdlib modules must NOT fire.
+    assert not is_augmentable("what time is the meeting")
+    assert not is_augmentable("can you re-run that for me")
 
 
 def test_last_user_text_handles_parts_form():

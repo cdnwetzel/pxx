@@ -25,12 +25,27 @@ _DOC_HINT = re.compile(
     re.IGNORECASE,
 )
 
+# Distinctive module names that warrant retrieval even when mentioned bare (no
+# dot) — e.g. "how does sqlite3 row_factory work". Curated to avoid common
+# English words (so not 're'/'os'/'json'/'http'/'enum'/'abc'). Surfaced by the
+# §6 A/B, which caught contextlib/sqlite3 questions slipping past the gate.
+_MODULE_HINTS = frozenset({
+    "asyncio", "contextlib", "dataclasses", "dataclass", "functools",
+    "itertools", "collections", "pathlib", "subprocess", "sqlite3",
+    "argparse", "tomllib", "urllib", "logging", "typing",
+})
+_WORD = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
 _TOP_K = int(os.environ.get("DOCS_SME_TOP_K", "5"))
 _CANDIDATES = int(os.environ.get("DOCS_SME_CANDIDATES", "20"))
 
 
 def is_augmentable(user_text: str) -> bool:
-    return bool(user_text and _DOC_HINT.search(user_text))
+    if not user_text:
+        return False
+    if _DOC_HINT.search(user_text):
+        return True
+    return any(w.lower() in _MODULE_HINTS for w in _WORD.findall(user_text))
 
 
 def format_context(hits: list[dict]) -> str:

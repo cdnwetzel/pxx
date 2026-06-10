@@ -755,10 +755,48 @@ def main() -> None:
     }
     _try_write_session_start(record)
 
-    # Build isolated environment for aider subprocess to prevent OPENAI_API_KEY
-    # from leaking to git hooks or other subprocesses spawned by aider.
+    # Build isolated environment for aider to prevent OPENAI_API_KEY from
+    # leaking to git hooks or other subprocesses spawned by aider.
     env = os.environ.copy()
     env["OPENAI_API_KEY"] = "EMPTY"
+
+    # Route aider through the docs-rag-sme proxy if requested (#009). The SME is
+    # an external service with no lifecycle for pxx to manage, so it needs only
+    # an env tweak before the handoff — not supervisor mode.
+    if with_docs:
+        sme = docs_sme.sme_base_url()
+        if not docs_sme.probe_sme(sme):
+            print(
+                f"pxx: --with-docs: docs-rag-sme not reachable at {sme}. "
+                f"Start it (uv run docs-sme) or set PXX_DOCS_SME_URL.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        pyver = docs_sme.resolve_python_version(Path.cwd())
+        notified = docs_sme.notify_version(sme, pyver)
+        env["OPENAI_API_BASE"] = f"{sme}/v1"
+        note = (
+            "" if notified else " (version notify failed; retrieving across versions)"
+        )
+        print(
+            f"pxx: docs-RAG SME at {sme} — aider routed through it; "
+            f"python={pyver or 'any'}{note}",
+            file=sys.stderr,
+        )
+        if endpoint.backend != "vllm":
+            print(
+                "pxx: note — SME forwards to its own upstream "
+                "(DOCS_SME_UPSTREAM, default the vLLM :8003). Ensure it "
+                f"serves the selected model ({model}).",
+                file=sys.stderr,
+            )
+
+    # The pxx contract: by default, replace this process with aider and get out
+    # of the way. Supervisor mode below is entered only when we must stay alive
+    # to manage 9router / agentmemory and the observer thread.
+    if not (with_router or with_memory):
+        os.execve(aider_bin, args, env)
+        return  # unreachable: execve replaces the process image
 
     # Phase 5 Tier 1: supervisor mode for 9router + agentmemory
     router_manager: NineRouterManager | None = None
@@ -781,37 +819,6 @@ def main() -> None:
                 print(f"pxx: failed to start 9router: {e}", file=sys.stderr)
                 sys.exit(1)
 
-        # Route aider through the docs-rag-sme proxy if requested (#009).
-        if with_docs:
-            sme = docs_sme.sme_base_url()
-            if not docs_sme.probe_sme(sme):
-                print(
-                    f"pxx: --with-docs: docs-rag-sme not reachable at {sme}. "
-                    f"Start it (uv run docs-sme) or set PXX_DOCS_SME_URL.",
-                    file=sys.stderr,
-                )
-                sys.exit(1)
-            pyver = docs_sme.resolve_python_version(Path.cwd())
-            notified = docs_sme.notify_version(sme, pyver)
-            env["OPENAI_API_BASE"] = f"{sme}/v1"
-            note = (
-                ""
-                if notified
-                else " (version notify failed; retrieving across versions)"
-            )
-            print(
-                f"pxx: docs-RAG SME at {sme} — aider routed through it; "
-                f"python={pyver or 'any'}{note}",
-                file=sys.stderr,
-            )
-            if endpoint.backend != "vllm":
-                print(
-                    "pxx: note — SME forwards to its own upstream "
-                    "(DOCS_SME_UPSTREAM, default the vLLM :8003). Ensure it "
-                    f"serves the selected model ({model}).",
-                    file=sys.stderr,
-                )
-
         # Start agentmemory if requested
         if with_memory:
             try:
@@ -822,7 +829,7 @@ def main() -> None:
                 print(f"pxx: failed to start agentmemory: {e}", file=sys.stderr)
                 sys.exit(1)
 
-        # Launch aider as subprocess (not execve) so we can supervise
+        # Launch aider as a subprocess so we can supervise the services.
         aider_proc = subprocess.Popen(args, env=env)
 
         # Start observer thread if memory is active

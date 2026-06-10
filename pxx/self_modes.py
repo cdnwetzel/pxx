@@ -42,7 +42,8 @@ def self_test(repo_root: Path) -> int:
         f"pxx: self-test — running `{' '.join(cmd)}` in {repo_root}",
         file=sys.stderr,
     )
-    rc = subprocess.run(cmd, cwd=repo_root, check=False).returncode
+    # Bound the run so a hung test can't block the self-test indefinitely.
+    rc = subprocess.run(cmd, cwd=repo_root, check=False, timeout=120).returncode
     status = "passed" if rc == 0 else "failed"
     print(f"pxx: self-test — {status} ({rc})", file=sys.stderr)
     return rc

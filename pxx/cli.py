@@ -820,7 +820,13 @@ def main() -> None:
                     file=sys.stderr,
                 )
             except RuntimeError as e:
-                print(f"pxx: failed to start 9router: {e}", file=sys.stderr)
+                print(
+                    f"pxx: --with-router could not start 9router: {e}\n"
+                    "  The router service ships with a repo checkout "
+                    "(services/9router), not the pip package — clone the repo or "
+                    "install the `nine-router` console script to use --with-router.",
+                    file=sys.stderr,
+                )
                 sys.exit(1)
 
         # Start agentmemory if requested
@@ -830,7 +836,13 @@ def main() -> None:
                 memory_manager.start()
                 print("pxx: agentmemory started (port 3111)", file=sys.stderr)
             except Exception as e:
-                print(f"pxx: failed to start agentmemory: {e}", file=sys.stderr)
+                print(
+                    f"pxx: --with-memory could not start agentmemory: {e}\n"
+                    "  The memory service ships with a repo checkout "
+                    "(services/agentmemory), not the pip package — clone the repo "
+                    "or install the `agentmemory` console script to use --with-memory.",
+                    file=sys.stderr,
+                )
                 sys.exit(1)
 
         # Launch aider as a subprocess so we can supervise the services.

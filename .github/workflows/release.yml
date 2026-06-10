@@ -1,0 +1,35 @@
+name: Release to PyPI
+
+# Publishes via PyPI "trusted publishing" (OIDC) — no API token stored anywhere.
+# One-time setup on pypi.org → project pxx → Publishing → Add a publisher:
+#   owner: cdnwetzel   repository: pxx   workflow: release.yml   environment: pypi
+# Then a `vX.Y.Z` tag push releases that version.
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write # OIDC for trusted publishing
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1

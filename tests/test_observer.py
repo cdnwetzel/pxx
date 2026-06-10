@@ -130,66 +130,50 @@ class TestAiderMemoryObserver:
         assert observer.thread.daemon is True
 
     @patch("pxx.observer.requests.post")
-    def test_observer_send_to_memory_success(self, mock_post: Mock) -> None:
-        """Test _send_to_memory() POSTs hook event on success."""
+    def test_observer_store_observation_success(self, mock_post: Mock) -> None:
+        """Test _store_observation() POSTs to /observations on success."""
         mock_proc = Mock(spec=Popen)
-        observer = AiderMemoryObserver(mock_proc)
+        observer = AiderMemoryObserver(mock_proc, repo_root="/repo")
         mock_post.return_value.status_code = 200
 
-        payload = {
-            "hook_type": "pre_tool_use",
-            "data": {"tool_name": "test"},
-            "timestamp": "2026-06-02T10:00:00",
-        }
-
-        observer._send_to_memory(payload)
+        observer._store_observation({"content": "Tool use: ls"})
 
         mock_post.assert_called_once()
         args, kwargs = mock_post.call_args
-        assert "http://127.0.0.1:3111/mem/observe" in args[0]
-        assert kwargs["json"] == payload
+        assert "http://127.0.0.1:3111/observations" in args[0]
+        assert kwargs["json"] == {"project": "/repo", "content": "Tool use: ls"}
         assert kwargs["timeout"] == 2
 
     @patch("pxx.observer.requests.post")
     @patch("builtins.print")
-    def test_observer_send_to_memory_failure(
+    def test_observer_store_observation_failure(
         self, mock_print: Mock, mock_post: Mock
     ) -> None:
-        """Test _send_to_memory() logs but doesn't block on failure."""
+        """Test _store_observation() logs but doesn't block on failure."""
         mock_proc = Mock(spec=Popen)
         observer = AiderMemoryObserver(mock_proc)
         mock_post.return_value.status_code = 500
 
-        payload = {
-            "hook_type": "pre_tool_use",
-            "data": {},
-            "timestamp": "2026-06-02T10:00:00",
-        }
-
-        observer._send_to_memory(payload)
+        observer._store_observation({"content": "x"})
 
         # Should print error but not raise
         mock_print.assert_called_once()
-        assert "memory observe failed" in str(mock_print.call_args)
+        assert "memory store failed" in str(mock_print.call_args)
 
     @patch("pxx.observer.requests.post")
     @patch("builtins.print")
-    def test_observer_send_to_memory_timeout(
+    def test_observer_store_observation_timeout(
         self, mock_print: Mock, mock_post: Mock
     ) -> None:
-        """Test _send_to_memory() handles connection timeout gracefully."""
+        """Test _store_observation() handles connection errors gracefully."""
+        import requests
+
         mock_proc = Mock(spec=Popen)
         observer = AiderMemoryObserver(mock_proc)
-        mock_post.side_effect = Exception("Connection timeout")
+        mock_post.side_effect = requests.Timeout("Connection timeout")
 
-        payload = {
-            "hook_type": "pre_tool_use",
-            "data": {},
-            "timestamp": "2026-06-02T10:00:00",
-        }
-
-        observer._send_to_memory(payload)
+        observer._store_observation({"content": "x"})
 
         # Should print error but not raise
         mock_print.assert_called_once()
-        assert "memory connection error" in str(mock_print.call_args)
+        assert "memory store error" in str(mock_print.call_args)

@@ -66,11 +66,11 @@ class TestObservationInjection:
     """Tests for observation injection to memory."""
 
     @patch("pxx.observer.requests.post")
-    def test_inject_observation_success(self, mock_post: Mock) -> None:
-        """Test successful observation injection."""
+    def test_store_observation_success(self, mock_post: Mock) -> None:
+        """Test successful observation storage to /observations."""
         mock_post.return_value.status_code = 200
         mock_proc = Mock(spec=Popen)
-        observer = AiderMemoryObserver(mock_proc)
+        observer = AiderMemoryObserver(mock_proc, repo_root="/repo")
 
         obs = {
             "title": "Test",
@@ -79,37 +79,34 @@ class TestObservationInjection:
             "metadata": {},
         }
 
-        observer._inject_observation(obs)
+        observer._store_observation(obs)
 
         mock_post.assert_called_once()
         args, kwargs = mock_post.call_args
-        assert "/mem/inject" in args[0]
-        assert kwargs["json"]["observations"][0] == obs
+        assert args[0].endswith("/observations")
+        assert kwargs["json"]["project"] == "/repo"
+        assert kwargs["json"]["content"] == "Test content"
 
     @patch("pxx.observer.requests.post")
     @patch("builtins.print")
-    def test_inject_observation_failure(
-        self, mock_print: Mock, mock_post: Mock
-    ) -> None:
-        """Test injection logs but doesn't block on failure."""
+    def test_store_observation_failure(self, mock_print: Mock, mock_post: Mock) -> None:
+        """Test storage logs but doesn't block on failure."""
         mock_post.return_value.status_code = 500
         mock_proc = Mock(spec=Popen)
         observer = AiderMemoryObserver(mock_proc)
 
         obs = {"title": "Test", "content": "Test"}
 
-        observer._inject_observation(obs)
+        observer._store_observation(obs)
 
         # Should log error but not raise
         mock_print.assert_called_once()
-        assert "inject failed" in str(mock_print.call_args)
+        assert "store failed" in str(mock_print.call_args)
 
     @patch("pxx.observer.requests.post")
     @patch("builtins.print")
-    def test_inject_observation_timeout(
-        self, mock_print: Mock, mock_post: Mock
-    ) -> None:
-        """Test injection handles timeout gracefully."""
+    def test_store_observation_timeout(self, mock_print: Mock, mock_post: Mock) -> None:
+        """Test storage handles timeout gracefully."""
         import requests
 
         mock_post.side_effect = requests.Timeout("timeout")
@@ -118,11 +115,11 @@ class TestObservationInjection:
 
         obs = {"title": "Test", "content": "Test"}
 
-        observer._inject_observation(obs)
+        observer._store_observation(obs)
 
         # Should log error but not raise
         mock_print.assert_called_once()
-        assert "inject error" in str(mock_print.call_args)
+        assert "store error" in str(mock_print.call_args)
 
 
 class TestToolCallResultPairing:
@@ -150,8 +147,8 @@ class TestToolCallResultPairing:
         assert observer.last_tool_call is None
 
     @patch("pxx.observer.requests.post")
-    def test_observer_injects_on_result(self, mock_post: Mock) -> None:
-        """Test observer injects observation when result received."""
+    def test_observer_stores_on_result(self, mock_post: Mock) -> None:
+        """Test observer stores an observation when a result is received."""
         mock_post.return_value.status_code = 200
         mock_proc = Mock(spec=Popen)
         observer = AiderMemoryObserver(mock_proc, repo_root="/repo", cwd="/repo")
@@ -160,19 +157,19 @@ class TestToolCallResultPairing:
         tool_call = {"tool_name": "execute_bash", "arguments": {"cmd": "ls"}}
         observer.last_tool_call = tool_call
 
-        # Simulate result - observer would call _inject_observation
+        # Simulate result - observer would call _store_observation
         obs = observer._format_observation(
             tool_call["tool_name"],
             str(tool_call.get("arguments", {})),
             "file1\nfile2",
         )
-        observer._inject_observation(obs)
+        observer._store_observation(obs)
 
-        # Should have POSTed to /mem/inject
-        inject_calls = [
-            call for call in mock_post.call_args_list if "/mem/inject" in str(call)
+        # Should have POSTed to /observations
+        store_calls = [
+            call for call in mock_post.call_args_list if "/observations" in str(call)
         ]
-        assert len(inject_calls) > 0
+        assert len(store_calls) > 0
 
 
 class TestObserverInitialization:

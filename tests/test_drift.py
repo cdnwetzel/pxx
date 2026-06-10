@@ -88,7 +88,7 @@ class TestDrift:
         )
         drift.print_report(res)
         out, err = capsys.readouterr()
-        assert "✓ Neo and Studio in sync at abcdef1 (main)" in err
+        assert "✓ local and remote in sync at abcdef1 (main)" in err
 
     def test_print_report_drift(self, capsys):
         res = drift.DriftResult(
@@ -100,9 +100,9 @@ class TestDrift:
         drift.print_report(res)
         out, err = capsys.readouterr()
         assert "✗ drift detected" in err
-        assert "Neo:    aaaaaa feat" in err
-        assert "Studio: bbbbbb main" in err
-        assert "git deliver" in err
+        assert "local:  aaaaaa feat" in err
+        assert "remote: bbbbbb main" in err
+        assert "Sync the two checkouts" in err
 
     def test_print_report_timeout(self, capsys):
         res = drift.DriftResult(

@@ -1,7 +1,8 @@
 """Cross-machine sync/drift detection for pxx (#006).
 
-Detects if the local (Neo) and remote (Studio) pxx repositories have diverged
-at the git HEAD level.
+Detects if the local pxx checkout and a remote one (another machine you work
+on, reached over SSH) have diverged at the git HEAD level. Opt-in: configure
+PXX_DRIFT_SSH_TARGET and PXX_DRIFT_REMOTE_PATH.
 """
 
 from __future__ import annotations
@@ -163,7 +164,7 @@ def _get_remote_state(
             # P2 finding: treat DNS/resolution failure as "unreachable" (skipped)
             # rather than "error" (✗)
             if "Could not resolve" in err or "Permission denied" in err:
-                return None, None, f"Studio unreachable ({err})"
+                return None, None, f"remote unreachable ({err})"
             return None, None, f"SSH command failed: {err}"
 
         lines = result.stdout.strip().splitlines()
@@ -173,7 +174,7 @@ def _get_remote_state(
         return lines[0], lines[1], None
 
     except subprocess.TimeoutExpired:
-        return None, None, f"Studio unreachable (SSH timeout after {timeout}s)."
+        return None, None, f"remote unreachable (SSH timeout after {timeout}s)."
     except FileNotFoundError:
         return None, None, "ssh binary not found in PATH."
     except Exception as e:
@@ -193,7 +194,9 @@ def print_report(result: DriftResult) -> None:
     branch_part = (
         f" ({result.local_branch})" if result.local_branch and result.is_synced else ""
     )
-    status = "✓ Neo and Studio in sync at " if result.is_synced else "✗ drift detected:"
+    status = (
+        "✓ local and remote in sync at " if result.is_synced else "✗ drift detected:"
+    )
     print(
         f"{status}{result.local_sha[:7]}{branch_part}",
         file=sys.stderr,
@@ -204,13 +207,13 @@ def print_report(result: DriftResult) -> None:
         remote_sha = result.remote_sha[:7] if result.remote_sha else "???????"
         remote_branch = result.remote_branch or ""
         print(
-            f"    Neo:    {result.local_sha[:7]} {result.local_branch or ''}",
+            f"    local:  {result.local_sha[:7]} {result.local_branch or ''}",
             file=sys.stderr,
         )
-        print(f"    Studio: {remote_sha} {remote_branch}", file=sys.stderr)
+        print(f"    remote: {remote_sha} {remote_branch}", file=sys.stderr)
         print(file=sys.stderr)
-        print("  From Neo: git deliver && rsync ...", file=sys.stderr)
         print(
-            "  Or from Studio: cd ~/ai/code_pro/pxx && git pull origin main",
+            "  Sync the two checkouts (push from one, pull on the other) "
+            "before editing.",
             file=sys.stderr,
         )

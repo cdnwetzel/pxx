@@ -148,7 +148,12 @@ See `docs/EXAMPLES.md` for real-world workflows.
 ```bash
 # Core
 PXX_OLLAMA_BASE=http://localhost:11434           # Ollama endpoint (default)
-PXX_MODEL=ollama_chat/qwen2.5-coder:7b           # Force a model (example)
+PXX_MODEL=ollama_chat/qwen2.5-coder:7b           # Force one model for the session
+PXX_OLLAMA_MODEL=ollama_chat/llama3.1:8b         # Default Ollama model
+                                                 #   (ships as devstral:24b — set
+                                                 #   this to a model you've pulled)
+PXX_VLLM_MODEL=openai/your-served-model          # Model id if you use a vLLM
+                                                 #   endpoint (server-specific)
 
 # Memory (optional)
 AGENTMEMORY_RETENTION_DAYS=90                    # Observation TTL

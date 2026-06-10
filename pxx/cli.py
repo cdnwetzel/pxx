@@ -85,16 +85,17 @@ _extract_self_fix_task = self_modes.extract_self_fix_task
 _determine_session_class = self_modes.determine_session_class
 SELF_FIX_DIFF_CAP = self_modes.SELF_FIX_DIFF_CAP
 
-STUDIO_DEFAULT = "ollama_chat/devstral:24b"
+# Default models. All are env-overridable: PXX_MODEL forces one model for the
+# session regardless of endpoint; PXX_OLLAMA_MODEL/PXX_VLLM_MODEL adjust the
+# per-backend defaults. vLLM model ids are server-specific, so anyone running
+# their own vLLM should set PXX_VLLM_MODEL (or PXX_MODEL) to match it; litellm
+# needs the openai/ prefix to route an OpenAI-compatible endpoint via
+# OPENAI_API_BASE.
+STUDIO_DEFAULT = os.environ.get("PXX_OLLAMA_MODEL", "ollama_chat/devstral:24b")
 NEO_DEFAULT = "ollama_chat/qwen3:4b"
-# vLLM models are served by the T5810 (2x A4500) audit-proxy, reached through
-# the SSH tunnel (see deploy/launchd/). litellm needs the openai/ prefix to
-# route a bare OpenAI-compatible endpoint via OPENAI_API_BASE.
-VLLM_DEFAULT = "openai/qwen2.5-coder-14b-coder-lora"
+VLLM_DEFAULT = os.environ.get("PXX_VLLM_MODEL", "openai/qwen2.5-coder-14b-coder-lora")
 T1_DEFAULT = "ollama_chat/qwen2.5-coder:7b"
-# No larger coder model is deployed in the fleet yet; t3 aliases the 14b
-# until one exists. Repoint when a bigger vLLM model lands.
-VLLM_T3_DEFAULT = "openai/qwen2.5-coder-14b-coder-lora"
+VLLM_T3_DEFAULT = VLLM_DEFAULT
 
 # Tier routing: (backend, tier) -> model name
 _TIER_MODEL = {
@@ -117,9 +118,9 @@ def model_for(endpoint: Endpoint, tier: str | None = None) -> str:
         # Tier 1 requires Ollama; reject vLLM endpoints
         if tier == "t1" and endpoint.backend == "vllm":
             raise RuntimeError(
-                f"--tier t1 requires Ollama endpoint, but "
+                f"--tier t1 requires an Ollama endpoint, but "
                 f"{endpoint.name} ({endpoint.backend}) is available. "
-                f"Check Studio connectivity or use --tier t2/t3."
+                f"Check that your Ollama is reachable, or use --tier t2/t3."
             )
 
         key = (endpoint.backend, tier)
@@ -211,8 +212,8 @@ def _build_aider_args(
 
     # Pass aider's model config files only when present, so a checkout missing
     # one can't break the launch. model-settings.yml carries per-model edit
-    # format + Ollama num_ctx; model-metadata.json informs aider of the T5810
-    # vLLM's hard 16k context window (it has no litellm metadata otherwise).
+    # format + Ollama num_ctx; model-metadata.json describes models litellm has
+    # no metadata for (e.g. a local vLLM's context window).
     settings_args = (
         ["--model-settings-file", str(MODEL_SETTINGS)]
         if MODEL_SETTINGS.exists()
@@ -812,7 +813,10 @@ def main() -> None:
     try:
         # Start 9router if requested
         if with_router:
-            if not shutil.which("nine-router") and not Path(ROUTER_SERVICE_DIR).exists():
+            if (
+                not shutil.which("nine-router")
+                and not Path(ROUTER_SERVICE_DIR).exists()
+            ):
                 print(
                     "pxx: --with-router needs the 9router service, which ships with "
                     "a repo checkout (services/9router), not the pip package. Clone "
@@ -841,7 +845,10 @@ def main() -> None:
 
         # Start agentmemory if requested
         if with_memory:
-            if not shutil.which("agentmemory") and not Path(MEMORY_SERVICE_DIR).exists():
+            if (
+                not shutil.which("agentmemory")
+                and not Path(MEMORY_SERVICE_DIR).exists()
+            ):
                 print(
                     "pxx: --with-memory needs the agentmemory service, which ships "
                     "with a repo checkout (services/agentmemory), not the pip "

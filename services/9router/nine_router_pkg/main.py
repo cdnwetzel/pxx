@@ -40,7 +40,7 @@ async def lifespan(app: FastAPI):
     logger.info("9router shutting down")
 
 
-app = FastAPI(title="9router", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="9router", version="1.0.0", lifespan=lifespan)
 
 
 @app.get("/health")

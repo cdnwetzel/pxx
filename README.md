@@ -185,6 +185,11 @@ See [docs/EXAMPLES.md](https://github.com/cdnwetzel/pxx/blob/main/docs/EXAMPLES.
 
 ## Configuration
 
+All settings are environment variables. You can also put them in
+`~/.config/pxx/env` (KEY=VALUE lines) — pxx loads that file at startup, so your
+endpoints/models follow you across shells without touching shell profiles.
+Real environment variables override the file.
+
 **Environment variables:**
 ```bash
 # Core

@@ -806,6 +806,36 @@ class TestSelfImproveFlag:
         assert any("system.md" in p for p in read_paths)
         assert any("self-improve.md" in p for p in read_paths)
 
+    def test_self_improve_enforces_ask_chat_mode(self, monkeypatch, tmp_path):
+        """Suggest-only must be enforced by aider's mode, not just prompt text.
+
+        --self-improve sets edit_mode (for the safety tag / trusted-path gate),
+        which used to skip the --chat-mode ask injection — leaving aider in its
+        default code mode while the banner claimed ask. Regression guard.
+        """
+        from pxx import cli as cli_module
+
+        captured_args: list[list[str]] = []
+
+        def fake_execv(_bin, args, env=None):
+            captured_args.append(args)
+
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(sys, "argv", ["pxx", "--self-improve"])
+        monkeypatch.setattr(
+            cli_module,
+            "detect_endpoint",
+            lambda **kwargs: Endpoint("neo", "http://x:11434"),
+        )
+        monkeypatch.setattr(cli_module.os, "execve", fake_execv)
+        monkeypatch.setattr(cli_module, "_find_aider", lambda: "/x/aider")
+
+        cli_module.main()
+        assert captured_args, "execv was not called"
+        argv = captured_args[0]
+        assert "--chat-mode" in argv
+        assert argv[argv.index("--chat-mode") + 1] == "ask"
+
 
 class TestExtractSelfFixTask:
     """Unit tests for the task-string extractor (#012)."""

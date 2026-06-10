@@ -62,13 +62,13 @@ async def lifespan(app: FastAPI):
         print("Saved BM25 index to database")
 
 
-app = FastAPI(title="agentmemory", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="agentmemory", version="1.0.0", lifespan=lifespan)
 
 
 @app.get("/health")
 async def health_check():
     """Health check endpoint."""
-    return {"status": "healthy", "version": "0.1.0"}
+    return {"status": "healthy", "version": "1.0.0"}
 
 
 @app.post("/observations")
@@ -244,7 +244,7 @@ async def metrics():
     """Get service metrics and performance statistics."""
     return {
         "service": "agentmemory",
-        "version": "0.1.0",
+        "version": "1.0.0",
         "cache": {
             "size": len(search_cache._cache),
             "maxsize": search_cache.maxsize,
@@ -259,7 +259,7 @@ async def status():
     """Get service status."""
     return {
         "service": "agentmemory",
-        "version": "0.1.0",
+        "version": "1.0.0",
         "status": "healthy",
     }
 

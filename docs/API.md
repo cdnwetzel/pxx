@@ -13,7 +13,7 @@ RESTful API for observation storage, search, and management. Default: `http://12
 curl http://127.0.0.1:3111/health
 # {
 #   "status": "healthy",
-#   "version": "0.1.0"
+#   "version": "1.0.0"
 # }
 ```
 
@@ -22,7 +22,7 @@ curl http://127.0.0.1:3111/health
 curl http://127.0.0.1:3111/status
 # {
 #   "service": "agentmemory",
-#   "version": "0.1.0",
+#   "version": "1.0.0",
 #   "status": "healthy"
 # }
 ```
@@ -254,7 +254,7 @@ curl http://127.0.0.1:3111/metrics
 
 # {
 #   "service": "agentmemory",
-#   "version": "0.1.0",
+#   "version": "1.0.0",
 #   "cache": {
 #     "size": 15,
 #     "maxsize": 128,

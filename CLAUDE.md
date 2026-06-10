@@ -343,7 +343,15 @@ If a task seems to require editing one of these, stop and ask. The
 | Var | Effect |
 |---|---|
 | `PXX_OLLAMA_BASE`      | Skip detection entirely, use this URL |
-| `PXX_STUDIO_LAN_URL`   | Override `http://workstation:11434` |
-| `PXX_STUDIO_REMOTE_URL`| Studio's VPN-reachable URL (empty by default) |
+| `PXX_STUDIO_LAN_URL`   | Override the primary Ollama URL (default `http://localhost:11434`) |
+| `PXX_STUDIO_REMOTE_URL`| Second Ollama URL, e.g. VPN-reachable (empty by default) |
+| `PXX_VLLM_URL`         | Optional vLLM endpoint (default `http://127.0.0.1:8003`) |
 | `PXX_MODEL`            | Force a specific model regardless of endpoint |
+| `PXX_OLLAMA_MODEL` / `PXX_VLLM_MODEL` | Per-backend default models |
+| `PXX_DRIFT_SSH_TARGET` / `PXX_DRIFT_REMOTE_PATH` | Enable the cross-machine drift check |
 | `PXX_AUTOCHECK_DRIFT`  | Set to `1` to run a drift check before every `--edit` session |
+
+Any of these can also live in `~/.config/pxx/env` (KEY=VALUE lines, loaded at
+import by `pxx/__init__.py`; real env vars win). That's where this machine's
+fleet-specific values (e.g. `PXX_VLLM_MODEL` for the T5810's served model id)
+belong — never in the repo.

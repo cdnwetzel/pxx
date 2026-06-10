@@ -204,7 +204,9 @@ def _build_aider_args(
     chat_mode_args: list[str] = []
     if not has_chat_mode and not edit_mode:
         # Only inject in ask mode. Edit mode lets aider use its default +
-        # config's edit-format=diff.
+        # config's edit-format=diff. Note: --self-improve must NOT reach here
+        # with edit_mode=True — its suggest-only contract depends on aider
+        # running in ask mode, not just on the prompt text (see main()).
         chat_mode_args = ["--chat-mode", "ask"]
 
     extra_read_args: list[str] = []
@@ -732,7 +734,15 @@ def main() -> None:
         extra_reads.append(SELF_IMPROVE_PROMPT)
 
     args = _build_aider_args(
-        aider_bin, model, user_args, in_git_repo, edit_mode, extra_reads=extra_reads
+        aider_bin,
+        model,
+        user_args,
+        in_git_repo,
+        # --self-improve sets edit_mode (safety tag, trusted-path gate) but its
+        # suggest-only contract requires aider itself to run in ask mode — so
+        # for chat-mode purposes it is NOT an edit session.
+        edit_mode and not self_improve_mode,
+        extra_reads=extra_reads,
     )
 
     root = _git_repo_root() if in_git_repo else None

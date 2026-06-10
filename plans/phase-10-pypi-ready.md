@@ -6,12 +6,12 @@
 PyPI — installable and usable by someone who is not the author, on a machine
 that is not the Studio.
 
-**Status:** `done` (PyPI-**ready**) — decided **Option B** (core on PyPI;
-services are a repo-clone feature). 10.1–10.5 complete and verified by a
-clean-venv install dry-run; `twine check` passes on sdist + wheel. The only
-remaining step is the actual `twine upload`, which is a deliberate, irreversible
-user action (needs a PyPI token + explicit go-ahead) and is intentionally not
-automated.
+**Status:** `done` — **SHIPPED 2026-06-10**: `pxx-orchestrator 1.0.0` is live
+on PyPI (https://pypi.org/project/pxx-orchestrator/) and on TestPyPI, both
+verified installable (fresh-venv install + smoke from each index). Published
+as `pxx-orchestrator` because the `pxx` name is squatted by an unrelated 2023
+project; the console script and import package remain `pxx`. Option B (core on
+PyPI; services are a repo-clone feature).
 
 **Today's reality (cited):** pxx is a personal/offline tool with vestigial
 publish scaffolding. It's on PyPI at **0.0.9** while local is **1.0.0** (the

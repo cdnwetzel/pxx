@@ -41,7 +41,9 @@ class TestMemoryInjector:
         result = injector.retrieve(repo_root="/repo", cwd="/repo/src")
 
         assert result["observations"]
-        assert result["observations"][0]["content"] == "Fixed race condition in auth flow"
+        assert (
+            result["observations"][0]["content"] == "Fixed race condition in auth flow"
+        )
         mock_post.assert_called_once()
         args, kwargs = mock_post.call_args
         assert args[0].endswith("/search")

@@ -6,6 +6,7 @@ stays deterministic — set PXX_RUN_LIVE=1 with the services installed/runnable.
 """
 
 import os
+import socket
 import time
 
 import pytest
@@ -14,6 +15,13 @@ pytestmark = pytest.mark.skipif(
     os.environ.get("PXX_RUN_LIVE") != "1",
     reason="live smoke test: set PXX_RUN_LIVE=1 to start and probe 9router + agentmemory",
 )
+
+
+def _port_in_use(port: int) -> bool:
+    """True if something is already listening on 127.0.0.1:port."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.settimeout(0.5)
+        return s.connect_ex(("127.0.0.1", port)) == 0
 
 
 class TestSupervisorModeServices:
@@ -61,6 +69,12 @@ class TestSupervisorModeServices:
         """Test that both 9router and agentmemory can run together."""
         from pxx.router import NineRouterManager
         from pxx.memory import AgentmemoryManager
+
+        if _port_in_use(20128) or _port_in_use(3111):
+            pytest.skip(
+                "9router (:20128) or agentmemory (:3111) already running — this "
+                "test owns the service lifecycle and can't verify a duplicate start"
+            )
 
         router = NineRouterManager()
         memory = AgentmemoryManager()
@@ -164,6 +178,12 @@ class TestSupervisorModeServices:
         """Test that services are cleaned up properly on KeyboardInterrupt."""
         from pxx.router import NineRouterManager
         from pxx.memory import AgentmemoryManager
+
+        if _port_in_use(20128) or _port_in_use(3111):
+            pytest.skip(
+                "9router (:20128) or agentmemory (:3111) already running — this "
+                "test owns the service lifecycle and can't verify a duplicate start"
+            )
 
         router = NineRouterManager()
         memory = AgentmemoryManager()

@@ -22,6 +22,9 @@ class Settings:
     # Per-request upstream timeout (seconds). Generous: local generation of a
     # long diff can take a while. None disables the read timeout.
     timeout: float | None
+    # Retrieval augmentation. When off (or when the store/embedder can't be
+    # reached) the proxy degrades to a plain verbatim forwarder.
+    retrieval: bool
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -31,4 +34,5 @@ class Settings:
             host=os.environ.get("DOCS_SME_HOST", "127.0.0.1"),
             port=int(os.environ.get("DOCS_SME_PORT", "8004")),
             timeout=None if timeout_raw in {"0", "none", ""} else float(timeout_raw),
+            retrieval=os.environ.get("DOCS_SME_RETRIEVAL", "on").lower() != "off",
         )

@@ -33,8 +33,11 @@ CREATE TABLE IF NOT EXISTS doc_chunks (
     anchor          text,
     content_hash    text,
     embedding       vector({EMBED_DIM}),
+    -- translate('._' -> spaces) so dotted identifiers (asyncio.TaskGroup)
+    -- split into searchable tokens; otherwise they index as one opaque lexeme.
     tsv             tsvector GENERATED ALWAYS AS
-                      (to_tsvector('english', coalesce(title,'') || ' ' || coalesce(body,''))) STORED
+                      (to_tsvector('english',
+                        translate(coalesce(title,'') || ' ' || coalesce(body,''), '._', '  '))) STORED
 );
 CREATE INDEX IF NOT EXISTS doc_chunks_tsv_idx ON doc_chunks USING gin (tsv);
 CREATE INDEX IF NOT EXISTS doc_chunks_vec_idx ON doc_chunks
@@ -137,6 +140,57 @@ def vector_search(
     rows = conn.execute(sql, params).fetchall()
     cols = ["chunk_id", "title", "source_url", "python_version", "package", "score"]
     return [dict(zip(cols, r, strict=True)) for r in rows]
+
+
+def _rows_to_dicts(rows, cols) -> list[dict]:
+    return [dict(zip(cols, r, strict=True)) for r in rows]
+
+
+def hybrid_search(
+    conn: psycopg.Connection,
+    query_text: str,
+    query_embedding: list[float],
+    k: int = 5,
+    candidates: int = 20,
+    python_version: str | None = None,
+) -> list[dict]:
+    """Reciprocal-rank fusion of semantic (vector) and lexical (tsvector)
+    retrieval. The lexical leg catches exact identifiers (`asyncio.TaskGroup`)
+    that embeddings smear; the vector leg catches paraphrased intent. RRF needs
+    no score calibration between the two. Returns chunk dicts incl. body text.
+    """
+    qv = np.asarray(query_embedding, dtype=np.float32)
+    vfilter = "WHERE python_version = %s" if python_version else ""
+    cols = ["chunk_id", "title", "body", "source_url", "python_version", "package"]
+    sel = ", ".join(cols)
+
+    vec_sql = f"SELECT {sel} FROM doc_chunks {vfilter} ORDER BY embedding <=> %s LIMIT %s"
+    vec_params = [*([python_version] if python_version else []), qv, candidates]
+    vec_rows = _rows_to_dicts(conn.execute(vec_sql, vec_params).fetchall(), cols)
+
+    lex_filter = "AND python_version = %s" if python_version else ""
+    lex_sql = f"""
+        SELECT {sel} FROM doc_chunks
+        WHERE tsv @@ plainto_tsquery('english', translate(%s, '._', '  ')) {lex_filter}
+        ORDER BY ts_rank(tsv, plainto_tsquery('english', translate(%s, '._', '  '))) DESC
+        LIMIT %s
+    """
+    lex_params = [query_text, *([python_version] if python_version else []), query_text, candidates]
+    lex_rows = _rows_to_dicts(conn.execute(lex_sql, lex_params).fetchall(), cols)
+
+    return _rrf_fuse(vec_rows, lex_rows, k=k)
+
+
+def _rrf_fuse(vec_rows: list[dict], lex_rows: list[dict], k: int, k0: int = 60) -> list[dict]:
+    scores: dict[str, float] = {}
+    by_id: dict[str, dict] = {}
+    for ranked in (vec_rows, lex_rows):
+        for rank, row in enumerate(ranked):
+            cid = row["chunk_id"]
+            scores[cid] = scores.get(cid, 0.0) + 1.0 / (k0 + rank)
+            by_id.setdefault(cid, row)
+    ordered = sorted(scores, key=lambda c: scores[c], reverse=True)[:k]
+    return [{**by_id[c], "score": scores[c]} for c in ordered]
 
 
 def count(conn: psycopg.Connection) -> int:

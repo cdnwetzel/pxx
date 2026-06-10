@@ -51,14 +51,14 @@ def test_upsert_search_roundtrip_and_version_filter():
     src = "https://docs.python.org/3.12/_pytest_t1b.html"
     conn.execute("DELETE FROM doc_chunks WHERE source_url = %s", (src,))
 
+    # Sentinel versions isolate these rows from any real ingested 3.12 data.
     chunks = [
         DocChunk(source_url=src, title="asyncio.TaskGroup", text="group of tasks",
-                 python_version="3.12", anchor="asyncio.TaskGroup", content_hash="h"),
+                 python_version="tst-A", anchor="asyncio.TaskGroup", content_hash="h"),
         DocChunk(source_url=src, title="asyncio.gather", text="run awaitables concurrently",
-                 python_version="3.12", anchor="asyncio.gather", content_hash="h"),
-        DocChunk(source_url="https://docs.python.org/3.10/_pytest_t1b.html",
-                 title="old.thing", text="run awaitables concurrently",
-                 python_version="3.10", anchor="old.thing", content_hash="h"),
+                 python_version="tst-A", anchor="asyncio.gather", content_hash="h"),
+        DocChunk(source_url=src, title="old.thing", text="run awaitables concurrently",
+                 python_version="tst-B", anchor="old.thing", content_hash="h"),
     ]
     emb = Embedder()
     vectors = emb.embed([c.text for c in chunks])
@@ -66,16 +66,47 @@ def test_upsert_search_roundtrip_and_version_filter():
     assert n == 3
 
     q = emb.embed_one("how do I run awaitables concurrently")
-    hits = store.vector_search(conn, q, k=3, python_version="3.12")
+    hits = store.vector_search(conn, q, k=3, python_version="tst-A")
     emb.close()
     assert hits, "expected at least one hit"
-    # Version filter must exclude the 3.10 row entirely.
-    assert all(h["python_version"] == "3.12" for h in hits)
+    # Version filter must exclude the tst-B row entirely.
+    assert all(h["python_version"] == "tst-A" for h in hits)
     # Semantic recall: gather should outrank TaskGroup for this query.
     assert hits[0]["title"] == "asyncio.gather"
 
     conn.execute("DELETE FROM doc_chunks WHERE source_url = %s", (src,))
-    conn.execute("DELETE FROM doc_chunks WHERE python_version = %s AND title = 'old.thing'", ("3.10",))
+    conn.close()
+
+
+@needs_pg
+@needs_ollama
+def test_hybrid_search_finds_exact_identifier():
+    """The lexical (tsv) leg must surface an exact identifier even when the
+    query phrasing is semantically distant — that's the point of hybrid."""
+    from docs_rag_sme import store
+
+    conn = store.connect()
+    store.init_schema(conn)
+    src = "https://docs.python.org/3.12/_pytest_hybrid.html"
+    conn.execute("DELETE FROM doc_chunks WHERE source_url = %s", (src,))
+    chunks = [
+        DocChunk(source_url=src, title="asyncio.TaskGroup",
+                 text="asyncio.TaskGroup is an async context manager for a group of tasks",
+                 python_version="tst-H", anchor="tg", content_hash="h"),
+        DocChunk(source_url=src, title="json.dumps",
+                 text="serialize obj to a JSON formatted string",
+                 python_version="tst-H", anchor="jd", content_hash="h"),
+    ]
+    emb = Embedder()
+    store.upsert_chunks(conn, chunks, emb.embed([c.text for c in chunks]))
+    qv = emb.embed_one("TaskGroup")
+    hits = store.hybrid_search(conn, "TaskGroup", qv, k=2, python_version="tst-H")
+    emb.close()
+    titles = [h["title"] for h in hits]
+    assert "asyncio.TaskGroup" in titles
+    assert hits[0]["title"] == "asyncio.TaskGroup"
+    assert "body" in hits[0]
+    conn.execute("DELETE FROM doc_chunks WHERE source_url = %s", (src,))
     conn.close()
 
 

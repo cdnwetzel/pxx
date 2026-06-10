@@ -44,10 +44,13 @@ def proxy_client() -> httpx.AsyncClient:
     upstream = _fake_upstream()
     upstream_client = httpx.AsyncClient(transport=httpx.ASGITransport(app=upstream), base_url="http://up")
 
-    settings = Settings(upstream="http://up", host="127.0.0.1", port=8004, timeout=30.0)
+    settings = Settings(
+        upstream="http://up", host="127.0.0.1", port=8004, timeout=30.0, retrieval=False
+    )
     proxy = create_app(settings)
     # Inject the in-process upstream client instead of opening a real socket.
     proxy.state.client = upstream_client
+    proxy.state.retriever = None
     proxy.router.lifespan_context = _noop_lifespan
     return httpx.AsyncClient(transport=httpx.ASGITransport(app=proxy), base_url="http://proxy")
 

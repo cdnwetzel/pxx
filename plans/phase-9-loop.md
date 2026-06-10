@@ -74,6 +74,10 @@ gate autonomous edits is the highest risk here.
 - [ ] `test_review_gate.py`: `parse_findings` (P0/P1/P2 extraction, malformed
       input), `compute_verdict` (REJECT/REVISE/APPROVE truth table),
       `build_healing_prompt` (P1-only, empty, ordering).
+- [ ] **Fail-closed severity handling**: `compute_verdict` currently returns
+      APPROVE for any severity that isn't exactly "P0"/"P1" (parse glitch,
+      casing, unknown label) — a loop verifier must fail closed (or surface),
+      never silently approve. Found during the 2026-06-10 dogfood triage.
 - [ ] `test_workflow.py`: `transition` phase moves + `healing_attempts` updates,
       `load_state`/`save_state` round-trip, `resume_state`.
 - [ ] `test_governance.py`: `run_governance_check` allow/deny on a synthetic
@@ -161,6 +165,13 @@ benefits from 8.5)
   warning offering a docs URL) and prompt_toolkit can't attach to a non-TTY
   stdin. Every loop round must pass `--yes` (and keep model metadata in sync
   with the served model id) so no confirm-prompt can block an unattended round.
+- **Never act on unverified model findings.** Same dogfood session, second run
+  (worked end-to-end: env-file config → tunnel → T5810 14b → ask-mode one-shot):
+  the model returned 3 suggestions; the 2 verifiable ones were both FALSE — one
+  proposed error handling that already exists verbatim, one "fixed" os.replace's
+  Windows atomicity (os.replace IS atomic there; the proposed shutil.move is
+  worse). 0-for-2 confirms the plan's stance: REVISE-round healing prompts come
+  only from the deterministic review gate, never raw model suggestions.
 
 ---
 

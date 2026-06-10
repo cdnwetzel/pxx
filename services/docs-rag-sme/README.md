@@ -51,6 +51,31 @@ curl -s http://127.0.0.1:8004/healthz
 curl -s http://127.0.0.1:8004/v1/models | head
 ```
 
+## T1 — ingestion (crawl → chunk → embed → pgvector)
+
+Infra setup is one self-logging command (Postgres 17 + pgvector + a local
+embedding model; JSON-Lines log for review):
+
+```bash
+bash scripts/setup-t1b.sh        # no sudo on macOS; brew + ollama are user-level
+```
+
+Then ingest allowlisted pages:
+
+```bash
+# Dry-run: show the structural chunks (no DB/embed needed)
+uv run docs-sme-ingest https://docs.python.org/3.12/library/asyncio-task.html
+
+# Embed + store into Postgres/pgvector (delta-skips unchanged pages)
+uv run docs-sme-ingest --store https://docs.python.org/3.12/library/asyncio-task.html
+uv run docs-sme-ingest --store --force <url>     # re-ingest even if unchanged
+```
+
+Allowlist is enforced **in code** (`ingest/allowlist.py`): https-only,
+`docs.python.org` / `peps.python.org` / `pypi.org` JSON API only — no config
+can widen it. Embeddings come from local Ollama (`nomic-embed-text`, 768-dim),
+so ingestion is the *only* network step and it never leaves the allowlist.
+
 ### Config (env)
 
 | Var | Default | Effect |
@@ -59,16 +84,20 @@ curl -s http://127.0.0.1:8004/v1/models | head
 | `DOCS_SME_HOST`     | `127.0.0.1`            | bind host |
 | `DOCS_SME_PORT`     | `8004`                 | bind port |
 | `DOCS_SME_TIMEOUT`  | `600`                  | per-request upstream read timeout (s); `0`/`none` disables |
+| `DOCS_SME_DSN`      | `postgresql://localhost/docs_sme` | Postgres connection |
+| `DOCS_SME_EMBED_MODEL` | `nomic-embed-text`  | Ollama embedding model (768-dim) |
+| `DOCS_SME_OLLAMA_URL`  | `http://127.0.0.1:11434` | local Ollama base |
 
 ### Test
 
 ```bash
-uv run pytest -q          # in-process fake upstream; no real vLLM needed
+uv run pytest -q          # unit suite + T1b integration (skips if PG/Ollama down)
 uv run ruff check
 ```
 
 ## Roadmap
 
-T1 ingestion (allowlist crawler + pgvector) → T2 hybrid retrieval + rerank →
-T3 version-aware filter → T4 systemd timer → T5 `pxx --with-docs` + model A/B.
+T0 forwarder ✅ → T1 ingestion (allowlist crawler + pgvector) ✅ →
+**T2 hybrid retrieval + rerank + inject** (next) → T3 version-aware filter →
+T4 systemd timer → T5 `pxx --with-docs` + model A/B.
 Tracked in `pxx/plans/docs-rag-sme.md`.

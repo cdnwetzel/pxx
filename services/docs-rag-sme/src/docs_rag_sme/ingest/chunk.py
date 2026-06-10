@@ -10,15 +10,50 @@ fields. Both yield `DocChunk`s carrying version provenance.
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 
 from lxml import html as lxml_html
 
 from .allowlist import package_of, python_version_of
 from .models import DocChunk
 
+# Keep embed inputs comfortably under nomic-embed-text's ~2k-token window.
+MAX_CHARS = 6000
+OVERLAP = 200
+
 
 def _text(node) -> str:
     return " ".join(node.text_content().split())
+
+
+def _split_long(chunk: DocChunk) -> list[DocChunk]:
+    """Split an over-long chunk into overlapping windows, repeating the header
+    (signature/title) on each so the identifier stays searchable in every part.
+    Distinct anchors keep chunk_ids unique. Normal-size chunks pass through."""
+    if len(chunk.text) <= MAX_CHARS:
+        return [chunk]
+    head, sep, body = chunk.text.partition("\n\n")
+    if not sep:
+        head, body = "", chunk.text
+    budget = MAX_CHARS - (len(head) + 2 if head else 0)
+    step = max(budget - OVERLAP, 1)
+    parts: list[DocChunk] = []
+    start = i = 0
+    base_anchor = chunk.anchor or "chunk"
+    while start < len(body):
+        window = body[start : start + budget]
+        text = f"{head}\n\n{window}" if head else window
+        parts.append(replace(chunk, text=text, anchor=f"{base_anchor}#part{i}"))
+        start += step
+        i += 1
+    return parts
+
+
+def _finalize(chunks: list[DocChunk]) -> list[DocChunk]:
+    out: list[DocChunk] = []
+    for c in chunks:
+        out.extend(_split_long(c))
+    return out
 
 
 def chunk_sphinx(url: str, body: str, *, content_hash: str | None = None) -> list[DocChunk]:
@@ -70,7 +105,7 @@ def chunk_sphinx(url: str, body: str, *, content_hash: str | None = None) -> lis
             )
         )
 
-    return chunks
+    return _finalize(chunks)
 
 
 def chunk_pypi(url: str, body: str, *, content_hash: str | None = None) -> list[DocChunk]:

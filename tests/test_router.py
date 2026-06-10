@@ -7,8 +7,15 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 import pytest
+import requests
 
 from pxx.router import NineroterManager
+
+# Capture the real Popen at import time. The lifecycle tests patch
+# ``pxx.router.subprocess.Popen`` (the shared subprocess module), so inside
+# those tests ``subprocess.Popen`` is itself a Mock and can't be used as a
+# spec. This reference still points at the genuine class.
+RealPopen = subprocess.Popen
 
 
 @pytest.fixture
@@ -38,7 +45,7 @@ def test_router_init_custom_config(temp_router_config: Path) -> None:
 @patch("pxx.router.requests.get")
 def test_router_start_success(mock_get: Mock, mock_popen: Mock) -> None:
     """Test successful 9router startup and health check."""
-    mock_proc = Mock(spec=subprocess.Popen)
+    mock_proc = Mock(spec=RealPopen)
     mock_popen.return_value = mock_proc
     mock_get.return_value.status_code = 200
 
@@ -47,28 +54,36 @@ def test_router_start_success(mock_get: Mock, mock_popen: Mock) -> None:
 
     assert manager.process == mock_proc
     mock_popen.assert_called_once()
-    # Verify Popen was called with ["9router"]
+    # Verify Popen was launched via the console-script entry point
     args, kwargs = mock_popen.call_args
-    assert args[0] == ["9router"]
+    assert args[0] == ["nine-router"]
 
 
 @patch("pxx.router.subprocess.Popen")
-@patch("pxx.router.requests.get")
-def test_router_start_timeout(mock_get: Mock, mock_popen: Mock) -> None:
-    """Test 9router startup timeout raises TimeoutError."""
-    mock_proc = Mock(spec=subprocess.Popen)
+@patch.object(
+    NineroterManager,
+    "_wait_for_ready",
+    side_effect=TimeoutError("9router failed to start within timeout"),
+)
+def test_router_start_timeout(mock_wait: Mock, mock_popen: Mock) -> None:
+    """Test a readiness timeout on every launch path surfaces as RuntimeError.
+
+    TimeoutError subclasses OSError, so start() catches the readiness timeout
+    on both the console-script and uv-run attempts and re-raises the aggregate
+    RuntimeError("Failed to start 9router: ...").
+    """
+    mock_proc = Mock(spec=RealPopen)
     mock_popen.return_value = mock_proc
-    mock_get.side_effect = Exception("Connection refused")
 
     manager = NineroterManager()
-    with pytest.raises(TimeoutError):
+    with pytest.raises(RuntimeError):
         manager.start()
 
 
 @patch("pxx.router.subprocess.Popen")
 def test_router_stop_graceful(mock_popen: Mock) -> None:
     """Test graceful 9router shutdown."""
-    mock_proc = Mock(spec=subprocess.Popen)
+    mock_proc = Mock(spec=RealPopen)
     mock_popen.return_value = mock_proc
 
     manager = NineroterManager()
@@ -82,7 +97,7 @@ def test_router_stop_graceful(mock_popen: Mock) -> None:
 @patch("pxx.router.subprocess.Popen")
 def test_router_stop_kill_on_timeout(mock_popen: Mock) -> None:
     """Test 9router is killed if graceful shutdown times out."""
-    mock_proc = Mock(spec=subprocess.Popen)
+    mock_proc = Mock(spec=RealPopen)
     mock_proc.wait.side_effect = subprocess.TimeoutExpired("9router", 3)
     mock_popen.return_value = mock_proc
 
@@ -119,7 +134,7 @@ def test_router_get_usage_success(mock_get: Mock) -> None:
 @patch("pxx.router.requests.get")
 def test_router_get_usage_timeout(mock_get: Mock) -> None:
     """Test get_usage() returns empty dict on timeout."""
-    mock_get.side_effect = Exception("Connection timeout")
+    mock_get.side_effect = requests.ConnectionError("Connection timeout")
 
     manager = NineroterManager()
     result = manager.get_usage()
@@ -146,7 +161,7 @@ def test_router_get_status_success(mock_get: Mock) -> None:
 @patch("pxx.router.requests.get")
 def test_router_get_status_failure(mock_get: Mock) -> None:
     """Test get_status() returns empty dict on failure."""
-    mock_get.side_effect = Exception("Connection error")
+    mock_get.side_effect = requests.ConnectionError("Connection error")
 
     manager = NineroterManager()
     result = manager.get_status()

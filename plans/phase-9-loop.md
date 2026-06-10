@@ -155,6 +155,12 @@ benefits from 8.5)
 - **Reviewer-runtime safety.** `--loop` implies `--edit`/`--self-fix`, which
   trips the #002 safety tag (stashes the working tree). Same rule as
   `--self-fix`: never run `--loop` during a concurrent multi-agent review pass.
+- **Non-interactive aider must never be asked a question.** Live dogfood
+  (2026-06-10): a one-shot `--self-improve --message` run died with
+  `OSError: Errno 22` because aider hit an interactive confirm (an unknown-model
+  warning offering a docs URL) and prompt_toolkit can't attach to a non-TTY
+  stdin. Every loop round must pass `--yes` (and keep model metadata in sync
+  with the served model id) so no confirm-prompt can block an unattended round.
 
 ---
 

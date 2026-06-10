@@ -14,6 +14,15 @@ from pathlib import Path
 
 import requests
 
+# Source dir for the bundled 9router service, resolved relative to this package
+# (repo_root/services/9router) rather than an absolute path. Used only by the
+# dev-mode `uv run` fallback; an installed `nine-router` console script (Try 1)
+# doesn't need it. Override with PXX_9ROUTER_DIR.
+_SERVICE_DIR = os.environ.get(
+    "PXX_9ROUTER_DIR",
+    str(Path(__file__).resolve().parent.parent / "services" / "9router"),
+)
+
 
 class NineRouterManager:
     """Lifecycle manager for 9router subprocess."""
@@ -65,7 +74,7 @@ class NineRouterManager:
                 env=env,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
-                cwd="/Users/you/ai/pxx/services/9router",
+                cwd=_SERVICE_DIR,
             )
             self._wait_for_ready(timeout=5)
             return

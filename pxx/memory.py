@@ -13,6 +13,15 @@ from pathlib import Path
 
 import requests
 
+# Source dir for the bundled agentmemory service, resolved relative to this
+# package (repo_root/services/agentmemory) rather than an absolute path. Used
+# only by the dev-mode `uv run` fallback; an installed `agentmemory` console
+# script (Try 1) doesn't need it. Override with PXX_AGENTMEMORY_DIR.
+_SERVICE_DIR = os.environ.get(
+    "PXX_AGENTMEMORY_DIR",
+    str(Path(__file__).resolve().parent.parent / "services" / "agentmemory"),
+)
+
 
 class AgentmemoryManager:
     """Lifecycle manager for agentmemory subprocess."""
@@ -86,7 +95,7 @@ STATE_PATH=~/.pxx/memory.db
                 env=env,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
-                cwd="/Users/you/ai/pxx/services/agentmemory",
+                cwd=_SERVICE_DIR,
             )
             self._wait_for_ready(timeout=5)
             return

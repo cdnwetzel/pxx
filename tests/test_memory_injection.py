@@ -27,26 +27,25 @@ class TestMemoryInjector:
         """Test retrieve() with successful response."""
         mock_post.return_value.status_code = 200
         mock_post.return_value.json.return_value = {
-            "observations": [
+            "results": [
                 {
-                    "title": "Previous bug fix",
+                    "id": "obs-1",
                     "content": "Fixed race condition in auth flow",
-                    "source": "session-2026-06-01",
                     "score": 0.85,
                 }
-            ]
+            ],
+            "count": 1,
         }
 
         injector = MemoryInjector()
         result = injector.retrieve(repo_root="/repo", cwd="/repo/src")
 
         assert result["observations"]
-        assert result["observations"][0]["title"] == "Previous bug fix"
+        assert result["observations"][0]["content"] == "Fixed race condition in auth flow"
         mock_post.assert_called_once()
         args, kwargs = mock_post.call_args
-        assert "mem/retrieve" in args[0]
-        assert kwargs["json"]["filters"]["repo_root"] == "/repo"
-        assert kwargs["json"]["filters"]["cwd"] == "/repo/src"
+        assert args[0].endswith("/search")
+        assert kwargs["json"]["project"] == "/repo"
 
     @patch("pxx.memory_injection.requests.post")
     def test_retrieve_empty_result(self, mock_post: Mock) -> None:
@@ -211,11 +210,10 @@ class TestMemoryInjector:
         """Test inject_into_aider_args() adds --read flag."""
         mock_post.return_value.status_code = 200
         mock_post.return_value.json.return_value = {
-            "observations": [
+            "results": [
                 {
-                    "title": "Test",
+                    "id": "obs-1",
                     "content": "Test content",
-                    "source": "s1",
                     "score": 0.9,
                 }
             ]

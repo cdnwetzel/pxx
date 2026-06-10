@@ -26,6 +26,7 @@ from pxx import (
     tool_capture,
     workflow,
 )
+from pxx import docs_sme
 from pxx._core_files import is_core
 from pxx.commands_index import CommandInfo, list_commands
 from pxx.endpoints import Endpoint, detect_endpoint
@@ -455,6 +456,7 @@ def main() -> None:
     self_fix_mode = "--self-fix" in sys.argv
     with_router = "--with-router" in sys.argv
     with_memory = "--with-memory" in sys.argv
+    with_docs = "--with-docs" in sys.argv
 
     # #006 M2: optional pre-edit drift check.
     # Off by default; PXX_AUTOCHECK_DRIFT=1 to opt-in.
@@ -468,6 +470,13 @@ def main() -> None:
     if self_fix_mode and self_improve_mode:
         print(
             "pxx: --self-fix and --self-improve are mutually exclusive.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    if with_docs and with_router:
+        print(
+            "pxx: --with-docs and --with-router both rewrite the aider endpoint "
+            "and can't be combined. Pick one.",
             file=sys.stderr,
         )
         sys.exit(2)
@@ -543,6 +552,7 @@ def main() -> None:
             "--tier",
             "--with-router",
             "--with-memory",
+            "--with-docs",
         )
     ]
     # Also filter out tier values that follow --tier
@@ -765,6 +775,33 @@ def main() -> None:
             except RuntimeError as e:
                 print(f"pxx: failed to start 9router: {e}", file=sys.stderr)
                 sys.exit(1)
+
+        # Route aider through the docs-rag-sme proxy if requested (#009).
+        if with_docs:
+            sme = docs_sme.sme_base_url()
+            if not docs_sme.probe_sme(sme):
+                print(
+                    f"pxx: --with-docs: docs-rag-sme not reachable at {sme}. "
+                    f"Start it (uv run docs-sme) or set PXX_DOCS_SME_URL.",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+            pyver = docs_sme.resolve_python_version(Path.cwd())
+            notified = docs_sme.notify_version(sme, pyver)
+            env["OPENAI_API_BASE"] = f"{sme}/v1"
+            note = "" if notified else " (version notify failed; retrieving across versions)"
+            print(
+                f"pxx: docs-RAG SME at {sme} — aider routed through it; "
+                f"python={pyver or 'any'}{note}",
+                file=sys.stderr,
+            )
+            if endpoint.backend != "vllm":
+                print(
+                    "pxx: note — SME forwards to its own upstream "
+                    "(DOCS_SME_UPSTREAM, default the vLLM :8003). Ensure it "
+                    f"serves the selected model ({model}).",
+                    file=sys.stderr,
+                )
 
         # Start agentmemory if requested
         if with_memory:

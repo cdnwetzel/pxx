@@ -28,7 +28,7 @@ class TestSupervisorFlags:
         # beyond unit scope. This documents the intent.
         pass
 
-    @patch("pxx.cli.NineroterManager")
+    @patch("pxx.cli.NineRouterManager")
     @patch("pxx.cli.AgentmemoryManager")
     @patch("pxx.cli.AiderMemoryObserver")
     @patch("pxx.cli.subprocess.Popen")
@@ -65,7 +65,7 @@ class TestSupervisorFlags:
         mock_router_cls.assert_called_once()
         mock_router.start.assert_called_once()
 
-    @patch("pxx.cli.NineroterManager")
+    @patch("pxx.cli.NineRouterManager")
     @patch("pxx.cli.AgentmemoryManager")
     @patch("pxx.cli.AiderMemoryObserver")
     @patch("pxx.cli.subprocess.Popen")
@@ -101,7 +101,7 @@ class TestSupervisorFlags:
         mock_memory_cls.assert_called_once()
         mock_memory.start.assert_called_once()
 
-    @patch("pxx.cli.NineroterManager")
+    @patch("pxx.cli.NineRouterManager")
     @patch("pxx.cli.AgentmemoryManager")
     @patch("pxx.cli.AiderMemoryObserver")
     @patch("pxx.cli.subprocess.Popen")
@@ -143,7 +143,7 @@ class TestSupervisorFlags:
                                                 == "http://127.0.0.1:20128/v1"
                                             )
 
-    @patch("pxx.cli.NineroterManager")
+    @patch("pxx.cli.NineRouterManager")
     @patch("pxx.cli.AgentmemoryManager")
     @patch("pxx.cli.AiderMemoryObserver")
     @patch("pxx.cli.subprocess.Popen")
@@ -179,7 +179,7 @@ class TestSupervisorFlags:
         mock_observer_cls.assert_called_once()
         mock_observer.start.assert_called_once()
 
-    @patch("pxx.cli.NineroterManager")
+    @patch("pxx.cli.NineRouterManager")
     @patch("pxx.cli.AgentmemoryManager")
     @patch("pxx.cli.AiderMemoryObserver")
     @patch("pxx.cli.subprocess.Popen")
@@ -210,7 +210,7 @@ class TestSupervisorFlags:
 
         mock_proc.wait.assert_called_once()
 
-    @patch("pxx.cli.NineroterManager")
+    @patch("pxx.cli.NineRouterManager")
     @patch("pxx.cli.AgentmemoryManager")
     @patch("pxx.cli.AiderMemoryObserver")
     @patch("pxx.cli.subprocess.Popen")

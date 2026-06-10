@@ -7,6 +7,7 @@ OpenAI-compatible proxy (default port 20128).
 from __future__ import annotations
 
 import os
+import random
 import subprocess
 import time
 from pathlib import Path
@@ -14,7 +15,7 @@ from pathlib import Path
 import requests
 
 
-class NineroterManager:
+class NineRouterManager:
     """Lifecycle manager for 9router subprocess."""
 
     def __init__(self, config_path: Path | None = None):

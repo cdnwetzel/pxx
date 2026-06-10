@@ -9,7 +9,7 @@ from unittest.mock import Mock, patch
 import pytest
 import requests
 
-from pxx.router import NineroterManager
+from pxx.router import NineRouterManager
 
 # Capture the real Popen at import time. The lifecycle tests patch
 # ``pxx.router.subprocess.Popen`` (the shared subprocess module), so inside
@@ -28,16 +28,16 @@ def temp_router_config(tmp_path: Path) -> Path:
 
 
 def test_router_init_default_config() -> None:
-    """Test NineroterManager initializes with default config path."""
-    manager = NineroterManager()
+    """Test NineRouterManager initializes with default config path."""
+    manager = NineRouterManager()
     assert manager.config_path == Path.home() / ".9router" / "config.yml"
     assert manager.process is None
     assert manager.api_base == "http://127.0.0.1:20128"
 
 
 def test_router_init_custom_config(temp_router_config: Path) -> None:
-    """Test NineroterManager initializes with custom config path."""
-    manager = NineroterManager(config_path=temp_router_config)
+    """Test NineRouterManager initializes with custom config path."""
+    manager = NineRouterManager(config_path=temp_router_config)
     assert manager.config_path == temp_router_config
 
 
@@ -49,7 +49,7 @@ def test_router_start_success(mock_get: Mock, mock_popen: Mock) -> None:
     mock_popen.return_value = mock_proc
     mock_get.return_value.status_code = 200
 
-    manager = NineroterManager()
+    manager = NineRouterManager()
     manager.start()
 
     assert manager.process == mock_proc
@@ -61,7 +61,7 @@ def test_router_start_success(mock_get: Mock, mock_popen: Mock) -> None:
 
 @patch("pxx.router.subprocess.Popen")
 @patch.object(
-    NineroterManager,
+    NineRouterManager,
     "_wait_for_ready",
     side_effect=TimeoutError("9router failed to start within timeout"),
 )
@@ -75,7 +75,7 @@ def test_router_start_timeout(mock_wait: Mock, mock_popen: Mock) -> None:
     mock_proc = Mock(spec=RealPopen)
     mock_popen.return_value = mock_proc
 
-    manager = NineroterManager()
+    manager = NineRouterManager()
     with pytest.raises(RuntimeError):
         manager.start()
 
@@ -86,7 +86,7 @@ def test_router_stop_graceful(mock_popen: Mock) -> None:
     mock_proc = Mock(spec=RealPopen)
     mock_popen.return_value = mock_proc
 
-    manager = NineroterManager()
+    manager = NineRouterManager()
     manager.process = mock_proc
     manager.stop()
 
@@ -101,7 +101,7 @@ def test_router_stop_kill_on_timeout(mock_popen: Mock) -> None:
     mock_proc.wait.side_effect = subprocess.TimeoutExpired("9router", 3)
     mock_popen.return_value = mock_proc
 
-    manager = NineroterManager()
+    manager = NineRouterManager()
     manager.process = mock_proc
     manager.stop()
 
@@ -111,7 +111,7 @@ def test_router_stop_kill_on_timeout(mock_popen: Mock) -> None:
 
 def test_router_stop_none_process() -> None:
     """Test stop() is safe when process is None."""
-    manager = NineroterManager()
+    manager = NineRouterManager()
     manager.stop()  # Should not raise
 
 
@@ -123,7 +123,7 @@ def test_router_get_usage_success(mock_get: Mock) -> None:
         "total_cost": 0.05,
     }
 
-    manager = NineroterManager()
+    manager = NineRouterManager()
     result = manager.get_usage()
 
     assert result["total_tokens"] == 5000
@@ -136,7 +136,7 @@ def test_router_get_usage_timeout(mock_get: Mock) -> None:
     """Test get_usage() returns empty dict on timeout."""
     mock_get.side_effect = requests.ConnectionError("Connection timeout")
 
-    manager = NineroterManager()
+    manager = NineRouterManager()
     result = manager.get_usage()
 
     assert result == {}
@@ -150,7 +150,7 @@ def test_router_get_status_success(mock_get: Mock) -> None:
         "fallback_chain": ["openai", "anthropic"],
     }
 
-    manager = NineroterManager()
+    manager = NineRouterManager()
     result = manager.get_status()
 
     assert result["active_provider"] == "openai"
@@ -163,7 +163,7 @@ def test_router_get_status_failure(mock_get: Mock) -> None:
     """Test get_status() returns empty dict on failure."""
     mock_get.side_effect = requests.ConnectionError("Connection error")
 
-    manager = NineroterManager()
+    manager = NineRouterManager()
     result = manager.get_status()
 
     assert result == {}

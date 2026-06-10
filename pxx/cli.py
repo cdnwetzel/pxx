@@ -33,7 +33,7 @@ from pxx.commands_index import CommandInfo, list_commands
 from pxx.endpoints import Endpoint, detect_endpoint
 from pxx.memory import AgentmemoryManager
 from pxx.observer import AiderMemoryObserver
-from pxx.router import NineroterManager
+from pxx.router import NineRouterManager
 from pxx.scope import (
     extract_scope_args,
     format_for_env,
@@ -761,7 +761,7 @@ def main() -> None:
     env["OPENAI_API_KEY"] = "EMPTY"
 
     # Phase 5 Tier 1: supervisor mode for 9router + agentmemory
-    router_manager: NineroterManager | None = None
+    router_manager: NineRouterManager | None = None
     memory_manager: AgentmemoryManager | None = None
     observer: AiderMemoryObserver | None = None
 
@@ -769,7 +769,7 @@ def main() -> None:
         # Start 9router if requested
         if with_router:
             try:
-                router_manager = NineroterManager()
+                router_manager = NineRouterManager()
                 router_manager._start_with_retries(max_attempts=3)
                 env["OPENAI_API_BASE"] = "http://127.0.0.1:20128/v1"
                 router_status = "✓" if router_manager.get_status() else "?"

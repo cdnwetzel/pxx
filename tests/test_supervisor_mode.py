@@ -8,9 +8,9 @@ class TestSupervisorModeServices:
 
     def test_9router_manager_lifecycle(self):
         """Test 9router service lifecycle: start, status check, stop."""
-        from pxx.router import NineroterManager
+        from pxx.router import NineRouterManager
 
-        manager = NineroterManager()
+        manager = NineRouterManager()
 
         # Start service
         manager.start()
@@ -46,10 +46,10 @@ class TestSupervisorModeServices:
 
     def test_both_services_run_concurrently(self):
         """Test that both 9router and agentmemory can run together."""
-        from pxx.router import NineroterManager
+        from pxx.router import NineRouterManager
         from pxx.memory import AgentmemoryManager
 
-        router = NineroterManager()
+        router = NineRouterManager()
         memory = AgentmemoryManager()
 
         try:
@@ -73,10 +73,10 @@ class TestSupervisorModeServices:
 
     def test_9router_proxies_requests(self):
         """Test that 9router successfully proxies requests to Studio Ollama."""
-        from pxx.router import NineroterManager
+        from pxx.router import NineRouterManager
         import httpx
 
-        manager = NineroterManager()
+        manager = NineRouterManager()
 
         try:
             manager.start()
@@ -124,11 +124,11 @@ class TestSupervisorModeServices:
 
     def test_memory_middleware_integration(self):
         """Test that 9router and agentmemory can run together."""
-        from pxx.router import NineroterManager
+        from pxx.router import NineRouterManager
         from pxx.memory import AgentmemoryManager
         import httpx
 
-        router = NineroterManager()
+        router = NineRouterManager()
         memory = AgentmemoryManager()
 
         try:
@@ -149,10 +149,10 @@ class TestSupervisorModeServices:
 
     def test_services_cleanup_on_interrupt(self):
         """Test that services are cleaned up properly on KeyboardInterrupt."""
-        from pxx.router import NineroterManager
+        from pxx.router import NineRouterManager
         from pxx.memory import AgentmemoryManager
 
-        router = NineroterManager()
+        router = NineRouterManager()
         memory = AgentmemoryManager()
 
         # Start both

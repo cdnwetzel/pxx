@@ -122,6 +122,9 @@ class TestAiderMemoryObserver:
     def test_observer_start(self) -> None:
         """Test start() spawns observer thread."""
         mock_proc = Mock(spec=Popen)
+        # No stdout to read: _run() hits its early-return guard so the daemon
+        # thread exits cleanly instead of raising on a Mock stream.
+        mock_proc.stdout = None
         observer = AiderMemoryObserver(mock_proc)
 
         observer.start()

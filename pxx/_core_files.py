@@ -46,7 +46,7 @@ def is_core(path: str) -> bool:
     """True if ``path`` refers to one of the registered core pxx modules.
 
     Accepts repo-relative paths (``pxx/cli.py``), absolute paths
-    (``/Users/.../pxx/cli.py``), and paths with trailing slashes
+    (``/path/to/pxx/cli.py``), and paths with trailing slashes
     (``pxx/cli.py/``) — all are normalized before comparison. Comparison
     is suffix-based: an absolute path matches if it *ends with* a core
     path, treating ``/`` as the separator.

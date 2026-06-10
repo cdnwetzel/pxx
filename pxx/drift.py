@@ -6,6 +6,7 @@ at the git HEAD level.
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -39,8 +40,12 @@ class DriftResult:
         return self.local_sha == self.remote_sha
 
 
-DEFAULT_SSH_TARGET = "cwetzel@workstation"
-DEFAULT_REMOTE_PATH = "/Users/you/ai/code_pro/pxx"
+# Cross-machine drift is inherently personal — it compares this checkout against
+# a specific remote host you also work on. No default host is baked in; set both
+# env vars to enable it (e.g. PXX_DRIFT_SSH_TARGET=you@host,
+# PXX_DRIFT_REMOTE_PATH=/path/to/pxx).
+DEFAULT_SSH_TARGET = os.environ.get("PXX_DRIFT_SSH_TARGET", "")
+DEFAULT_REMOTE_PATH = os.environ.get("PXX_DRIFT_REMOTE_PATH", "")
 DRIFT_TIMEOUT_SECONDS = 5.0
 
 
@@ -63,6 +68,18 @@ def check_sync(
             local_branch=None,
             remote_branch=None,
             error="Could not determine local pxx HEAD.",
+        )
+
+    if not ssh_target or not remote_path:
+        return DriftResult(
+            local_sha=local_sha,
+            remote_sha=None,
+            local_branch=_get_pxx_local_branch(),
+            remote_branch=None,
+            error=(
+                "drift check not configured — set PXX_DRIFT_SSH_TARGET and "
+                "PXX_DRIFT_REMOTE_PATH to the host you sync with."
+            ),
         )
 
     local_branch = _get_pxx_local_branch()

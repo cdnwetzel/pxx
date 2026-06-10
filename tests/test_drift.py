@@ -18,7 +18,7 @@ class TestDrift:
 
         monkeypatch.setattr("pxx.drift._get_remote_state", mock_remote)
 
-        result = drift.check_sync()
+        result = drift.check_sync(ssh_target="u@h", remote_path="/p")
         assert result.is_synced is True
         assert result.local_sha == "abc1234"
         assert result.remote_sha == "abc1234"
@@ -33,7 +33,7 @@ class TestDrift:
 
         monkeypatch.setattr("pxx.drift._get_remote_state", mock_remote)
 
-        result = drift.check_sync()
+        result = drift.check_sync(ssh_target="u@h", remote_path="/p")
         assert result.is_synced is False
         assert result.local_sha == "local_sha"
         assert result.remote_sha == "remote_sha"

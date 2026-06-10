@@ -1,18 +1,19 @@
 """Detect which Ollama or vLLM endpoint to use.
 
-Priority: explicit override > vLLM (T5810) > Ollama Studio LAN > Ollama Studio over VPN.
-First reachable wins. 1-second timeout per probe.
+Priority: explicit override > vLLM > Ollama (LAN/local) > Ollama (remote).
+First reachable wins, 1-second timeout per probe.
 
-Ollama: the Mac Studio (M4 Max, 36GB) runs Ollama locally; pxx now runs on
-the Studio itself, so "studio" and "local" are the same machine.
-vLLM: the T5810 (2× RTX A4500 20GB, NVLink) serves qwen2.5-coder-14b-coder-lora
-behind an audit-proxy on :8003. The T5810 is SSH-only (office NAT forwards
-only port 22), so it is reached through a persistent SSH local-forward
-(launchd `local.pxx.gpu-node-1-vllm-tunnel` -> 127.0.0.1:8003). See
-deploy/launchd/. Set PXX_VLLM_URL to override.
-- LAN = on the office network (workstation:11434, resolvable via corp DNS or mDNS)
-- Remote = Studio resolvable while connected to the SSL VPN
-- vLLM = OpenAI-compatible endpoint reached via the SSH tunnel (default: 127.0.0.1:8003)
+Endpoints are configured via environment variables (all optional):
+
+- ``PXX_OLLAMA_BASE``    — hard override; skip detection and use this URL.
+- ``PXX_STUDIO_LAN_URL`` — primary Ollama URL (default ``http://localhost:11434``).
+- ``PXX_STUDIO_REMOTE_URL`` — optional second Ollama URL (e.g. a remote host
+  reachable over VPN); empty/unset is skipped.
+- ``PXX_VLLM_URL``      — optional OpenAI-compatible vLLM endpoint
+  (default ``http://127.0.0.1:8003``).
+
+The "studio"/"neo" endpoint names are historical; functionally they are just
+"primary Ollama" and "localhost Ollama".
 """
 
 from __future__ import annotations
@@ -26,9 +27,12 @@ from pathlib import Path
 
 PROBE_TIMEOUT_SEC = 1.0
 
-DEFAULT_STUDIO_LAN = "http://workstation.splawoffice.local:11434"
+# Default Ollama endpoint — localhost works whether Ollama runs on this machine
+# or you point PXX_STUDIO_LAN_URL / PXX_OLLAMA_BASE at another host (e.g. a LAN
+# box by hostname). Read via PXX_STUDIO_LAN_URL in _ollama_candidates().
+DEFAULT_STUDIO_LAN = "http://localhost:11434"
 DEFAULT_NEO = "http://localhost:11434"
-DEFAULT_VLLM = "http://127.0.0.1:8003"  # T5810 audit-proxy via SSH tunnel
+DEFAULT_VLLM = "http://127.0.0.1:8003"  # optional vLLM endpoint (PXX_VLLM_URL)
 
 
 @dataclass(frozen=True)
@@ -126,7 +130,7 @@ def detect_endpoint(preferred_backend: str | None = None) -> Endpoint:
                 return ep
 
     raise RuntimeError(
-        "No Ollama or vLLM endpoint reachable. "
-        "Bring up the VPN to reach the Studio, "
-        "or confirm Studio is running Ollama or vLLM on LAN."
+        "No Ollama or vLLM endpoint reachable. Start Ollama locally "
+        "(`ollama serve`), or set PXX_OLLAMA_BASE to your Ollama URL "
+        "(e.g. http://localhost:11434)."
     )

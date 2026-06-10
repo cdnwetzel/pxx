@@ -78,8 +78,9 @@ Phase 5 adds three optional services for enhanced orchestration:
 # Install (editable) — uses uv tool
 uv tool install --editable . --python 3.12
 
-# Pre-flight: which endpoints are up, memory pressure, loaded models, CPU temp
-bash scripts/doctor.sh
+# Pre-flight: 9router + agentmemory health and git-mirror sync
+# (cdnwetzel/mirror). Exits non-zero when the mirrors are out of sync.
+pxx --doctor
 
 # Run pxx in another project directory
 cd ~/some-python-project && pxx
@@ -318,7 +319,7 @@ break installs, OOM the Studio, or alter agent behavior subtly:
 - `config/model-settings.yml` (Ollama context windows)
 - `config/aider.conf.yml`, `.aider.conf.yml`
 - `pyproject.toml`
-- `scripts/setup-studio.sh`, `scripts/setup-neo.sh`, `scripts/doctor.sh`
+- `scripts/setup-studio.sh`, `scripts/setup-neo.sh`
 - `.aiderignore`, `CONVENTIONS.md`
 
 If a task seems to require editing one of these, stop and ask. The

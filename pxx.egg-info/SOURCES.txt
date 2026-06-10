@@ -7,6 +7,7 @@ pxx/audit.py
 pxx/cli.py
 pxx/commands_index.py
 pxx/cost_metrics.py
+pxx/docs_sme.py
 pxx/doctor.py
 pxx/drift.py
 pxx/endpoints.py
@@ -33,6 +34,7 @@ pxx.egg-info/requires.txt
 pxx.egg-info/top_level.txt
 tests/test_cli.py
 tests/test_cost_metrics.py
+tests/test_docs_sme.py
 tests/test_doctor.py
 tests/test_memory.py
 tests/test_memory_analytics.py

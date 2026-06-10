@@ -34,6 +34,7 @@ Issues = "https://github.com/cdnwetzel/pxx/issues"
 
 [project.scripts]
 pxx = "pxx.cli:main"
+pxx-scope-check = "pxx.scope:scope_check_main"
 
 [tool.setuptools]
 packages = ["pxx"]

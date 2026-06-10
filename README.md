@@ -8,7 +8,7 @@ pxx bridges local LLM inference (Ollama) with aider, adding memory context from 
 
 A command-line orchestrator that:
 
-1. **Detects your LLM endpoint** (local Ollama or remote Studio)
+1. **Detects your LLM endpoint** (local or networked Ollama, optional vLLM)
 2. **Manages memory** across sessions (optional observation storage)
 3. **Routes requests** with fallback chains (optional 9router proxy)
 4. **Launches aider** for coding assistance
@@ -17,26 +17,35 @@ Memory is persistent: previous sessions inform future decisions automatically.
 
 ## Quick Start
 
-**Requires:** Ollama running (local or network reachable)
+**Requires:** [Ollama](https://ollama.com) running and reachable (local by default).
 
 ```bash
-# Install pxx (from source for now)
-git clone https://github.com/cdnwetzel/pxx
-cd pxx
-pip install -e .
+# Install the core
+pip install pxx
 
-# Install optional memory services
-cd services/agentmemory && pip install -e . && cd ../..
-cd services/9router && pip install -e . && cd ../..
+# Point pxx at your Ollama if it isn't on localhost:11434
+export PXX_OLLAMA_BASE=http://your-ollama-host:11434   # optional
 
-# Run with memory enabled (auto-starts services)
-pxx --edit --with-memory
-
-# Or ask mode (read-only, no edits)
+# Ask mode (read-only — safe to run anywhere)
 pxx "Explain this function"
+
+# Edit mode (allows file changes)
+pxx --edit "Add error handling"
 ```
 
-That's it. Aider takes over; pxx is out of the picture once it's running.
+That's it for the core. Aider takes over; pxx is out of the picture once it's
+running.
+
+**Optional services** (`--with-memory`, `--with-router`, `--with-docs`) are not
+in the pip package — they live in `services/` and need a repo checkout:
+
+```bash
+git clone https://github.com/cdnwetzel/pxx && cd pxx
+uv sync --extra dev                 # core, editable
+(cd services/agentmemory && uv sync)
+(cd services/9router && uv sync)
+pxx --edit --with-memory            # auto-starts the service
+```
 
 > **Note on "offline-capable":** pxx doesn't run inference locally — it orchestrates aider against your Ollama instance. The "offline" part means no cloud dependency: all LLM calls stay on your network.
 
@@ -77,7 +86,7 @@ Your Project
     ├→ Starts agentmemory (optional)
     └→ os.execv → aider (takes over)
                    ↓
-               Ollama (Studio or local)
+               Ollama (local or networked)
                ↓
          Inference response
                    ↓
@@ -89,14 +98,18 @@ Your Project
              Next session sees this context
 ```
 
-Two-machine variant: Studio (Ollama + agentmemory) ← Neo (pxx orchestrator)
+The optional services can run on the same machine or a separate host (point
+pxx at them with the env vars below); the core needs only an Ollama endpoint.
 
 ## Installation
 
-**Quick (pip):**
+**Core (pip):**
 ```bash
-pip install pxx[all]
+pip install pxx
 ```
+This gives you the orchestrator + ask/edit against any Ollama. The optional
+`--with-memory` / `--with-router` / `--with-docs` services are not packaged on
+PyPI — see "Optional services" in Quick Start to run them from a repo checkout.
 
 **Development (uv):**
 ```bash
@@ -134,8 +147,8 @@ See `docs/EXAMPLES.md` for real-world workflows.
 **Environment variables:**
 ```bash
 # Core
-PXX_OLLAMA_BASE=http://workstation:11434    # Ollama endpoint
-PXX_MODEL=ollama_chat/devstral:24b               # Force model
+PXX_OLLAMA_BASE=http://localhost:11434           # Ollama endpoint (default)
+PXX_MODEL=ollama_chat/qwen2.5-coder:7b           # Force a model (example)
 
 # Memory (optional)
 AGENTMEMORY_RETENTION_DAYS=90                    # Observation TTL

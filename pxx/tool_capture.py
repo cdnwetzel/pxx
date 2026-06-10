@@ -33,12 +33,34 @@ def get_git_diff_since(commit_sha: str) -> str:
         return ""
 
 
-def extract_observations_from_diff(diff_stat: str, project_root: Path) -> list[dict]:
+def get_unified_diff_since(commit_sha: str) -> str:
+    """Get `git diff <commit_sha>..HEAD --unified=0` (zero-context unified diff)."""
+    try:
+        result = subprocess.run(
+            ["git", "diff", f"{commit_sha}..HEAD", "--unified=0"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        return result.stdout if result.returncode == 0 else ""
+    except Exception as e:
+        logger.warning(f"Failed to get unified git diff: {e}")
+        return ""
+
+
+def extract_observations_from_diff(
+    diff_stat: str, project_root: Path, unified_diff: str = ""
+) -> list[dict]:
     """Extract meaningful observations from git diff output.
 
     Args:
-        diff_stat: Output from `git diff --stat`
+        diff_stat: Output from `git diff <range> --stat`
         project_root: Root directory of the project
+        unified_diff: Matching `git diff <range> --unified=0` for the same range,
+            used to attach function/class metadata. Empty skips that enrichment.
+            Passed in (rather than shelled out internally) so this function is
+            pure: its result depends only on its arguments, not the live working
+            tree, and the unified diff stays consistent with ``diff_stat``.
 
     Returns:
         List of observation dictionaries with metadata
@@ -47,19 +69,6 @@ def extract_observations_from_diff(diff_stat: str, project_root: Path) -> list[d
 
     if not diff_stat.strip():
         return observations
-
-    # Get full diff for parsing function/class boundaries
-    try:
-        result = subprocess.run(
-            ["git", "diff", "--unified=0"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        unified_diff = result.stdout if result.returncode == 0 else ""
-    except Exception as e:
-        logger.warning(f"Failed to get git diff: {e}")
-        unified_diff = ""
 
     # Parse diff stat output: "path/to/file.py | 10 +---"
     lines = diff_stat.strip().split("\n")
@@ -126,11 +135,12 @@ def extract_observations_from_diff(diff_stat: str, project_root: Path) -> list[d
             },
         }
 
-        # Parse unified diff for function/class changes
-        if filepath in unified_diff:
-            file_diff = unified_diff.split(f"diff --git a/{filepath}")[1].split(
-                "diff --git"
-            )[0]
+        # Parse unified diff for function/class changes. Match the exact
+        # `diff --git a/<path>` header (not a bare substring) so a filepath that
+        # merely appears inside the diff body can't trip an IndexError on split.
+        header = f"diff --git a/{filepath}"
+        if header in unified_diff:
+            file_diff = unified_diff.split(header, 1)[1].split("diff --git", 1)[0]
             obs["metadata"].update(parse_code_changes(file_diff, filepath))
 
         # For backward compatibility, also store just the content
@@ -276,14 +286,20 @@ def capture_session_tools(
         Number of observations captured and stored
     """
     try:
-        # Get diff since the session started
+        # Get diff since the session started. Both the --stat summary and the
+        # zero-context unified diff come from the same <sha>..HEAD range so the
+        # function/class metadata stays consistent with the file stats.
         diff_stat = get_git_diff_since(commit_sha)
         if not diff_stat:
             logger.debug("No changes to capture")
             return 0
 
+        unified_diff = get_unified_diff_since(commit_sha)
+
         # Extract observations from the diff
-        observations = extract_observations_from_diff(diff_stat, project_root)
+        observations = extract_observations_from_diff(
+            diff_stat, project_root, unified_diff
+        )
         if not observations:
             logger.debug("No tool calls to capture")
             return 0

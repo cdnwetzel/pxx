@@ -72,3 +72,46 @@ def test_diff_with_statistics_line():
     assert len(obs) == 2
     # Should not have observations from the stats line
     assert not any("changed" in o for o in obs)
+
+
+def test_unified_diff_attaches_function_metadata():
+    """A matching unified diff enriches the observation with function metadata.
+
+    This path was previously unreachable in tests because the function shelled
+    out to the live working tree (empty in CI) instead of taking the diff in.
+    """
+    diff_stat = "pxx/cli.py | 2 ++"
+    unified_diff = (
+        "diff --git a/pxx/cli.py b/pxx/cli.py\n"
+        "--- a/pxx/cli.py\n"
+        "+++ b/pxx/cli.py\n"
+        "@@ -0,0 +1,2 @@\n"
+        "+def new_handler(arg):\n"
+        "+    return arg\n"
+    )
+    obs = extract_observations_from_diff(diff_stat, Path.cwd(), unified_diff)
+    assert len(obs) == 1
+    functions = obs[0]["metadata"].get("functions", [])
+    assert any(f["name"] == "new_handler" for f in functions)
+
+
+def test_filepath_substring_in_diff_body_does_not_crash():
+    """A filepath appearing only in the diff *body* must not trip the split.
+
+    Regression for the IndexError when the code split on a bare substring match
+    (`filepath in unified_diff`) instead of the exact `diff --git a/<path>`
+    header — exactly what a dirty working tree used to trigger.
+    """
+    diff_stat = "pxx/cli.py | 2 +-"
+    unified_diff = (
+        "diff --git a/pxx/other.py b/pxx/other.py\n"
+        "--- a/pxx/other.py\n"
+        "+++ b/pxx/other.py\n"
+        "@@ -1 +1 @@\n"
+        "-# references pxx/cli.py in a comment\n"
+        "+# still references pxx/cli.py\n"
+    )
+    obs = extract_observations_from_diff(diff_stat, Path.cwd(), unified_diff)
+    assert len(obs) == 1
+    # No real header for cli.py, so no function/class metadata is attached.
+    assert "functions" not in obs[0]["metadata"]

@@ -8,3 +8,5 @@ __pycache__/
 .claude/worktrees/
 temp-phase1/
 *.egg-info/
+/dist/
+/build/

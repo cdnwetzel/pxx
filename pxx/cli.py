@@ -222,6 +222,11 @@ def _build_aider_args(
         else []
     )
 
+    # Pass pxx's bundled aider config only when present. It ships with a repo
+    # checkout but not a `pip install` (it's outside the package), so a pip
+    # install falls back to aider's own config / ~/.aider.conf.yml.
+    config_args = ["--config", str(AIDER_CONF)] if AIDER_CONF.exists() else []
+
     args = [
         aider_bin,
         "--model",
@@ -229,8 +234,7 @@ def _build_aider_args(
         "--read",
         str(SYSTEM_PROMPT),
         *extra_read_args,
-        "--config",
-        str(AIDER_CONF),
+        *config_args,
         *settings_args,
         *metadata_args,
         *chat_mode_args,

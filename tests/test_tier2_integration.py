@@ -86,18 +86,18 @@ class TestTier2EndToEnd:
         assert obs["metadata"]["repo_root"] == "/repo"
         assert obs["metadata"]["cwd"] == "/repo"
 
-        # Step 3: Inject observation
-        observer._inject_observation(obs)
+        # Step 3: Store observation
+        observer._store_observation(obs)
 
-        # Verify injection POST was made
+        # Verify the store POST was made
         assert mock_observer_post.call_count >= 1
-        # Find the inject call
-        inject_calls = [
+        # Find the /observations call
+        store_calls = [
             call
             for call in mock_observer_post.call_args_list
-            if "/mem/inject" in str(call)
+            if "/observations" in str(call)
         ]
-        assert len(inject_calls) > 0
+        assert len(store_calls) > 0
 
     def test_memory_context_file_format(self, tmp_path: Path) -> None:
         """Test memory context file has correct markdown format."""
@@ -176,9 +176,9 @@ class TestTier2EndToEnd:
         obs = {"title": "Test", "content": "Test"}
 
         # Should not raise, just log
-        observer._inject_observation(obs)
+        observer._store_observation(obs)
 
-        # Verify the injection was attempted
+        # Verify the store was attempted
         mock_post.assert_called_once()
 
 

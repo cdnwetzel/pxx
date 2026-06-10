@@ -32,37 +32,45 @@ class MemoryInjector:
         self,
         repo_root: str | None = None,
         cwd: str | None = None,
+        query: str = "",
         limit: int = 5,
         timeout: float = 3.0,
     ) -> dict:
-        """Query agentmemory /mem/retrieve with project context.
+        """Retrieve observations from agentmemory for the session's project.
+
+        Uses the server's structured search endpoint (POST /search) so the
+        client-side tuner can rank the returned dicts before injection. The
+        repo root is the server's per-project scope. The server's bundled
+        POST /inject endpoint is an alternative that returns pre-formatted,
+        char-capped strings, but it bypasses the local tuner.
 
         Args:
-            repo_root: Git repository root path (optional filter)
-            cwd: Current working directory (optional filter)
+            repo_root: Git repository root path; the server's project scope
+            cwd: Current working directory (reserved; server scopes by project)
+            query: Optional ranking query; empty retrieves the project's set
             limit: Maximum observations to retrieve
             timeout: HTTP request timeout
 
         Returns:
-            Dict with 'observations' list and metadata. Returns empty dict on error.
+            Dict with an 'observations' list (the server's ranked results).
+            Returns an empty dict on error.
         """
         try:
             payload = {
+                "project": repo_root or "default",
+                "query": query,
                 "limit": limit,
-                "filters": {},
             }
-            if repo_root:
-                payload["filters"]["repo_root"] = repo_root
-            if cwd:
-                payload["filters"]["cwd"] = cwd
 
             resp = requests.post(
-                f"{self.memory_api}/mem/retrieve",
+                f"{self.memory_api}/search",
                 json=payload,
                 timeout=timeout,
             )
             if resp.status_code == 200:
-                return resp.json()
+                # Server returns ranked dicts under "results"; downstream code
+                # (tuner, analytics, format_context) consumes "observations".
+                return {"observations": resp.json().get("results", [])}
             return {}
         except (requests.RequestException, ValueError):
             return {}
@@ -71,7 +79,7 @@ class MemoryInjector:
         """Format observations as markdown context for aider prompt.
 
         Args:
-            observations: List of observation dicts from /mem/retrieve
+            observations: List of observation dicts from retrieve() (/search)
 
         Returns:
             Formatted markdown string ready for --read injection.

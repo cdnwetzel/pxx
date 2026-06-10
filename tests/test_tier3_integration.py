@@ -19,14 +19,15 @@ class TestSlashCommandExecution:
         """Test /recall command execution."""
         mock_post.return_value.status_code = 200
         mock_post.return_value.json.return_value = {
-            "observations": [{"title": "Test", "content": "Content", "score": 0.9}]
+            "results": [{"id": "obs-1", "content": "Content", "score": 0.9}],
+            "count": 1,
         }
 
         handler = SlashCommandHandler()
         result = handler.execute("recall", "test query")
 
         assert result["success"]
-        assert "Test" in result["response"]
+        assert "Content" in result["response"]
 
     def test_slash_command_remember_execution(self) -> None:
         """Test /remember command saves observation."""
@@ -37,10 +38,11 @@ class TestSlashCommandExecution:
             result = handler.execute("remember", '"Title" "Content"')
 
             assert result["success"]
-            # Verify POST was called with observation
+            # Verify the command was forwarded to the server's /command dispatcher
             args, kwargs = mock_post.call_args
-            assert "/mem/inject" in args[0]
-            assert kwargs["json"]["observations"][0]["title"] == "Title"
+            assert args[0].endswith("/command")
+            assert kwargs["json"]["command"] == "remember"
+            assert kwargs["json"]["args"]["title"] == "Title"
 
 
 class TestThresholdApplication:
@@ -51,7 +53,7 @@ class TestThresholdApplication:
         """Test tuner filters out low-relevance observations."""
         mock_post.return_value.status_code = 200
         mock_post.return_value.json.return_value = {
-            "observations": [
+            "results": [
                 {"title": "High", "content": "Good", "score": 0.9},
                 {"title": "Low", "content": "Bad", "score": 0.3},
             ]
@@ -78,7 +80,7 @@ class TestThresholdApplication:
         with patch("pxx.memory_injection.requests.post") as mock_post:
             mock_post.return_value.status_code = 200
             mock_post.return_value.json.return_value = {
-                "observations": [
+                "results": [
                     {"title": f"Obs{i}", "content": f"Content{i}", "score": 0.9}
                     for i in range(10)
                 ]
@@ -108,7 +110,7 @@ class TestAnalyticsRecording:
         """Test injection records retrieval analytics."""
         mock_post.return_value.status_code = 200
         mock_post.return_value.json.return_value = {
-            "observations": [{"title": "Obs", "score": 0.9}]
+            "results": [{"id": "obs-1", "content": "Obs", "score": 0.9}]
         }
 
         analytics = MemoryAnalytics()
@@ -126,7 +128,7 @@ class TestAnalyticsRecording:
         """Test injection records injection analytics."""
         mock_post.return_value.status_code = 200
         mock_post.return_value.json.return_value = {
-            "observations": [{"title": "Obs", "content": "Content"}]
+            "results": [{"id": "obs-1", "content": "Content"}]
         }
 
         analytics = MemoryAnalytics()
@@ -220,7 +222,7 @@ class TestTier3FullIntegration:
         # Setup injection mock
         mock_inj_post.return_value.status_code = 200
         mock_inj_post.return_value.json.return_value = {
-            "observations": [
+            "results": [
                 {"title": "A", "content": "Content A", "score": 0.9},
                 {"title": "B", "content": "Content B", "score": 0.4},
             ]

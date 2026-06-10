@@ -31,8 +31,10 @@ from pxx import docs_sme
 from pxx._core_files import is_core
 from pxx.commands_index import CommandInfo, list_commands
 from pxx.endpoints import Endpoint, detect_endpoint
+from pxx.memory import _SERVICE_DIR as MEMORY_SERVICE_DIR
 from pxx.memory import AgentmemoryManager
 from pxx.observer import AiderMemoryObserver
+from pxx.router import _SERVICE_DIR as ROUTER_SERVICE_DIR
 from pxx.router import NineRouterManager
 from pxx.scope import (
     extract_scope_args,
@@ -810,6 +812,14 @@ def main() -> None:
     try:
         # Start 9router if requested
         if with_router:
+            if not shutil.which("nine-router") and not Path(ROUTER_SERVICE_DIR).exists():
+                print(
+                    "pxx: --with-router needs the 9router service, which ships with "
+                    "a repo checkout (services/9router), not the pip package. Clone "
+                    "the repo or install the `nine-router` console script.",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
             try:
                 router_manager = NineRouterManager()
                 router_manager._start_with_retries(max_attempts=3)
@@ -831,6 +841,15 @@ def main() -> None:
 
         # Start agentmemory if requested
         if with_memory:
+            if not shutil.which("agentmemory") and not Path(MEMORY_SERVICE_DIR).exists():
+                print(
+                    "pxx: --with-memory needs the agentmemory service, which ships "
+                    "with a repo checkout (services/agentmemory), not the pip "
+                    "package. Clone the repo or install the `agentmemory` console "
+                    "script.",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
             try:
                 memory_manager = AgentmemoryManager()
                 memory_manager.start()

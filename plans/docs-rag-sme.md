@@ -2,11 +2,12 @@
 
 > Backlog ID: 009
 
-> **Status:** `in-progress` — T0 + T1 + T2 landed (hybrid retrieval + late
-> injection, verified live). Next: T3 (version-aware filter from repo pin) and
-> T2b (optional bge reranker — needs a torch model download). Code lives at
-> `services/docs-rag-sme/` (co-located in this repo per the 2026-06-10
-> decision, not a standalone repo).
+> **Status:** `in-progress` — T0 + T1 + T2 + T2b + T3 + `pxx --with-docs`
+> landed. Validated live against a real model: through the SME, qwen2.5-coder
+> corrected its own incomplete `asyncio.TaskGroup.create_task` signature
+> (added the `context=` param it didn't know) using the real 3.12 docs.
+> Version filter is default-safe (no matching version → 0 injected). Next: T4
+> (perpetual delta-refresh timer). Code lives at `services/docs-rag-sme/`.
 >
 > **Depends on:** nothing in-repo. Sits *beside* the existing T5810 vLLM +
 > audit-proxy stack; pxx changes are limited to one endpoint override and
@@ -221,10 +222,12 @@ several official doc pages alongside the repo map.
   aware) → gate → late injection with graceful degradation. Reranker is a
   pluggable stage (identity default). **T2b** (optional bge cross-encoder)
   staged — needs a torch model download.
-- **T3 — Version-aware filter:** resolve version from repo pin; default-safe.
-  **← next**
-- **T4 — Systemd timer + delta refresh:** the "perpetual" part.
-- **T5 — `pxx --with-docs` flag + banner; model A/B (§6).**
+- **T3 — Version-aware filter:** ✅ session version via /control/context
+  (single active project assumed); retrieval filters by it; default-safe
+  (no match → inject nothing, never wrong-version). Verified live.
+- **T4 — Timer + delta refresh:** the "perpetual" part (launchd/systemd). **← next**
+- **T5 — `pxx --with-docs`:** ✅ flag routes aider through the SME + posts the
+  resolved Python version. Model A/B (§6) still open.
 
 ---
 

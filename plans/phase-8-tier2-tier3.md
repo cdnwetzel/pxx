@@ -57,7 +57,7 @@
 
 **Effort:** 5-7 days
 
-**Status:** `planned`
+**Status:** `done` — structured metadata (functions/classes via `parse_code_changes`, test names via `extract_test_names`) lands in `pxx/tool_capture.py`. (`phase-8.5-confidence-scoring.md` correctly treats 8.4 as a completed prerequisite.)
 
 ---
 

@@ -48,18 +48,20 @@ network, set Ollama's `OLLAMA_HOST` to `127.0.0.1:11434` first.
 
 Phase 5 adds three optional services for enhanced orchestration:
 
+> Note: these services now run **on the Studio** (which absorbed Neo's
+> orchestrator role — see the fleet note above). pxx starts them itself via
+> supervisor mode when the opt-in flag is passed; there is no `scripts/setup-*.sh`.
+
 **1. 9router (Tier 1 — request routing)**
-- Binds to `http://127.0.0.1:20128` on Neo
+- Binds to `http://127.0.0.1:20128` on the Studio (localhost)
 - Routes aider requests to primary (Studio Ollama) with optional fallback chains
-- Opt-in: `pxx --with-router`
-- Setup: Run `9router -listen 127.0.0.1:20128` on Neo (included in `scripts/setup-neo.sh`)
+- Opt-in: `pxx --with-router` — `NineRouterManager` launches it (`pxx/router.py`); source lives in `services/9router/`
 
 **2. agentmemory (Tier 2+ — session memory)**
-- Binds to `http://127.0.0.1:3111` on Neo
+- Binds to `http://127.0.0.1:3111` on the Studio (localhost)
 - Captures observations from aider tool calls; enables `/recall`, `/remember`, `/forget` slash commands
-- Opt-in: `pxx --with-memory`
-- Setup: Run `agentmemory server --port 3111` on Neo (included in `scripts/setup-neo.sh`)
-- Requires: Python 3.10+, available via `pip install agentmemory`
+- Opt-in: `pxx --with-memory` — `AgentmemoryManager` launches it (`pxx/memory.py`); source lives in `services/agentmemory/`
+- Requires: Python 3.10+
 
 **3. Slash commands (Tier 2+ — memory interaction)**
 - `/recall <query>` — search saved observations from previous sessions
@@ -319,7 +321,6 @@ break installs, OOM the Studio, or alter agent behavior subtly:
 - `config/model-settings.yml` (Ollama context windows)
 - `config/aider.conf.yml`, `.aider.conf.yml`
 - `pyproject.toml`
-- `scripts/setup-studio.sh`, `scripts/setup-neo.sh`
 - `.aiderignore`, `CONVENTIONS.md`
 
 If a task seems to require editing one of these, stop and ask. The

@@ -1,12 +1,10 @@
 # Phase 8: Infrastructure Hardening & Scaling
 
-> Backlog ID: 008
-
 ## Overview
 
 **Goal:** Fix critical infrastructure gaps discovered in v1.0.0 code review. Enable confident scaling to 100k+ observations and multi-machine deployments.
 
-**Status:** `planned`
+**Status:** `in-progress` — Tier 1 (8.1–8.3) complete; Tier 2 underway (8.4 done, 8.5 designed). See `phase-8-tier2-tier3.md` and `phase-8.5-confidence-scoring.md`.
 
 **Timeline:** 4-6 weeks (Tier 1), then 6-8 weeks (Tier 2)
 
@@ -46,7 +44,7 @@
 
 **Effort:** 3-4 days
 
-**Status:** `in-progress`
+**Status:** `done` — `feat(8.1)`; see `agentmemory_pkg/vector_index.py`, `tests/test_vector_index.py`.
 
 ### Phase 8.2: Persistent BM25 Indexing
 
@@ -71,7 +69,7 @@
 
 **Effort:** 2-3 days
 
-**Status:** `planned`
+**Status:** `done` — `feat(8.2)`; see `agentmemory_pkg/search.py`, `tests/test_bm25_persistence.py`.
 
 ### Phase 8.3: Concurrency & Scale Testing
 
@@ -97,7 +95,7 @@
 
 **Effort:** 2-3 days
 
-**Status:** `planned`
+**Status:** `done` — `feat(8.3)`; see `tests/test_concurrency.py`.
 
 ---
 
@@ -123,7 +121,7 @@
 
 **Effort:** 5-7 days
 
-**Status:** `planned`
+**Status:** `done` — structured metadata (functions/classes/tests) lands in `pxx/tool_capture.py` (`parse_code_changes`, `extract_test_names`).
 
 ### Phase 8.5: Observation Confidence Scoring
 
@@ -144,7 +142,7 @@
 
 **Effort:** 2-3 days
 
-**Status:** `planned`
+**Status:** `planned` — design complete, not yet implemented (no `confidence_score` field yet). See `phase-8.5-confidence-scoring.md`.
 
 ### Phase 8.6: Multi-Machine Collaboration
 
@@ -217,12 +215,12 @@
 
 ## Success Criteria
 
-### Tier 1 Complete (Phases 8.1-8.3)
-- [ ] HNSW persists to disk + rebuilds on schema change
-- [ ] BM25 indexing is persistent + O(log n) lookups
-- [ ] 20+ concurrency tests pass (concurrent writes, rebuilds, searches)
-- [ ] Performance baselines established (1k, 10k, 100k observations)
-- [ ] Max concurrent sessions documented
+### Tier 1 Complete (Phases 8.1-8.3) ✅
+- [x] HNSW persists to disk + rebuilds on schema change
+- [x] BM25 indexing is persistent + O(log n) lookups
+- [x] 20+ concurrency tests pass (concurrent writes, rebuilds, searches)
+- [x] Performance baselines established (1k, 10k, 100k observations)
+- [x] Max concurrent sessions documented
 
 ### Tier 2 Complete (Phases 8.4-8.6)
 - [ ] Observations include AST metadata + test results
@@ -242,8 +240,9 @@
 **Blocked by:** Nothing (v1.0.0 complete, code review done)
 
 **Blocks:** 
-- Phase 9 (Advanced features: embedding consolidation, cost tracking)
-- Phase 10 (Release v1.1.0)
+- Phase 9 (Closed-loop autonomy — `pxx --loop`; see `phase-9-loop.md`). Soft
+  dependency only: 9.4 per-round learning benefits from 8.4 ✅ / 8.5.
+- Release v1.1.0
 
 ---
 

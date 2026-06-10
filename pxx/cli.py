@@ -182,7 +182,8 @@ def _find_aider() -> str:
     if found:
         return found
     print(
-        "pxx: aider not found. Reinstall: uv tool install --editable . --python 3.12",
+        "pxx: aider not found. It installs with pxx — try "
+        "`pip install --force-reinstall pxx` (or `uv sync` in a repo checkout).",
         file=sys.stderr,
     )
     sys.exit(1)

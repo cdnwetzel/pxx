@@ -15,6 +15,34 @@ A command-line orchestrator that:
 
 Memory is persistent: previous sessions inform future decisions automatically.
 
+## Prerequisites & Assumptions
+
+Before installing, you need:
+
+| Prerequisite | Why | Notes |
+|---|---|---|
+| **Python 3.11+** | runs pxx and aider | 3.12 is what's tested day-to-day |
+| **[Ollama](https://ollama.com)** installed and running | the LLM backend | `ollama serve`; local `localhost:11434` by default, or any reachable host via `PXX_OLLAMA_BASE` |
+| **At least one pulled model** | aider needs a model that exists | e.g. `ollama pull qwen2.5-coder:7b`, then `export PXX_MODEL=ollama_chat/qwen2.5-coder:7b` |
+| **git** (recommended) | auto-commits, safety tags, scoping | pxx works outside a git repo too (it passes `--no-git` to aider) |
+
+You do **not** install aider separately — `pip install pxx` brings
+`aider-chat` as a pinned dependency (pinned deliberately; aider releases
+weekly and can change behavior pxx depends on).
+
+Assumptions pxx makes:
+
+- **Ask mode is the default** (read-only). Nothing is edited until you pass `--edit`.
+- **Your LLM endpoint is trusted.** pxx talks to Ollama/vLLM with no auth — run it
+  against localhost or a network you trust, not the open internet.
+- **The default model is `devstral:24b`** (a public Ollama model, ~14 GB). If you
+  haven't pulled it, set `PXX_MODEL` or `PXX_OLLAMA_MODEL` to a model you have.
+- **aider takes over your terminal** once launched — pxx execs into it and gets
+  out of the way.
+- Endpoint detection probes (1s timeout each): `PXX_OLLAMA_BASE` override → an
+  optional vLLM endpoint (`PXX_VLLM_URL`, default `127.0.0.1:8003`) → Ollama
+  (`PXX_STUDIO_LAN_URL`, default `localhost:11434`). First reachable wins.
+
 ## Quick Start
 
 **Requires:** [Ollama](https://ollama.com) running and reachable (local by default).
@@ -26,11 +54,14 @@ pip install pxx
 # Point pxx at your Ollama if it isn't on localhost:11434
 export PXX_OLLAMA_BASE=http://your-ollama-host:11434   # optional
 
-# Ask mode (read-only — safe to run anywhere)
-pxx "Explain this function"
+# Ask mode (read-only — safe to run anywhere): opens an interactive aider chat
+pxx
+
+# One-shot question (--message and other aider flags pass straight through)
+pxx --message "Explain main.py"
 
 # Edit mode (allows file changes)
-pxx --edit "Add error handling"
+pxx --edit --message "Add error handling to main.py"
 ```
 
 That's it for the core. Aider takes over; pxx is out of the picture once it's
@@ -119,28 +150,37 @@ uv sync --extra dev
 uv run pytest -q
 ```
 
-See `docs/INSTALL.md` for platform-specific notes and troubleshooting.
+See [docs/INSTALL.md](https://github.com/cdnwetzel/pxx/blob/main/docs/INSTALL.md) for platform-specific notes and troubleshooting.
 
 ## Usage
 
 ```bash
-# Basic ask mode (no edits, no memory)
-pxx "What does this function do?"
+# Interactive ask mode (read-only chat; no edits)
+pxx
 
-# Edit mode (allows file changes, no memory)
-pxx --edit "Add error handling"
+# Add files to the chat — positional args pass through to aider as files
+pxx main.py utils.py
 
-# Edit mode WITH memory (recommended)
-pxx --edit --with-memory "Improve performance"
+# One-shot prompts use aider's --message flag (passes through)
+pxx --message "What does process_data() in main.py do?"
 
-# dogfooding (pxx improving itself)
+# Edit mode (allows file changes)
+pxx --edit --message "Add error handling to main.py"
+
+# Edit mode WITH memory (repo checkout only — see Optional services)
+pxx --edit --with-memory
+
+# Dogfooding (when developing pxx itself, from a repo checkout)
 pxx --self-test              # Run test suite
 pxx --self-lint              # Check code style
 pxx --self-improve           # Suggest-only session
 pxx --self-fix "task" --scope X  # Autonomous bounded edit
 ```
 
-See `docs/EXAMPLES.md` for real-world workflows.
+Any flag pxx doesn't recognize is forwarded to aider unchanged — your aider
+muscle memory (`--message`, `--model`, file args, ...) works through pxx.
+
+See [docs/EXAMPLES.md](https://github.com/cdnwetzel/pxx/blob/main/docs/EXAMPLES.md) for real-world workflows.
 
 ## Configuration
 
@@ -163,15 +203,15 @@ AGENTMEMORY_CLEANUP_INTERVAL=3600                # Cleanup interval (sec)
 PXX_ROUTER_PORT=20128                            # 9router port
 ```
 
-See `docs/DEPLOY.md` for production setup.
+See [docs/DEPLOY.md](https://github.com/cdnwetzel/pxx/blob/main/docs/DEPLOY.md) for production setup.
 
 ## Documentation
 
-- **[API Reference](docs/API.md)** — All endpoints and request/response examples
-- **[Installation Guide](docs/INSTALL.md)** — Setup for different platforms
-- **[Deployment Guide](docs/DEPLOY.md)** — Production configurations
-- **[Usage Examples](docs/EXAMPLES.md)** — Real-world workflows
-- **[CHANGELOG](CHANGELOG.md)** — Full development history (phases 1-7)
+- **[API Reference](https://github.com/cdnwetzel/pxx/blob/main/docs/API.md)** — All endpoints and request/response examples
+- **[Installation Guide](https://github.com/cdnwetzel/pxx/blob/main/docs/INSTALL.md)** — Setup for different platforms
+- **[Deployment Guide](https://github.com/cdnwetzel/pxx/blob/main/docs/DEPLOY.md)** — Production configurations
+- **[Usage Examples](https://github.com/cdnwetzel/pxx/blob/main/docs/EXAMPLES.md)** — Real-world workflows
+- **[CHANGELOG](https://github.com/cdnwetzel/pxx/blob/main/CHANGELOG.md)** — Full development history (phases 1-7)
 
 ## Features by Phase
 
@@ -210,7 +250,7 @@ See `docs/DEPLOY.md` for production setup.
 
 ## Security
 
-⚠️ **agentmemory has no authentication.** Only expose on trusted networks (LAN, VPN). See `docs/DEPLOY.md` for firewall recommendations.
+⚠️ **agentmemory has no authentication.** Only expose on trusted networks (LAN, VPN). See [docs/DEPLOY.md](https://github.com/cdnwetzel/pxx/blob/main/docs/DEPLOY.md) for firewall recommendations.
 
 ## Common Issues
 
@@ -222,11 +262,11 @@ See `docs/DEPLOY.md` for production setup.
 - Check port availability: `lsof -i :3111`
 - Try alternate port: `AGENTMEMORY_URL=http://127.0.0.1:3112 pxx --with-memory`
 
-See `docs/INSTALL.md` for more troubleshooting.
+See [docs/INSTALL.md](https://github.com/cdnwetzel/pxx/blob/main/docs/INSTALL.md) for more troubleshooting.
 
 ## Contributing
 
-Contributions welcome! See `CLAUDE.md` (aider development guide) and `CONVENTIONS.md` (code style).
+Contributions welcome! See [CLAUDE.md](https://github.com/cdnwetzel/pxx/blob/main/CLAUDE.md) (development guide) and [CONVENTIONS.md](https://github.com/cdnwetzel/pxx/blob/main/CONVENTIONS.md) (code style).
 
 ## License
 
@@ -234,4 +274,4 @@ MIT
 
 ---
 
-**[📚 Full Documentation](docs/)** | **[🐛 Issues](https://github.com/cdnwetzel/pxx/issues)** | **[📝 Changelog](CHANGELOG.md)**
+**[📚 Full Documentation](https://github.com/cdnwetzel/pxx/tree/main/docs/)** | **[🐛 Issues](https://github.com/cdnwetzel/pxx/issues)** | **[📝 Changelog](https://github.com/cdnwetzel/pxx/blob/main/CHANGELOG.md)**

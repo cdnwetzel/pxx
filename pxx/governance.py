@@ -66,14 +66,27 @@ def scan_staged_secrets(repo_root: Path) -> list[GovernanceViolation]:
         return violations
 
     for filepath in staged_files:
-        full_path = repo_root / filepath
-        if not full_path.exists() or full_path.is_dir():
+        if not filepath:
             continue
 
+        # Scan the STAGED (index) content, not the worktree. A secret can be
+        # staged and then removed from the worktree — the commit still carries
+        # it — so reading the worktree file would miss it. `git show :<path>`
+        # reads the index blob being committed.
         try:
-            content = full_path.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
+            show = subprocess.run(
+                ["git", "show", f":{filepath}"],
+                cwd=repo_root,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=5,
+            )
+        except (FileNotFoundError, subprocess.TimeoutExpired):
             continue
+        if show.returncode != 0:
+            continue
+        content = show.stdout
 
         for pattern_name, pattern in SECRET_PATTERNS:
             for line_num, line in enumerate(content.splitlines(), 1):

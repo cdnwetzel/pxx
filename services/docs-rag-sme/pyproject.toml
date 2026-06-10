@@ -18,6 +18,11 @@ dev = [
     "pytest-asyncio>=0.23",
     "ruff>=0.6",
 ]
+# Optional cross-encoder reranker (T2b). Heavy (torch); install only on the
+# box that will run it: `uv sync --extra rerank`.
+rerank = [
+    "sentence-transformers>=3.0",
+]
 
 [project.scripts]
 docs-sme = "docs_rag_sme.app:run"

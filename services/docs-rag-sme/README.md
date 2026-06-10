@@ -87,6 +87,19 @@ so ingestion is the *only* network step and it never leaves the allowlist.
 | `DOCS_SME_DSN`      | `postgresql://localhost/docs_sme` | Postgres connection |
 | `DOCS_SME_EMBED_MODEL` | `nomic-embed-text`  | Ollama embedding model (768-dim) |
 | `DOCS_SME_OLLAMA_URL`  | `http://127.0.0.1:11434` | local Ollama base |
+| `DOCS_SME_RETRIEVAL` | `on`                | `off` = plain forwarder (no augmentation) |
+| `DOCS_SME_RERANK`    | `none`              | `bge` = cross-encoder rerank (needs rerank extra) |
+| `DOCS_SME_RERANK_MODEL` | `BAAI/bge-reranker-v2-m3` | cross-encoder model when `RERANK=bge` |
+
+### Optional: cross-encoder reranker (T2b)
+
+A bge cross-encoder reranks retrieved chunks for precision. Heavy (torch +
+~2GB model), so it's opt-in:
+
+```bash
+bash scripts/setup-rerank.sh      # uv sync --extra rerank + download/smoke-test
+DOCS_SME_RERANK=bge uv run docs-sme
+```
 
 ### Test
 

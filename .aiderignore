@@ -1,0 +1,17 @@
+# Files aider MUST NOT modify when editing pxx itself. Mirrors the
+# "Hard guardrails" list in CLAUDE.md — wrong values OOM the Studio, break
+# installs, or alter agent behavior subtly. Edit these by hand only.
+
+# Ollama context windows / call parameters — wrong values can OOM the Studio
+config/model-settings.yml
+
+# Aider's own defaults — change behavior in subtle ways
+config/aider.conf.yml
+.aider.conf.yml
+
+# Package metadata + dependencies — break installs
+pyproject.toml
+
+# Meta — the guardrails themselves
+.aiderignore
+CONVENTIONS.md

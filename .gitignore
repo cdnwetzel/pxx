@@ -1,4 +1,8 @@
-.aider*
+# aider runtime artifacts (the .aiderignore and .aider.conf.yml configs ARE tracked)
+.aider.chat.history.md
+.aider.input.history
+.aider.llm.history
+.aider*.tags.cache.v*/
 __pycache__/
 *.pyc
 .claude/worktrees/

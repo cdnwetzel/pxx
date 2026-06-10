@@ -183,7 +183,7 @@ def _find_aider() -> str:
         return found
     print(
         "pxx: aider not found. It installs with pxx — try "
-        "`pip install --force-reinstall pxx` (or `uv sync` in a repo checkout).",
+        "`pip install --force-reinstall pxx-orchestrator` (or `uv sync` in a repo checkout).",
         file=sys.stderr,
     )
     sys.exit(1)

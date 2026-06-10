@@ -1717,7 +1717,7 @@ wheels = [
 ]
 
 [[package]]
-name = "pxx"
+name = "pxx-orchestrator"
 version = "1.0.0"
 source = { editable = "." }
 dependencies = [

@@ -1,7 +1,7 @@
 name: Release to PyPI
 
 # Publishes via PyPI "trusted publishing" (OIDC) — no API token stored anywhere.
-# One-time setup on pypi.org → project pxx → Publishing → Add a publisher:
+# One-time setup on pypi.org → project pxx-orchestrator → Publishing (use 'Add a pending publisher' before the first upload) → Add a publisher:
 #   owner: cdnwetzel   repository: pxx   workflow: release.yml   environment: pypi
 # Then a `vX.Y.Z` tag push releases that version.
 

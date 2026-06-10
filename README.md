@@ -26,7 +26,7 @@ Before installing, you need:
 | **At least one pulled model** | aider needs a model that exists | e.g. `ollama pull qwen2.5-coder:7b`, then `export PXX_MODEL=ollama_chat/qwen2.5-coder:7b` |
 | **git** (recommended) | auto-commits, safety tags, scoping | pxx works outside a git repo too (it passes `--no-git` to aider) |
 
-You do **not** install aider separately — `pip install pxx` brings
+You do **not** install aider separately — `pip install pxx-orchestrator` brings
 `aider-chat` as a pinned dependency (pinned deliberately; aider releases
 weekly and can change behavior pxx depends on).
 
@@ -48,8 +48,9 @@ Assumptions pxx makes:
 **Requires:** [Ollama](https://ollama.com) running and reachable (local by default).
 
 ```bash
-# Install the core
-pip install pxx
+# Install the core (the command is `pxx`; the PyPI name differs
+# because `pxx` was taken by an unrelated 2023 project)
+pip install pxx-orchestrator
 
 # Point pxx at your Ollama if it isn't on localhost:11434
 export PXX_OLLAMA_BASE=http://your-ollama-host:11434   # optional
@@ -136,7 +137,7 @@ pxx at them with the env vars below); the core needs only an Ollama endpoint.
 
 **Core (pip):**
 ```bash
-pip install pxx
+pip install pxx-orchestrator   # installs the `pxx` command
 ```
 This gives you the orchestrator + ask/edit against any Ollama. The optional
 `--with-memory` / `--with-router` / `--with-docs` services are not packaged on

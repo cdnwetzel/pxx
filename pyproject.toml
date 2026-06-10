@@ -3,7 +3,9 @@ requires = ["setuptools>=77.0.3", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "pxx"
+# Distribution name. "pxx" on PyPI is owned by an unrelated 2023 project, so we
+# publish as pxx-orchestrator; the console script and import package stay `pxx`.
+name = "pxx-orchestrator"
 version = "1.0.0"
 description = "Offline-capable aider orchestrator with persistent observation memory"
 readme = "README.md"

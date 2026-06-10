@@ -64,28 +64,34 @@ class TestRecallCommand:
         """Test successful /recall execution."""
         mock_post.return_value.status_code = 200
         mock_post.return_value.json.return_value = {
-            "observations": [
+            "query": "race condition",
+            "results": [
                 {
-                    "title": "Bug fix",
-                    "content": "Fixed race condition",
+                    "id": "obs-1",
+                    "content": "Bug fix: Fixed race condition",
                     "score": 0.95,
                 }
-            ]
+            ],
+            "count": 1,
         }
 
         handler = SlashCommandHandler()
         result = handler.execute("recall", "race condition")
 
         assert result["success"]
-        assert "Bug fix" in result["response"]
-        assert "Fixed race condition" in result["response"]
+        assert "Bug fix: Fixed race condition" in result["response"]
         assert "0.95" in result["response"]
+        # Forwarded to the server's /command dispatcher
+        args, kwargs = mock_post.call_args
+        assert args[0].endswith("/command")
+        assert kwargs["json"]["command"] == "recall"
+        assert kwargs["json"]["args"]["query"] == "race condition"
 
     @patch("pxx.memory_commands.requests.post")
     def test_recall_no_results(self, mock_post: Mock) -> None:
         """Test /recall with no results."""
         mock_post.return_value.status_code = 200
-        mock_post.return_value.json.return_value = {"observations": []}
+        mock_post.return_value.json.return_value = {"results": [], "count": 0}
 
         handler = SlashCommandHandler()
         result = handler.execute("recall", "nonexistent query")
@@ -125,17 +131,16 @@ class TestRecallCommand:
 
     @patch("pxx.memory_commands.requests.post")
     def test_recall_with_context(self, mock_post: Mock) -> None:
-        """Test /recall includes repo context in filter."""
+        """Test /recall scopes the query to the repo via the project field."""
         mock_post.return_value.status_code = 200
-        mock_post.return_value.json.return_value = {"observations": []}
+        mock_post.return_value.json.return_value = {"results": [], "count": 0}
 
         handler = SlashCommandHandler()
         handler.execute("recall", "test", repo_root="/repo", cwd="/repo/src")
 
-        # Verify context was included in POST
+        # repo_root maps to the server's per-project scope
         args, kwargs = mock_post.call_args
-        assert kwargs["json"]["filters"]["repo_root"] == "/repo"
-        assert kwargs["json"]["filters"]["cwd"] == "/repo/src"
+        assert kwargs["json"]["project"] == "/repo"
 
 
 class TestRememberCommand:
@@ -189,11 +194,12 @@ class TestRememberCommand:
         result = handler.execute("remember", "Title:Some content here")
 
         assert result["success"]
-        # Verify observation was posted
+        # Verify the command was forwarded with parsed title/content
         args, kwargs = mock_post.call_args
-        obs = kwargs["json"]["observations"][0]
-        assert obs["title"] == "Title"
-        assert obs["content"] == "Some content here"
+        assert args[0].endswith("/command")
+        assert kwargs["json"]["command"] == "remember"
+        assert kwargs["json"]["args"]["title"] == "Title"
+        assert kwargs["json"]["args"]["content"] == "Some content here"
 
     @patch("pxx.memory_commands.requests.post")
     def test_remember_network_error(self, mock_post: Mock) -> None:

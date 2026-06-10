@@ -16,6 +16,12 @@ NEXT STEPS (post-Phase-5):
 - Or: wire stdin/stdout bidirectionally via PTY support in the supervisor
 
 For now, this module is infrastructure-ready but not connected.
+
+ROLE: this handler is a thin client. The agentmemory server owns the command
+logic (services/agentmemory CommandHandler). Each command is forwarded to the
+server's `POST /command` endpoint as `{project, command, args}` and the JSON
+result is formatted for display. The server scopes observations by `project`,
+which pxx maps to the session's repo root.
 """
 
 from __future__ import annotations
@@ -74,19 +80,19 @@ class SlashCommandHandler:
         Args:
             command: Command name (recall, remember, forget)
             args: Command arguments (query string or key=value pairs)
-            repo_root: Git repository root (optional context)
-            cwd: Current working directory (optional context)
+            repo_root: Git repository root, used as the memory `project` scope
+            cwd: Current working directory (reserved; server scopes by project)
 
         Returns:
             SlashCommandResult with success flag and response.
         """
         try:
             if command == "recall":
-                return self._recall(args, repo_root=repo_root, cwd=cwd)
+                return self._recall(args, repo_root=repo_root)
             elif command == "remember":
-                return self._remember(args, repo_root=repo_root, cwd=cwd)
+                return self._remember(args, repo_root=repo_root)
             elif command == "forget":
-                return self._forget(args)
+                return self._forget(args, repo_root=repo_root)
             else:
                 return {
                     "success": False,
@@ -100,22 +106,23 @@ class SlashCommandHandler:
                 "response": f"Command error: {e}",
             }
 
-    def _recall(
-        self,
-        query: str,
-        repo_root: str | None = None,
-        cwd: str | None = None,
-    ) -> SlashCommandResult:
-        """Execute /recall <query> to search memory.
+    def _post_command(
+        self, command: str, args: dict, repo_root: str | None
+    ) -> requests.Response:
+        """Forward a slash command to the agentmemory server's /command endpoint."""
+        payload = {
+            "project": repo_root or "default",
+            "command": command,
+            "args": args,
+        }
+        return requests.post(
+            f"{self.memory_api}/command",
+            json=payload,
+            timeout=2.0,
+        )
 
-        Args:
-            query: Search term for memory retrieval
-            repo_root: Repository root for filtering
-            cwd: Current directory for filtering
-
-        Returns:
-            SlashCommandResult with search results.
-        """
+    def _recall(self, query: str, repo_root: str | None = None) -> SlashCommandResult:
+        """Execute /recall <query> — search saved observations via /command."""
         if not query:
             return {
                 "success": False,
@@ -124,21 +131,7 @@ class SlashCommandHandler:
             }
 
         try:
-            payload = {
-                "query": query,
-                "limit": 5,
-                "filters": {},
-            }
-            if repo_root:
-                payload["filters"]["repo_root"] = repo_root
-            if cwd:
-                payload["filters"]["cwd"] = cwd
-
-            resp = requests.post(
-                f"{self.memory_api}/search",
-                json=payload,
-                timeout=2.0,
-            )
+            resp = self._post_command("recall", {"query": query, "limit": 5}, repo_root)
 
             if resp.status_code != 200:
                 return {
@@ -147,10 +140,8 @@ class SlashCommandHandler:
                     "response": f"Memory query failed: HTTP {resp.status_code}",
                 }
 
-            result = resp.json()
-            observations = result.get("observations", [])
-
-            if not observations:
+            results = resp.json().get("results", [])
+            if not results:
                 return {
                     "success": True,
                     "command": "recall",
@@ -158,11 +149,10 @@ class SlashCommandHandler:
                 }
 
             lines = [f"### Recall Results for '{query}':\n"]
-            for i, obs in enumerate(observations, 1):
-                title = obs.get("title", f"Observation {i}")
+            for i, obs in enumerate(results, 1):
                 content = obs.get("content", "")
                 score = obs.get("score", 0)
-                lines.append(f"**{i}. {title}** (relevance: {score:.2f})")
+                lines.append(f"**{i}.** (relevance: {score:.2f})")
                 lines.append(content)
                 lines.append("")
 
@@ -179,22 +169,8 @@ class SlashCommandHandler:
                 "response": f"Memory connection error: {e}",
             }
 
-    def _remember(
-        self,
-        args: str,
-        repo_root: str | None = None,
-        cwd: str | None = None,
-    ) -> SlashCommandResult:
-        """Execute /remember <title> <content> to save observation.
-
-        Args:
-            args: "title" "content" or title:content format
-            repo_root: Repository root for context
-            cwd: Current directory for context
-
-        Returns:
-            SlashCommandResult with save status.
-        """
+    def _remember(self, args: str, repo_root: str | None = None) -> SlashCommandResult:
+        """Execute /remember "title" "content" — save an observation via /command."""
         if not args:
             return {
                 "success": False,
@@ -207,7 +183,6 @@ class SlashCommandHandler:
         if len(parts) == 2:
             title, content = parts[0].strip(), parts[1].strip()
         else:
-            # Try quoted format
             match = re.match(r'"([^"]+)"\s+"([^"]+)"', args)
             if match:
                 title, content = match.group(1), match.group(2)
@@ -226,21 +201,8 @@ class SlashCommandHandler:
             }
 
         try:
-            observation = {
-                "title": title,
-                "content": content,
-                "source": "user-remember-command",
-                "metadata": {
-                    "repo_root": repo_root,
-                    "cwd": cwd,
-                    "command": "remember",
-                },
-            }
-
-            resp = requests.post(
-                f"{self.memory_api}/inject",
-                json={"observations": [observation]},
-                timeout=2.0,
+            resp = self._post_command(
+                "remember", {"title": title, "content": content}, repo_root
             )
 
             if resp.status_code == 200:
@@ -249,12 +211,11 @@ class SlashCommandHandler:
                     "command": "remember",
                     "response": f"Saved: {title}",
                 }
-            else:
-                return {
-                    "success": False,
-                    "command": "remember",
-                    "response": f"Save failed: HTTP {resp.status_code}",
-                }
+            return {
+                "success": False,
+                "command": "remember",
+                "response": f"Save failed: HTTP {resp.status_code}",
+            }
 
         except requests.RequestException as e:
             return {
@@ -263,29 +224,37 @@ class SlashCommandHandler:
                 "response": f"Save error: {e}",
             }
 
-    def _forget(self, args: str) -> SlashCommandResult:
-        """Execute /forget <key> to mark observation deprecated.
-
-        Args:
-            args: Observation key or ID to forget
-
-        Returns:
-            SlashCommandResult with forget status.
-        """
-        if not args:
+    def _forget(self, args: str, repo_root: str | None = None) -> SlashCommandResult:
+        """Execute /forget <id> — delete an observation via /command."""
+        obs_id = args.strip()
+        if not obs_id:
             return {
                 "success": False,
                 "command": "forget",
                 "response": "Usage: /forget <observation_id>",
             }
 
-        # TODO: agentmemory does not yet have a /forget endpoint.
-        # For now, return a "not yet implemented" message.
-        return {
-            "success": False,
-            "command": "forget",
-            "response": "/forget not yet implemented (agentmemory endpoint missing)",
-        }
+        try:
+            resp = self._post_command("forget", {"id": obs_id}, repo_root)
+
+            if resp.status_code == 200:
+                return {
+                    "success": True,
+                    "command": "forget",
+                    "response": f"Forgot: {obs_id}",
+                }
+            return {
+                "success": False,
+                "command": "forget",
+                "response": f"Forget failed: HTTP {resp.status_code}",
+            }
+
+        except requests.RequestException as e:
+            return {
+                "success": False,
+                "command": "forget",
+                "response": f"Forget error: {e}",
+            }
 
     def is_command_line(self, line: str) -> bool:
         """Check if line is a slash command.

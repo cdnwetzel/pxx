@@ -56,8 +56,8 @@ for round in 1..max_rounds:
 - **REJECT** (P0) → stop immediately; offer rollback to the safety tag.
 
 This finally wires the three inert primitives: `build_healing_prompt` gets a
-caller, `healing_attempts` gets incremented, and `--heal` becomes real (or the
-loop subsumes it — see Open Questions).
+caller, `healing_attempts` gets incremented, and `--heal` becomes real — one
+REVISE round, with `--loop` as a fold over it (see Decisions).
 
 ---
 
@@ -78,6 +78,16 @@ gate autonomous edits is the highest risk here.
       APPROVE for any severity that isn't exactly "P0"/"P1" (parse glitch,
       casing, unknown label) — a loop verifier must fail closed (or surface),
       never silently approve. Found during the 2026-06-10 dogfood triage.
+- [ ] **Design question — approval on silence.** The gate is currently
+      optimistic in *both* layers: a weak reviewer generating findings (the
+      live T5810 pass went 0-for-2 on verifiable suggestions) and a verdict
+      function that approves when no findings parse. Decide in 9.1 whether the
+      verdict should distinguish "review ran and found nothing" from "review
+      empty/absent/unparseable" — treating no-findings from an untrusted
+      reviewer as *no information*, not approval. Either way, the deterministic
+      gates (pytest, ruff, diff cap) carry the real weight until the reviewer
+      model earns trust; the verdict's job is to never launder reviewer silence
+      into a green light.
 - [ ] `test_workflow.py`: `transition` phase moves + `healing_attempts` updates,
       `load_state`/`save_state` round-trip, `resume_state`.
 - [ ] `test_governance.py`: `run_governance_check` allow/deny on a synthetic

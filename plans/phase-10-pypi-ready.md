@@ -127,22 +127,24 @@ pxx to their console scripts only.
 
 ## Success Criteria
 
-- [ ] `pip install pxx` in a clean venv (not the repo) → `pxx` runs ask/edit
-      against a user-configured Ollama with zero machine-specific assumptions.
-- [ ] No hardcoded `/Users/...`, office hostnames, or personal SSH targets reachable
-      on a default code path.
-- [ ] `twine check` clean; LICENSE present; metadata real.
-- [ ] README is sufficient for a stranger to install, configure, and run.
-- [ ] Optional services either install via extras (A) or degrade gracefully with
-      a clear "clone the repo" message (B).
+- [x] `pip install pxx` in a clean venv (not the repo) → `pxx` runs (verified:
+      `--list-commands`, `--doctor`, packaged `system.md` resolves, degrades
+      without Ollama/services).
+- [x] No hardcoded `/Users/...`, office hostnames, or personal SSH targets on a
+      default code path (`grep` clean across `pxx/*.py` and `README.md`).
+- [x] `twine check` clean on sdist + wheel; LICENSE present; metadata real.
+- [x] README stands alone for a stranger (no fleet refs; pip-core + repo-services).
+- [x] Optional services degrade gracefully with a clear "clone the repo" message,
+      fast (~0.2s, no retry spam).
 
-## Open Decisions
+## Decisions (resolved)
 
-1. **Crux: services packaging — Option A, B, or C?** (gates 10.2/10.4)
-2. **Scope of the published product:** is the supervisor/memory/loop a headline
-   feature (→ A) or an advanced repo-clone extra (→ B)?
-3. **drift.py:** keep as a documented advanced feature, or exclude from the
-   published package as too personal?
+1. **Services packaging → Option B** (core on PyPI; services are a repo-clone
+   feature). A is a future option if the services warrant their own releases.
+2. **Published product scope → core orchestrator** (ask/edit + memory client);
+   supervisor/loop are advanced repo features.
+3. **drift.py → kept**, but de-personalized: no default host, env-configured,
+   skips cleanly when unset.
 
 ## Dependencies
 

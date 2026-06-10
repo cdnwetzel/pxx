@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import Mock, patch
 
-from pxx.doctor import Doctor, MemoryStats, RouterStats
+from pxx.doctor import Doctor, MemoryStats, RemoteStats, RouterStats
 
 
 class TestRouterStats:
@@ -187,8 +187,10 @@ class TestDoctorMemory:
 class TestDoctorSummary:
     """Tests for Doctor summary/report."""
 
+    @patch("pxx.doctor._git.remote_head_sha", return_value="abc1234")
+    @patch("pxx.doctor._git.head_sha", return_value="abc1234")
     @patch("pxx.doctor.requests.get")
-    def test_get_summary(self, mock_get: Mock) -> None:
+    def test_get_summary(self, mock_get: Mock, _head: Mock, _remote: Mock) -> None:
         """Test doctor summary dict generation."""
         responses = [
             Mock(status_code=200, json=lambda: {"active_requests": 1}),  # Router
@@ -205,11 +207,15 @@ class TestDoctorSummary:
         assert "timestamp" in summary
         assert "router" in summary
         assert "memory" in summary
+        assert "mirrors" in summary
         assert summary["router"]["available"]
         assert summary["memory"]["available"]
+        assert summary["mirrors"]["in_sync"]
 
+    @patch("pxx.doctor._git.remote_head_sha", return_value="abc1234")
+    @patch("pxx.doctor._git.head_sha", return_value="abc1234")
     @patch("pxx.doctor.requests.get")
-    def test_print_report(self, mock_get: Mock) -> None:
+    def test_print_report(self, mock_get: Mock, _head: Mock, _remote: Mock) -> None:
         """Test doctor report output."""
         mock_get.side_effect = [
             Mock(status_code=200, json=lambda: {"active_requests": 2}),
@@ -223,6 +229,54 @@ class TestDoctorSummary:
 
         # Just verify it doesn't crash
         doctor.print_report()
+
+
+class TestRemoteStats:
+    """Tests for the dual-push mirror-sync check."""
+
+    def test_in_sync_when_all_match(self) -> None:
+        """All reachable remotes matching local HEAD => in sync."""
+        stats = RemoteStats(
+            local_sha="deadbeef",
+            remotes={"origin": "deadbeef", "mirror": "deadbeef"},
+        )
+        assert stats.in_sync
+        assert "in sync" in str(stats)
+
+    def test_out_of_sync_when_one_behind(self) -> None:
+        """A remote at a different SHA => out of sync."""
+        stats = RemoteStats(
+            local_sha="deadbeef",
+            remotes={"origin": "deadbeef", "mirror": "0ldc0de"},
+        )
+        assert not stats.in_sync
+        assert "OUT OF SYNC" in str(stats)
+
+    def test_unreachable_remote_does_not_count_as_synced(self) -> None:
+        """Unreachable remote (None) is reported, not treated as in sync."""
+        stats = RemoteStats(
+            local_sha="deadbeef",
+            remotes={"origin": "deadbeef", "mirror": None},
+        )
+        assert stats.in_sync  # only reachable remotes gate sync
+        assert "unreachable" in str(stats)
+
+    def test_not_a_repo(self) -> None:
+        """No local HEAD => not in sync, friendly message."""
+        stats = RemoteStats(local_sha=None, remotes={"origin": None})
+        assert not stats.in_sync
+        assert "not a git repo" in str(stats)
+
+    @patch("pxx.doctor._git.remote_head_sha")
+    @patch("pxx.doctor._git.head_sha", return_value="deadbeef")
+    def test_check_remotes_probes_each_mirror(
+        self, _head: Mock, mock_remote: Mock
+    ) -> None:
+        """check_remotes probes every configured mirror remote."""
+        mock_remote.side_effect = lambda name, ref="main": "deadbeef"
+        stats = Doctor().check_remotes(remotes=("origin", "mirror"))
+        assert stats.in_sync
+        assert set(stats.remotes) == {"origin", "mirror"}
 
 
 class TestDoctorEnvVars:

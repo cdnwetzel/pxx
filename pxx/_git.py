@@ -89,3 +89,25 @@ def head_sha() -> str | None:
         return result.stdout.strip() or None
     except (FileNotFoundError, subprocess.TimeoutExpired):
         return None
+
+
+def remote_head_sha(remote: str, ref: str = "main") -> str | None:
+    """Return a remote ref's SHA-1 via `git ls-remote`, or None on any failure.
+
+    Hits the network (one round-trip per call), so callers should treat a None
+    return as "unreachable / unknown" rather than "diverged". The 5s timeout
+    accommodates SSH handshakes to GitHub.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "ls-remote", remote, ref],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+        )
+        if result.returncode != 0 or not result.stdout.strip():
+            return None
+        return result.stdout.split()[0] or None
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return None

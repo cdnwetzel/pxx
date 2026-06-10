@@ -11,6 +11,12 @@ from datetime import datetime
 
 import requests
 
+from pxx import _git
+
+# The two GitHub mirrors `git push origin` fans out to (cdnwetzel + mirror).
+# A healthy fleet keeps both at the same SHA as local HEAD.
+MIRROR_REMOTES: tuple[str, ...] = ("origin", "mirror")
+
 
 @dataclass
 class RouterStats:
@@ -75,6 +81,38 @@ class MemoryStats:
         return " | ".join(parts) if len(parts) > 1 else parts[0]
 
 
+@dataclass
+class RemoteStats:
+    """Mirror-sync state for the GitHub remotes pxx dual-pushes to."""
+
+    local_sha: str | None
+    remotes: dict[str, str | None]
+
+    @property
+    def in_sync(self) -> bool:
+        """True iff every reachable remote matches local HEAD."""
+        if self.local_sha is None:
+            return False
+        reachable = [sha for sha in self.remotes.values() if sha is not None]
+        return bool(reachable) and all(sha == self.local_sha for sha in reachable)
+
+    def __str__(self) -> str:
+        """Format mirror-sync status for display."""
+        if self.local_sha is None:
+            return "  mirrors: not a git repo (or unborn HEAD)"
+
+        status = "in sync" if self.in_sync else "⚠️  OUT OF SYNC"
+        lines = [f"  mirrors ({status}) — local {self.local_sha[:7]}"]
+        for name, sha in self.remotes.items():
+            if sha is None:
+                lines.append(f"    {name}: unreachable")
+            elif sha == self.local_sha:
+                lines.append(f"    {name}: {sha[:7]} ✓")
+            else:
+                lines.append(f"    {name}: {sha[:7]} ✗ (behind/ahead)")
+        return "\n".join(lines)
+
+
 class Doctor:
     """System health diagnostics."""
 
@@ -91,6 +129,17 @@ class Doctor:
         """
         self.router_api = router_api or os.getenv("PXX_ROUTER_API")
         self.memory_api = memory_api or os.getenv("PXX_MEMORY_API")
+
+    def check_remotes(self, remotes: tuple[str, ...] = MIRROR_REMOTES) -> RemoteStats:
+        """Check that the dual-push GitHub mirrors match local HEAD.
+
+        Each remote is probed with `git ls-remote` (one network round-trip);
+        an unreachable remote is reported as such rather than as diverged.
+        """
+        return RemoteStats(
+            local_sha=_git.head_sha(),
+            remotes={name: _git.remote_head_sha(name) for name in remotes},
+        )
 
     def check_router(self) -> RouterStats:
         """Check 9router health.
@@ -200,6 +249,10 @@ class Doctor:
         memory_stats = self.check_memory()
         print(str(memory_stats))
 
+        print("\nGit mirrors:")
+        remote_stats = self.check_remotes()
+        print(str(remote_stats))
+
         print("\n=== Run full doctor ===")
         print("  bash scripts/doctor.sh  (Ollama, endpoints, drift)")
 
@@ -211,6 +264,7 @@ class Doctor:
         """
         router = self.check_router()
         memory = self.check_memory()
+        remotes = self.check_remotes()
 
         return {
             "timestamp": datetime.now().isoformat(),
@@ -228,5 +282,10 @@ class Doctor:
                 "total_size_mb": memory.total_size_mb,
                 "hit_rate": memory.hit_rate,
                 "avg_retrieval_ms": memory.avg_retrieval_ms,
+            },
+            "mirrors": {
+                "in_sync": remotes.in_sync,
+                "local_sha": remotes.local_sha,
+                "remotes": remotes.remotes,
             },
         }

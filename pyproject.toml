@@ -22,7 +22,11 @@ classifiers = [
     "Topic :: System :: Shells",
 ]
 dependencies = [
-    "aider-chat>=0.45.0",
+    # Exact pin by design — aider releases weekly and can change behavior pxx
+    # depends on (chat modes, --read, --config, edit format, exit codes). Bump
+    # only via the upgrade discipline in CLAUDE.md. (Already the resolved/
+    # installed/latest version; this only re-tightens the constraint string.)
+    "aider-chat==0.86.2",
     "requests>=2.31.0",
 ]
 

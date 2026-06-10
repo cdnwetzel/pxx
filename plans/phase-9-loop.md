@@ -113,9 +113,12 @@ stays in the modules it calls.
 distinct failure mode.
 
 - [ ] **Round cap** (default 3) — hard ceiling on iterations.
-- [ ] **Monotonic-progress rule** — the failing-test count must *strictly
-      decrease* each round, else abort. Kills the "iterates 100 times making no
-      progress" cost failure mode.
+- [ ] **Monotonic-progress rule** — measured against the **baseline test set
+      captured before round 1**: failures within that set must *strictly
+      decrease* each round, else abort. Tests the loop itself introduces are
+      tracked separately (a good round may add tests that initially fail —
+      naive whole-count monotonicity would punish exactly the right behavior).
+      Kills the "iterates 100 times making no progress" cost failure mode.
 - [ ] **Cumulative diff budget** — a budget across *all* rounds (not just the
       per-commit `SELF_FIX_DIFF_CAP = 60`), so N rounds can't smuggle in an
       N×60-line rewrite.
@@ -127,25 +130,30 @@ distinct failure mode.
 
 **Effort:** 2 days. **Status:** `planned`
 
-## Phase 9.4: Per-round learning via `tool_capture` (not the observer)
+## Phase 9.4: Feedback — direct in-loop, memory for cross-session only
 
-**What:** Inject "what failed in round N and why" into round N+1's context.
+**What:** Round-to-round feedback is **plain prompt construction from variables
+the driver already holds** — the exact failing-test list and diff of the round
+just run go straight into `build_healing_prompt`. Deterministic and free.
+Routing it through `MemoryInjector`'s fuzzy retrieval would add a failure mode
+for zero gain: within a loop, the driver holds the ground truth.
 
-**Why:** This is the real synergy with the Phase-8 memory stack. `tool_capture`
-(post-session git-diff + test-name parsing) **works today in supervisor mode** —
-it does not depend on the runtime observer, which is honestly documented as
-blocked (aider's TUI can't run under piped stdout; see `pxx/observer.py`). Use
-the working path; leave real-time observation deferred.
+Memory's role is **cross-session learning** ("we attempted this task last week,
+here's what broke"): after the loop terminates, `tool_capture` (post-session
+git-diff + test-name parsing — works today, does not depend on the blocked
+runtime observer) stores a summary observation for future sessions.
 
 **Tasks:**
-- [ ] After each round, `tool_capture.capture_session_tools()` the round's diff +
-      failing tests.
-- [ ] Feed the prior round's capture into the next round via `MemoryInjector`.
-- [ ] (Stronger once Phase 8.5 confidence scoring lands — sequence 8.5 before
-      relying on ranked recall.)
+- [ ] Driver passes round-N failing tests + diff directly into the round-N+1
+      healing prompt (no retrieval on this path).
+- [ ] On terminal verdict, `tool_capture.capture_session_tools()` stores the
+      loop summary for cross-session recall.
+- [ ] Privacy check: loop audit/memory records must honor the de-identification
+      contract (commit a256a04) — no machine paths/hostnames in anything that
+      could reach a public artifact.
 
-**Effort:** 2-3 days. **Status:** `planned` (soft-depends on Phase 8.4 ✅ /
-benefits from 8.5)
+**Effort:** 1 day (shrunk by dropping in-loop retrieval). **Status:** `planned`
+(8.5 confidence scoring is **off the loop's critical path entirely**)
 
 ---
 
@@ -165,6 +173,11 @@ benefits from 8.5)
   warning offering a docs URL) and prompt_toolkit can't attach to a non-TTY
   stdin. Every loop round must pass `--yes` (and keep model metadata in sync
   with the served model id) so no confirm-prompt can block an unattended round.
+  Auto-confirming is correct, not scary: **the prompt is not the boundary — the
+  hook is.** Aider's interactive confirms were never a real gate; the diff cap,
+  scope hook, ruff+pytest gate, and review verdict all sit downstream of aider,
+  so `--yes` upstream does not widen the blast radius. (Stated here so a future
+  reader doesn't "fix" it.)
 - **Never act on unverified model findings.** Same dogfood session, second run
   (worked end-to-end: env-file config → tunnel → T5810 14b → ask-mode one-shot):
   the model returned 3 suggestions; the 2 verifiable ones were both FALSE — one
@@ -172,6 +185,12 @@ benefits from 8.5)
   Windows atomicity (os.replace IS atomic there; the proposed shutil.move is
   worse). 0-for-2 confirms the plan's stance: REVISE-round healing prompts come
   only from the deterministic review gate, never raw model suggestions.
+- **Post-PyPI shipping posture.** As of 2026-06-10 pxx ships to strangers
+  without this repo's guardrail culture. `--loop` therefore lands marked
+  **experimental** in v1.1 with the most conservative defaults: refuse without
+  `--scope`; refuse on a dirty tree outside the safety-tag flow; round cap 3;
+  no-push absolute; REJECT stops and reports (never auto-reverts a stranger's
+  tree — `--rollback` is opt-in).
 
 ---
 
@@ -181,33 +200,39 @@ benefits from 8.5)
 - [ ] `pxx --loop "<task>" --scope <file>` drives edit→test→review→heal to a
       terminal verdict.
 - [ ] `healing_attempts` increments; `build_healing_prompt` is called; `--heal`
-      is real (or removed as superseded — see Open Questions).
+      is real (one REVISE round; `--loop` folds over it — see Decisions).
 - [ ] All three guards demonstrably stop a pathological loop (round cap,
-      non-decreasing test count, diff budget).
+      baseline-set failures not strictly decreasing, cumulative diff budget).
 - [ ] Budget reported in tokens + wall-clock; never pushes; every round audited.
 
 ---
 
-## Open Questions
+## Decisions (resolved 2026-06-10, loop-engineering review)
 
-1. **`--heal` vs `--loop`.** `--heal` is currently advertised but unimplemented.
-   Options: (a) implement `--heal` as a single REVISE round and have `--loop`
-   call it N times, or (b) drop `--heal` (strip the 3 suggestion strings + the
-   dead `build_healing_prompt` caller) and ship only `--loop`. Leaning (a):
-   `--heal` = one round is a natural, testable primitive.
-2. **Rollback policy on REJECT.** Auto-rollback to the safety tag, or stop and
-   leave the tree for inspection? Default to stop-and-report; `--loop --rollback`
-   to opt into auto-revert.
-3. **8.5 sequencing.** Per-round learning (9.4) is stronger with confidence
-   scoring (8.5). Do 8.5 first, or ship 9.4 against unranked recall and upgrade?
+1. **`--heal` = exactly one REVISE round; `--loop` = a fold over it.** The
+   decisive argument is testability, not elegance: one round can be unit- and
+   integration-tested cheaply, and the loop driver then needs almost no tests
+   of its own beyond guard behavior.
+2. **Rollback on REJECT: stop-and-report, always.** Hardened by PyPI: never
+   auto-revert a stranger's tree. `--loop --rollback` is the explicit opt-in.
+3. **8.5 does not gate the loop.** Dissolved by the 9.4 simplification: in-loop
+   feedback is direct variable passing; memory (and any future confidence
+   ranking) only improves cross-session recall, off the critical path.
+
+## Sequencing
+
+9.1 (verifier tests) → **9.2 + 9.3 together** (driver and guards are one review
+surface — a driver without guards shouldn't exist even on a branch) →
+simplified 9.4. With `--heal`-as-one-round, the critical path is roughly a week
+and nothing on it is blocked.
 
 ---
 
 ## Dependencies
 
 **Blocked by:** Nothing.
-**Soft-depends on:** Phase 8.4 (✅ done — metadata capture) for 9.4; benefits
-from Phase 8.5 (confidence scoring, `planned`).
+**Soft-depends on:** Phase 8.4 (✅ done — metadata capture) for cross-session
+capture. Phase 8.5 is explicitly **not** on the critical path (see Decisions).
 **Unblocks:** Hands-off bounded refactors/bugfixes on a single scoped file.
 
 ---

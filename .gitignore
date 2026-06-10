@@ -10,3 +10,5 @@ temp-phase1/
 *.egg-info/
 /dist/
 /build/
+# pxx local runtime state (workflow.save_state) — was once accidentally tracked
+.pxx/

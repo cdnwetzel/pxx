@@ -1,6 +1,7 @@
 """System health check and diagnostics (Phase 5 Tier 4).
 
-Extends scripts/doctor.sh with runtime diagnostics for router, memory, and aider.
+Runtime diagnostics for the 9router, agentmemory, and the dual-push git
+mirrors. Surfaced via `pxx --doctor`.
 """
 
 from __future__ import annotations
@@ -238,8 +239,12 @@ class Doctor:
                 avg_retrieval_ms=None,
             )
 
-    def print_report(self) -> None:
-        """Print health check report to stdout."""
+    def print_report(self) -> RemoteStats:
+        """Print health check report to stdout; return the mirror-sync stats.
+
+        Returning the RemoteStats lets callers (e.g. `pxx --doctor`) derive an
+        exit code without re-probing the remotes over the network.
+        """
         print("\n=== pxx doctor (extended) ===\n")
 
         print("Routing & Memory:")
@@ -253,8 +258,7 @@ class Doctor:
         remote_stats = self.check_remotes()
         print(str(remote_stats))
 
-        print("\n=== Run full doctor ===")
-        print("  bash scripts/doctor.sh  (Ollama, endpoints, drift)")
+        return remote_stats
 
     def get_summary(self) -> dict:
         """Get diagnostics summary as dict.

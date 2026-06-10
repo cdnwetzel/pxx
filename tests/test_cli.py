@@ -599,6 +599,45 @@ class TestSelfTest:
         assert called == []
 
 
+class TestDoctor:
+    """Tests for the pxx --doctor flag."""
+
+    def _stub_doctor(self, monkeypatch, *, in_sync: bool):
+        from pxx import cli as cli_module
+        from pxx.doctor import RemoteStats
+
+        called: list[str] = []
+
+        def fake_detect():
+            called.append("detect_endpoint")
+            raise RuntimeError("should not be called")
+
+        sha = "deadbeef" if in_sync else None
+        stats = RemoteStats(local_sha="deadbeef", remotes={"origin": sha})
+
+        class FakeDoctor:
+            def print_report(self):
+                return stats
+
+        monkeypatch.setattr(cli_module, "detect_endpoint", fake_detect)
+        monkeypatch.setattr(cli_module.doctor, "Doctor", lambda: FakeDoctor())
+        monkeypatch.setattr(sys, "argv", ["pxx", "--doctor"])
+        return cli_module, called
+
+    def test_doctor_exits_zero_when_in_sync(self, monkeypatch):
+        cli_module, called = self._stub_doctor(monkeypatch, in_sync=True)
+        with pytest.raises(SystemExit) as exc:
+            cli_module.main()
+        assert exc.value.code == 0
+        assert called == []  # short-circuits before endpoint detection
+
+    def test_doctor_exits_nonzero_when_out_of_sync(self, monkeypatch):
+        cli_module, _ = self._stub_doctor(monkeypatch, in_sync=False)
+        with pytest.raises(SystemExit) as exc:
+            cli_module.main()
+        assert exc.value.code == 1
+
+
 class TestSelfLint:
     """Tests for the pxx --self-lint flag (#001 Tier 1)."""
 

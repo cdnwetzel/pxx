@@ -18,6 +18,7 @@ from pathlib import Path
 from pxx import (
     _git,
     audit,
+    doctor,
     drift,
     governance,
     review_gate,
@@ -402,6 +403,10 @@ def main() -> None:
         res = drift.check_sync()
         drift.print_report(res)
         sys.exit(0 if res.is_synced or res.error else 1)
+
+    if "--doctor" in sys.argv:
+        remote_stats = doctor.Doctor().print_report()
+        sys.exit(0 if remote_stats.in_sync else 1)
 
     if "--install-hook" in sys.argv:
         _install_precommit_hook()
@@ -789,7 +794,11 @@ def main() -> None:
             pyver = docs_sme.resolve_python_version(Path.cwd())
             notified = docs_sme.notify_version(sme, pyver)
             env["OPENAI_API_BASE"] = f"{sme}/v1"
-            note = "" if notified else " (version notify failed; retrieving across versions)"
+            note = (
+                ""
+                if notified
+                else " (version notify failed; retrieving across versions)"
+            )
             print(
                 f"pxx: docs-RAG SME at {sme} — aider routed through it; "
                 f"python={pyver or 'any'}{note}",

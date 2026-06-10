@@ -2,7 +2,9 @@
 
 > Backlog ID: 009
 
-> **Status:** `planned`
+> **Status:** `in-progress` — T0 + T1 landed; T2 (hybrid retrieval + rerank +
+> inject) next. Code lives at `services/docs-rag-sme/` (co-located in this repo
+> per the 2026-06-10 decision, not a standalone repo).
 >
 > **Depends on:** nothing in-repo. Sits *beside* the existing T5810 vLLM +
 > audit-proxy stack; pxx changes are limited to one endpoint override and
@@ -208,12 +210,13 @@ several official doc pages alongside the repo map.
 
 ## §8 Phased build (suggested)
 
-- **T0 — Spike:** FastAPI OpenAI-shim that forwards verbatim (no retrieval),
+- **T0 — Spike:** ✅ FastAPI OpenAI-shim that forwards verbatim (no retrieval),
   pointed at by `PXX_VLLM_URL`. Proves the seam + Decisions A/C cheaply.
-- **T1 — Ingestion + store:** crawler (allowlist, delta-hash) → trafilatura
-  → pgvector + full-text. Manual one-shot ingest of `docs.python.org/3.12`.
+- **T1 — Ingestion + store:** ✅ allowlist crawler (delta-hash) → lxml
+  structural chunking → embed (local Ollama nomic-embed-text, 768-dim) →
+  pgvector + generated tsvector. Verified live on `docs.python.org/3.12`.
 - **T2 — Hybrid retrieval + rerank:** wire retrieval into the shim, inject
-  late (Decision B), measure cache hit-rate.
+  late (Decision B), measure cache hit-rate. **← next**
 - **T3 — Version-aware filter:** resolve version from repo pin; default-safe.
 - **T4 — Systemd timer + delta refresh:** the "perpetual" part.
 - **T5 — `pxx --with-docs` flag + banner; model A/B (§6).**

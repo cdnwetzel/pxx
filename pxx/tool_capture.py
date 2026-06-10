@@ -7,6 +7,7 @@ and stores them in agentmemory for future session context.
 from __future__ import annotations
 
 import logging
+import re
 import subprocess
 from pathlib import Path
 
@@ -115,32 +116,42 @@ def extract_observations_from_diff(diff_stat: str, project_root: Path) -> list[d
         obs: dict[str, any] = {
             "content": f"Aider {action} {filepath} ({insertions}+ {deletions}-)",
             "metadata": {
-                "files_changed": [{"path": filepath, "lines_added": insertions, "lines_removed": deletions}]
-            }
+                "files_changed": [
+                    {
+                        "path": filepath,
+                        "lines_added": insertions,
+                        "lines_removed": deletions,
+                    }
+                ]
+            },
         }
 
         # Parse unified diff for function/class changes
         if filepath in unified_diff:
-            file_diff = unified_diff.split(f"diff --git a/{filepath}")[1].split("diff --git")[0]
+            file_diff = unified_diff.split(f"diff --git a/{filepath}")[1].split(
+                "diff --git"
+            )[0]
             obs["metadata"].update(parse_code_changes(file_diff, filepath))
 
         # For backward compatibility, also store just the content
-        observations.append({"content": obs["content"], "metadata": obs.get("metadata", {})})
+        observations.append(
+            {"content": obs["content"], "metadata": obs.get("metadata", {})}
+        )
 
     return observations
+
 
 def parse_code_changes(diff_text: str, filepath: str) -> dict:
     """Parse unified diff to extract function/class changes."""
     metadata = {"functions": [], "classes": []}
 
     # Regex patterns for Python code
-    func_pattern = re.compile(r'^\+.*?def\s+(\w+)\(.*?\)')
-    class_pattern = re.compile(r'^\+.*?class\s+(\w+)\s*\(.*?\)')
+    func_pattern = re.compile(r"^\+.*?def\s+(\w+)\(.*?\)")
+    class_pattern = re.compile(r"^\+.*?class\s+(\w+)\s*\(.*?\)")
 
-    lines = diff_text.split('\n')
+    lines = diff_text.split("\n")
     current_function = None
     current_class = None
-    start_line = 0
 
     for i, line in enumerate(lines):
         func_match = func_pattern.match(line)
@@ -149,7 +160,11 @@ def parse_code_changes(diff_text: str, filepath: str) -> dict:
         if func_match and not current_class:
             # Found a function definition at the root level
             func_name = func_match.group(1)
-            current_function = {"name": func_name, "line_range": (i+1, i+1), "change": "add"}
+            current_function = {
+                "name": func_name,
+                "line_range": (i + 1, i + 1),
+                "change": "add",
+            }
             metadata["functions"].append(current_function)
 
         elif class_match:
@@ -157,17 +172,25 @@ def parse_code_changes(diff_text: str, filepath: str) -> dict:
             class_name = class_match.group(1)
             if not current_class:
                 # New class at root level or nested in another class
-                current_class = {"name": class_name, "line_range": (i+1, i+1), "change": "add"}
+                current_class = {
+                    "name": class_name,
+                    "line_range": (i + 1, i + 1),
+                    "change": "add",
+                }
                 metadata["classes"].append(current_class)
 
-        elif line.startswith('+'):
+        elif line.startswith("+"):
             # Inside a function or class
             if current_function:
-                current_function["line_range"] = (current_function["line_range"][0], i+1)
+                current_function["line_range"] = (
+                    current_function["line_range"][0],
+                    i + 1,
+                )
             elif current_class:
-                current_class["line_range"] = (current_class["line_range"][0], i+1)
+                current_class["line_range"] = (current_class["line_range"][0], i + 1)
 
     return metadata
+
 
 def extract_test_names(output: str) -> dict:
     """Extract test names from test output."""
@@ -175,15 +198,15 @@ def extract_test_names(output: str) -> dict:
 
     # Simple regex patterns for common test frameworks
     passed_patterns = [
-        re.compile(r'passed\s+(\w+)'),
-        re.compile(r'\.\s*(\w+)\s+\(.*?\)')
+        re.compile(r"passed\s+(\w+)"),
+        re.compile(r"\.\s*(\w+)\s+\(.*?\)"),
     ]
     failed_patterns = [
-        re.compile(r'failed\s+(\w+)'),
-        re.compile(r'F\s*(\w+)\s+\(.*?\)')
+        re.compile(r"failed\s+(\w+)"),
+        re.compile(r"F\s*(\w+)\s+\(.*?\)"),
     ]
 
-    for line in output.split('\n'):
+    for line in output.split("\n"):
         for pattern in passed_patterns:
             match = pattern.search(line)
             if match:
@@ -219,7 +242,11 @@ def post_observations_to_memory(
         try:
             resp = requests.post(
                 f"{memory_url}/observations",
-                json={"project": project, "content": obs_data["content"], "metadata": obs_data.get("metadata")},
+                json={
+                    "project": project,
+                    "content": obs_data["content"],
+                    "metadata": obs_data.get("metadata"),
+                },
                 timeout=5,
             )
             if resp.status_code == 200:

@@ -1,6 +1,19 @@
-"""Smoke tests for Phase 5 supervisor mode (9router + agentmemory)."""
+"""Smoke tests for Phase 5 supervisor mode (9router + agentmemory).
 
+These are live tests: they launch the real 9router and agentmemory services
+and probe them over the network. They are opt-in so the default unit suite
+stays deterministic — set PXX_RUN_LIVE=1 with the services installed/runnable.
+"""
+
+import os
 import time
+
+import pytest
+
+pytestmark = pytest.mark.skipif(
+    os.environ.get("PXX_RUN_LIVE") != "1",
+    reason="live smoke test: set PXX_RUN_LIVE=1 to start and probe 9router + agentmemory",
+)
 
 
 class TestSupervisorModeServices:

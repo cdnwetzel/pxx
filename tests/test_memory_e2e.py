@@ -1,8 +1,21 @@
-"""End-to-end test for Phase 5 memory cycle: inject → execute → capture → retrieve."""
+"""End-to-end test for Phase 5 memory cycle: inject → execute → capture → retrieve.
 
+These are live tests: they spawn real pxx sessions and talk to a running
+agentmemory (and, for the full cycle, 9router + an LLM). They are opt-in so the
+default unit suite stays deterministic — set PXX_RUN_LIVE=1 with the fleet up.
+"""
+
+import os
 import subprocess
 import time
+
 import httpx
+import pytest
+
+pytestmark = pytest.mark.skipif(
+    os.environ.get("PXX_RUN_LIVE") != "1",
+    reason="live e2e: set PXX_RUN_LIVE=1 with the pxx fleet (9router + agentmemory + LLM) running",
+)
 
 
 class TestMemoryCycleE2E:
@@ -74,7 +87,11 @@ class TestMemoryCycleE2E:
         with httpx.Client(timeout=5.0) as client:
             search_response = client.post(
                 "http://127.0.0.1:3111/search",
-                json={"query": "files directory bash", "limit": 10},
+                json={
+                    "project": str(tmp_path),
+                    "query": "files directory bash",
+                    "limit": 10,
+                },
             )
 
         assert search_response.status_code == 200, (
@@ -82,7 +99,7 @@ class TestMemoryCycleE2E:
         )
 
         search_results = search_response.json()
-        observations = search_results.get("observations", [])
+        observations = search_results.get("results", [])
 
         print(f"Observations in memory: {len(observations)}")
         for i, obs in enumerate(observations):
@@ -184,17 +201,12 @@ class TestMemoryCycleE2E:
         time.sleep(0.5)
 
         with httpx.Client(timeout=5.0) as client:
-            # Store an observation
-            obs = {
-                "title": "Test Tool Call",
-                "content": "User ran: ls -la /tmp\nResult: list of files",
-                "source": "test-e2e",
-                "metadata": {"tool": "bash"},
-            }
-
+            # Store an observation (storage is POST /observations {project, content};
+            # /inject is the retrieval endpoint, not storage).
+            content = "Test Tool Call\n\nUser ran: ls -la /tmp\nResult: list of files"
             store_resp = client.post(
-                "http://127.0.0.1:3111/inject",
-                json={"observations": [obs]},
+                "http://127.0.0.1:3111/observations",
+                json={"project": "test-e2e", "content": content},
             )
 
             assert store_resp.status_code == 200, (
@@ -207,7 +219,7 @@ class TestMemoryCycleE2E:
 
             search_resp = client.post(
                 "http://127.0.0.1:3111/search",
-                json={"query": "ls tmp files", "limit": 5},
+                json={"project": "test-e2e", "query": "ls tmp files", "limit": 5},
             )
 
             assert search_resp.status_code == 200, (
@@ -215,10 +227,10 @@ class TestMemoryCycleE2E:
             )
 
             results = search_resp.json()
-            observations = results.get("observations", [])
+            observations = results.get("results", [])
 
             assert len(observations) > 0, "Stored observation not found in search"
-            assert observations[0]["title"] == "Test Tool Call"
+            assert "ls -la /tmp" in observations[0]["content"]
 
             print("✓ agentmemory store → retrieve cycle works")
 

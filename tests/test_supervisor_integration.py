@@ -61,9 +61,9 @@ class TestSupervisorFlags:
                                     except SystemExit:
                                         pass
 
-        # Verify router was instantiated and started
+        # Verify router was instantiated and started (with retry/backoff)
         mock_router_cls.assert_called_once()
-        mock_router.start.assert_called_once()
+        mock_router._start_with_retries.assert_called_once()
 
     @patch("pxx.cli.NineRouterManager")
     @patch("pxx.cli.AgentmemoryManager")
@@ -127,9 +127,7 @@ class TestSupervisorFlags:
                         with patch("pxx.cli._build_aider_args", return_value=["aider"]):
                             with patch("pxx.cli._in_git_repo", return_value=False):
                                 with patch("pxx.cli._try_write_session_start"):
-                                    with patch.dict(
-                                        "os.environ", {}, clear=False
-                                    ) as env:
+                                    with patch.dict("os.environ", {}, clear=False):
                                         try:
                                             main()
                                         except SystemExit:
@@ -190,12 +188,17 @@ class TestSupervisorFlags:
         mock_memory_cls: Mock,
         mock_router_cls: Mock,
     ) -> None:
-        """Test supervisor waits for aider subprocess to finish."""
+        """Test supervisor waits for aider subprocess to finish.
+
+        Supervisor mode (Popen + wait) is only entered with --with-router or
+        --with-memory; the default path execs into aider instead.
+        """
+        mock_memory_cls.return_value = Mock()
         mock_proc = Mock()
         mock_proc.wait.return_value = 42  # aider exit code
         mock_popen.return_value = mock_proc
 
-        with patch("sys.argv", ["pxx"]):
+        with patch("sys.argv", ["pxx", "--with-memory"]):
             with patch("pxx.cli._find_aider", return_value="/usr/bin/aider"):
                 with patch("pxx.cli.detect_endpoint"):
                     with patch("pxx.cli._set_backend_env"):

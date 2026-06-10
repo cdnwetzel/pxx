@@ -15,7 +15,7 @@ from docs_rag_sme.config import Settings
 
 def _fake_upstream() -> Starlette:
     async def models(_request):
-        return JSONResponse({"object": "list", "data": [{"id": "qwen2.5-coder-14b-coder-lora"}]})
+        return JSONResponse({"object": "list", "data": [{"id": "qwen2.5-coder-14b"}]})
 
     async def chat(request):
         body = await request.json()
@@ -69,7 +69,7 @@ async def test_get_models_forwarded(proxy_client):
     async with proxy_client as c:
         r = await c.get("/v1/models")
     assert r.status_code == 200
-    assert r.json()["data"][0]["id"] == "qwen2.5-coder-14b-coder-lora"
+    assert r.json()["data"][0]["id"] == "qwen2.5-coder-14b"
 
 
 @pytest.mark.asyncio

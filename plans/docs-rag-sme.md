@@ -23,7 +23,7 @@
 ## Problem
 
 Every local model's knowledge is frozen at its training cutoff. The T5810
-serves a coding model (today `qwen2.5-coder-14b-coder-lora`; candidates under A/B
+serves a coding model (today `qwen2.5-coder-14b`; candidates under A/B
 are Qwen3-Coder-Next and Gemma 4 26B A4B — see §6) that cannot know yesterday's
 `asyncio` change or a library's just-released API. Aider's manual `/web <url>`
 works but is per-call and unstructured.
@@ -165,7 +165,7 @@ cache hit-rate before/after.
 message array (system prompt, repo map, files, chat). A transparent proxy that
 *adds* a message is usually fine, but verify Aider doesn't choke on an
 unexpected role/length and that token budget math still fits the model's window
-(the coder-lora model has a hard 16k in+out; a 26B MoE candidate has 256K headroom,
+(the 14b model has a hard 16k in+out; a 26B MoE candidate has 256K headroom,
 which is partly *why* it's the better SME host).
 
 **Decision D — where does the proxy run?** On the T5810 (next to vLLM, lowest
@@ -184,7 +184,7 @@ backing coding model is worth an explicit A/B *independent of* this plan:
 |---|---|---|
 | **Qwen3-Coder-Next** | Strongest pure-code: **70.6–71.3% SWE-bench Verified** (scaffold-dependent); beats DeepSeek-V3.2, trails GLM-4.7. MoE, fast/token, 256K ctx. | Top pick for Aider/agentic editing. |
 | **Gemma 4 26B A4B** | Fast generalist, strong coding, native function calling, configurable thinking mode, 256K ctx. #6 open on text Arena. | Verbose thinking mode costs local tokens. |
-| **qwen2.5-coder-14b-coder-lora** (incumbent) | Fine-tuned + `coder-lora-prod` LoRA already in prod on :8003. | Baseline to beat; keep until A/B is conclusive. |
+| **qwen2.5-coder-14b** (incumbent) | Fine-tuned + `coder-prod` LoRA already in prod on :8003. | Baseline to beat; keep until A/B is conclusive. |
 
 **A/B method:** run candidates behind the *same* SME proxy on the same task set
 (real pxx/repo edit tasks + a few T-SQL/PowerShell/Python prompts), compare

@@ -13,7 +13,7 @@ class EndpointRouter:
 
         # Primary endpoint from env var or default
         self.primary = os.getenv(
-            "PXX_ROUTER_PRIMARY", "http://workstation.splawoffice.local:11434"
+            "PXX_ROUTER_PRIMARY", "http://localhost:11434"
         )
 
         # Fallback endpoints (comma-separated)

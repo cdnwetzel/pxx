@@ -6,7 +6,7 @@ Get pxx and its services running in minutes.
 
 **Prerequisites:**
 - Python 3.11+ (`python --version`)
-- Ollama running and reachable (default: `http://workstation.splawoffice.local:11434`)
+- Ollama running and reachable (default: `http://localhost:11434`)
   - Set `PXX_OLLAMA_BASE` to override
 
 **Installation (from source):**
@@ -38,7 +38,7 @@ pxx --edit --with-memory
 
 - **Python 3.11+** — `python --version`
 - **Ollama** — Running locally or on network (required for inference)
-  - Studio: `http://workstation.splawoffice.local:11434` (LAN or VPN)
+  - Studio: `http://localhost:11434` (LAN or VPN)
   - Local: Ollama on your machine for fallback
   - Override: Set `PXX_OLLAMA_BASE=<url>` to specify endpoint
 - **Git** (optional) — For version control

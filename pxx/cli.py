@@ -93,7 +93,7 @@ SELF_FIX_DIFF_CAP = self_modes.SELF_FIX_DIFF_CAP
 # OPENAI_API_BASE.
 STUDIO_DEFAULT = os.environ.get("PXX_OLLAMA_MODEL", "ollama_chat/devstral:24b")
 NEO_DEFAULT = "ollama_chat/qwen3:4b"
-VLLM_DEFAULT = os.environ.get("PXX_VLLM_MODEL", "openai/qwen2.5-coder-14b-coder-lora")
+VLLM_DEFAULT = os.environ.get("PXX_VLLM_MODEL", "openai/qwen2.5-coder-14b")
 T1_DEFAULT = "ollama_chat/qwen2.5-coder:7b"
 VLLM_T3_DEFAULT = VLLM_DEFAULT
 

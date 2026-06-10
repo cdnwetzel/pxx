@@ -168,7 +168,7 @@ See `pxx/endpoints.py` and `pxx/cli.py` for integration points.
 ### 9router
 - `PXX_ROUTER_HOST` (default: 127.0.0.1)
 - `PXX_ROUTER_PORT` (default: 20128)
-- `PXX_ROUTER_PRIMARY` (default: http://workstation.splawoffice.local:11434)
+- `PXX_ROUTER_PRIMARY` (default: http://workstation.local:11434)
 - `PXX_ROUTER_FALLBACKS` (comma-separated list)
 
 ### agentmemory

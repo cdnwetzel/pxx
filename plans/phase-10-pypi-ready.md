@@ -60,7 +60,7 @@ the dev fallback (now relative — `pxx/router.py:_SERVICE_DIR`).
       not env-overridable. Add `PXX_DRIFT_SSH_TARGET` / `PXX_DRIFT_REMOTE_PATH`,
       and skip the drift feature cleanly when unset (it's inherently personal —
       cross-machine sync between *specific* hosts).
-- [ ] `pxx/endpoints.py:29` — default `workstation.splawoffice.local` →
+- [ ] `pxx/endpoints.py:29` — default `workstation.local` →
       a generic default (`localhost:11434`) or none; document the env overrides.
 - [ ] `pxx/_core_files.py:49` — cosmetic `/Users/...` docstring example → generic.
 

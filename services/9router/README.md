@@ -26,7 +26,7 @@ PXX_ROUTER_PRIMARY=http://workstation:11434 9router -listen 127.0.0.1:20128
 
 - `PXX_ROUTER_HOST`: Bind host (default: 127.0.0.1)
 - `PXX_ROUTER_PORT`: Bind port (default: 20128)
-- `PXX_ROUTER_PRIMARY`: Primary Ollama endpoint (default: http://workstation.splawoffice.local:11434)
+- `PXX_ROUTER_PRIMARY`: Primary Ollama endpoint (default: http://localhost:11434)
 - `PXX_ROUTER_FALLBACKS`: Fallback endpoints, comma-separated
 
 ### API Endpoints
@@ -87,7 +87,7 @@ Response:
 {
   "available": true,
   "endpoint": "http://localhost:11434",
-  "primary": "http://workstation.splawoffice.local:11434",
+  "primary": "http://localhost:11434",
   "fallbacks": [],
   "metrics": { ... }
 }

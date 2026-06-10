@@ -16,7 +16,7 @@
 # only after watching `scripts`/Activity Monitor for memory pressure.
 
 # --- T5810 vLLM (2x A4500), reached via the SSH tunnel (:8003) ---
-- name: openai/qwen2.5-coder-14b-coder-lora
+- name: openai/qwen2.5-coder-14b
   edit_format: diff
   use_repo_map: true
   streaming: true

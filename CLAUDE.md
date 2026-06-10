@@ -16,18 +16,18 @@ folded in the orchestrator role the 8GB "Neo" MacBook used to hold):
   locally (`devstral:24b` default, plus `qwen2.5:32b`, `qwen2.5-coder:7b`).
   Orchestrator and primary inference host are now the same machine.
 - **T5810** (`gpu-node-1`, 2× RTX A4500 20GB, NVLink) — remote vLLM
-  serving `qwen2.5-coder-14b-coder-lora` (+`coder-lora-prod` LoRA) behind an
+  serving `qwen2.5-coder-14b` (+`coder-prod` LoRA) behind an
   audit-proxy on `:8003`. **SSH-only**: the office router NATs only port 22
   to it, so it is reached through a persistent SSH local-forward
   (`deploy/launchd/local.pxx.gpu-node-1-vllm-tunnel.plist` → `127.0.0.1:8003`).
   Used for tier-2/3 sessions.
 - **inference-node** (RHEL 10) — a separate inference node (vLLM with legal
   LoRAs on `:8000`, Ollama on `:11434`). Not used by pxx today; it already
-  runs the systemd twin of the Studio tunnel (`psagent-coder-tunnel.service`).
+  runs the systemd twin of the Studio tunnel (`coder-tunnel.service`).
 
 The Asrock RTX 3060Ti is not part of the fleet; pxx never referenced it.
 
-**Studio Ollama endpoint:** `workstation.splawoffice.local:11434` — now
+**Studio Ollama endpoint:** `workstation.local:11434` — now
 resolves to localhost (this host *is* `workstation`). Set
 `PXX_OLLAMA_BASE` to override (rarely needed); `PXX_VLLM_URL` overrides the
 T5810 tunnel URL.

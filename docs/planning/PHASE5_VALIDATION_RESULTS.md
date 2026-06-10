@@ -52,7 +52,7 @@ curl http://127.0.0.1:20128/health
 ```
 Response:
 ```json
-{"status":"healthy","endpoint":"http://workstation.splawoffice.local:11434"}
+{"status":"healthy","endpoint":"http://workstation.local:11434"}
 ```
 Result: ✅ PASS (detects Studio endpoint correctly)
 

@@ -18,7 +18,7 @@ logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 OLLAMA_BASE = os.getenv(
-    "PXX_OLLAMA_BASE", "http://workstation.splawoffice.local:11434"
+    "PXX_OLLAMA_BASE", "http://localhost:11434"
 )
 
 # Memory middleware (optional, disabled by default via env var)

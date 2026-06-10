@@ -90,8 +90,8 @@ curl http://127.0.0.1:3111/health
 pip install pxx
 
 # 2. Configure Studio endpoint
-export PXX_STUDIO_LAN_URL=http://workstation.splawoffice.local:11434
-export AGENTMEMORY_URL=http://workstation.splawoffice.local:3111
+export PXX_STUDIO_LAN_URL=http://your-ollama-host:11434
+export AGENTMEMORY_URL=http://your-ollama-host:3111
 
 # 3. Run pxx with memory pointing to Studio
 pxx --edit --with-memory
@@ -257,7 +257,7 @@ export AGENTMEMORY_URL=http://127.0.0.1:3112
 **Connection timeout to Studio:**
 ```bash
 # Check network connectivity
-ping workstation.splawoffice.local
+ping your-ollama-host
 
 # Check firewall
 sudo ufw allow 11434

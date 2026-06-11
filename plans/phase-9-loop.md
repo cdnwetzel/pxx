@@ -6,7 +6,7 @@
 cycle: edit → test → review → heal → repeat, until the change is approved or a
 guard stops it.
 
-**Status:** `planned`
+**Status:** `in-progress` — 9.1 done (verifier hardening); 9.2+9.3 (driver+guards, one review surface) next.
 
 **Key Finding:** Every component of an autonomous loop already exists in main —
 *except the loop itself*. There is a state machine (`workflow.py`), a

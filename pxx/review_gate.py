@@ -37,11 +37,29 @@ def _get_claude_bin() -> str | None:
     return shutil.which("claude")
 
 
-def run_review_pass(project_root: Path) -> int:
-    """Invoke code_review framework and return exit code.
+# The reviewer's output contract: where to write and the exact header format
+# the parser accepts. Without this in the prompt, the reviewer has no way to
+# know either — run #1's web-side verification predicted exactly that failure.
+REVIEW_PROMPT = """Run a code review pass on this project.
 
-    Runs: claude --print "run a review pass on this project"
-    from project_root. Returns 0 on success, 1 on failure.
+Write your findings to review/claude/claude-findings.md (create the directory
+if needed). Every finding MUST be a markdown header line in exactly this
+format, one per finding:
+
+### F-NNN — <short description> in <file>:<line> (P0, state: open)
+
+where the severity is P0 (must fix), P1 (should fix), or P2 (minor), and the
+state is `open`. If the code is clean, still write the file containing the
+line: `# Review pass: no findings.`"""
+
+
+def run_review_pass(project_root: Path, timeout: float | None = None) -> int:
+    """Invoke a claude review pass with an explicit output contract.
+
+    Returns 0 on success, 1 on failure. `timeout` lets a caller with a budget
+    (the loop) charge the review leg against it; when None, the standalone
+    ceiling applies: PXX_REVIEW_TIMEOUT (default 900s — live dogfood measured
+    a real full-repo pass at >300s, so the old fixed 300 guaranteed NO_REVIEW).
     """
     claude_bin = _get_claude_bin()
     if not claude_bin:
@@ -51,13 +69,11 @@ def run_review_pass(project_root: Path) -> int:
         )
         return 1
 
-    # Live dogfood (2026-06-10) measured a real full-repo review pass at
-    # >300s — the old fixed timeout guaranteed NO_REVIEW. Default raised;
-    # PXX_REVIEW_TIMEOUT overrides per environment.
-    timeout = float(os.environ.get("PXX_REVIEW_TIMEOUT", "900"))
+    if timeout is None:
+        timeout = float(os.environ.get("PXX_REVIEW_TIMEOUT", "900"))
     try:
         result = subprocess.run(
-            [claude_bin, "--print", "run a review pass on this project"],
+            [claude_bin, "--print", REVIEW_PROMPT],
             cwd=project_root,
             capture_output=True,
             text=True,

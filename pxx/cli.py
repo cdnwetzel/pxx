@@ -74,20 +74,6 @@ def _self_sanity_check(module_name: str = "pxx.endpoints") -> None:
     return safety.sanity_check(REPO_ROOT, module_name)
 
 
-def _loop_hooks_installed() -> bool:
-    """True iff the pxx-managed pre-commit hook is installed in this repo.
-
-    The loop's --yes doctrine ("the prompt is not the boundary — the hook is")
-    only holds when the hook exists: it enforces the scope gate, diff cap, and
-    test/lint gates on every autonomous commit.
-    """
-    hook = REPO_ROOT / ".git" / "hooks" / "pre-commit"
-    try:
-        return "pxx-managed" in hook.read_text(encoding="utf-8")
-    except OSError:
-        return False
-
-
 def _self_test() -> int:
     return self_modes.self_test(REPO_ROOT)
 
@@ -523,18 +509,6 @@ def main() -> None:
             print(
                 "pxx: --loop refuses to start on a dirty tree — commit or "
                 "stash first (rounds must be cleanly attributable).",
-                file=sys.stderr,
-            )
-            sys.exit(1)
-        if not _loop_hooks_installed():
-            # Live dogfood (2026-06-10): with hooks absent, an auto---yes'd
-            # aider mutated .gitignore out of scope and committed untagged.
-            # "The prompt is not the boundary — the hook is" requires the
-            # hook to actually exist.
-            print(
-                "pxx: --loop requires the pxx git hooks (scope gate, diff "
-                "cap, [autonomous] tagging) — --yes rounds are unbounded "
-                "without them. Install: pxx --install-hook",
                 file=sys.stderr,
             )
             sys.exit(1)

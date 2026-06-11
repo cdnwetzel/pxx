@@ -31,7 +31,7 @@ import re
 import subprocess
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from pxx import audit, review_gate, self_modes, workflow
@@ -49,15 +49,62 @@ _NON_HEALABLE = {"P0", "P2", "UNPARSEABLE"}
 class RoundResult:
     verdict: str  # APPROVE | REVISE | REJECT | NO_REVIEW
     healable: list[review_gate.Finding]
+    all_findings: list[review_gate.Finding] = field(default_factory=list)
+    note: str = ""  # diagnosable reason for NO_REVIEW variants
+
+
+def _hooks_installed(root: Path) -> bool:
+    """True iff BOTH pxx-managed hooks are installed at git's *active* hook path.
+
+    Resolved via `git rev-parse --git-path` so core.hooksPath redirection and
+    worktrees (.git-as-file) can't produce a false positive — the dangerous
+    direction, since the --yes doctrine's boundary would silently not exist.
+    pre-commit carries the scope gate/diff cap/test gates; prepare-commit-msg
+    carries the [autonomous] tagging (run #1's untagged commit came from
+    exactly this hook being absent).
+    """
+    for hook_name in ("pre-commit", "prepare-commit-msg"):
+        r = subprocess.run(
+            ["git", "rev-parse", "--git-path", f"hooks/{hook_name}"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+        )
+        if r.returncode != 0:
+            return False
+        hook = Path(r.stdout.strip())
+        if not hook.is_absolute():
+            hook = root / hook
+        try:
+            if "pxx-managed" not in hook.read_text(encoding="utf-8"):
+                return False
+        except OSError:
+            return False
+    return True
+
+
+def _require_hooks(root: Path) -> bool:
+    """Shared precondition for every edit-round caller; prints the remedy."""
+    if _hooks_installed(root):
+        return True
+    _say(
+        "the pxx git hooks (scope gate, diff cap, [autonomous] tagging) are "
+        "not installed — --yes rounds are unbounded without them. "
+        "Install: pxx --install-hook"
+    )
+    return False
 
 
 def _say(msg: str) -> None:
     print(f"pxx loop: {msg}", file=sys.stderr)
 
 
-def _failing_tests(root: Path) -> set[str] | None:
+def _failing_tests(root: Path, timeout: float = 600.0) -> set[str] | None:
     """Run pytest and return the set of failing test ids, or None if the run
     itself broke (collection error, missing uv) — the loop fails closed on None.
+    `timeout` lets the loop charge the test leg against its wall-clock budget.
     """
     try:
         r = subprocess.run(
@@ -65,7 +112,7 @@ def _failing_tests(root: Path) -> set[str] | None:
             cwd=root,
             capture_output=True,
             text=True,
-            timeout=600,
+            timeout=timeout,
         )
     except (FileNotFoundError, subprocess.TimeoutExpired):
         return None
@@ -135,13 +182,25 @@ def _run_edit_round(
     return r.returncode
 
 
-def _review_verdict(root: Path) -> RoundResult:
-    """Run a review pass and classify the result, including the no-heal cases."""
-    rc = review_gate.run_review_pass(root)
+def _review_verdict(root: Path, timeout: float | None = None) -> RoundResult:
+    """Run a review pass and classify the result, including the no-heal cases.
+
+    Each NO_REVIEW variant carries a distinct, diagnosable note — "the pass
+    failed/timed out", "ran but left no artifacts" (output-contract breach),
+    and "only unparseable findings" are three different remedies.
+    """
+    rc = review_gate.run_review_pass(root, timeout=timeout)
     if rc != 0:
-        return RoundResult("NO_REVIEW", [])
+        return RoundResult("NO_REVIEW", [], note="review pass failed or timed out")
     if not review_gate.has_review_evidence(root):
-        return RoundResult("NO_REVIEW", [])
+        return RoundResult(
+            "NO_REVIEW",
+            [],
+            note=(
+                "review ran but left no artifacts at review/claude/ — "
+                "check the output contract"
+            ),
+        )
 
     findings = review_gate.collect_active_findings(root)
     verdict = review_gate.compute_verdict(findings)
@@ -150,8 +209,60 @@ def _review_verdict(root: Path) -> RoundResult:
     if verdict == "REVISE" and not healable:
         # REVISE driven only by UNPARSEABLE findings: the remedy is fixing or
         # re-running the review, not pointing aider at a malformed header.
-        return RoundResult("NO_REVIEW", [])
-    return RoundResult(verdict, healable)
+        return RoundResult(
+            "NO_REVIEW",
+            [],
+            all_findings=findings,
+            note="review produced only unparseable findings — fix or re-run it",
+        )
+    return RoundResult(verdict, healable, all_findings=findings)
+
+
+def _format_scope(root: Path, scope: str) -> None:
+    """Deterministically format the round's output and commit the fixup.
+
+    Run #1 left aider's output check-clean but format-dirty, which would block
+    APPROVE forever while the healing message never mentioned lint. Formatting
+    is a solved problem — run the formatter, don't ask a 14B to do it.
+    """
+    subprocess.run(
+        ["uv", "run", "ruff", "format", scope],
+        cwd=root,
+        capture_output=True,
+        check=False,
+        timeout=60,
+    )
+    dirty = subprocess.run(
+        ["git", "status", "--porcelain", scope],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+    )
+    if dirty.stdout.strip():
+        subprocess.run(["git", "add", scope], cwd=root, check=False, timeout=10)
+        subprocess.run(
+            ["git", "commit", "-q", "-m", "[autonomous] style: ruff format (loop)"],
+            cwd=root,
+            check=False,
+            timeout=120,
+        )
+
+
+def _lint_feedback(root: Path) -> str:
+    """Concise ruff output for the healing message when the lint gate is red —
+    the model must be told WHAT is wrong, not just re-fed the same findings."""
+    r = subprocess.run(
+        ["uv", "run", "ruff", "check", "pxx/", "tests/", "--output-format=concise"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=60,
+    )
+    lines = r.stdout.strip().splitlines()[:15]
+    return "Lint errors to fix:\n" + "\n".join(lines) if lines else ""
 
 
 def _healing_message(
@@ -183,6 +294,8 @@ def run_loop(
     outcome (fail closed). Never pushes.
     """
     started = time.monotonic()
+    if not _require_hooks(root):
+        return 1
     start_sha = _head_sha(root)
 
     baseline = _failing_tests(root)
@@ -205,9 +318,11 @@ def run_loop(
         _say(f"round {round_no}: edit")
         # The subprocess gets the REMAINING budget (floored) so a wedged aider
         # can't defeat the time guard between top-of-round checks.
+        t0 = time.monotonic()
         edit_rc = _run_edit_round(
             root, message, scope, timeout=max(60.0, max_seconds - elapsed)
         )
+        edit_s = time.monotonic() - t0
         if edit_rc != 0:
             why = "timed out" if edit_rc == 124 else f"failed (rc {edit_rc})"
             _say(f"edit round {why} — stopping (fail closed).")
@@ -228,7 +343,12 @@ def run_loop(
                 pass
             return 1
 
-        failing = _failing_tests(root)
+        _format_scope(root, scope)
+
+        t0 = time.monotonic()
+        remaining = max(60.0, max_seconds - (time.monotonic() - started))
+        failing = _failing_tests(root, timeout=min(600.0, remaining))
+        test_s = time.monotonic() - t0
         if failing is None:
             _say("test run broke mid-loop — stopping (fail closed).")
             return 1
@@ -248,7 +368,13 @@ def run_loop(
                 f"note: {len(introduced_failing)} new failing test(s) introduced by the loop (tracked, not gated)."
             )
 
-        result = _review_verdict(root)
+        t0 = time.monotonic()
+        # The review leg is charged against the SAME wall-clock budget as the
+        # edit leg (its F3 sibling) — one review must not silently consume the
+        # whole loop's time.
+        remaining = max(60.0, max_seconds - (time.monotonic() - started))
+        result = _review_verdict(root, timeout=min(900.0, remaining))
+        review_s = time.monotonic() - t0
         state = workflow.transition(
             state,
             "review_pending",
@@ -269,6 +395,19 @@ def run_loop(
                     "introduced_failing": len(introduced_failing),
                     "diff_lines": spent,
                     "lint_rc": lint_rc,
+                    # Run #2 calibration capture: the message that drove this
+                    # round (steering is a measurement, not a vibe), per-leg
+                    # wall-clock, and reviewer format compliance.
+                    "message": message[:2000],
+                    "edit_s": round(edit_s),
+                    "test_s": round(test_s),
+                    "review_s": round(review_s),
+                    "findings_by_severity": {
+                        sev: sum(
+                            1 for f in result.all_findings if f.severity.upper() == sev
+                        )
+                        for sev in ("P0", "P1", "P2", "UNPARSEABLE")
+                    },
                 }
             )
         except Exception:
@@ -300,8 +439,9 @@ def run_loop(
                 root,
             )
             _say(
-                "no usable review evidence (absent or all-unparseable) — the "
-                "remedy is fixing/re-running the review, not another edit round."
+                result.note
+                or "no usable review evidence — fix/re-run the review, not "
+                "another edit round."
             )
             return 1
 
@@ -341,6 +481,10 @@ def run_loop(
         prev_baseline_failing = baseline_failing
         prev_healable = len(result.healable)
         message = _healing_message(task, result.healable, failing)
+        if lint_rc != 0:
+            lint_note = _lint_feedback(root)
+            if lint_note:
+                message = f"{message}\n\n{lint_note}"
 
     _say(f"round cap ({max_rounds}) reached — stopping.")
     workflow.save_state(
@@ -355,6 +499,8 @@ def heal_once(root: Path, scope: str) -> int:
     The single-round primitive `--loop` folds over; also the handler behind
     `pxx --review --heal`.
     """
+    if not _require_hooks(root):
+        return 1
     if not review_gate.has_review_evidence(root):
         _say("nothing to heal: no review evidence — run `pxx --review` first.")
         return 1
@@ -383,6 +529,7 @@ def heal_once(root: Path, scope: str) -> int:
         why = "timed out" if edit_rc == 124 else f"failed (rc {edit_rc})"
         _say(f"edit round {why} — not reviewing a round that didn't complete.")
         return 1
+    _format_scope(root, scope)
 
     result = _review_verdict(root)
     _say(f"post-heal verdict: {result.verdict}")

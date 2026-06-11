@@ -26,17 +26,21 @@ class _Harness:
         self.tmp_path = tmp_path
 
         monkeypatch.setattr(loop, "_head_sha", lambda root: "base")
+        monkeypatch.setattr(loop, "_require_hooks", lambda root: True)
+        monkeypatch.setattr(loop, "_format_scope", lambda root, scope: None)
         monkeypatch.setattr(loop, "_diff_lines_since", lambda root, sha: diff_lines)
         monkeypatch.setattr(
             loop,
             "_run_edit_round",
             lambda root, msg, scope, timeout=None: self.edits.append(msg) or 0,
         )
-        monkeypatch.setattr(loop, "_failing_tests", lambda root: self._failings.pop(0))
+        monkeypatch.setattr(
+            loop, "_failing_tests", lambda root, timeout=None: self._failings.pop(0)
+        )
         monkeypatch.setattr(
             loop,
             "_review_verdict",
-            lambda root: self._verdicts.pop(0),
+            lambda root, timeout=None: self._verdicts.pop(0),
         )
         monkeypatch.setattr("pxx.self_modes.self_lint", lambda root: 0)
         monkeypatch.setattr(
@@ -164,7 +168,9 @@ class TestRunLoopGuards:
 
 class TestReviewVerdictClassification:
     def _arrange(self, monkeypatch, findings, evidence=True, pass_rc=0):
-        monkeypatch.setattr("pxx.review_gate.run_review_pass", lambda root: pass_rc)
+        monkeypatch.setattr(
+            "pxx.review_gate.run_review_pass", lambda root, timeout=None: pass_rc
+        )
         monkeypatch.setattr(
             "pxx.review_gate.has_review_evidence", lambda root: evidence
         )
@@ -200,7 +206,9 @@ class TestHealOnce:
         monkeypatch.setattr(
             "pxx.review_gate.collect_active_findings", lambda root: findings
         )
-        monkeypatch.setattr(loop, "_failing_tests", lambda root: set())
+        monkeypatch.setattr(loop, "_require_hooks", lambda root: True)
+        monkeypatch.setattr(loop, "_format_scope", lambda root, scope: None)
+        monkeypatch.setattr(loop, "_failing_tests", lambda root, timeout=None: set())
         monkeypatch.setattr(
             loop,
             "_run_edit_round",
@@ -209,7 +217,7 @@ class TestHealOnce:
         monkeypatch.setattr(
             loop,
             "_review_verdict",
-            lambda root: loop.RoundResult("APPROVE", []),
+            lambda root, timeout=None: loop.RoundResult("APPROVE", []),
         )
 
     def test_no_evidence_refuses_without_editing(self, monkeypatch, tmp_path):
@@ -321,15 +329,19 @@ class TestEditRoundFailure:
 
     def test_heal_once_stops_before_review_on_failed_edit(self, monkeypatch, tmp_path):
         consulted = []
+        monkeypatch.setattr(loop, "_require_hooks", lambda root: True)
+        monkeypatch.setattr(loop, "_format_scope", lambda root, scope: None)
         monkeypatch.setattr("pxx.review_gate.has_review_evidence", lambda root: True)
         monkeypatch.setattr(
             "pxx.review_gate.collect_active_findings", lambda root: [_p1()]
         )
-        monkeypatch.setattr(loop, "_failing_tests", lambda root: set())
+        monkeypatch.setattr(loop, "_failing_tests", lambda root, timeout=None: set())
         monkeypatch.setattr(
             loop, "_run_edit_round", lambda root, msg, scope, timeout=None: 1
         )
-        monkeypatch.setattr(loop, "_review_verdict", lambda root: consulted.append(1))
+        monkeypatch.setattr(
+            loop, "_review_verdict", lambda root, timeout=None: consulted.append(1)
+        )
         assert loop.heal_once(tmp_path, "pxx/") == 1
         assert consulted == []
 
@@ -365,3 +377,139 @@ class TestEditRoundTimeout:
         monkeypatch.setattr(loop, "_run_edit_round", fake_edit)
         h.run(max_seconds=1800.0)
         assert seen and 60.0 <= seen[0] <= 1800.0
+
+
+class TestHookPrecondition:
+    """The --yes doctrine's boundary must exist for ANY edit-round caller."""
+
+    def test_run_loop_refuses_without_hooks(self, monkeypatch, tmp_path):
+        h = _Harness(monkeypatch, tmp_path, verdicts=[], failings=[set()])
+        monkeypatch.setattr(loop, "_require_hooks", lambda root: False)
+        assert h.run() == 1
+        assert h.edits == []
+
+    def test_heal_once_refuses_without_hooks(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(loop, "_require_hooks", lambda root: False)
+        edits: list[str] = []
+        monkeypatch.setattr(
+            loop,
+            "_run_edit_round",
+            lambda root, msg, scope, timeout=None: edits.append(msg) or 0,
+        )
+        assert loop.heal_once(tmp_path, "pxx/") == 1
+        assert edits == []
+
+    def _repo_with_hooks(self, tmp_path, hooks):
+        import subprocess as sp
+
+        sp.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+        hooks_dir = tmp_path / ".git" / "hooks"
+        hooks_dir.mkdir(exist_ok=True)
+        for name in hooks:
+            (hooks_dir / name).write_text("# pxx-managed pre-commit hook\nexit 0\n")
+        return tmp_path
+
+    def test_hooks_installed_requires_both(self, tmp_path):
+        repo = self._repo_with_hooks(tmp_path, ["pre-commit"])
+        assert loop._hooks_installed(repo) is False
+
+    def test_hooks_installed_true_with_both(self, tmp_path):
+        repo = self._repo_with_hooks(tmp_path, ["pre-commit", "prepare-commit-msg"])
+        assert loop._hooks_installed(repo) is True
+
+    def test_hooks_installed_false_on_non_pxx_hooks(self, tmp_path):
+        import subprocess as sp
+
+        sp.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+        hooks_dir = tmp_path / ".git" / "hooks"
+        hooks_dir.mkdir(exist_ok=True)
+        for name in ("pre-commit", "prepare-commit-msg"):
+            (hooks_dir / name).write_text("#!/bin/sh\nexit 0\n")
+        assert loop._hooks_installed(tmp_path) is False
+
+    def test_hooks_installed_respects_core_hookspath(self, tmp_path):
+        """core.hooksPath redirection must not produce a false positive."""
+        import subprocess as sp
+
+        repo = self._repo_with_hooks(tmp_path, ["pre-commit", "prepare-commit-msg"])
+        empty = tmp_path / "elsewhere"
+        empty.mkdir()
+        sp.run(["git", "config", "core.hooksPath", str(empty)], cwd=repo, check=True)
+        # Files exist at .git/hooks but git no longer consults them.
+        assert loop._hooks_installed(repo) is False
+
+
+class TestBudgetChargedLegs:
+    def test_review_leg_gets_remaining_budget(self, monkeypatch, tmp_path):
+        seen: list[float] = []
+
+        def fake_review(root, timeout=None):
+            seen.append(timeout)
+            return loop.RoundResult("APPROVE", [])
+
+        h = _Harness(
+            monkeypatch,
+            tmp_path,
+            verdicts=[],
+            failings=[set(), set()],
+        )
+        monkeypatch.setattr(loop, "_review_verdict", fake_review)
+        assert h.run(max_seconds=1800.0) == 0
+        assert seen and 60.0 <= seen[0] <= 900.0
+
+    def test_review_verdict_passes_timeout_through(self, monkeypatch, tmp_path):
+        seen: list[float] = []
+
+        def fake_pass(root, timeout=None):
+            seen.append(timeout)
+            return 1  # fail -> NO_REVIEW, short-circuits the rest
+
+        monkeypatch.setattr("pxx.review_gate.run_review_pass", fake_pass)
+        result = loop._review_verdict(tmp_path, timeout=123.0)
+        assert seen == [123.0]
+        assert result.verdict == "NO_REVIEW"
+        assert "failed or timed out" in result.note
+
+    def test_no_artifacts_note_is_distinct(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(
+            "pxx.review_gate.run_review_pass", lambda root, timeout=None: 0
+        )
+        monkeypatch.setattr("pxx.review_gate.has_review_evidence", lambda root: False)
+        result = loop._review_verdict(tmp_path)
+        assert result.verdict == "NO_REVIEW"
+        assert "output contract" in result.note
+
+
+class TestLintAwareHealing:
+    def test_red_lint_feeds_ruff_output_into_next_round(self, monkeypatch, tmp_path):
+        h = _Harness(
+            monkeypatch,
+            tmp_path,
+            verdicts=[
+                loop.RoundResult("REVISE", [_p1()]),
+                loop.RoundResult("APPROVE", []),
+            ],
+            failings=[set(), set(), set()],
+        )
+        monkeypatch.setattr("pxx.self_modes.self_lint", lambda root: 1)
+        monkeypatch.setattr(
+            loop, "_lint_feedback", lambda root: "Lint errors to fix:\nE501 long line"
+        )
+        # Round 2 won't APPROVE (lint red), so it ends on the cap — what we
+        # care about is round 2's message content.
+        h.run(max_rounds=2)
+        assert "Lint errors to fix" in h.edits[1]
+
+    def test_format_step_runs_each_round(self, monkeypatch, tmp_path):
+        formatted: list[str] = []
+        h = _Harness(
+            monkeypatch,
+            tmp_path,
+            verdicts=[loop.RoundResult("APPROVE", [])],
+            failings=[set(), set()],
+        )
+        monkeypatch.setattr(
+            loop, "_format_scope", lambda root, scope: formatted.append(scope)
+        )
+        assert h.run() == 0
+        assert formatted == ["pxx/"]

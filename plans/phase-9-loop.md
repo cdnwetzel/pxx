@@ -287,8 +287,44 @@ converged in one round; the review→heal leg never got to run.
   formatting — the round left `duration.py` check-clean but format-dirty
   (human-fixed post-run; consider a format step in the round).
 
-**Next live run:** install hooks first; expect the review leg to complete
-within the new budget; observe whether a REVISE round's healing prompt steers.
+**Pre-run-#2 fix pass (second-side verification verdicts, all adopted):**
+
+- **Review output contract (P1).** The web side predicted run #2's NO_REVIEW
+  before it happened: nothing told the reviewer where to write or what format
+  the parser accepts (repo has codex/copilot/gemini review dirs, no claude/).
+  `run_review_pass` now sends an explicit contract — target path
+  `review/claude/claude-findings.md` + the exact `### F-NNN — … (P0, state:
+  open)` header format + a clean-pass sentinel. NO_REVIEW variants now carry
+  distinct diagnosable notes ("pass failed/timed out" vs "ran but left no
+  artifacts — check the output contract" vs "only unparseable findings").
+- **Shared hook gate (P1).** Moved from the cli layer into `loop.py` —
+  `_require_hooks()` is called by BOTH `run_loop` and `heal_once`, so every
+  current and future edit-round caller inherits it. Hardened per review:
+  resolves the ACTIVE hook path via `git rev-parse --git-path` (core.hooksPath
+  redirection and worktrees can't false-positive), and checks BOTH hooks —
+  pre-commit (scope/diff/test gates) and prepare-commit-msg ([autonomous]
+  tagging; run #1's untagged commit came from exactly that hook's absence).
+- **Format step + lint-aware healing (P1, load-bearing for run #2).** Each
+  round now runs `ruff format <scope>` after the edit and commits the fixup
+  (formatting is deterministic — don't ask a 14B to do it), and when the lint
+  gate is red the healing message includes concise ruff output (the model must
+  be told WHAT is wrong; previously the loop stopped on the progress guard
+  with the model never informed).
+- **Budget-charged review + test legs (P2).** `run_review_pass(timeout=)` and
+  `_failing_tests(timeout=)`; the loop passes min(ceiling, remaining budget)
+  for both — the F3 siblings. Standalone `pxx --review` keeps the
+  PXX_REVIEW_TIMEOUT/900s ceiling. Honest consequence accepted: the wall-clock
+  budget now bounds everything, which is what "wall-clock budget" means.
+- **Q3 (untagged commit `2c18f6b`):** stays in history — rewriting a
+  PyPI-public repo is worse than the anomaly; the post-mortem + aider's
+  Co-authored-by trailer are the provenance.
+- **Q4 capture additions implemented:** per-round audit now records the
+  verbatim healing message (capped 2000 chars), per-leg wall-clock
+  (edit_s/test_s/review_s), and findings-by-severity incl. UNPARSEABLE count.
+
+**Next live run (#2):** install hooks first (now enforced); comparable seeded
+task; success criterion: a REVISE round's healing prompt visibly steers
+round 2 — measured via the persisted per-round messages, not vibes.
 
 ## Success Criteria
 

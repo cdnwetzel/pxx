@@ -928,7 +928,6 @@ class TestLoopFlag:
         )
         monkeypatch.setattr(cli_module, "_git_repo_root", lambda: cli_module.REPO_ROOT)
         monkeypatch.setattr(cli_module, "_git_dirty", lambda: False)
-        monkeypatch.setattr(cli_module, "_loop_hooks_installed", lambda: True)
         monkeypatch.setattr(cli_module.loop_mod, "run_loop", fake_run_loop)
 
         with pytest.raises(SystemExit) as exc:
@@ -940,12 +939,14 @@ class TestLoopFlag:
         assert "EXPERIMENTAL" in capsys.readouterr().err
 
     def test_refuses_without_pxx_hooks(self, monkeypatch, capsys):
+        # The gate lives in loop.py (shared by run_loop and heal_once) — the
+        # cli dispatch reaches the driver, which refuses before any edit.
         from pxx import cli as cli_module
 
         monkeypatch.setattr(sys, "argv", ["pxx", "--loop", "do it", "--scope", "pxx/"])
         monkeypatch.setattr(cli_module, "_git_repo_root", lambda: cli_module.REPO_ROOT)
         monkeypatch.setattr(cli_module, "_git_dirty", lambda: False)
-        monkeypatch.setattr(cli_module, "_loop_hooks_installed", lambda: False)
+        monkeypatch.setattr(cli_module.loop_mod, "_hooks_installed", lambda root: False)
         with pytest.raises(SystemExit) as exc:
             cli_module.main()
         assert exc.value.code == 1

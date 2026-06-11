@@ -837,6 +837,33 @@ class TestSelfImproveFlag:
         assert argv[argv.index("--chat-mode") + 1] == "ask"
 
 
+class TestReviewVerdictWiring:
+    """--review must fail closed when no review artifacts exist (9.1)."""
+
+    def test_no_review_evidence_yields_no_review_and_rejected(
+        self, monkeypatch, tmp_path, capsys
+    ):
+        import json
+
+        from pxx import cli as cli_module
+
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(sys, "argv", ["pxx", "--review"])
+        monkeypatch.setattr(cli_module, "_git_repo_root", lambda: tmp_path)
+        monkeypatch.setattr(cli_module.review_gate, "run_review_pass", lambda root: 0)
+
+        with pytest.raises(SystemExit) as exc:
+            cli_module.main()
+        assert exc.value.code == 0
+
+        err = capsys.readouterr().err
+        assert "verdict=NO_REVIEW" in err
+
+        state = json.loads((tmp_path / ".pxx" / "workflow_state.json").read_text())
+        assert state["phase"] == "rejected"
+        assert state["review_verdict"] == "NO_REVIEW"
+
+
 class TestExtractSelfFixTask:
     """Unit tests for the task-string extractor (#012)."""
 

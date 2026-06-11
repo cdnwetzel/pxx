@@ -70,16 +70,22 @@ def parse_findings(md_content: str) -> list[Finding]:
 
     Looks for headers like:
     ### F-NNN — description (P0/P1/P2, state: open/proposed/resolved/etc)
+
+    The severity group is deliberately permissive (any word, normalized to
+    upper-case): a finding with a malformed severity must become a *visible*
+    finding that compute_verdict can fail closed on — silently dropping the
+    line would let it vanish into an APPROVE-on-silence.
     """
     findings = []
     # Match: ### F-NNN — description (severity, state: value)
-    pattern = r"^### (F-\d+) — (.+?)\s+\(([P0-2]+),\s*(?:state:\s*)?([a-z\-]+)\)"
+    pattern = r"^### (F-\d+) — (.+?)\s+\((\w+),\s*(?:state:\s*)?([a-z\-]+)\)"
 
     for line in md_content.splitlines():
         m = re.match(pattern, line)
         if not m:
             continue
         finding_id, description, severity, state = m.groups()
+        severity = severity.upper()
         # Extract location from description if present (e.g., "title in file.py:L42")
         location = ""
         if " in " in description:
@@ -116,34 +122,54 @@ def collect_active_findings(project_root: Path) -> list[Finding]:
     return [f for f in all_findings if f.state in active_states]
 
 
+def has_review_evidence(project_root: Path) -> bool:
+    """True iff a review actually left artifacts to judge (any claude-*.md).
+
+    "No findings" is only meaningful when a review demonstrably ran. Without
+    evidence, the verdict must be NO_REVIEW, not APPROVE — reviewer silence is
+    absence of information, not approval.
+    """
+    review_dir = project_root / "review" / "claude"
+    return review_dir.exists() and any(review_dir.glob("claude-*.md"))
+
+
 def compute_verdict(findings: list[Finding]) -> str:
-    """Compute verdict: APPROVE, REVISE, or REJECT.
+    """Compute verdict: APPROVE, REVISE, or REJECT. Fails closed.
 
     - P0 active findings → REJECT
+    - any finding with an unknown severity (not P0/P1/P2) → REVISE — a parse
+      glitch or unrecognized label must never silently approve
     - P1 active findings (no P0) → REVISE
     - Only P2 or empty → APPROVE
-    """
-    has_p0 = any(f.severity == "P0" for f in findings)
-    has_p1 = any(f.severity == "P1" for f in findings)
 
-    if has_p0:
+    Severity comparison is case-normalized so "p0" cannot slip past REJECT.
+    """
+    severities = {f.severity.upper() for f in findings}
+
+    if "P0" in severities:
         return "REJECT"
-    if has_p1:
+    if "P1" in severities or any(s not in {"P0", "P1", "P2"} for s in severities):
         return "REVISE"
     return "APPROVE"
 
 
 def build_healing_prompt(findings: list[Finding]) -> str:
-    """Build aider --message prompt from P1 findings (for --heal mode)."""
-    p1_findings = [f for f in findings if f.severity == "P1"]
-    if not p1_findings:
+    """Build aider --message prompt for --heal mode.
+
+    Includes P1 findings and any unknown-severity findings (the latter cause a
+    fail-closed REVISE, so they must surface here — otherwise a REVISE verdict
+    could come with an empty healing prompt and the loop would spin on nothing).
+    P0 is the REJECT path; P2 never blocks.
+    """
+    heal_findings = [f for f in findings if f.severity.upper() not in {"P0", "P2"}]
+    if not heal_findings:
         return ""
 
     lines = [
         "Address the following code review findings:",
         "",
     ]
-    for f in p1_findings:
+    for f in heal_findings:
         lines.append(f"- {f.id}: {f.description}")
         if f.location:
             lines.append(f"  Location: {f.location}")

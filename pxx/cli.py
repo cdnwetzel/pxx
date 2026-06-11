@@ -437,9 +437,14 @@ def main() -> None:
         exit_code = review_gate.run_review_pass(root)
         if exit_code != 0:
             sys.exit(exit_code)
-        # Collect findings and compute verdict
-        findings = review_gate.collect_active_findings(root)
-        verdict = review_gate.compute_verdict(findings)
+        # Collect findings and compute verdict. No review artifacts at all means
+        # NO_REVIEW (absence of information), which fails closed into rejected —
+        # reviewer silence must never launder into approval.
+        if not review_gate.has_review_evidence(root):
+            verdict = "NO_REVIEW"
+        else:
+            findings = review_gate.collect_active_findings(root)
+            verdict = review_gate.compute_verdict(findings)
         # Load workflow state and record verdict
         state = workflow.load_state(root) or workflow.WorkflowState()
         new_phase = "approved" if verdict == "APPROVE" else "rejected"

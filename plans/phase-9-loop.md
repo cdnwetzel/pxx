@@ -65,35 +65,33 @@ REVISE round, with `--loop` as a fold over it (see Decisions).
 
 **What:** Unit tests for the gates the loop will trust, before empowering them.
 
-**Why:** A loop is only as good as its verifier, and right now the verifier is
-the least-tested code in the repo: `review_gate.py`, `workflow.py`, and
-`governance.py` have **zero dedicated tests**. Empowering an untested verifier to
-gate autonomous edits is the highest risk here.
+**Why (as written, then overtaken):** when this plan was drafted the verifiers
+had zero dedicated tests. Later the same day, the merge-loss recovery restored
+the lost suites (`test_review_gate.py` 21, `test_workflow.py` 18,
+`test_governance.py` 15), so 9.1 became gap-closing + the two fail-closed
+changes rather than greenfield test-writing.
 
 **Tasks:**
-- [ ] `test_review_gate.py`: `parse_findings` (P0/P1/P2 extraction, malformed
-      input), `compute_verdict` (REJECT/REVISE/APPROVE truth table),
-      `build_healing_prompt` (P1-only, empty, ordering).
-- [ ] **Fail-closed severity handling**: `compute_verdict` currently returns
-      APPROVE for any severity that isn't exactly "P0"/"P1" (parse glitch,
-      casing, unknown label) — a loop verifier must fail closed (or surface),
-      never silently approve. Found during the 2026-06-10 dogfood triage.
-- [ ] **Design question — approval on silence.** The gate is currently
-      optimistic in *both* layers: a weak reviewer generating findings (the
-      live T5810 pass went 0-for-2 on verifiable suggestions) and a verdict
-      function that approves when no findings parse. Decide in 9.1 whether the
-      verdict should distinguish "review ran and found nothing" from "review
-      empty/absent/unparseable" — treating no-findings from an untrusted
-      reviewer as *no information*, not approval. Either way, the deterministic
-      gates (pytest, ruff, diff cap) carry the real weight until the reviewer
-      model earns trust; the verdict's job is to never launder reviewer silence
-      into a green light.
-- [ ] `test_workflow.py`: `transition` phase moves + `healing_attempts` updates,
-      `load_state`/`save_state` round-trip, `resume_state`.
-- [ ] `test_governance.py`: `run_governance_check` allow/deny on a synthetic
-      verdict + `[autonomous]` commit set.
+- [x] `test_review_gate.py`: `parse_findings`, `compute_verdict` truth table,
+      `build_healing_prompt` (restored; +15 new tests for the items below;
+      `run_review_pass` now covered too).
+- [x] **Fail-closed severity handling** — fixed at *both* layers: the parse
+      regex no longer silently drops unknown severities (they become visible
+      findings, case-normalized), and `compute_verdict` returns REVISE for any
+      severity outside {P0,P1,P2} ("p0" can't slip past REJECT either).
+      Invariant tested: REVISE ⇒ non-empty healing prompt (unknown-severity
+      findings feed `build_healing_prompt` alongside P1).
+- [x] **Approval on silence — DECIDED: distinguish.** New
+      `has_review_evidence(root)`; `pxx --review` records verdict
+      **`NO_REVIEW`** (→ phase `rejected`, fail closed) when no claude-*.md
+      artifacts exist. "Review ran and found nothing" still APPROVEs — but only
+      with evidence on disk. Reviewer silence can no longer launder into a
+      green light.
+- [x] `test_workflow.py`: transition/state round-trip/resume (restored suite).
+- [x] `test_governance.py`: allow/deny gates (restored suite; the restoration
+      also caught + fixed the index-vs-worktree secrets-scanner bug).
 
-**Effort:** 1-2 days. **Status:** `planned`
+**Effort:** 1-2 days (actual: collapsed by the restoration). **Status:** `done`
 
 ## Phase 9.2: The loop driver
 
@@ -206,7 +204,7 @@ runtime observer) stores a summary observation for future sessions.
 
 ## Success Criteria
 
-- [ ] `review_gate`, `workflow`, `governance` have unit tests (9.1).
+- [x] `review_gate`, `workflow`, `governance` have unit tests (9.1 ✅).
 - [ ] `pxx --loop "<task>" --scope <file>` drives edit→test→review→heal to a
       terminal verdict.
 - [ ] `healing_attempts` increments; `build_healing_prompt` is called; `--heal`

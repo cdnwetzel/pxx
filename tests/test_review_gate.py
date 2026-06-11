@@ -10,7 +10,9 @@ from pxx.review_gate import (
     collect_active_findings,
     compute_verdict,
     framework_path,
+    has_review_evidence,
     parse_findings,
+    run_review_pass,
 )
 
 
@@ -98,6 +100,103 @@ class TestComputeVerdict:
         assert compute_verdict([]) == "APPROVE"
 
 
+class TestFailClosedVerdict:
+    """The verdict must never launder a glitch into approval (9.1)."""
+
+    def test_unknown_severity_returns_revise_not_approve(self):
+        findings = [Finding("F-001", "P3", "open", "file.py", "odd label")]
+        assert compute_verdict(findings) == "REVISE"
+
+    def test_garbage_severity_returns_revise(self):
+        findings = [Finding("F-001", "URGENT", "open", "file.py", "free-text sev")]
+        assert compute_verdict(findings) == "REVISE"
+
+    def test_lowercase_p0_still_rejects(self):
+        findings = [Finding("F-001", "p0", "open", "file.py", "casing glitch")]
+        assert compute_verdict(findings) == "REJECT"
+
+    def test_unknown_severity_with_only_p2_still_revises(self):
+        findings = [
+            Finding("F-001", "P2", "open", "file.py", "style"),
+            Finding("F-002", "P9", "open", "file.py", "unknown"),
+        ]
+        assert compute_verdict(findings) == "REVISE"
+
+    def test_parse_keeps_unknown_severity_visible(self):
+        # The old regex silently DROPPED non-P0/P1/P2 severities — the finding
+        # vanished and the verdict approved on silence.
+        md = "### F-001 — weird label in x.py (P3, state: open)"
+        findings = parse_findings(md)
+        assert len(findings) == 1
+        assert findings[0].severity == "P3"
+
+    def test_parse_normalizes_severity_case(self):
+        md = "### F-001 — cased severity in x.py (p1, state: open)"
+        findings = parse_findings(md)
+        assert findings[0].severity == "P1"
+
+    def test_revise_always_has_nonempty_healing_prompt(self):
+        # Invariant: any findings-set that yields REVISE must yield a healing
+        # prompt — otherwise the loop would spin on an empty message.
+        for findings in (
+            [Finding("F-001", "P1", "open", "a.py", "p1 issue")],
+            [Finding("F-002", "P3", "open", "b.py", "unknown sev")],
+            [
+                Finding("F-003", "P2", "open", "c.py", "style"),
+                Finding("F-004", "WAT", "open", "d.py", "garbage sev"),
+            ],
+        ):
+            assert compute_verdict(findings) == "REVISE"
+            assert build_healing_prompt(findings) != ""
+
+
+class TestHasReviewEvidence:
+    """Reviewer silence is absence of information, not approval (9.1)."""
+
+    def test_no_review_dir_is_no_evidence(self, tmp_path):
+        assert has_review_evidence(tmp_path) is False
+
+    def test_empty_review_dir_is_no_evidence(self, tmp_path):
+        (tmp_path / "review" / "claude").mkdir(parents=True)
+        assert has_review_evidence(tmp_path) is False
+
+    def test_non_matching_files_are_no_evidence(self, tmp_path):
+        d = tmp_path / "review" / "claude"
+        d.mkdir(parents=True)
+        (d / "notes.txt").write_text("not a review artifact")
+        assert has_review_evidence(tmp_path) is False
+
+    def test_claude_md_file_is_evidence(self, tmp_path):
+        d = tmp_path / "review" / "claude"
+        d.mkdir(parents=True)
+        (d / "claude-findings.md").write_text("clean pass, no findings")
+        assert has_review_evidence(tmp_path) is True
+
+
+class TestRunReviewPass:
+    def test_missing_claude_binary_returns_1(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("pxx.review_gate._get_claude_bin", lambda: None)
+        assert run_review_pass(tmp_path) == 1
+
+    def test_successful_pass_returns_0(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("pxx.review_gate._get_claude_bin", lambda: "/x/claude")
+
+        class R:
+            returncode = 0
+
+        monkeypatch.setattr("pxx.review_gate.subprocess.run", lambda *a, **k: R())
+        assert run_review_pass(tmp_path) == 0
+
+    def test_failing_pass_returns_1(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("pxx.review_gate._get_claude_bin", lambda: "/x/claude")
+
+        class R:
+            returncode = 2
+
+        monkeypatch.setattr("pxx.review_gate.subprocess.run", lambda *a, **k: R())
+        assert run_review_pass(tmp_path) == 1
+
+
 class TestBuildHealingPrompt:
     def test_builds_prompt_from_p1_findings(self):
         findings = [
@@ -169,8 +268,12 @@ class TestCollectActiveFindings:
         review_dir = tmp_path / "review" / "claude"
         review_dir.mkdir(parents=True)
 
-        (review_dir / "claude-findings-1.md").write_text("### F-001 — issue (P1, state: open)")
-        (review_dir / "claude-findings-2.md").write_text("### F-002 — issue (P1, state: open)")
+        (review_dir / "claude-findings-1.md").write_text(
+            "### F-001 — issue (P1, state: open)"
+        )
+        (review_dir / "claude-findings-2.md").write_text(
+            "### F-002 — issue (P1, state: open)"
+        )
 
         findings = collect_active_findings(tmp_path)
         assert len(findings) == 2
@@ -181,7 +284,9 @@ class TestCollectActiveFindings:
         review_dir.mkdir(parents=True)
 
         # Valid finding
-        (review_dir / "claude-valid.md").write_text("### F-001 — issue (P1, state: open)")
+        (review_dir / "claude-valid.md").write_text(
+            "### F-001 — issue (P1, state: open)"
+        )
         # Malformed file that will raise an error
         (review_dir / "claude-broken.md").write_bytes(b"\x80\x81\x82")  # invalid UTF-8
 

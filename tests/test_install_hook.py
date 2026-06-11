@@ -29,7 +29,9 @@ def _init_repo(tmp_path: Path) -> Path:
     # Bypass the pxx pre-commit hook (which won't be installed yet anyway,
     # but also wouldn't pass: no pyproject.toml in this fake repo).
     env = {**os.environ, "PXX_PRECOMMIT_SKIP": "1"}
-    subprocess.run(["git", "commit", "-q", "-m", "seed"], cwd=tmp_path, check=True, env=env)
+    subprocess.run(
+        ["git", "commit", "-q", "-m", "seed"], cwd=tmp_path, check=True, env=env
+    )
     return tmp_path
 
 

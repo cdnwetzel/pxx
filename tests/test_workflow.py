@@ -61,11 +61,13 @@ class TestWorkflowState:
         (tmp_path / ".pxx").mkdir(parents=True, exist_ok=True)
         path = tmp_path / ".pxx" / "workflow_state.json"
         path.write_text(
-            json.dumps({
-                "version": 1,
-                "phase": "generating",
-                "unknown_field": "should be ignored",
-            })
+            json.dumps(
+                {
+                    "version": 1,
+                    "phase": "generating",
+                    "unknown_field": "should be ignored",
+                }
+            )
         )
         result = load_state(tmp_path)
         assert result is not None

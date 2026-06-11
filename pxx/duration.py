@@ -3,6 +3,7 @@ from typing import Final
 SECONDS_IN_MINUTE: Final = 60
 SECONDS_IN_HOUR: Final = 3600
 
+
 def human_duration(seconds: float) -> str:
     if seconds < SECONDS_IN_MINUTE:
         return f"{int(seconds)}s"

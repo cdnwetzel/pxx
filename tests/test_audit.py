@@ -77,7 +77,9 @@ class TestNowIso:
     def test_returns_iso_8601_with_offset(self):
         s = now_iso()
         # e.g. "2026-05-13T10:30:00.123-04:00" or "...+00:00"
-        assert re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}[+-]\d{2}:\d{2}$", s), s
+        assert re.match(
+            r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}[+-]\d{2}:\d{2}$", s
+        ), s
 
 
 class TestIsSensitiveEnv:
@@ -165,7 +167,9 @@ class TestLastSessionHeadFor:
         return json.dumps(rec)
 
     def test_returns_none_when_directory_missing(self, tmp_path):
-        assert last_session_head_for("/work/pxx", directory=tmp_path / "missing") is None
+        assert (
+            last_session_head_for("/work/pxx", directory=tmp_path / "missing") is None
+        )
 
     def test_returns_none_when_directory_empty(self, tmp_path):
         assert last_session_head_for("/work/pxx", directory=tmp_path) is None
@@ -176,9 +180,13 @@ class TestLastSessionHeadFor:
 
     def test_returns_most_recent_record_across_files(self, tmp_path):
         # Older log file (lexically smaller name).
-        (tmp_path / "2026-05-14.jsonl").write_text(self._record(git_head_sha="old111") + "\n")
+        (tmp_path / "2026-05-14.jsonl").write_text(
+            self._record(git_head_sha="old111") + "\n"
+        )
         # Newer log file.
-        (tmp_path / "2026-05-15.jsonl").write_text(self._record(git_head_sha="new222") + "\n")
+        (tmp_path / "2026-05-15.jsonl").write_text(
+            self._record(git_head_sha="new222") + "\n"
+        )
         assert last_session_head_for("/work/pxx", directory=tmp_path) == "new222"
 
     def test_returns_last_record_in_file(self, tmp_path):
@@ -199,7 +207,9 @@ class TestLastSessionHeadFor:
         assert last_session_head_for("/work/pxx", directory=tmp_path) is None
 
     def test_ignores_null_sha(self, tmp_path):
-        (tmp_path / "2026-05-15.jsonl").write_text(self._record(git_head_sha=None) + "\n")
+        (tmp_path / "2026-05-15.jsonl").write_text(
+            self._record(git_head_sha=None) + "\n"
+        )
         assert last_session_head_for("/work/pxx", directory=tmp_path) is None
 
     def test_ignores_non_session_start_events(self, tmp_path):
@@ -214,7 +224,9 @@ class TestLastSessionHeadFor:
     def test_ignores_gz_files(self, tmp_path):
         # Gzipped files are out of scope; only .jsonl is read.
         (tmp_path / "2026-05-14.jsonl.gz").write_bytes(b"\x1f\x8bnot-decoded")
-        (tmp_path / "2026-05-15.jsonl").write_text(self._record(git_head_sha="live") + "\n")
+        (tmp_path / "2026-05-15.jsonl").write_text(
+            self._record(git_head_sha="live") + "\n"
+        )
         assert last_session_head_for("/work/pxx", directory=tmp_path) == "live"
 
 

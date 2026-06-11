@@ -25,12 +25,12 @@ def _init_repo(tmp_path: Path) -> Path:
     pyproject = tmp_path / "pyproject.toml"
     pyproject.write_text(
         "[project]\n"
-        "name = \"test-repo\"\n"
-        "version = \"0.0.1\"\n"
+        'name = "test-repo"\n'
+        'version = "0.0.1"\n'
         "\n"
         "[tool.ruff]\n"
         "[tool.ruff.lint]\n"
-        "select = [\"E\", \"F\", \"W\"]\n"
+        'select = ["E", "F", "W"]\n'
     )
 
     # Seed commit with a passing test so pytest always passes initially
@@ -38,7 +38,9 @@ def _init_repo(tmp_path: Path) -> Path:
     (tmp_path / "test_seed.py").write_text("def test_seed():\n    assert True\n")
     subprocess.run(["git", "add", "."], cwd=tmp_path, check=True)
     env = {**os.environ, "PXX_PRECOMMIT_SKIP": "1"}
-    subprocess.run(["git", "commit", "-q", "-m", "seed"], cwd=tmp_path, check=True, env=env)
+    subprocess.run(
+        ["git", "commit", "-q", "-m", "seed"], cwd=tmp_path, check=True, env=env
+    )
 
     return tmp_path
 
@@ -132,7 +134,9 @@ class TestRuffGate:
 
         result = _commit(repo)
         # Should pass ruff but may fail pytest if no tests
-        assert "ruff check FAILED" not in result.stderr, f"ruff should not fail: {result.stderr}"
+        assert "ruff check FAILED" not in result.stderr, (
+            f"ruff should not fail: {result.stderr}"
+        )
 
 
 class TestPytestGate:
@@ -149,7 +153,9 @@ class TestPytestGate:
 
         result = _commit(repo)
         assert result.returncode != 0, "pytest should block commit"
-        assert "pytest FAILED" in result.stderr, f"expected pytest error in stderr: {result.stderr}"
+        assert "pytest FAILED" in result.stderr, (
+            f"expected pytest error in stderr: {result.stderr}"
+        )
 
     def test_pytest_succeeds_on_passing_test(self, tmp_path):
         """Stage a passing test; hook should pass pytest gate."""
@@ -161,9 +167,9 @@ class TestPytestGate:
         subprocess.run(["git", "add", "test_pass.py"], cwd=repo, check=True)
 
         result = _commit(repo)
-        assert (
-            "pytest FAILED" not in result.stderr
-        ), f"pytest should pass: {result.stderr}"
+        assert "pytest FAILED" not in result.stderr, (
+            f"pytest should pass: {result.stderr}"
+        )
 
 
 class TestDiffCap:
@@ -181,9 +187,9 @@ class TestDiffCap:
 
         result = _commit(repo)
         assert result.returncode != 0, "diff cap should block large commit"
-        assert "staged diff is" in result.stderr and "lines (cap 100)" in result.stderr, (
-            f"expected diff cap error: {result.stderr}"
-        )
+        assert (
+            "staged diff is" in result.stderr and "lines (cap 100)" in result.stderr
+        ), f"expected diff cap error: {result.stderr}"
 
     def test_allow_big_diff_env_overrides_cap(self, tmp_path):
         """Stage >100 lines with PXX_ALLOW_BIG_DIFF=1; hook should pass."""

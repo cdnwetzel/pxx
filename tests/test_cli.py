@@ -661,22 +661,24 @@ class TestSelfLint:
         rc = _self_lint()
         assert rc == 0
         assert calls == [
-            ["uv", "run", "ruff", "check", "."],
-            ["uv", "run", "ruff", "format", "--check", "."],
+            ["uv", "run", "ruff", "check", "pxx/", "tests/"],
+            ["uv", "run", "ruff", "format", "--check", "pxx/", "tests/"],
         ]
         err = capsys.readouterr().err
         assert "self-lint — running" in err
         assert "check=0 format=0 combined=0" in err
 
     def test_nonzero_if_check_fails(self, monkeypatch, capsys):
-        fake, _ = self._stub_run({("uv", "run", "ruff", "check", "."): 1})
+        fake, _ = self._stub_run({("uv", "run", "ruff", "check", "pxx/", "tests/"): 1})
         monkeypatch.setattr(subprocess, "run", fake)
         rc = _self_lint()
         assert rc != 0
         assert "check=1 format=0" in capsys.readouterr().err
 
     def test_nonzero_if_format_fails(self, monkeypatch, capsys):
-        fake, _ = self._stub_run({("uv", "run", "ruff", "format", "--check", "."): 1})
+        fake, _ = self._stub_run(
+            {("uv", "run", "ruff", "format", "--check", "pxx/", "tests/"): 1}
+        )
         monkeypatch.setattr(subprocess, "run", fake)
         rc = _self_lint()
         assert rc != 0
@@ -684,7 +686,9 @@ class TestSelfLint:
 
     def test_both_subcommands_run_even_when_check_fails(self, monkeypatch):
         # Don't short-circuit on first failure — user wants to see every issue.
-        fake, calls = self._stub_run({("uv", "run", "ruff", "check", "."): 1})
+        fake, calls = self._stub_run(
+            {("uv", "run", "ruff", "check", "pxx/", "tests/"): 1}
+        )
         monkeypatch.setattr(subprocess, "run", fake)
         _self_lint()
         assert len(calls) == 2
@@ -924,6 +928,7 @@ class TestLoopFlag:
         )
         monkeypatch.setattr(cli_module, "_git_repo_root", lambda: cli_module.REPO_ROOT)
         monkeypatch.setattr(cli_module, "_git_dirty", lambda: False)
+        monkeypatch.setattr(cli_module, "_loop_hooks_installed", lambda: True)
         monkeypatch.setattr(cli_module.loop_mod, "run_loop", fake_run_loop)
 
         with pytest.raises(SystemExit) as exc:
@@ -933,6 +938,18 @@ class TestLoopFlag:
         assert calls[0][2].rstrip("/") == "pxx"
         assert calls[0][3] == 2
         assert "EXPERIMENTAL" in capsys.readouterr().err
+
+    def test_refuses_without_pxx_hooks(self, monkeypatch, capsys):
+        from pxx import cli as cli_module
+
+        monkeypatch.setattr(sys, "argv", ["pxx", "--loop", "do it", "--scope", "pxx/"])
+        monkeypatch.setattr(cli_module, "_git_repo_root", lambda: cli_module.REPO_ROOT)
+        monkeypatch.setattr(cli_module, "_git_dirty", lambda: False)
+        monkeypatch.setattr(cli_module, "_loop_hooks_installed", lambda: False)
+        with pytest.raises(SystemExit) as exc:
+            cli_module.main()
+        assert exc.value.code == 1
+        assert "--install-hook" in capsys.readouterr().err
 
 
 class TestReviewHealWiring:

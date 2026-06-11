@@ -156,7 +156,10 @@ class TestFormatForEnv:
         assert format_for_env(["tests/"]) == "tests/"
 
     def test_multi_scope_colon_separated(self):
-        assert format_for_env(["tests/", "docs/", "pxx/cli.py"]) == "tests/:docs/:pxx/cli.py"
+        assert (
+            format_for_env(["tests/", "docs/", "pxx/cli.py"])
+            == "tests/:docs/:pxx/cli.py"
+        )
 
     def test_empty(self):
         assert format_for_env([]) == ""
@@ -179,7 +182,9 @@ class TestScopeCheckMain:
 
     def test_out_of_scope_files_listed(self, monkeypatch, capsys):
         monkeypatch.setenv("PXX_SCOPE", "tests/")
-        monkeypatch.setattr("sys.stdin", io.StringIO("tests/a.py\nsrc/b.py\ndocs/c.md\n"))
+        monkeypatch.setattr(
+            "sys.stdin", io.StringIO("tests/a.py\nsrc/b.py\ndocs/c.md\n")
+        )
         rc = scope_check_main(["check"])
         assert rc == 0  # CLI exits 0 — caller decides what to do with output
         out = capsys.readouterr().out
@@ -189,7 +194,9 @@ class TestScopeCheckMain:
 
     def test_multi_scope_via_colon(self, monkeypatch, capsys):
         monkeypatch.setenv("PXX_SCOPE", "tests/:docs/")
-        monkeypatch.setattr("sys.stdin", io.StringIO("tests/a.py\nsrc/b.py\ndocs/c.md\n"))
+        monkeypatch.setattr(
+            "sys.stdin", io.StringIO("tests/a.py\nsrc/b.py\ndocs/c.md\n")
+        )
         scope_check_main(["check"])
         out = capsys.readouterr().out
         assert "src/b.py" in out
@@ -249,12 +256,18 @@ class TestTrustedPathsConfigPath:
 
     def test_falls_back_to_dot_config(self, monkeypatch):
         monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
-        assert trusted_paths_config_path() == Path.home() / ".config" / "pxx" / "trusted-paths"
+        assert (
+            trusted_paths_config_path()
+            == Path.home() / ".config" / "pxx" / "trusted-paths"
+        )
 
     def test_empty_xdg_config_home_falls_back(self, monkeypatch):
         # POSIX ${VAR:-default} treats empty same as unset.
         monkeypatch.setenv("XDG_CONFIG_HOME", "")
-        assert trusted_paths_config_path() == Path.home() / ".config" / "pxx" / "trusted-paths"
+        assert (
+            trusted_paths_config_path()
+            == Path.home() / ".config" / "pxx" / "trusted-paths"
+        )
 
 
 class TestLoadTrustedPaths:

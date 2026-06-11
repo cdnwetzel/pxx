@@ -51,13 +51,17 @@ def run_review_pass(project_root: Path) -> int:
         )
         return 1
 
+    # Live dogfood (2026-06-10) measured a real full-repo review pass at
+    # >300s — the old fixed timeout guaranteed NO_REVIEW. Default raised;
+    # PXX_REVIEW_TIMEOUT overrides per environment.
+    timeout = float(os.environ.get("PXX_REVIEW_TIMEOUT", "900"))
     try:
         result = subprocess.run(
             [claude_bin, "--print", "run a review pass on this project"],
             cwd=project_root,
             capture_output=True,
             text=True,
-            timeout=300,
+            timeout=timeout,
         )
         return 0 if result.returncode == 0 else 1
     except (FileNotFoundError, subprocess.TimeoutExpired) as e:

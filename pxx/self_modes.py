@@ -50,9 +50,14 @@ def self_test(repo_root: Path) -> int:
 
 
 def self_lint(repo_root: Path) -> int:
-    """Run ruff check and ruff format --check against the pxx repo (#001 T1)."""
-    check_cmd = ["uv", "run", "ruff", "check", "."]
-    format_cmd = ["uv", "run", "ruff", "format", "--check", "."]
+    """Run ruff check and ruff format --check against the pxx repo (#001 T1).
+
+    Scoped to pxx/ and tests/ — services/* are separate packages with their
+    own tooling, and linting the whole tree made the loop's lint gate
+    structurally red on pre-existing service debt (live dogfood 2026-06-10).
+    """
+    check_cmd = ["uv", "run", "ruff", "check", "pxx/", "tests/"]
+    format_cmd = ["uv", "run", "ruff", "format", "--check", "pxx/", "tests/"]
 
     print(
         f"pxx: self-lint — running `{' '.join(check_cmd)}` in {repo_root}",

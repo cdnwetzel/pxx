@@ -255,6 +255,41 @@ runtime observer) stores a summary observation for future sessions.
 
 ---
 
+## Live dogfood #1 (2026-06-10) — transcript and calibration
+
+**Setup:** seeded task — implement `pxx/duration.py::human_duration` against 3
+failing tests (committed first; non-empty baseline). Fresh review state. T5810
+14B via tunnel. Hooks NOT installed (as found).
+
+**Result:** round 1: the model implemented the function correctly in one shot
+— clean, typed, 3/3 tests pass, committed autonomously (`2c18f6b`), 16 diff
+lines, baseline 3→0. The review pass then timed out (claude --print > 300s) →
+verdict NO_REVIEW → the loop stopped fail-closed after exactly one round with
+the correct remedy message. Per-round audit record and workflow state both
+written as designed. Exit 1.
+
+**Verdict on the loop machinery: everything fired as designed.** Baseline
+measured, edit rc captured, diff counted against budget, NO_REVIEW refused a
+second round. The convergence thesis is *half*-confirmed: the edit→test leg
+converged in one round; the review→heal leg never got to run.
+
+**Calibration findings → fixed immediately:**
+- **A.** `run_review_pass`'s fixed 300s timeout guaranteed NO_REVIEW on a real
+  full-repo review. Now `PXX_REVIEW_TIMEOUT` (default 900s).
+- **B.** `self_lint` linted the whole tree including `services/*` (separate
+  packages, own tooling) — pre-existing service debt made the loop's lint gate
+  structurally red (APPROVE unreachable). Now scoped to `pxx/ tests/`.
+- **C.** With hooks absent, an auto-`--yes`'d aider mutated `.gitignore` out
+  of scope (re-adding the over-broad `.aider*` pattern!) and its commit lacked
+  the `[autonomous]` tag. The --yes doctrine's boundary didn't exist. `--loop`
+  now **refuses to start unless the pxx pre-commit hook is installed**.
+- Minor: the loop runs `ruff format --check` but aider's output needed
+  formatting — the round left `duration.py` check-clean but format-dirty
+  (human-fixed post-run; consider a format step in the round).
+
+**Next live run:** install hooks first; expect the review leg to complete
+within the new budget; observe whether a REVISE round's healing prompt steers.
+
 ## Success Criteria
 
 - [x] `review_gate`, `workflow`, `governance` have unit tests (9.1 ✅).

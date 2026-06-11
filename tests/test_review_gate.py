@@ -294,3 +294,60 @@ class TestCollectActiveFindings:
         findings = collect_active_findings(tmp_path)
         assert len(findings) == 1
         assert findings[0].id == "F-001"
+
+
+class TestNearMissGuard:
+    """The last silent-drop path: header-like lines that fail the format."""
+
+    def test_hyphen_instead_of_emdash_surfaces_as_unparseable(self):
+        md = "### F-007 - hyphen not em-dash in x.py (P1, state: open)"
+        findings = parse_findings(md)
+        assert len(findings) == 1
+        assert findings[0].id == "F-007"
+        assert findings[0].severity == "UNPARSEABLE"
+        assert findings[0].state == "open"
+
+    def test_missing_severity_state_parens_surfaces(self):
+        md = "### F-008 — forgot the parens entirely"
+        findings = parse_findings(md)
+        assert len(findings) == 1
+        assert findings[0].severity == "UNPARSEABLE"
+
+    def test_near_miss_fails_closed_into_revise_with_prompt(self):
+        md = "### F-009 - malformed but real finding (P0, state: open)"
+        findings = parse_findings(md)
+        assert compute_verdict(findings) == "REVISE"
+        prompt = build_healing_prompt(findings)
+        assert "F-009" in prompt
+        assert "unparseable" in prompt.lower()
+
+    def test_non_finding_headers_are_not_flagged(self):
+        md = "\n".join(
+            [
+                "### Findings overview",
+                "## F-010 is discussed below",  # wrong header level
+                "regular prose mentioning ### F-011 mid-line",
+                "### Future work",
+            ]
+        )
+        assert parse_findings(md) == []
+
+    def test_near_miss_survives_active_state_filtering(self, tmp_path):
+        d = tmp_path / "review" / "claude"
+        d.mkdir(parents=True)
+        (d / "claude-x.md").write_text("### F-012 - bad dash (P1, open)")
+        findings = collect_active_findings(tmp_path)
+        assert len(findings) == 1
+        assert findings[0].severity == "UNPARSEABLE"
+
+
+class TestHealingPromptOrdering:
+    def test_preserves_input_order(self):
+        findings = [
+            Finding("F-003", "P1", "open", "c.py", "third listed first"),
+            Finding("F-001", "P1", "open", "a.py", "first listed second"),
+            Finding("F-002", "P1", "open", "b.py", "second listed third"),
+        ]
+        prompt = build_healing_prompt(findings)
+        positions = [prompt.index(fid) for fid in ("F-003", "F-001", "F-002")]
+        assert positions == sorted(positions)

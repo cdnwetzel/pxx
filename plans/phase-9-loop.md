@@ -88,8 +88,17 @@ changes rather than greenfield test-writing.
       with evidence on disk. Reviewer silence can no longer launder into a
       green light.
 - [x] `test_workflow.py`: transition/state round-trip/resume (restored suite).
-- [x] `test_governance.py`: allow/deny gates (restored suite; the restoration
-      also caught + fixed the index-vs-worktree secrets-scanner bug).
+- [x] `test_governance.py` — in two steps. The restored suite covered the
+      three *checkers* only; the verification pass correctly flagged the
+      original checkbox as overstating. **9.1b** closed the remainder:
+      `run_governance_check` aggregator tests (exit 0/1, skip-guard
+      RuntimeError outside pytest, invalid-config warning path), an
+      `errors="replace"` fix for the UnicodeDecodeError crash on staged
+      binaries (a bug in the same-day index-fix code, with regression test),
+      all 9 secret patterns parametrized, the em-dash near-miss guard in
+      `parse_findings` (header-like lines that fail the format surface as
+      UNPARSEABLE findings → REVISE, instead of silently dropping), and the
+      healing-prompt ordering test.
 
 **Effort:** 1-2 days (actual: collapsed by the restoration). **Status:** `done`
 
@@ -110,6 +119,12 @@ stays in the modules it calls.
       `healing_attempts`.
 - [ ] Terminal states: APPROVE/REJECT/round-cap, with optional rollback to the
       #002 safety tag on REJECT.
+- [ ] **NO_REVIEW must not heal.** NO_REVIEW lands in phase `rejected`, whose
+      resume message generically suggests `--heal` — but healing NO_REVIEW is
+      nonsensical (no findings → empty prompt → the exact spin the REVISE
+      invariant guards against). The driver special-cases it: NO_REVIEW's
+      remedy is "run a review", never a heal round; make the rejected-phase
+      message verdict-aware when `--heal` lands.
 
 **Effort:** 2-3 days. **Status:** `planned`
 

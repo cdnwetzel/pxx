@@ -83,6 +83,23 @@ def parse_findings(md_content: str) -> list[Finding]:
     for line in md_content.splitlines():
         m = re.match(pattern, line)
         if not m:
+            # Near-miss guard: a line that *looks like* a finding header but
+            # fails the strict format (hyphen instead of em-dash, missing
+            # state, etc.) must not vanish — fewer findings means APPROVE, so
+            # parser strictness could launder findings into silence. Surface
+            # it as an UNPARSEABLE finding, which fails closed into REVISE
+            # and appears in the healing prompt.
+            near = re.match(r"^### (F-\d+)\b(.*)", line)
+            if near:
+                findings.append(
+                    Finding(
+                        id=near.group(1),
+                        severity="UNPARSEABLE",
+                        state="open",
+                        location="",
+                        description=f"unparseable finding header: {line.strip()}",
+                    )
+                )
             continue
         finding_id, description, severity, state = m.groups()
         severity = severity.upper()

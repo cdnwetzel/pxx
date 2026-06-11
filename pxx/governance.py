@@ -79,6 +79,11 @@ def scan_staged_secrets(repo_root: Path) -> list[GovernanceViolation]:
                 cwd=repo_root,
                 capture_output=True,
                 text=True,
+                # A staged binary (image, pickle, ...) is not valid UTF-8;
+                # strict decoding would raise UnicodeDecodeError and take down
+                # the whole governance gate. Replace and scan what's scannable.
+                encoding="utf-8",
+                errors="replace",
                 check=False,
                 timeout=5,
             )

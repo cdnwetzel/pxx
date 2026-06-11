@@ -164,7 +164,11 @@ class TestCheckVersionSync:
 
         violations = check_version_sync(tmp_path, config)
         # Should not have error-level violations for version mismatch
-        errors = [v for v in violations if v.severity == "error" and "mismatch" in v.detail.lower()]
+        errors = [
+            v
+            for v in violations
+            if v.severity == "error" and "mismatch" in v.detail.lower()
+        ]
         assert len(errors) == 0
 
     def test_handles_missing_file(self, tmp_path):
@@ -203,7 +207,11 @@ class TestCheckVersionSync:
         }
 
         violations = check_version_sync(tmp_path, config)
-        errors = [v for v in violations if v.severity == "error" and "mismatch" in v.detail.lower()]
+        errors = [
+            v
+            for v in violations
+            if v.severity == "error" and "mismatch" in v.detail.lower()
+        ]
         assert len(errors) == 0
 
     def test_parses_python_assignment(self, tmp_path):
@@ -218,7 +226,11 @@ class TestCheckVersionSync:
         }
 
         violations = check_version_sync(tmp_path, config)
-        errors = [v for v in violations if v.severity == "error" and "mismatch" in v.detail.lower()]
+        errors = [
+            v
+            for v in violations
+            if v.severity == "error" and "mismatch" in v.detail.lower()
+        ]
         assert len(errors) == 0
 
 
@@ -257,3 +269,113 @@ class TestCheckReviewVerdict:
     def test_returns_empty_when_no_state(self, tmp_path):
         violations = check_review_verdict(tmp_path)
         assert violations == []
+
+
+class TestSecretPatternBreadth:
+    """Every shipped secret pattern must actually match its target shape."""
+
+    import pytest as _pytest
+
+    SAMPLES = [
+        ("api-key-literal", 'api_key = "abcdefgh12345678"'),
+        ("openai-key", "sk-" + "a1b2c3d4" * 5),
+        ("anthropic-key", "sk-ant-" + "a1b2c3d4" * 5),
+        ("huggingface-token", "hf_" + "a" * 24),
+        ("aws-key", "AKIA" + "ABCDEFGHIJKLMNOP"),
+        ("github-token", "ghp_" + "a" * 36),
+        ("bearer-token", "Authorization: Bearer " + "abcdefghij0123456789"),
+        ("private-key-pem", "-----BEGIN RSA PRIVATE KEY-----"),
+        ("generic-password", 'password = "hunter22"'),
+    ]
+
+    @_pytest.mark.parametrize("name,sample", SAMPLES)
+    def test_pattern_matches_its_sample(self, name, sample):
+        from pxx.governance import SECRET_PATTERNS
+
+        pattern = dict(SECRET_PATTERNS)[name]
+        assert pattern.search(sample), f"{name} failed to match its own sample"
+
+    def test_all_nine_patterns_are_exercised(self):
+        from pxx.governance import SECRET_PATTERNS
+
+        assert {n for n, _ in SECRET_PATTERNS} == {n for n, _ in self.SAMPLES}
+
+
+def _init_repo(tmp_path):
+    import subprocess as sp
+
+    sp.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    sp.run(["git", "config", "user.email", "x@x"], cwd=tmp_path, check=True)
+    sp.run(["git", "config", "user.name", "x"], cwd=tmp_path, check=True)
+    return tmp_path
+
+
+class TestStagedBinaryFiles:
+    def test_staged_binary_does_not_crash_the_gate(self, tmp_path):
+        """A staged non-UTF-8 blob must not take down scan_staged_secrets.
+
+        Regression: `git show :<path>` with text=True strict decoding raised
+        UnicodeDecodeError (not in the caught tuple) on any staged binary.
+        """
+        import subprocess as sp
+
+        repo = _init_repo(tmp_path)
+        (repo / "blob.bin").write_bytes(b"\x80\x81\xfe\xff" * 8)
+        (repo / "leak.py").write_text('password = "hunter22"\n')
+        sp.run(["git", "add", "."], cwd=repo, check=True)
+
+        violations = scan_staged_secrets(repo)
+        # No crash, and the real secret alongside the binary is still found.
+        assert any(v.check == "secrets" for v in violations)
+
+
+class TestRunGovernanceCheck:
+    """Aggregator-level allow/deny — the gate the loop will call."""
+
+    def test_clean_repo_returns_0(self, tmp_path, monkeypatch):
+        from pxx.governance import run_governance_check
+
+        repo = _init_repo(tmp_path)
+        monkeypatch.delenv("PXX_GOVERNANCE_SKIP", raising=False)
+        assert run_governance_check(repo) == 0
+
+    def test_staged_secret_returns_1(self, tmp_path, monkeypatch):
+        import subprocess as sp
+
+        from pxx.governance import run_governance_check
+
+        repo = _init_repo(tmp_path)
+        (repo / "config.py").write_text('api_key = "abcdefgh12345678"\n')
+        sp.run(["git", "add", "."], cwd=repo, check=True)
+        monkeypatch.delenv("PXX_GOVERNANCE_SKIP", raising=False)
+        assert run_governance_check(repo) == 1
+
+    def test_skip_env_inside_pytest_returns_0(self, tmp_path, monkeypatch):
+        from pxx.governance import run_governance_check
+
+        monkeypatch.setenv("PXX_GOVERNANCE_SKIP", "1")
+        assert run_governance_check(tmp_path) == 0
+
+    def test_skip_env_outside_pytest_raises(self, tmp_path, monkeypatch):
+        import pytest as pt
+
+        from pxx.governance import run_governance_check
+
+        monkeypatch.setenv("PXX_GOVERNANCE_SKIP", "1")
+        monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+        with pt.raises(RuntimeError):
+            run_governance_check(tmp_path)
+
+    def test_invalid_governance_json_warns_but_does_not_crash(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        from pxx.governance import run_governance_check
+
+        repo = _init_repo(tmp_path)
+        (repo / ".pxx").mkdir()
+        (repo / ".pxx" / "governance.json").write_text("{not json")
+        monkeypatch.delenv("PXX_GOVERNANCE_SKIP", raising=False)
+
+        rc = run_governance_check(repo)
+        assert rc == 0  # warning, not error
+        assert "invalid JSON" in capsys.readouterr().err

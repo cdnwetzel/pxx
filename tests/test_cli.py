@@ -864,6 +864,110 @@ class TestReviewVerdictWiring:
         assert state["review_verdict"] == "NO_REVIEW"
 
 
+class TestLoopFlag:
+    """--loop gates: experimental, pxx-repo-only, scope+clean-tree required."""
+
+    def test_refuses_outside_pxx_repo(self, monkeypatch, tmp_path, capsys):
+        from pxx import cli as cli_module
+
+        monkeypatch.setattr(sys, "argv", ["pxx", "--loop", "task", "--scope", "x/"])
+        monkeypatch.setattr(cli_module, "_git_repo_root", lambda: tmp_path)
+        with pytest.raises(SystemExit) as exc:
+            cli_module.main()
+        assert exc.value.code == 1
+        assert "only inside" in capsys.readouterr().err
+
+    def test_requires_task(self, monkeypatch, capsys):
+        from pxx import cli as cli_module
+
+        monkeypatch.setattr(sys, "argv", ["pxx", "--loop"])
+        monkeypatch.setattr(cli_module, "_git_repo_root", lambda: cli_module.REPO_ROOT)
+        with pytest.raises(SystemExit) as exc:
+            cli_module.main()
+        assert exc.value.code == 2
+        assert "usage" in capsys.readouterr().err
+
+    def test_requires_scope(self, monkeypatch, capsys):
+        from pxx import cli as cli_module
+
+        monkeypatch.setattr(sys, "argv", ["pxx", "--loop", "do the thing"])
+        monkeypatch.setattr(cli_module, "_git_repo_root", lambda: cli_module.REPO_ROOT)
+        with pytest.raises(SystemExit) as exc:
+            cli_module.main()
+        assert exc.value.code == 2
+        assert "--scope" in capsys.readouterr().err
+
+    def test_refuses_dirty_tree(self, monkeypatch, capsys):
+        from pxx import cli as cli_module
+
+        monkeypatch.setattr(sys, "argv", ["pxx", "--loop", "do it", "--scope", "pxx/"])
+        monkeypatch.setattr(cli_module, "_git_repo_root", lambda: cli_module.REPO_ROOT)
+        monkeypatch.setattr(cli_module, "_git_dirty", lambda: True)
+        with pytest.raises(SystemExit) as exc:
+            cli_module.main()
+        assert exc.value.code == 1
+        assert "dirty tree" in capsys.readouterr().err
+
+    def test_dispatches_to_driver_with_experimental_banner(self, monkeypatch, capsys):
+        from pxx import cli as cli_module
+
+        calls: list[tuple] = []
+
+        def fake_run_loop(root, task, scope, max_rounds):
+            calls.append((root, task, scope, max_rounds))
+            return 5
+
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            ["pxx", "--loop", "fix it", "--scope", "pxx/", "--max-rounds", "2"],
+        )
+        monkeypatch.setattr(cli_module, "_git_repo_root", lambda: cli_module.REPO_ROOT)
+        monkeypatch.setattr(cli_module, "_git_dirty", lambda: False)
+        monkeypatch.setattr(cli_module.loop_mod, "run_loop", fake_run_loop)
+
+        with pytest.raises(SystemExit) as exc:
+            cli_module.main()
+        assert exc.value.code == 5
+        assert calls and calls[0][1] == "fix it"
+        assert calls[0][2].rstrip("/") == "pxx"
+        assert calls[0][3] == 2
+        assert "EXPERIMENTAL" in capsys.readouterr().err
+
+
+class TestReviewHealWiring:
+    """--review --heal = one REVISE round, scope-gated."""
+
+    def _arrange_revise(self, monkeypatch, tmp_path):
+        from pxx import cli as cli_module
+
+        d = tmp_path / "review" / "claude"
+        d.mkdir(parents=True)
+        (d / "claude-f.md").write_text("### F-001 — fix me in x.py (P1, state: open)")
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(cli_module, "_git_repo_root", lambda: tmp_path)
+        monkeypatch.setattr(cli_module.review_gate, "run_review_pass", lambda root: 0)
+        return cli_module
+
+    def test_heal_requires_scope(self, monkeypatch, tmp_path, capsys):
+        cli_module = self._arrange_revise(monkeypatch, tmp_path)
+        monkeypatch.setattr(sys, "argv", ["pxx", "--review", "--heal"])
+        with pytest.raises(SystemExit) as exc:
+            cli_module.main()
+        assert exc.value.code == 2
+        assert "--scope" in capsys.readouterr().err
+
+    def test_heal_dispatches_and_propagates_exit_code(self, monkeypatch, tmp_path):
+        cli_module = self._arrange_revise(monkeypatch, tmp_path)
+        monkeypatch.setattr(
+            sys, "argv", ["pxx", "--review", "--heal", "--scope", "pxx/"]
+        )
+        monkeypatch.setattr(cli_module.loop_mod, "heal_once", lambda root, scope: 7)
+        with pytest.raises(SystemExit) as exc:
+            cli_module.main()
+        assert exc.value.code == 7
+
+
 class TestExtractSelfFixTask:
     """Unit tests for the task-string extractor (#012)."""
 

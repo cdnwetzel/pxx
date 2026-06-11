@@ -27,6 +27,7 @@ from pxx import (
     tool_capture,
     workflow,
 )
+from pxx import loop as loop_mod
 from pxx import docs_sme
 from pxx._core_files import is_core
 from pxx.commands_index import CommandInfo, list_commands
@@ -451,6 +452,18 @@ def main() -> None:
         new_state = workflow.transition(state, new_phase, review_verdict=verdict)
         workflow.save_state(new_state, root)
         print(f"pxx: review pass complete. verdict={verdict}.", file=sys.stderr)
+        if "--heal" in sys.argv:
+            # --heal is exactly one REVISE round (#009). NO_REVIEW and
+            # all-UNPARSEABLE refuse inside heal_once — their remedy is the
+            # review itself, not an edit round.
+            heal_scopes, _ = extract_scope_args(sys.argv[1:])
+            if not heal_scopes:
+                print(
+                    "pxx: --heal needs --scope <path> for its edit round.",
+                    file=sys.stderr,
+                )
+                sys.exit(2)
+            sys.exit(loop_mod.heal_once(root, heal_scopes[0]))
         sys.exit(0)
 
     if "--check" in sys.argv:
@@ -459,6 +472,54 @@ def main() -> None:
             print("pxx: --check requires a git repo.", file=sys.stderr)
             sys.exit(1)
         sys.exit(governance.run_governance_check(root))
+
+    if "--loop" in sys.argv:
+        # EXPERIMENTAL (#009). Most conservative posture: pxx repo only (the
+        # self-fix rounds chdir there), --scope required, clean tree required,
+        # bounded rounds, never pushes.
+        root = _git_repo_root()
+        if root is None or root.resolve() != REPO_ROOT.resolve():
+            print(
+                "pxx: --loop is experimental and currently runs only inside "
+                "the pxx repo (self-fix rounds operate there).",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        task, argv_rest = _extract_self_fix_task(
+            ["--self-fix" if a == "--loop" else a for a in sys.argv[1:]]
+        )
+        if not task:
+            print('pxx: usage: pxx --loop "<task>" --scope <path>', file=sys.stderr)
+            sys.exit(2)
+        loop_scopes, _ = extract_scope_args(argv_rest)
+        if not loop_scopes:
+            print(
+                "pxx: --loop refuses to run without --scope — one scoped "
+                "path per loop is the unit of iteration.",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+        if _git_dirty():
+            print(
+                "pxx: --loop refuses to start on a dirty tree — commit or "
+                "stash first (rounds must be cleanly attributable).",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        max_rounds = loop_mod.DEFAULT_MAX_ROUNDS
+        if "--max-rounds" in sys.argv:
+            idx = sys.argv.index("--max-rounds")
+            if idx + 1 < len(sys.argv) and sys.argv[idx + 1].isdigit():
+                max_rounds = int(sys.argv[idx + 1])
+        print(
+            "pxx: --loop is EXPERIMENTAL — bounded autonomous rounds; never "
+            "pushes; stops on APPROVE/REJECT/no-progress/budget.",
+            file=sys.stderr,
+        )
+        _try_write_session_start(
+            {"session_class": "loop", "cwd": str(Path.cwd()), "task": task}
+        )
+        sys.exit(loop_mod.run_loop(root, task, loop_scopes[0], max_rounds=max_rounds))
 
     _self_sanity_check()
     _emit_core_restart_banner()

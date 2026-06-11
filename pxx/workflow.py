@@ -109,10 +109,17 @@ def resume_state(repo_root: Path) -> int:
         return 0
 
     if state.phase == "rejected":
+        if state.review_verdict == "NO_REVIEW":
+            # Healing NO_REVIEW is nonsensical — there are no findings to feed
+            # back; the remedy is producing a review, not an edit round.
+            remedy = "Run `pxx --review` to produce review evidence first."
+        else:
+            remedy = (
+                "Run `pxx --review --heal --scope <path>` to feed findings "
+                "back to aider, or `pxx --edit` to address manually."
+            )
         print(
-            f"pxx: session rejected (attempt {state.healing_attempts}). "
-            "Run `pxx --review --heal` to feed findings back to aider, "
-            "or `pxx --edit` to address manually.",
+            f"pxx: session rejected (attempt {state.healing_attempts}). {remedy}",
             file=sys.stderr,
         )
         return 1

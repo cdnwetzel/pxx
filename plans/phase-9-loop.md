@@ -6,7 +6,7 @@
 cycle: edit → test → review → heal → repeat, until the change is approved or a
 guard stops it.
 
-**Status:** `in-progress` — 9.1 done (verifier hardening); 9.2+9.3 (driver+guards, one review surface) next.
+**Status:** `in-progress` — 9.1+9.1b done (verifier hardening), 9.2+9.3 done (driver+guards, born together); remaining: 9.4 cross-session capture, deferred `--rollback` opt-in, live dogfood of `pxx --loop`.
 
 **Key Finding:** Every component of an autonomous loop already exists in main —
 *except the loop itself*. There is a state machine (`workflow.py`), a
@@ -111,22 +111,37 @@ changes rather than greenfield test-writing.
 stays in the modules it calls.
 
 **Tasks:**
-- [ ] `--loop` flag + task/scope parsing (reuse `scope.extract_scope_args`,
-      `self_modes.extract_self_fix_task`).
-- [ ] `pxx/loop.py`: the round loop, verdict branching, healing-prompt feedback,
-      `workflow` persistence, per-round `audit` records.
-- [ ] Wire `build_healing_prompt` -> next-round `--message`; increment
-      `healing_attempts`.
-- [ ] Terminal states: APPROVE/REJECT/round-cap, with optional rollback to the
-      #002 safety tag on REJECT.
-- [ ] **NO_REVIEW must not heal.** NO_REVIEW lands in phase `rejected`, whose
+- [x] `--loop` flag + task/scope parsing (reuses `extract_scope_args` /
+      `extract_self_fix_task`); conservative gates enforced at the cli:
+      pxx-repo-only (v1), `--scope` required, clean tree required,
+      EXPERIMENTAL banner, `--max-rounds`.
+- [x] `pxx/loop.py`: round loop, verdict branching, healing-prompt feedback
+      (gate findings + live failing-test list — 9.4's direct-feedback design,
+      built in from day one), `workflow` persistence (`healing_attempts`
+      increments per round), per-round `audit` records. Each edit round is a
+      `pxx --self-fix` subprocess with `--yes` (reuses safety tag, diff cap,
+      [autonomous] tagging, execve handoff).
+- [x] `build_healing_prompt` wired; `--heal` is real: `heal_once()` = exactly
+      one REVISE round, dispatched from `pxx --review --heal --scope <path>`.
+- [x] Terminal states: APPROVE / REJECT / round-cap, REJECT = stop-and-report
+      per Decisions. ( **Deferred:** the `--rollback` opt-in flag for
+      auto-revert to the #002 tag — stop-and-report is the shipped default.)
+- [x] **All-UNPARSEABLE must not heal either.** Same family as NO_REVIEW
+      (verified-pass input): if a REVISE verdict is driven *only* by
+      UNPARSEABLE findings, the healing prompt would tell aider to "address" a
+      malformed markdown header — the remedy is fixing/re-running the review,
+      not editing code. The driver branches on "at least one substantive
+      finding (P1 or unknown-real)"; all-UNPARSEABLE behaves like NO_REVIEW.
+- [x] **NO_REVIEW must not heal.** NO_REVIEW lands in phase `rejected`, whose
       resume message generically suggests `--heal` — but healing NO_REVIEW is
       nonsensical (no findings → empty prompt → the exact spin the REVISE
       invariant guards against). The driver special-cases it: NO_REVIEW's
       remedy is "run a review", never a heal round; make the rejected-phase
-      message verdict-aware when `--heal` lands.
+      message verdict-aware when `--heal` lands. (Done: `resume_state`'s
+      rejected message now branches on the verdict.)
 
-**Effort:** 2-3 days. **Status:** `planned`
+**Effort:** 2-3 days. **Status:** `done` (except the deferred `--rollback`
+opt-in, noted above)
 
 ## Phase 9.3: Termination guards (the real design work)
 
@@ -135,23 +150,25 @@ stays in the modules it calls.
 **Why:** The guards are what separate "autonomous" from "runaway." Each kills a
 distinct failure mode.
 
-- [ ] **Round cap** (default 3) — hard ceiling on iterations.
-- [ ] **Monotonic-progress rule** — measured against the **baseline test set
+- [x] **Round cap** (default 3) — hard ceiling on iterations.
+- [x] **Monotonic-progress rule** — measured against the **baseline test set
       captured before round 1**: failures within that set must *strictly
       decrease* each round, else abort. Tests the loop itself introduces are
       tracked separately (a good round may add tests that initially fail —
       naive whole-count monotonicity would punish exactly the right behavior).
       Kills the "iterates 100 times making no progress" cost failure mode.
-- [ ] **Cumulative diff budget** — a budget across *all* rounds (not just the
+- [x] **Cumulative diff budget** (default 150 lines) — a budget across *all* rounds (not just the
       per-commit `SELF_FIX_DIFF_CAP = 60`), so N rounds can't smuggle in an
       N×60-line rewrite.
-- [ ] **No-push is absolute** — the loop never pushes; APPROVE just stops with
-      tagged commits.
-- [ ] **Budget in tokens + wall-clock, not dollars** — `cost_metrics.py`
-      currently prices at `$0.003/1k` (cloud rates); inference here is local and
-      free, so the loop's budget gate must count tokens and wall-clock.
+- [x] **No-push is absolute** — the driver has no push code path; APPROVE
+      stops with tagged commits.
+- [x] **Budget in wall-clock** (default 1800s). **Deferred:** token counting —
+      aider doesn't expose per-run token totals to a parent process without
+      output scraping; wall-clock + rounds + diff budget bound the same failure
+      mode. Revisit if/when aider grows a machine-readable usage report.
 
-**Effort:** 2 days. **Status:** `planned`
+**Effort:** 2 days. **Status:** `done` (token budget deferred, bounded
+equivalently by wall-clock/rounds/diff)
 
 ## Phase 9.4: Feedback — direct in-loop, memory for cross-session only
 
@@ -167,8 +184,8 @@ git-diff + test-name parsing — works today, does not depend on the blocked
 runtime observer) stores a summary observation for future sessions.
 
 **Tasks:**
-- [ ] Driver passes round-N failing tests + diff directly into the round-N+1
-      healing prompt (no retrieval on this path).
+- [x] Driver passes round-N failing tests directly into the round-N+1 healing
+      prompt (no retrieval on this path; built with the 9.2 driver).
 - [ ] On terminal verdict, `tool_capture.capture_session_tools()` stores the
       loop summary for cross-session recall.
 - [ ] Privacy check: loop audit/memory records must honor the de-identification
@@ -220,12 +237,13 @@ runtime observer) stores a summary observation for future sessions.
 ## Success Criteria
 
 - [x] `review_gate`, `workflow`, `governance` have unit tests (9.1 ✅).
-- [ ] `pxx --loop "<task>" --scope <file>` drives edit→test→review→heal to a
-      terminal verdict.
-- [ ] `healing_attempts` increments; `build_healing_prompt` is called; `--heal`
+- [x] `pxx --loop "<task>" --scope <file>` drives edit→test→review→heal to a
+      terminal verdict (unit/guard-tested; live dogfood pending).
+- [x] `healing_attempts` increments; `build_healing_prompt` is called; `--heal`
       is real (one REVISE round; `--loop` folds over it — see Decisions).
-- [ ] All three guards demonstrably stop a pathological loop (round cap,
-      baseline-set failures not strictly decreasing, cumulative diff budget).
+- [x] All three guards demonstrably stop a pathological loop (round cap,
+      baseline-set failures not strictly decreasing, cumulative diff budget) —
+      each has a dedicated test.
 - [ ] Budget reported in tokens + wall-clock; never pushes; every round audited.
 
 ---

@@ -49,7 +49,6 @@ _NON_HEALABLE = {"P0", "P2", "UNPARSEABLE"}
 class RoundResult:
     verdict: str  # APPROVE | REVISE | REJECT | NO_REVIEW
     healable: list[review_gate.Finding]
-    failing_tests: set[str]
 
 
 def _say(msg: str) -> None:
@@ -107,10 +106,17 @@ def _head_sha(root: Path) -> str:
     return r.stdout.strip()
 
 
-def _run_edit_round(root: Path, message: str, scope: str) -> int:
+def _run_edit_round(
+    root: Path, message: str, scope: str, timeout: float | None = None
+) -> int:
     """One bounded edit: a pxx --self-fix subprocess (safety tag, diff cap,
     [autonomous] tagging, execve into aider — all reused). --yes because a
-    non-interactive round must never be asked a question."""
+    non-interactive round must never be asked a question.
+
+    `timeout` is the remaining wall-clock budget: a wedged aider must not be
+    able to defeat the loop's time guard. A timeout is just a failed round
+    (rc 124) — one stop semantics for "the edit round didn't complete".
+    """
     cmd = [
         sys.executable,
         "-m",
@@ -122,7 +128,10 @@ def _run_edit_round(root: Path, message: str, scope: str) -> int:
         "--yes",
         "--no-stream",
     ]
-    r = subprocess.run(cmd, cwd=root, check=False)
+    try:
+        r = subprocess.run(cmd, cwd=root, check=False, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return 124
     return r.returncode
 
 
@@ -130,9 +139,9 @@ def _review_verdict(root: Path) -> RoundResult:
     """Run a review pass and classify the result, including the no-heal cases."""
     rc = review_gate.run_review_pass(root)
     if rc != 0:
-        return RoundResult("NO_REVIEW", [], set())
+        return RoundResult("NO_REVIEW", [])
     if not review_gate.has_review_evidence(root):
-        return RoundResult("NO_REVIEW", [], set())
+        return RoundResult("NO_REVIEW", [])
 
     findings = review_gate.collect_active_findings(root)
     verdict = review_gate.compute_verdict(findings)
@@ -141,8 +150,8 @@ def _review_verdict(root: Path) -> RoundResult:
     if verdict == "REVISE" and not healable:
         # REVISE driven only by UNPARSEABLE findings: the remedy is fixing or
         # re-running the review, not pointing aider at a malformed header.
-        return RoundResult("NO_REVIEW", [], set())
-    return RoundResult(verdict, healable, set())
+        return RoundResult("NO_REVIEW", [])
+    return RoundResult(verdict, healable)
 
 
 def _healing_message(
@@ -184,15 +193,40 @@ def run_loop(
 
     state = workflow.load_state(root) or workflow.WorkflowState()
     prev_baseline_failing = baseline
+    prev_healable: int | None = None
     message = task
 
     for round_no in range(1, max_rounds + 1):
-        if time.monotonic() - started > max_seconds:
+        elapsed = time.monotonic() - started
+        if elapsed > max_seconds:
             _say(f"wall-clock budget ({max_seconds:.0f}s) exhausted — stopping.")
             return 1
 
         _say(f"round {round_no}: edit")
-        _run_edit_round(root, message, scope)
+        # The subprocess gets the REMAINING budget (floored) so a wedged aider
+        # can't defeat the time guard between top-of-round checks.
+        edit_rc = _run_edit_round(
+            root, message, scope, timeout=max(60.0, max_seconds - elapsed)
+        )
+        if edit_rc != 0:
+            why = "timed out" if edit_rc == 124 else f"failed (rc {edit_rc})"
+            _say(f"edit round {why} — stopping (fail closed).")
+            workflow.save_state(
+                workflow.transition(state, "rejected", review_verdict="EDIT_FAILED"),
+                root,
+            )
+            try:
+                audit.write_session_start(
+                    {
+                        "session_class": "loop-round",
+                        "round": round_no,
+                        "verdict": "EDIT_FAILED",
+                        "edit_rc": edit_rc,
+                    }
+                )
+            except Exception:
+                pass
+            return 1
 
         failing = _failing_tests(root)
         if failing is None:
@@ -222,6 +256,9 @@ def run_loop(
             review_verdict=result.verdict,
         )
         workflow.save_state(state, root)
+        # Per-round audit deliberately reuses write_session_start: one JSONL
+        # stream for all session events; session_class "loop-round" is the
+        # discriminator.
         try:
             audit.write_session_start(
                 {
@@ -269,18 +306,40 @@ def run_loop(
             return 1
 
         # REVISE (or APPROVE blocked by failing baseline tests / lint):
-        # progress guard before another round.
-        if round_no > 1 and len(baseline_failing) >= len(prev_baseline_failing):
-            _say(
-                "no progress on the baseline failing set "
-                f"({len(prev_baseline_failing)} → {len(baseline_failing)}) — stopping."
-            )
-            workflow.save_state(
-                workflow.transition(state, "rejected", review_verdict=result.verdict),
-                root,
-            )
-            return 1
+        # progress guard before another round. With a non-empty baseline the
+        # metric is the baseline failing set; with a GREEN baseline that rule
+        # is degenerate (0 >= 0 stops every loop at round 2), so progress is
+        # measured on the loop's actual work: healable findings must strictly
+        # decrease between rounds.
+        if round_no > 1:
+            if baseline:
+                if len(baseline_failing) >= len(prev_baseline_failing):
+                    _say(
+                        "no progress on the baseline failing set "
+                        f"({len(prev_baseline_failing)} → {len(baseline_failing)}) "
+                        "— stopping."
+                    )
+                    workflow.save_state(
+                        workflow.transition(
+                            state, "rejected", review_verdict=result.verdict
+                        ),
+                        root,
+                    )
+                    return 1
+            elif prev_healable is not None and len(result.healable) >= prev_healable:
+                _say(
+                    "no progress on healable findings "
+                    f"({prev_healable} → {len(result.healable)}) — stopping."
+                )
+                workflow.save_state(
+                    workflow.transition(
+                        state, "rejected", review_verdict=result.verdict
+                    ),
+                    root,
+                )
+                return 1
         prev_baseline_failing = baseline_failing
+        prev_healable = len(result.healable)
         message = _healing_message(task, result.healable, failing)
 
     _say(f"round cap ({max_rounds}) reached — stopping.")
@@ -319,7 +378,11 @@ def heal_once(root: Path, scope: str) -> int:
 
     failing = _failing_tests(root) or set()
     message = _healing_message("Address the review findings below.", healable, failing)
-    _run_edit_round(root, message, scope)
+    edit_rc = _run_edit_round(root, message, scope, timeout=DEFAULT_MAX_SECONDS)
+    if edit_rc != 0:
+        why = "timed out" if edit_rc == 124 else f"failed (rc {edit_rc})"
+        _say(f"edit round {why} — not reviewing a round that didn't complete.")
+        return 1
 
     result = _review_verdict(root)
     _say(f"post-heal verdict: {result.verdict}")

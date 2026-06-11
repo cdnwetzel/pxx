@@ -499,6 +499,12 @@ def main() -> None:
                 file=sys.stderr,
             )
             sys.exit(2)
+        if len(loop_scopes) > 1:
+            print(
+                f"pxx: --loop uses one scope per loop; ignoring extra scopes: "
+                f"{', '.join(loop_scopes[1:])}",
+                file=sys.stderr,
+            )
         if _git_dirty():
             print(
                 "pxx: --loop refuses to start on a dirty tree — commit or "

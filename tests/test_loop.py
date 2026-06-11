@@ -30,7 +30,7 @@ class _Harness:
         monkeypatch.setattr(
             loop,
             "_run_edit_round",
-            lambda root, msg, scope: self.edits.append(msg) or 0,
+            lambda root, msg, scope, timeout=None: self.edits.append(msg) or 0,
         )
         monkeypatch.setattr(loop, "_failing_tests", lambda root: self._failings.pop(0))
         monkeypatch.setattr(
@@ -53,14 +53,14 @@ class TestRunLoopGuards:
         h = _Harness(
             monkeypatch,
             tmp_path,
-            verdicts=[loop.RoundResult("APPROVE", [], set())],
+            verdicts=[loop.RoundResult("APPROVE", [])],
             failings=[set(), set()],  # baseline, round 1
         )
         assert h.run() == 0
         assert len(h.edits) == 1
 
     def test_round_cap_stops_persistent_revise(self, monkeypatch, tmp_path):
-        revise = lambda: loop.RoundResult("REVISE", [_p1()], set())  # noqa: E731
+        revise = lambda: loop.RoundResult("REVISE", [_p1()])  # noqa: E731
         h = _Harness(
             monkeypatch,
             tmp_path,
@@ -73,7 +73,7 @@ class TestRunLoopGuards:
         assert len(h.edits) == 3
 
     def test_no_progress_on_baseline_set_aborts(self, monkeypatch, tmp_path):
-        revise = lambda: loop.RoundResult("REVISE", [_p1()], set())  # noqa: E731
+        revise = lambda: loop.RoundResult("REVISE", [_p1()])  # noqa: E731
         h = _Harness(
             monkeypatch,
             tmp_path,
@@ -87,7 +87,7 @@ class TestRunLoopGuards:
         h = _Harness(
             monkeypatch,
             tmp_path,
-            verdicts=[loop.RoundResult("REVISE", [_p1()], set())],
+            verdicts=[loop.RoundResult("REVISE", [_p1()])],
             failings=[set(), set()],
             diff_lines=10_000,
         )
@@ -108,7 +108,7 @@ class TestRunLoopGuards:
         h = _Harness(
             monkeypatch,
             tmp_path,
-            verdicts=[loop.RoundResult("REJECT", [], set())],
+            verdicts=[loop.RoundResult("REJECT", [])],
             failings=[set(), set()],
         )
         assert h.run() == 1
@@ -118,7 +118,7 @@ class TestRunLoopGuards:
         h = _Harness(
             monkeypatch,
             tmp_path,
-            verdicts=[loop.RoundResult("NO_REVIEW", [], set())],
+            verdicts=[loop.RoundResult("NO_REVIEW", [])],
             failings=[set(), set()],
         )
         assert h.run() == 1
@@ -133,8 +133,8 @@ class TestRunLoopGuards:
             monkeypatch,
             tmp_path,
             verdicts=[
-                loop.RoundResult("APPROVE", [], set()),
-                loop.RoundResult("APPROVE", [], set()),
+                loop.RoundResult("APPROVE", []),
+                loop.RoundResult("APPROVE", []),
             ],
             failings=[{"t1"}, {"t1"}, set()],
         )
@@ -151,8 +151,8 @@ class TestRunLoopGuards:
             monkeypatch,
             tmp_path,
             verdicts=[
-                loop.RoundResult("REVISE", [_p1()], set()),
-                loop.RoundResult("APPROVE", [], set()),
+                loop.RoundResult("REVISE", [_p1()]),
+                loop.RoundResult("APPROVE", []),
             ],
             failings=[{"t1", "t2"}, {"t1"}, set()],
         )
@@ -204,12 +204,12 @@ class TestHealOnce:
         monkeypatch.setattr(
             loop,
             "_run_edit_round",
-            lambda root, msg, scope: self.edits.append(msg) or 0,
+            lambda root, msg, scope, timeout=None: self.edits.append(msg) or 0,
         )
         monkeypatch.setattr(
             loop,
             "_review_verdict",
-            lambda root: loop.RoundResult("APPROVE", [], set()),
+            lambda root: loop.RoundResult("APPROVE", []),
         )
 
     def test_no_evidence_refuses_without_editing(self, monkeypatch, tmp_path):
@@ -257,3 +257,111 @@ class TestRejectedMessageVerdictAware:
         workflow.save_state(state, tmp_path)
         assert workflow.resume_state(tmp_path) == 1
         assert "--heal" in capsys.readouterr().err
+
+
+class TestGreenBaselineProgress:
+    """F1: with a green baseline the old rule was degenerate (0 >= 0 always)."""
+
+    def test_green_baseline_runs_past_round_2_while_findings_shrink(
+        self, monkeypatch, tmp_path
+    ):
+        h = _Harness(
+            monkeypatch,
+            tmp_path,
+            verdicts=[
+                loop.RoundResult("REVISE", [_p1(1), _p1(2)]),
+                loop.RoundResult("REVISE", [_p1(1)]),
+                loop.RoundResult("APPROVE", []),
+            ],
+            failings=[set(), set(), set(), set()],
+        )
+        assert h.run() == 0
+        assert len(h.edits) == 3  # the old bug stopped this at round 2
+
+    def test_green_baseline_stops_when_findings_plateau(
+        self, monkeypatch, tmp_path, capsys
+    ):
+        h = _Harness(
+            monkeypatch,
+            tmp_path,
+            verdicts=[
+                loop.RoundResult("REVISE", [_p1(1)]),
+                loop.RoundResult("REVISE", [_p1(1)]),
+            ],
+            failings=[set(), set(), set()],
+        )
+        assert h.run() == 1
+        assert len(h.edits) == 2
+        assert "healable findings (1 → 1)" in capsys.readouterr().err
+
+
+class TestEditRoundFailure:
+    """F2: a failed edit round must stop the loop, not burn budget."""
+
+    def test_failed_edit_stops_run_loop_without_review(self, monkeypatch, tmp_path):
+        # verdicts=[] proves _review_verdict is never consulted: the scripted
+        # pop would raise if it were.
+        h = _Harness(monkeypatch, tmp_path, verdicts=[], failings=[set()])
+        monkeypatch.setattr(
+            loop, "_run_edit_round", lambda root, msg, scope, timeout=None: 2
+        )
+        assert h.run() == 1
+
+    def test_failed_edit_records_edit_failed_verdict(self, monkeypatch, tmp_path):
+        from pxx import workflow
+
+        h = _Harness(monkeypatch, tmp_path, verdicts=[], failings=[set()])
+        monkeypatch.setattr(
+            loop, "_run_edit_round", lambda root, msg, scope, timeout=None: 2
+        )
+        h.run()
+        state = workflow.load_state(tmp_path)
+        assert state.phase == "rejected"
+        assert state.review_verdict == "EDIT_FAILED"
+
+    def test_heal_once_stops_before_review_on_failed_edit(self, monkeypatch, tmp_path):
+        consulted = []
+        monkeypatch.setattr("pxx.review_gate.has_review_evidence", lambda root: True)
+        monkeypatch.setattr(
+            "pxx.review_gate.collect_active_findings", lambda root: [_p1()]
+        )
+        monkeypatch.setattr(loop, "_failing_tests", lambda root: set())
+        monkeypatch.setattr(
+            loop, "_run_edit_round", lambda root, msg, scope, timeout=None: 1
+        )
+        monkeypatch.setattr(loop, "_review_verdict", lambda root: consulted.append(1))
+        assert loop.heal_once(tmp_path, "pxx/") == 1
+        assert consulted == []
+
+
+class TestEditRoundTimeout:
+    """F3: a wedged aider can't defeat the wall-clock budget."""
+
+    def test_subprocess_timeout_returns_124(self, monkeypatch, tmp_path):
+        import subprocess as sp
+
+        def boom(*a, **k):
+            raise sp.TimeoutExpired(cmd="pxx", timeout=1)
+
+        monkeypatch.setattr(loop.subprocess, "run", boom)
+        assert loop._run_edit_round(tmp_path, "msg", "pxx/") == 124
+
+    def test_timed_out_round_stops_the_loop(self, monkeypatch, tmp_path, capsys):
+        h = _Harness(monkeypatch, tmp_path, verdicts=[], failings=[set()])
+        monkeypatch.setattr(
+            loop, "_run_edit_round", lambda root, msg, scope, timeout=None: 124
+        )
+        assert h.run() == 1
+        assert "timed out" in capsys.readouterr().err
+
+    def test_remaining_budget_is_passed_as_timeout(self, monkeypatch, tmp_path):
+        seen: list[float] = []
+
+        def fake_edit(root, msg, scope, timeout=None):
+            seen.append(timeout)
+            return 2  # stop after capturing
+
+        h = _Harness(monkeypatch, tmp_path, verdicts=[], failings=[set()])
+        monkeypatch.setattr(loop, "_run_edit_round", fake_edit)
+        h.run(max_seconds=1800.0)
+        assert seen and 60.0 <= seen[0] <= 1800.0

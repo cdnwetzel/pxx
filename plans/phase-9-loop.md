@@ -170,6 +170,27 @@ distinct failure mode.
 **Effort:** 2 days. **Status:** `done` (token budget deferred, bounded
 equivalently by wall-clock/rounds/diff)
 
+### Post-9.3 hardening (second-side verification of bf7c490)
+
+The web-side verification confirmed the architecture and all loop/verifier
+tests, and found three runtime defects in the "round goes wrong" seams —
+fixed before the first live `--loop` run:
+
+- **F1 (P1)** — the progress guard was degenerate on a green baseline
+  (`0 >= 0` stopped every loop at round 2 with a misleading message, making
+  `--max-rounds > 2` unreachable). Green-baseline loops now measure progress
+  on **healable findings strictly decreasing**; non-empty baselines keep the
+  baseline-set rule; the stop message names the metric it used.
+- **F2 (P1)** — the edit round's exit code was discarded: a scope refusal,
+  aider crash, or pre-commit rejection proceeded to test+review anyway.
+  Nonzero rc now stops fail-closed (verdict `EDIT_FAILED`, audited);
+  `heal_once` refuses to review a round that didn't complete.
+- **F3 (P2)** — a wedged aider defeated the wall-clock budget (no subprocess
+  timeout). The edit subprocess now gets the **remaining** budget as its
+  timeout; a timeout is rc 124 = F2's failed-round path (one stop semantics).
+- Minors: dead `RoundResult.failing_tests` dropped; per-round audit-stream
+  choice documented; extra `--scope` args now warn instead of vanishing.
+
 ## Phase 9.4: Feedback — direct in-loop, memory for cross-session only
 
 **What:** Round-to-round feedback is **plain prompt construction from variables

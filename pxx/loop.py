@@ -182,14 +182,17 @@ def _run_edit_round(
     return r.returncode
 
 
-def _review_verdict(root: Path, timeout: float | None = None) -> RoundResult:
+def _review_verdict(
+    root: Path, timeout: float | None = None, diff_base: str | None = None
+) -> RoundResult:
     """Run a review pass and classify the result, including the no-heal cases.
 
     Each NO_REVIEW variant carries a distinct, diagnosable note — "the pass
     failed/timed out", "ran but left no artifacts" (output-contract breach),
-    and "only unparseable findings" are three different remedies.
+    and "only unparseable findings" are three different remedies. `diff_base`
+    scopes the local reviewer to the loop's changes (``diff_base..HEAD``).
     """
-    rc = review_gate.run_review_pass(root, timeout=timeout)
+    rc = review_gate.run_review_pass(root, timeout=timeout, diff_base=diff_base)
     if rc != 0:
         return RoundResult("NO_REVIEW", [], note="review pass failed or timed out")
     if not review_gate.has_review_evidence(root):
@@ -373,7 +376,9 @@ def run_loop(
         # edit leg (its F3 sibling) — one review must not silently consume the
         # whole loop's time.
         remaining = max(60.0, max_seconds - (time.monotonic() - started))
-        result = _review_verdict(root, timeout=min(900.0, remaining))
+        result = _review_verdict(
+            root, timeout=min(900.0, remaining), diff_base=start_sha
+        )
         review_s = time.monotonic() - t0
         state = workflow.transition(
             state,

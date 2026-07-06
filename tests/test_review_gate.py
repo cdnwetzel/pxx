@@ -174,11 +174,23 @@ class TestHasReviewEvidence:
 
 
 class TestRunReviewPass:
+    def test_local_is_default_backend(self, monkeypatch):
+        from pxx.review_gate import _review_backend
+
+        monkeypatch.delenv("PXX_REVIEW_BACKEND", raising=False)
+        assert _review_backend() == "local"
+
+    def test_unknown_backend_returns_1(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("PXX_REVIEW_BACKEND", "bogus")
+        assert run_review_pass(tmp_path) == 1
+
     def test_missing_claude_binary_returns_1(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("PXX_REVIEW_BACKEND", "claude")
         monkeypatch.setattr("pxx.review_gate._get_claude_bin", lambda: None)
         assert run_review_pass(tmp_path) == 1
 
-    def test_successful_pass_returns_0(self, tmp_path, monkeypatch):
+    def test_claude_successful_pass_returns_0(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("PXX_REVIEW_BACKEND", "claude")
         monkeypatch.setattr("pxx.review_gate._get_claude_bin", lambda: "/x/claude")
 
         class R:
@@ -187,13 +199,61 @@ class TestRunReviewPass:
         monkeypatch.setattr("pxx.review_gate.subprocess.run", lambda *a, **k: R())
         assert run_review_pass(tmp_path) == 0
 
-    def test_failing_pass_returns_1(self, tmp_path, monkeypatch):
+    def test_claude_invocation_grants_write_permission(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("PXX_REVIEW_BACKEND", "claude")
+        monkeypatch.setattr("pxx.review_gate._get_claude_bin", lambda: "/x/claude")
+        seen: dict[str, list[str]] = {}
+
+        class R:
+            returncode = 0
+
+        def fake_run(cmd, *a, **k):
+            seen["cmd"] = cmd
+            return R()
+
+        monkeypatch.setattr("pxx.review_gate.subprocess.run", fake_run)
+        run_review_pass(tmp_path)
+        assert "--permission-mode" in seen["cmd"]
+        assert "acceptEdits" in seen["cmd"]
+
+    def test_claude_failing_pass_returns_1(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("PXX_REVIEW_BACKEND", "claude")
         monkeypatch.setattr("pxx.review_gate._get_claude_bin", lambda: "/x/claude")
 
         class R:
             returncode = 2
 
         monkeypatch.setattr("pxx.review_gate.subprocess.run", lambda *a, **k: R())
+        assert run_review_pass(tmp_path) == 1
+
+    def test_local_writes_model_findings(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("PXX_REVIEW_BACKEND", "local")
+        monkeypatch.setattr(
+            "pxx.review_gate._git_diff", lambda *a: "diff --git a b\n+bad"
+        )
+        monkeypatch.setattr(
+            "pxx.review_gate._post_chat",
+            lambda *a, **k: "### F-001 — bug in a.py:1 (P1, state: open)",
+        )
+        assert run_review_pass(tmp_path, diff_base="abc123") == 0
+        out = tmp_path / "review" / "claude" / "claude-findings.md"
+        assert "F-001" in out.read_text(encoding="utf-8")
+
+    def test_local_empty_diff_writes_no_findings(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("PXX_REVIEW_BACKEND", "local")
+        monkeypatch.setattr("pxx.review_gate._git_diff", lambda *a: "   \n")
+        assert run_review_pass(tmp_path) == 0
+        out = tmp_path / "review" / "claude" / "claude-findings.md"
+        assert "no findings" in out.read_text(encoding="utf-8").lower()
+
+    def test_local_endpoint_failure_returns_1(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("PXX_REVIEW_BACKEND", "local")
+        monkeypatch.setattr("pxx.review_gate._git_diff", lambda *a: "diff\n+x")
+
+        def boom(*a, **k):
+            raise OSError("connection refused")
+
+        monkeypatch.setattr("pxx.review_gate._post_chat", boom)
         assert run_review_pass(tmp_path) == 1
 
 

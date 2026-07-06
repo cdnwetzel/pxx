@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import subprocess
 import sys
+import urllib.error
+import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -53,13 +56,118 @@ state is `open`. If the code is clean, still write the file containing the
 line: `# Review pass: no findings.`"""
 
 
-def run_review_pass(project_root: Path, timeout: float | None = None) -> int:
-    """Invoke a claude review pass with an explicit output contract.
+def _review_backend() -> str:
+    """Which reviewer produces the verdict.
 
-    Returns 0 on success, 1 on failure. `timeout` lets a caller with a budget
-    (the loop) charge the review leg against it; when None, the standalone
-    ceiling applies: PXX_REVIEW_TIMEOUT (default 900s — live dogfood measured
-    a real full-repo pass at >300s, so the old fixed 300 guaranteed NO_REVIEW).
+    ``local`` (default) reviews the diff on your own hardware — sovereign, the
+    right posture for unsupervised loops. ``claude`` uses the frontier agent,
+    appropriate for human-approved (supervised) sessions where external calls
+    are an accepted trade for sharper judgment. Set via PXX_REVIEW_BACKEND.
+    """
+    return os.environ.get("PXX_REVIEW_BACKEND", "local").strip().lower()
+
+
+LOCAL_REVIEW_INSTRUCTIONS = """You are a strict code reviewer. Review ONLY the \
+diff below — do not assume anything outside it.
+
+Write every finding as a markdown header line in EXACTLY this format, one per line:
+
+### F-NNN — <short description> in <file>:<line> (P0, state: open)
+
+Severity is P0 (must fix), P1 (should fix), or P2 (minor); state is `open`.
+Number findings F-001, F-002, and so on. If the diff is clean, output EXACTLY
+this single line and nothing else:
+
+# Review pass: no findings.
+
+Output nothing except finding headers or that no-findings line.
+
+Diff under review:
+"""
+
+
+def _git_diff(project_root: Path, diff_base: str | None) -> str:
+    """The unified diff the local reviewer judges.
+
+    With ``diff_base`` (the loop passes its start SHA) the range is
+    ``diff_base..HEAD`` — exactly what the session changed. Standalone it falls
+    back to the last commit.
+    """
+    rev = f"{diff_base}..HEAD" if diff_base else "HEAD~1..HEAD"
+    r = subprocess.run(
+        ["git", "diff", rev],
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    return r.stdout
+
+
+def _post_chat(url: str, model: str, prompt: str, timeout: float) -> str:
+    """POST one message to an OpenAI-compatible /v1/chat/completions endpoint and
+    return the assistant text. One code path serves both vLLM and Ollama (both
+    expose the OpenAI shape). Transport/parse failures raise; the caller maps
+    them to a failed pass (fail closed)."""
+    body = json.dumps(
+        {
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0,
+            "stream": False,
+        }
+    ).encode()
+    req = urllib.request.Request(
+        url.rstrip("/") + "/v1/chat/completions",
+        data=body,
+        headers={"Content-Type": "application/json", "Authorization": "Bearer EMPTY"},
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        payload = json.loads(resp.read())
+    return payload["choices"][0]["message"]["content"]
+
+
+def _run_local_review(project_root: Path, timeout: float, diff_base: str | None) -> int:
+    """Sovereign review: feed the round's diff to a local OpenAI-compatible model
+    (PXX_REVIEW_URL + PXX_REVIEW_MODEL) and write its findings to
+    review/claude/claude-findings.md in the F-NNN format the parser expects.
+
+    Deterministic and bounded — the reviewer sees exactly the diff, never roams
+    the tree, and needs no file-write permission (pxx writes the file). That is
+    precisely why the local path avoids the headless-permission failure the
+    claude agent hits.
+    """
+    url = os.environ.get("PXX_REVIEW_URL", "http://127.0.0.1:11434")
+    model = os.environ.get("PXX_REVIEW_MODEL", "qwen2.5:7b-instruct")
+    out_dir = project_root / "review" / "claude"
+    out_file = out_dir / "claude-findings.md"
+    diff = _git_diff(project_root, diff_base)
+
+    if not diff.strip():
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out_file.write_text("# Review pass: no findings.\n", encoding="utf-8")
+        return 0
+
+    try:
+        content = _post_chat(url, model, LOCAL_REVIEW_INSTRUCTIONS + diff, timeout)
+    except (urllib.error.URLError, TimeoutError, KeyError, ValueError, OSError) as e:
+        print(f"pxx: local review failed ({url}): {e}", file=sys.stderr)
+        return 1
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_file.write_text(
+        (content.strip() or "# Review pass: no findings.") + "\n", encoding="utf-8"
+    )
+    return 0
+
+
+def _run_claude_review(project_root: Path, timeout: float) -> int:
+    """Frontier review via the claude CLI agent.
+
+    ``--permission-mode acceptEdits`` is required: the default headless posture
+    denies the Write tool, so the agent reviews but writes no artifact →
+    NO_REVIEW. This bit a live loop run before it was added.
     """
     claude_bin = _get_claude_bin()
     if not claude_bin:
@@ -68,12 +176,9 @@ def run_review_pass(project_root: Path, timeout: float | None = None) -> int:
             file=sys.stderr,
         )
         return 1
-
-    if timeout is None:
-        timeout = float(os.environ.get("PXX_REVIEW_TIMEOUT", "900"))
     try:
         result = subprocess.run(
-            [claude_bin, "--print", REVIEW_PROMPT],
+            [claude_bin, "--print", "--permission-mode", "acceptEdits", REVIEW_PROMPT],
             cwd=project_root,
             capture_output=True,
             text=True,
@@ -83,6 +188,31 @@ def run_review_pass(project_root: Path, timeout: float | None = None) -> int:
     except (FileNotFoundError, subprocess.TimeoutExpired) as e:
         print(f"pxx: review pass failed: {e}", file=sys.stderr)
         return 1
+
+
+def run_review_pass(
+    project_root: Path, timeout: float | None = None, diff_base: str | None = None
+) -> int:
+    """Produce review findings at review/claude/, using the selected backend.
+
+    Returns 0 on success, 1 on failure. `timeout` lets a budgeted caller (the
+    loop) charge the review leg; when None the standalone ceiling applies
+    (PXX_REVIEW_TIMEOUT, default 900s). `diff_base` scopes the local reviewer to
+    ``diff_base..HEAD`` — the loop passes its start SHA so the review sees
+    exactly the session's changes.
+    """
+    if timeout is None:
+        timeout = float(os.environ.get("PXX_REVIEW_TIMEOUT", "900"))
+    backend = _review_backend()
+    if backend == "local":
+        return _run_local_review(project_root, timeout, diff_base)
+    if backend == "claude":
+        return _run_claude_review(project_root, timeout)
+    print(
+        f"pxx: unknown PXX_REVIEW_BACKEND={backend!r} (use 'local' or 'claude')",
+        file=sys.stderr,
+    )
+    return 1
 
 
 def parse_findings(md_content: str) -> list[Finding]:

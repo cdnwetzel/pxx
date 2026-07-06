@@ -350,6 +350,9 @@ If a task seems to require editing one of these, stop and ask. The
 | `PXX_OLLAMA_MODEL` / `PXX_VLLM_MODEL` | Per-backend default models |
 | `PXX_DRIFT_SSH_TARGET` / `PXX_DRIFT_REMOTE_PATH` | Enable the cross-machine drift check |
 | `PXX_AUTOCHECK_DRIFT`  | Set to `1` to run a drift check before every `--edit` session |
+| `PXX_REVIEW_BACKEND`   | `--loop`/`--review` reviewer: `local` (default, sovereign — reviews the diff via a local model) or `claude` (frontier agent, for supervised runs) |
+| `PXX_REVIEW_URL` / `PXX_REVIEW_MODEL` | Local-review endpoint (OpenAI-compatible, default `http://127.0.0.1:11434`) and model (default `qwen2.5:7b-instruct`) |
+| `PXX_REVIEW_TIMEOUT`   | Ceiling (seconds) for a standalone review pass (default `900`) |
 
 Any of these can also live in `~/.config/pxx/env` (KEY=VALUE lines, loaded at
 import by `pxx/__init__.py`; real env vars win). That's where this machine's

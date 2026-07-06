@@ -40,7 +40,7 @@ class _Harness:
         monkeypatch.setattr(
             loop,
             "_review_verdict",
-            lambda root, timeout=None: self._verdicts.pop(0),
+            lambda root, timeout=None, diff_base=None: self._verdicts.pop(0),
         )
         monkeypatch.setattr("pxx.self_modes.self_lint", lambda root: 0)
         monkeypatch.setattr(
@@ -169,7 +169,8 @@ class TestRunLoopGuards:
 class TestReviewVerdictClassification:
     def _arrange(self, monkeypatch, findings, evidence=True, pass_rc=0):
         monkeypatch.setattr(
-            "pxx.review_gate.run_review_pass", lambda root, timeout=None: pass_rc
+            "pxx.review_gate.run_review_pass",
+            lambda root, timeout=None, diff_base=None: pass_rc,
         )
         monkeypatch.setattr(
             "pxx.review_gate.has_review_evidence", lambda root: evidence
@@ -217,7 +218,7 @@ class TestHealOnce:
         monkeypatch.setattr(
             loop,
             "_review_verdict",
-            lambda root, timeout=None: loop.RoundResult("APPROVE", []),
+            lambda root, timeout=None, diff_base=None: loop.RoundResult("APPROVE", []),
         )
 
     def test_no_evidence_refuses_without_editing(self, monkeypatch, tmp_path):
@@ -443,7 +444,7 @@ class TestBudgetChargedLegs:
     def test_review_leg_gets_remaining_budget(self, monkeypatch, tmp_path):
         seen: list[float] = []
 
-        def fake_review(root, timeout=None):
+        def fake_review(root, timeout=None, diff_base=None):
             seen.append(timeout)
             return loop.RoundResult("APPROVE", [])
 
@@ -460,7 +461,7 @@ class TestBudgetChargedLegs:
     def test_review_verdict_passes_timeout_through(self, monkeypatch, tmp_path):
         seen: list[float] = []
 
-        def fake_pass(root, timeout=None):
+        def fake_pass(root, timeout=None, diff_base=None):
             seen.append(timeout)
             return 1  # fail -> NO_REVIEW, short-circuits the rest
 
@@ -472,7 +473,8 @@ class TestBudgetChargedLegs:
 
     def test_no_artifacts_note_is_distinct(self, monkeypatch, tmp_path):
         monkeypatch.setattr(
-            "pxx.review_gate.run_review_pass", lambda root, timeout=None: 0
+            "pxx.review_gate.run_review_pass",
+            lambda root, timeout=None, diff_base=None: 0,
         )
         monkeypatch.setattr("pxx.review_gate.has_review_evidence", lambda root: False)
         result = loop._review_verdict(tmp_path)

@@ -67,20 +67,24 @@ def _review_backend() -> str:
     return os.environ.get("PXX_REVIEW_BACKEND", "local").strip().lower()
 
 
-LOCAL_REVIEW_INSTRUCTIONS = """You are a strict code reviewer. Review ONLY the \
-diff below — do not assume anything outside it.
+LOCAL_REVIEW_INSTRUCTIONS = """You are a strict code reviewer. Judge the code AS \
+IT EXISTS AFTER the diff below. Lines starting with "-" were REMOVED — ignore \
+them completely, they no longer exist. Lines starting with "+" and the unchanged \
+context are the current code; review THAT.
+
+Report genuine correctness or logic bugs in the current code (wrong return \
+values, off-by-one, wrong branch taken, unhandled inputs). Do NOT report \
+formatting, style, or anything about removed lines.
 
 Write every finding as a markdown header line in EXACTLY this format, one per line:
 
-### F-NNN — <short description> in <file>:<line> (P0, state: open)
+### F-NNN — <short description> in <file>:<line> (P1, state: open)
 
 Severity is P0 (must fix), P1 (should fix), or P2 (minor); state is `open`.
-Number findings F-001, F-002, and so on. If the diff is clean, output EXACTLY
-this single line and nothing else:
+Number findings F-001, F-002, and so on. If the current code is correct, output
+EXACTLY this single line and nothing else:
 
 # Review pass: no findings.
-
-Output nothing except finding headers or that no-findings line.
 
 Diff under review:
 """

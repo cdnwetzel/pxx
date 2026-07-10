@@ -34,7 +34,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from pxx import audit, review_gate, self_modes, workflow
+from pxx import audit, review_gate, workflow
 
 DEFAULT_MAX_ROUNDS = 3
 DEFAULT_DIFF_BUDGET_LINES = 150
@@ -253,11 +253,38 @@ def _format_scope(root: Path, scope: str) -> None:
         )
 
 
-def _lint_feedback(root: Path) -> str:
-    """Concise ruff output for the healing message when the lint gate is red —
-    the model must be told WHAT is wrong, not just re-fed the same findings."""
+def _lint_scope(root: Path, scope: str) -> int:
+    """Lint gate limited to the loop's OWN scope, not the whole pxx/ tests/ tree.
+
+    The pre-commit scope gate forbids the loop from committing files outside
+    ``scope``, so a pre-existing format/lint issue elsewhere in the tree would
+    deadlock APPROVE — the loop can neither fix it (scope gate rejects the
+    commit) nor pass the gate. Judge only what the loop can actually own, exactly
+    as the baseline-failing-set rule gates on the loop's own regressions and not
+    pre-existing red tests. Returns ``check | format`` (0 == clean).
+    """
+    check = subprocess.run(
+        ["uv", "run", "ruff", "check", scope],
+        cwd=root,
+        capture_output=True,
+        check=False,
+        timeout=60,
+    ).returncode
+    fmt = subprocess.run(
+        ["uv", "run", "ruff", "format", "--check", scope],
+        cwd=root,
+        capture_output=True,
+        check=False,
+        timeout=60,
+    ).returncode
+    return check | fmt
+
+
+def _lint_feedback(root: Path, scope: str) -> str:
+    """Concise ruff output (scoped) for the healing message when the lint gate is
+    red — the model must be told WHAT is wrong, not just re-fed the same findings."""
     r = subprocess.run(
-        ["uv", "run", "ruff", "check", "pxx/", "tests/", "--output-format=concise"],
+        ["uv", "run", "ruff", "check", scope, "--output-format=concise"],
         cwd=root,
         capture_output=True,
         text=True,
@@ -355,7 +382,7 @@ def run_loop(
         if failing is None:
             _say("test run broke mid-loop — stopping (fail closed).")
             return 1
-        lint_rc = self_modes.self_lint(root)
+        lint_rc = _lint_scope(root, scope)
 
         spent = _diff_lines_since(root, start_sha)
         if spent > diff_budget:
@@ -487,7 +514,7 @@ def run_loop(
         prev_healable = len(result.healable)
         message = _healing_message(task, result.healable, failing)
         if lint_rc != 0:
-            lint_note = _lint_feedback(root)
+            lint_note = _lint_feedback(root, scope)
             if lint_note:
                 message = f"{message}\n\n{lint_note}"
 

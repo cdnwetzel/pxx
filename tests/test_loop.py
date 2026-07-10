@@ -42,7 +42,7 @@ class _Harness:
             "_review_verdict",
             lambda root, timeout=None, diff_base=None: self._verdicts.pop(0),
         )
-        monkeypatch.setattr("pxx.self_modes.self_lint", lambda root: 0)
+        monkeypatch.setattr(loop, "_lint_scope", lambda root, scope: 0)
         monkeypatch.setattr(
             "pxx.audit.write_session_start",
             lambda record, log_path=None: Path("/dev/null"),
@@ -493,9 +493,11 @@ class TestLintAwareHealing:
             ],
             failings=[set(), set(), set()],
         )
-        monkeypatch.setattr("pxx.self_modes.self_lint", lambda root: 1)
+        monkeypatch.setattr(loop, "_lint_scope", lambda root, scope: 1)
         monkeypatch.setattr(
-            loop, "_lint_feedback", lambda root: "Lint errors to fix:\nE501 long line"
+            loop,
+            "_lint_feedback",
+            lambda root, scope: "Lint errors to fix:\nE501 long line",
         )
         # Round 2 won't APPROVE (lint red), so it ends on the cap — what we
         # care about is round 2's message content.
@@ -515,3 +517,21 @@ class TestLintAwareHealing:
         )
         assert h.run() == 0
         assert formatted == ["pxx/"]
+
+    def test_lint_gate_is_scope_limited_not_whole_tree(self, monkeypatch, tmp_path):
+        # The lint gate must judge only the loop's scope — a pre-existing format
+        # issue elsewhere in pxx/ tests/ cannot be committed (scope gate) and so
+        # must not deadlock APPROVE. Assert ruff is invoked against the scope.
+        seen: list[list[str]] = []
+
+        class R:
+            returncode = 0
+
+        def fake_run(cmd, *a, **k):
+            seen.append(cmd)
+            return R()
+
+        monkeypatch.setattr(loop.subprocess, "run", fake_run)
+        assert loop._lint_scope(tmp_path, "pxx/duration.py") == 0
+        assert all("pxx/duration.py" in cmd for cmd in seen)
+        assert not any("tests/" in cmd for cmd in seen)

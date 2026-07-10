@@ -77,6 +77,53 @@ class TestProbe:
         assert _probe("http://x:11434") is True
 
 
+class TestProbeVllmRetry:
+    """A busy-but-healthy vLLM can miss the 1s probe intermittently; a single
+    miss must not drop the endpoint (that race misrouted live --loop edits)."""
+
+    def _ctx(self, data: bytes):
+        import io
+
+        class _Ctx:
+            def __enter__(self_):
+                return io.BytesIO(data)
+
+            def __exit__(self_, *a):
+                pass
+
+        return _Ctx()
+
+    def test_transient_blip_then_success_returns_true(self, monkeypatch):
+        from pxx import endpoints
+
+        monkeypatch.setattr(endpoints.time, "sleep", lambda *_: None)
+        calls = {"n": 0}
+
+        def flaky(*a, **kw):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise TimeoutError("blip")
+            return self._ctx(b'{"data": [{"id": "m"}]}')
+
+        monkeypatch.setattr("urllib.request.urlopen", flaky)
+        assert endpoints._probe_vllm("http://gpu-node-1:8003") is True
+        assert calls["n"] == 2  # retried past the first miss
+
+    def test_all_attempts_fail_returns_false(self, monkeypatch):
+        from pxx import endpoints
+
+        monkeypatch.setattr(endpoints.time, "sleep", lambda *_: None)
+        calls = {"n": 0}
+
+        def always_fail(*a, **kw):
+            calls["n"] += 1
+            raise TimeoutError("down")
+
+        monkeypatch.setattr("urllib.request.urlopen", always_fail)
+        assert endpoints._probe_vllm("http://gpu-node-1:8003") is False
+        assert calls["n"] == endpoints.PROBE_RETRIES  # exhausted retries
+
+
 class TestDetectEndpoint:
     def test_explicit_override_short_circuits(self, monkeypatch):
         # PXX_OLLAMA_BASE is taken without probing — even if unreachable.

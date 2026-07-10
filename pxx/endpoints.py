@@ -12,26 +12,28 @@ Endpoints are configured via environment variables (all optional):
 - ``PXX_VLLM_URL``      — optional OpenAI-compatible vLLM endpoint
   (default ``http://127.0.0.1:8003``).
 
-The "studio"/"neo" endpoint names are historical; functionally they are just
-"primary Ollama" and "localhost Ollama".
+The "studio" endpoint name is historical; functionally it is just "primary
+Ollama" (localhost by default, or PXX_STUDIO_LAN_URL). The old "neo" localhost
+candidate was retired — see _ollama_candidates.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
 PROBE_TIMEOUT_SEC = 1.0
+PROBE_RETRIES = 3  # a single missed probe on a busy vLLM must not drop the endpoint
 
 # Default Ollama endpoint — localhost works whether Ollama runs on this machine
 # or you point PXX_STUDIO_LAN_URL / PXX_OLLAMA_BASE at another host (e.g. a LAN
 # box by hostname). Read via PXX_STUDIO_LAN_URL in _ollama_candidates().
 DEFAULT_STUDIO_LAN = "http://localhost:11434"
-DEFAULT_NEO = "http://localhost:11434"
 DEFAULT_VLLM = "http://127.0.0.1:8003"  # optional vLLM endpoint (PXX_VLLM_URL)
 
 
@@ -73,29 +75,43 @@ def _probe_ollama(url: str) -> bool:
 
 
 def _probe_vllm(url: str) -> bool:
-    """Return True iff `url` responds to /v1/models with a vLLM/OpenAI models-list payload."""
+    """Return True iff `url` responds to /v1/models with a vLLM/OpenAI models-list.
+
+    Retried: a loaded vLLM (mid-inference, a scheduler/GC pause) can miss the 1s
+    probe intermittently even when healthy. A single miss must NOT silently drop
+    the edit endpoint and fall through to a wrong/absent Ollama — that exact race
+    caused --loop edit rounds to misroute during live runs.
+    """
     if not url:
         return False
-    try:
-        with urllib.request.urlopen(
-            f"{url}/v1/models", timeout=PROBE_TIMEOUT_SEC
-        ) as resp:
-            data = json.load(resp)
-            return isinstance(data, dict) and isinstance(data.get("data"), list)
-    except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError):
-        return False
+    for attempt in range(PROBE_RETRIES):
+        try:
+            with urllib.request.urlopen(
+                f"{url}/v1/models", timeout=PROBE_TIMEOUT_SEC
+            ) as resp:
+                data = json.load(resp)
+                if isinstance(data, dict) and isinstance(data.get("data"), list):
+                    return True
+        except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError):
+            pass
+        if attempt < PROBE_RETRIES - 1:
+            time.sleep(0.2)
+    return False
 
 
 _probe = _probe_ollama  # backward-compat alias for test monkeypatches
 
 
 def _ollama_candidates() -> list[Endpoint]:
+    # The legacy hardcoded "neo" localhost:11434 candidate was removed: the Mini
+    # is the box now, and a hardcoded localhost probe hijacked edit detection
+    # whenever anything unrelated (e.g. the local review model) listened on
+    # :11434. Localhost Ollama is still reachable via PXX_STUDIO_LAN_URL's default.
     return [
         Endpoint(
             "studio_lan", os.environ.get("PXX_STUDIO_LAN_URL", DEFAULT_STUDIO_LAN)
         ),
         Endpoint("studio_remote", os.environ.get("PXX_STUDIO_REMOTE_URL", "")),
-        Endpoint("neo", DEFAULT_NEO),
     ]
 
 

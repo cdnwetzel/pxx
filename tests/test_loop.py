@@ -380,6 +380,74 @@ class TestEditRoundTimeout:
         assert seen and 60.0 <= seen[0] <= 1800.0
 
 
+class TestEditRoundRetry:
+    """The 14B occasionally emits a malformed edit (rc 1); retry before failing —
+    but never retry a wedged aider (rc 124), and respect the wall-clock budget."""
+
+    def _deadline(self):
+        import time as _t
+
+        return _t.monotonic() + 1000.0  # ample budget
+
+    def test_retries_genuine_failure_then_succeeds(self, monkeypatch, tmp_path):
+        calls = {"n": 0}
+
+        def flaky(root, msg, scope, timeout=None):
+            calls["n"] += 1
+            return 0 if calls["n"] == 2 else 1
+
+        monkeypatch.setattr(loop, "_run_edit_round", flaky)
+        rc = loop._run_edit_round_retried(tmp_path, "m", "pxx/", self._deadline())
+        assert rc == 0 and calls["n"] == 2
+
+    def test_never_retries_timeout(self, monkeypatch, tmp_path):
+        calls = {"n": 0}
+
+        def wedged(root, msg, scope, timeout=None):
+            calls["n"] += 1
+            return 124
+
+        monkeypatch.setattr(loop, "_run_edit_round", wedged)
+        rc = loop._run_edit_round_retried(tmp_path, "m", "pxx/", self._deadline())
+        assert rc == 124 and calls["n"] == 1
+
+    def test_success_first_try_no_retry(self, monkeypatch, tmp_path):
+        calls = {"n": 0}
+        monkeypatch.setattr(
+            loop,
+            "_run_edit_round",
+            lambda *a, **k: (calls.__setitem__("n", calls["n"] + 1), 0)[1],
+        )
+        rc = loop._run_edit_round_retried(tmp_path, "m", "pxx/", self._deadline())
+        assert rc == 0 and calls["n"] == 1
+
+    def test_exhausts_retries_then_fails(self, monkeypatch, tmp_path):
+        calls = {"n": 0}
+
+        def always_fail(root, msg, scope, timeout=None):
+            calls["n"] += 1
+            return 1
+
+        monkeypatch.setattr(loop, "_run_edit_round", always_fail)
+        rc = loop._run_edit_round_retried(
+            tmp_path, "m", "pxx/", self._deadline(), retries=2
+        )
+        assert rc == 1 and calls["n"] == 3  # 1 initial + 2 retries
+
+    def test_no_attempt_when_budget_below_floor(self, monkeypatch, tmp_path):
+        import time as _t
+
+        calls = {"n": 0}
+        monkeypatch.setattr(
+            loop,
+            "_run_edit_round",
+            lambda *a, **k: (calls.__setitem__("n", calls["n"] + 1), 1)[1],
+        )
+        # deadline only 30s out -> under the 60s floor -> no attempt
+        loop._run_edit_round_retried(tmp_path, "m", "pxx/", _t.monotonic() + 30.0)
+        assert calls["n"] == 0
+
+
 class TestHookPrecondition:
     """The --yes doctrine's boundary must exist for ANY edit-round caller."""
 

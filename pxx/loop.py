@@ -39,6 +39,9 @@ from pxx import audit, review_gate, workflow
 DEFAULT_MAX_ROUNDS = 3
 DEFAULT_DIFF_BUDGET_LINES = 150
 DEFAULT_MAX_SECONDS = 1800.0
+DEFAULT_EDIT_RETRIES = (
+    2  # 14B occasionally emits a malformed edit; retry before failing
+)
 
 # Severities that an edit round can actually act on: P0 is the REJECT path,
 # P2 never blocks, UNPARSEABLE is a review artifact problem, not a code one.
@@ -180,6 +183,35 @@ def _run_edit_round(
     except subprocess.TimeoutExpired:
         return 124
     return r.returncode
+
+
+def _run_edit_round_retried(
+    root: Path,
+    message: str,
+    scope: str,
+    deadline: float,
+    retries: int = DEFAULT_EDIT_RETRIES,
+) -> int:
+    """Edit round with bounded retries for *genuine* failures.
+
+    The 14B intermittently emits a malformed SEARCH/REPLACE that aider can't
+    apply (rc 1) even for a well-formed task; a fresh attempt usually succeeds.
+    Timeouts (rc 124 = wedged aider) are NOT retried — that would only burn the
+    wall-clock budget. Each attempt gets the remaining budget (`deadline` is the
+    absolute monotonic time the loop must stop by); retries stop once under the
+    60s floor.
+    """
+    rc = 1
+    for attempt in range(retries + 1):
+        remaining = deadline - time.monotonic()
+        if remaining < 60.0:
+            break
+        rc = _run_edit_round(root, message, scope, timeout=remaining)
+        if rc in (0, 124):
+            return rc
+        if attempt < retries:
+            _say(f"edit round failed (rc {rc}) — retrying ({attempt + 1}/{retries}).")
+    return rc
 
 
 def _review_verdict(
@@ -349,9 +381,7 @@ def run_loop(
         # The subprocess gets the REMAINING budget (floored) so a wedged aider
         # can't defeat the time guard between top-of-round checks.
         t0 = time.monotonic()
-        edit_rc = _run_edit_round(
-            root, message, scope, timeout=max(60.0, max_seconds - elapsed)
-        )
+        edit_rc = _run_edit_round_retried(root, message, scope, started + max_seconds)
         edit_s = time.monotonic() - t0
         if edit_rc != 0:
             why = "timed out" if edit_rc == 124 else f"failed (rc {edit_rc})"

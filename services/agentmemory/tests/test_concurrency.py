@@ -5,11 +5,10 @@ import tempfile
 import time
 from pathlib import Path
 
-import pytest
 
 from agentmemory_pkg.embeddings import get_model
 from agentmemory_pkg.search import SearchEngine
-from agentmemory_pkg.storage import Observation, ObservationStore
+from agentmemory_pkg.storage import ObservationStore
 from agentmemory_pkg.vector_index import VectorIndex
 
 
@@ -29,7 +28,7 @@ class TestEmbeddingsThreadSafety:
 
             # Try to load model concurrently
             try:
-                model = get_model()
+                get_model()
                 embedding = embeddings.embed_text(f"{text}_{thread_id}")
                 results.append((thread_id, len(embedding)))
             except Exception as e:
@@ -103,7 +102,7 @@ class TestConcurrentWrites:
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "test.db"
             store = ObservationStore(db_path=str(db_path))
-            engine = SearchEngine(store=store)
+            SearchEngine(store=store)
 
             # Pre-populate with some observations
             for i in range(10):
@@ -223,7 +222,7 @@ class TestPerformanceBaselines:
         """Test HNSW rebuild while search is in progress."""
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "test.db"
-            store = ObservationStore(db_path=str(db_path))
+            ObservationStore(db_path=str(db_path))
             index = VectorIndex(dimension=384, max_elements=10000)
 
             # Store initial embeddings

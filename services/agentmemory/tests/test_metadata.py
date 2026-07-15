@@ -1,5 +1,5 @@
 import pytest
-from agentmemory_pkg.storage import ObservationStore, Observation
+from agentmemory_pkg.storage import ObservationStore
 
 @pytest.fixture
 def store(tmp_path):

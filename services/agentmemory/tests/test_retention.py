@@ -161,7 +161,7 @@ class TestCleanup:
 
             obs1 = store.store("project1", "content 1")
             obs2 = store.store("project2", "content 2")
-            obs3 = store.store("project1", "content 3")
+            store.store("project1", "content 3")
 
             # Expire observations in both projects
             expired_time = (datetime.utcnow() - timedelta(days=2)).isoformat()

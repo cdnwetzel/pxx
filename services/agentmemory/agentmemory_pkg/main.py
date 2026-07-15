@@ -42,7 +42,7 @@ async def lifespan(app: FastAPI):
         if vector_index.load(str(index_dir)):
             print(f"Loaded vector index from {index_dir}")
         else:
-            print(f"Failed to load vector index, will rebuild")
+            print("Failed to load vector index, will rebuild")
 
     # Load persisted BM25 index
     if search_engine.load_bm25_index_from_store():

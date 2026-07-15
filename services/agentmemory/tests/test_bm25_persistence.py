@@ -3,10 +3,9 @@
 import tempfile
 from pathlib import Path
 
-import pytest
 
 from agentmemory_pkg.search import BM25Ranker, SearchEngine
-from agentmemory_pkg.storage import Observation, ObservationStore
+from agentmemory_pkg.storage import ObservationStore
 
 
 class TestBM25Persistence:

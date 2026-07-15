@@ -5,6 +5,10 @@ from __future__ import annotations
 import logging
 import threading
 from datetime import datetime
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from agentmemory_pkg.storage import ObservationStore
 
 logger = logging.getLogger(__name__)
 
@@ -14,7 +18,7 @@ class CleanupManager:
 
     def __init__(
         self,
-        store: "ObservationStore",
+        store: ObservationStore,
         interval_seconds: int = 3600,
         enabled: bool = True,
     ):

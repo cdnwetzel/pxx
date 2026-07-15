@@ -61,7 +61,7 @@ class TestEmbeddings:
         """Test vector similarity search."""
         # Create some test embeddings
         query = "editing Python code"
-        query_emb = embeddings.embed_text(query)
+        embeddings.embed_text(query)
 
         obs_embeddings = [
             ("obs-1", embeddings.embed_text("edited Python file")),

@@ -1,7 +1,7 @@
 # vllm-host-1 session hardening — model config, headless robustness, read-only integrity
 > Backlog ID: 007
 
-> Status: planned
+> Status: in-progress
 > Source: 2026-07-15 vllm-host-1 smoke test + `--self-improve` dogfood session
 > (first real session through the new multi-candidate vLLM chain, commit
 > 6bb7eed). Every item below was observed live, not speculated.

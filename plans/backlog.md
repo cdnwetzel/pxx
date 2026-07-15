@@ -14,7 +14,7 @@ Statuses: `planned` | `in-progress` | `blocked` | `done`.
 | 004 | [Phase 9: Closed-Loop Autonomy (`pxx --loop`)](phase-9-loop.md) | in-progress | — | — |
 | 005 | [Phase 10: PyPI-Ready](phase-10-pypi-ready.md) | done | — | — |
 | 006 | [Docs-RAG SME retrieval proxy](docs-rag-sme.md) | in-progress | — | — |
-| 007 | [vllm-host-1 session hardening](vllm-host-1-session-hardening.md) | planned | — | — |
+| 007 | [vllm-host-1 session hardening](vllm-host-1-session-hardening.md) | in-progress | — | — |
 
 Next free ID: **008**
 

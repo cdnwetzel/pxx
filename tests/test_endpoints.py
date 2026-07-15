@@ -193,12 +193,30 @@ class TestVllmCandidateList:
         assert result.url == "http://127.0.0.1:8003"
         assert result.model == "openai/qwen2.5-coder-14b"
 
-    def test_model_list_shorter_than_urls_leaves_none(self, monkeypatch):
+    def test_model_list_shorter_than_urls_leaves_none_and_warns(
+        self, monkeypatch, capsys
+    ):
         monkeypatch.setenv("PXX_VLLM_URL", "http://a:1,http://b:2")
         monkeypatch.setenv("PXX_VLLM_MODEL", "openai/model-a")
         first, second = endpoints._vllm_candidates()
         assert first.model == "openai/model-a"
         assert second.model is None
+        err = capsys.readouterr().err
+        assert "names 1 model(s) for 2 vLLM URL(s)" in err
+        assert "http://b:2" in err
+
+    def test_matched_lists_do_not_warn(self, monkeypatch, capsys):
+        monkeypatch.setenv("PXX_VLLM_URL", "http://a:1,http://b:2")
+        monkeypatch.setenv("PXX_VLLM_MODEL", "openai/model-a,openai/model-b")
+        endpoints._vllm_candidates()
+        assert capsys.readouterr().err == ""
+
+    def test_unset_model_env_does_not_warn(self, monkeypatch, capsys):
+        monkeypatch.setenv("PXX_VLLM_URL", "http://a:1,http://b:2")
+        monkeypatch.delenv("PXX_VLLM_MODEL", raising=False)
+        first, second = endpoints._vllm_candidates()
+        assert first.model is None and second.model is None
+        assert capsys.readouterr().err == ""
 
 
 class TestDetectEndpointTierPreference:

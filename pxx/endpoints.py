@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import time
 import urllib.error
 import urllib.parse
@@ -136,6 +137,16 @@ def _vllm_candidates() -> list[Endpoint]:
         if u.strip()
     ]
     models = [m.strip() for m in os.environ.get("PXX_VLLM_MODEL", "").split(",")]
+    named = [m for m in models if m]
+    if named and len(named) != len(urls):
+        unpaired = [u for i, u in enumerate(urls) if i >= len(models) or not models[i]]
+        if unpaired:
+            print(
+                f"pxx: PXX_VLLM_MODEL names {len(named)} model(s) for "
+                f"{len(urls)} vLLM URL(s) — default model will be used for: "
+                f"{', '.join(unpaired)}",
+                file=sys.stderr,
+            )
     candidates = []
     for i, url in enumerate(urls):
         model = models[i] if i < len(models) and models[i] else None

@@ -25,6 +25,7 @@ from pxx.cli import (
     STUDIO_DEFAULT,
     VLLM_DEFAULT,
     _build_aider_args,
+    _headless_consent_args,
     _create_safety_tag,
     _emit_core_restart_banner,
     _find_aider,
@@ -209,6 +210,20 @@ class TestFindAider:
         found = _find_aider()
         assert Path(found).exists()
         assert Path(found).name == "aider"
+
+
+class TestHeadlessConsentArgs:
+    def test_non_tty_without_consent_injects_yes(self):
+        assert _headless_consent_args(False, []) == ["--yes"]
+        assert _headless_consent_args(False, ["--message", "hi"]) == ["--yes"]
+
+    def test_tty_never_injects(self):
+        assert _headless_consent_args(True, []) == []
+        assert _headless_consent_args(True, ["--message", "hi"]) == []
+
+    def test_existing_consent_flag_respected(self):
+        for flag in ("--yes", "--yes-always", "--no", "--yes-always=true"):
+            assert _headless_consent_args(False, [flag]) == []
 
 
 class TestBuildAiderArgs:

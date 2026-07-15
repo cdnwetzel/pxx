@@ -211,6 +211,15 @@ accidental edits. The startup banner prints the active mode.
 When working on pxx itself: the same rule applies — type `pxx --edit` to make
 changes. No special-casing for the pxx repo.
 
+**Headless runs:** when stdin is not a TTY and no consent flag was passed,
+pxx appends `--yes` for aider (with a stderr notice) — aider's interactive
+confirms crash on a non-TTY stdin, and headless callers (`--loop`, cron,
+one-shot `--message` runs) always want auto-confirm. Note the implication
+for *edit* mode: a headless `--edit` session auto-approves aider's actions;
+that is acceptable because headless edits already sit behind the #002
+safety tag and `--scope`/trusted-path gates. Pass `--no` explicitly to get
+decline-all semantics instead.
+
 ## Plans inventory (`plans/backlog.md`)
 
 The `plans/` folder is governed by `plans/backlog.md` — a master inventory

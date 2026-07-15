@@ -200,6 +200,24 @@ def _find_aider() -> str:
     sys.exit(1)
 
 
+def _headless_consent_args(isatty: bool, user_args: list[str]) -> list[str]:
+    """Args to append when stdin is not a TTY and no consent flag was given.
+
+    aider's interactive confirms crash on a non-TTY stdin (prompt_toolkit
+    raises OSError registering the fd), so headless one-shots — --loop
+    rounds, cron jobs, CI smoke tests — need --yes. pxx's own self-modes
+    are the primary headless callers and always want --yes semantics, so
+    inject rather than hard-fail; the caller-visible stderr notice is
+    printed at the call site.
+    """
+    consent = {"--yes", "--yes-always", "--no"}
+    if isatty:
+        return []
+    if any(a in consent or a.split("=", 1)[0] in consent for a in user_args):
+        return []
+    return ["--yes"]
+
+
 def _build_aider_args(
     aider_bin: str,
     model: str,
@@ -818,6 +836,11 @@ def main() -> None:
         extra_reads.append(scope_context)
     if self_improve_mode:
         extra_reads.append(SELF_IMPROVE_PROMPT)
+
+    headless_args = _headless_consent_args(sys.stdin.isatty(), user_args)
+    if headless_args:
+        print("pxx: non-TTY stdin — passing --yes to aider", file=sys.stderr)
+        user_args = [*user_args, *headless_args]
 
     args = _build_aider_args(
         aider_bin,

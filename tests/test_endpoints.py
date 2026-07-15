@@ -142,6 +142,48 @@ class TestDetectEndpoint:
         with pytest.raises(RuntimeError, match="No Ollama or vLLM endpoint reachable"):
             detect_endpoint()
 
+    def test_all_unreachable_error_names_tried_candidates(self, monkeypatch):
+        monkeypatch.delenv("PXX_OLLAMA_BASE", raising=False)
+        monkeypatch.setenv("PXX_VLLM_URL", "http://vllm-host-1-down:8001")
+        monkeypatch.setenv("PXX_STUDIO_LAN_URL", "http://studio-down:11434")
+        monkeypatch.setenv("PXX_STUDIO_REMOTE_URL", "")
+        monkeypatch.setattr("pxx.endpoints._probe_ollama", lambda url: False)
+        monkeypatch.setattr("pxx.endpoints._probe_vllm", lambda url: False)
+        with pytest.raises(RuntimeError) as exc:
+            detect_endpoint()
+        msg = str(exc.value)
+        assert "http://vllm-host-1-down:8001" in msg
+        assert "http://studio-down:11434" in msg
+        # empty-URL candidates (unset studio_remote) stay out of the list
+        assert "studio_remote" not in msg
+
+    def test_pxx_debug_logs_each_failed_probe(self, monkeypatch, capsys):
+        monkeypatch.delenv("PXX_OLLAMA_BASE", raising=False)
+        monkeypatch.setenv("PXX_DEBUG", "1")
+        monkeypatch.setenv("PXX_VLLM_URL", "http://vllm-host-1-down:8001")
+        monkeypatch.setenv("PXX_STUDIO_LAN_URL", "http://studio-ok:11434")
+        monkeypatch.setattr("pxx.endpoints._probe_vllm", lambda url: False)
+        monkeypatch.setattr(
+            "pxx.endpoints._probe_ollama", lambda url: url == "http://studio-ok:11434"
+        )
+        result = detect_endpoint()
+        assert result.url == "http://studio-ok:11434"
+        err = capsys.readouterr().err
+        assert "probe failed m1_vllm http://vllm-host-1-down:8001" in err
+        assert "studio-ok" not in err  # successful probe is not logged
+
+    def test_no_debug_env_stays_silent_on_failed_probes(self, monkeypatch, capsys):
+        monkeypatch.delenv("PXX_OLLAMA_BASE", raising=False)
+        monkeypatch.delenv("PXX_DEBUG", raising=False)
+        monkeypatch.setenv("PXX_VLLM_URL", "http://vllm-host-1-down:8001")
+        monkeypatch.setenv("PXX_STUDIO_LAN_URL", "http://studio-ok:11434")
+        monkeypatch.setattr("pxx.endpoints._probe_vllm", lambda url: False)
+        monkeypatch.setattr(
+            "pxx.endpoints._probe_ollama", lambda url: url == "http://studio-ok:11434"
+        )
+        detect_endpoint()
+        assert "probe failed" not in capsys.readouterr().err
+
     def test_first_reachable_candidate_wins(self, monkeypatch):
         monkeypatch.delenv("PXX_OLLAMA_BASE", raising=False)
         monkeypatch.setenv("PXX_STUDIO_LAN_URL", "http://studio-lan-fake:11434")

@@ -175,13 +175,21 @@ def detect_endpoint(preferred_backend: str | None = None) -> Endpoint:
             (_probe_ollama, _ollama_candidates()),
         ]
 
+    debug = os.environ.get("PXX_DEBUG") == "1"
+    tried: list[str] = []
     for probe_fn, candidates in probe_pairs:
         for ep in candidates:
+            if not ep.url:
+                continue
             if probe_fn(ep.url):
                 return ep
+            tried.append(f"{ep.name} ({ep.url})")
+            if debug:
+                print(f"pxx: probe failed {ep.name} {ep.url}", file=sys.stderr)
 
     raise RuntimeError(
-        "No Ollama or vLLM endpoint reachable. Start Ollama locally "
+        "No Ollama or vLLM endpoint reachable. "
+        f"Tried: {'; '.join(tried)}. Start Ollama locally "
         "(`ollama serve`), or set PXX_OLLAMA_BASE to your Ollama URL "
         "(e.g. http://localhost:11434)."
     )

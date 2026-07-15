@@ -1,7 +1,9 @@
 # vllm-host-1 session hardening — model config, headless robustness, read-only integrity
 > Backlog ID: 007
 
-> Status: in-progress
+> Status: done — all five items landed 2026-07-15 (commits 6b327c5, e920bf1,
+> 9364d10, acb4ccd, + item 5); acceptance verified live: no litellm metadata
+> warning, no .gitignore mutation, clean headless one-shot without --yes.
 > Source: 2026-07-15 vllm-host-1 smoke test + `--self-improve` dogfood session
 > (first real session through the new multi-candidate vLLM chain, commit
 > 6bb7eed). Every item below was observed live, not speculated.

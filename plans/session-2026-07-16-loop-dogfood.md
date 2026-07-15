@@ -68,6 +68,37 @@ The only remaining item of 006. Two changes to §6's original framing:
 
 Closing Task 3 flips plan 006 to `done`.
 
+## Task 4 — PyPI release checkpoint (v1.1.0)
+
+PyPI (`pxx-orchestrator`) is still at 1.0.0 (2026-06-04) while main has
+accumulated user-facing features since: multi-candidate vLLM lists with
+per-endpoint models, `--no-gitignore`, non-TTY `--yes` injection,
+`PXX_DEBUG` probe logging, plus the loop/review/endpoint fixes of June.
+The repo staying current while PyPI ages is its own drift class — adopt
+the rule: **any session that closes a plan touching user-facing behavior
+ends by asking "does PyPI need a bump?"**
+
+Release when, not before:
+- Task 1's dogfood passes — ship edit-mode-validated features, not
+  ask-mode-only ones.
+- `uv run pytest -q` and repo-wide ruff green (already true today).
+
+Steps (semver: minor bump — new features, no breaking changes):
+1. CHANGELOG.md: add `[1.1.0]` section covering everything since 1.0.0
+   (git log v1.0.0..main is the source of truth).
+2. Bump `version` in pyproject.toml — **guardrailed file: user executes
+   or explicitly approves.**
+3. Build + publish (`uv build`, then the same publish path used for
+   1.0.0), tag `v1.1.0`, push tag.
+4. Post-publish smoke: `uv tool install pxx-orchestrator==1.1.0` in a
+   temp env on a machine WITHOUT the repo checkout — 1.0.0's packaging
+   note applies: config/ files ship only with a checkout, so verify the
+   pip-installed fallback paths still behave (no `--config`, litellm
+   metadata warning acceptable there or documented).
+
+If Task 1 fails, still consider shipping 1.1.0 minus the loop claims —
+the endpoint/headless features are validated independently.
+
 ## Explicitly out of scope tomorrow
 
 - Phase 8.5 confidence scoring and the phase-8 tier-2/3 feature list

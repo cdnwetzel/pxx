@@ -1,13 +1,10 @@
 # vllm-host-1 session hardening — model config, headless robustness, read-only integrity
+> Backlog ID: 007
 
 > Status: planned
 > Source: 2026-07-15 vllm-host-1 smoke test + `--self-improve` dogfood session
 > (first real session through the new multi-candidate vLLM chain, commit
 > 6bb7eed). Every item below was observed live, not speculated.
->
-> Note: CLAUDE.md says `plans/` is governed by `plans/backlog.md`, but that
-> file does not exist in the repo — drift to resolve separately (either
-> create the inventory or fix CLAUDE.md's claim).
 
 ## Context
 

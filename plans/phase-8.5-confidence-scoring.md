@@ -1,4 +1,5 @@
 # Phase 8.5: Observation Confidence Scoring
+> Backlog ID: 003
 
 > **Prerequisite:** Phase 8.4 (Metadata schema) — COMPLETE ✅
 

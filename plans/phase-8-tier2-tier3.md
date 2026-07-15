@@ -1,4 +1,5 @@
 # Phase 8: Tier 2 & Tier 3 — Feature Expansion & Intelligence Layer
+> Backlog ID: 002
 
 > **Prerequisite:** Phase 8 Tier 1 (HNSW persistence, BM25 indexing, concurrency tests) — COMPLETE ✅
 

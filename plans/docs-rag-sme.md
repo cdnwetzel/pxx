@@ -1,4 +1,5 @@
 # Docs-RAG SME: version-aware "perpetual SME" retrieval proxy
+> Backlog ID: 006
 
 > Backlog ID: 009
 

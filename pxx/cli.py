@@ -248,6 +248,10 @@ def _build_aider_args(
         aider_bin,
         "--model",
         model,
+        # .gitignore hygiene is a repo decision, not a per-session one — an
+        # ask-mode session must never mutate the working tree (user args come
+        # later in argv, so a caller can still opt back in).
+        "--no-gitignore",
         "--read",
         str(SYSTEM_PROMPT),
         *extra_read_args,

@@ -249,6 +249,15 @@ class TestBuildAiderArgs:
         assert "--chat-mode" not in args
         assert "--chat-mode=help" in args
 
+    def test_no_gitignore_always_present(self):
+        # A read-only (ask) session must never mutate .gitignore; edit mode
+        # keeps it out too — ignore-file hygiene is a repo decision.
+        for edit_mode in (False, True):
+            args = _build_aider_args(
+                "/x/aider", "m", [], in_git_repo=True, edit_mode=edit_mode
+            )
+            assert "--no-gitignore" in args
+
     def test_no_git_flag_added_when_outside_repo(self):
         args = _build_aider_args(
             "/x/aider", "m", [], in_git_repo=False, edit_mode=False

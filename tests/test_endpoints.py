@@ -6,6 +6,7 @@ from dataclasses import FrozenInstanceError
 
 import pytest
 
+from pxx import endpoints
 from pxx.endpoints import Endpoint, _probe, detect_endpoint
 
 
@@ -157,6 +158,47 @@ class TestDetectEndpoint:
         result = detect_endpoint()
         assert result.name == "studio_lan"
         assert result.url == "http://studio-lan-fake:11434"
+
+
+class TestVllmCandidateList:
+    def test_single_url_keeps_legacy_name_and_default_model(self, monkeypatch):
+        monkeypatch.setenv("PXX_VLLM_URL", "http://vllm-host-1:8001")
+        monkeypatch.delenv("PXX_VLLM_MODEL", raising=False)
+        (ep,) = endpoints._vllm_candidates()
+        assert ep.name == "m1_vllm"
+        assert ep.url == "http://vllm-host-1:8001"
+        assert ep.model is None
+
+    def test_comma_list_probed_in_order_first_reachable_wins(self, monkeypatch):
+        monkeypatch.delenv("PXX_OLLAMA_BASE", raising=False)
+        monkeypatch.setenv("PXX_VLLM_URL", "http://vllm-host-1:8001, http://127.0.0.1:8003")
+        monkeypatch.setenv(
+            "PXX_VLLM_MODEL", "openai/Qwen3-Coder, openai/qwen2.5-coder-14b"
+        )
+        first, second = endpoints._vllm_candidates()
+        assert (first.url, first.model) == ("http://vllm-host-1:8001", "openai/Qwen3-Coder")
+        assert (second.url, second.model) == (
+            "http://127.0.0.1:8003",
+            "openai/qwen2.5-coder-14b",
+        )
+        assert first.name == "vllm_vllm-host-1"
+        assert second.name == "vllm_127_0_0_1"
+
+        # vllm-host-1 down -> the second candidate is selected with its own model.
+        monkeypatch.setattr(
+            "pxx.endpoints._probe_vllm", lambda url: url == "http://127.0.0.1:8003"
+        )
+        monkeypatch.setattr("pxx.endpoints._probe_ollama", lambda url: False)
+        result = detect_endpoint()
+        assert result.url == "http://127.0.0.1:8003"
+        assert result.model == "openai/qwen2.5-coder-14b"
+
+    def test_model_list_shorter_than_urls_leaves_none(self, monkeypatch):
+        monkeypatch.setenv("PXX_VLLM_URL", "http://a:1,http://b:2")
+        monkeypatch.setenv("PXX_VLLM_MODEL", "openai/model-a")
+        first, second = endpoints._vllm_candidates()
+        assert first.model == "openai/model-a"
+        assert second.model is None
 
 
 class TestDetectEndpointTierPreference:

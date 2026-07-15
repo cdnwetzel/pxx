@@ -80,6 +80,29 @@ class TestModelForVllm:
         ep = Endpoint("m1_vllm", "http://x:8000", backend="vllm")
         assert model_for(ep) == "my-model"
 
+    def test_endpoint_model_beats_vllm_default(self, monkeypatch):
+        monkeypatch.delenv("PXX_MODEL", raising=False)
+        ep = Endpoint(
+            "vllm_vllm-host-1",
+            "http://vllm-host-1:8001",
+            backend="vllm",
+            model="openai/Qwen3-Coder",
+        )
+        assert model_for(ep) == "openai/Qwen3-Coder"
+        assert model_for(ep, tier="t2") == "openai/Qwen3-Coder"
+        assert model_for(ep, tier="t3") == "openai/Qwen3-Coder"
+
+    def test_endpoint_model_does_not_bypass_t1_ollama_requirement(self, monkeypatch):
+        monkeypatch.delenv("PXX_MODEL", raising=False)
+        ep = Endpoint(
+            "vllm_vllm-host-1",
+            "http://vllm-host-1:8001",
+            backend="vllm",
+            model="openai/Qwen3-Coder",
+        )
+        with pytest.raises(RuntimeError, match="t1 requires an Ollama endpoint"):
+            model_for(ep, tier="t1")
+
 
 class TestSetBackendEnv:
     def test_vllm_sets_openai_api_base(self, monkeypatch):

@@ -9,8 +9,10 @@ Endpoints are configured via environment variables (all optional):
 - ``PXX_STUDIO_LAN_URL`` — primary Ollama URL (default ``http://localhost:11434``).
 - ``PXX_STUDIO_REMOTE_URL`` — optional second Ollama URL (e.g. a remote host
   reachable over VPN); empty/unset is skipped.
-- ``PXX_VLLM_URL``      — optional OpenAI-compatible vLLM endpoint
-  (default ``http://127.0.0.1:8003``).
+- ``PXX_VLLM_URL``      — optional OpenAI-compatible vLLM endpoint(s)
+  (default ``http://127.0.0.1:8003``). Comma-separated list allowed; probed
+  in order, first reachable wins. ``PXX_VLLM_MODEL`` may be a matching
+  comma-separated list to pair each URL with its served model id.
 
 The "studio" endpoint name is historical; functionally it is just "primary
 Ollama" (localhost by default, or PXX_STUDIO_LAN_URL). The old "neo" localhost
@@ -23,6 +25,7 @@ import json
 import os
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
@@ -43,6 +46,7 @@ class Endpoint:
     url: str
     backend: str = "ollama"  # "ollama" | "vllm"
     tensor_parallel: bool = False  # informational; True for vLLM TP-2 endpoints
+    model: str | None = None  # per-endpoint served model id; None = backend default
 
 
 def _probe_ollama(url: str) -> bool:
@@ -119,8 +123,28 @@ _candidates = _ollama_candidates  # backward-compat alias
 
 
 def _vllm_candidates() -> list[Endpoint]:
-    url = os.environ.get("PXX_VLLM_URL", DEFAULT_VLLM)
-    return [Endpoint("m1_vllm", url, backend="vllm", tensor_parallel=True)]
+    """Ordered vLLM candidates from PXX_VLLM_URL (comma-separated, first wins).
+
+    PXX_VLLM_MODEL pairs positionally: entry N names the model served by URL N.
+    A missing/empty entry means "use the VLLM_DEFAULT model" (Endpoint.model
+    stays None). Single-URL configs keep the historical "m1_vllm" name so
+    audit logs and banners stay comparable across the fleet.
+    """
+    urls = [
+        u.strip()
+        for u in os.environ.get("PXX_VLLM_URL", DEFAULT_VLLM).split(",")
+        if u.strip()
+    ]
+    models = [m.strip() for m in os.environ.get("PXX_VLLM_MODEL", "").split(",")]
+    candidates = []
+    for i, url in enumerate(urls):
+        model = models[i] if i < len(models) and models[i] else None
+        host = urllib.parse.urlsplit(url).hostname or f"vllm{i}"
+        name = "m1_vllm" if len(urls) == 1 else f"vllm_{host.replace('.', '_')}"
+        candidates.append(
+            Endpoint(name, url, backend="vllm", tensor_parallel=True, model=model)
+        )
+    return candidates
 
 
 def detect_endpoint(preferred_backend: str | None = None) -> Endpoint:

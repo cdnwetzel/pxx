@@ -94,7 +94,11 @@ SELF_FIX_DIFF_CAP = self_modes.SELF_FIX_DIFF_CAP
 # OPENAI_API_BASE.
 STUDIO_DEFAULT = os.environ.get("PXX_OLLAMA_MODEL", "ollama_chat/devstral:24b")
 NEO_DEFAULT = "ollama_chat/qwen3:4b"
-VLLM_DEFAULT = os.environ.get("PXX_VLLM_MODEL", "openai/qwen2.5-coder-14b")
+# PXX_VLLM_MODEL may be a comma list pairing entries with PXX_VLLM_URL; the
+# first entry doubles as the fallback for endpoints without a paired model.
+VLLM_DEFAULT = (
+    os.environ.get("PXX_VLLM_MODEL", "openai/qwen2.5-coder-14b").split(",")[0].strip()
+)
 T1_DEFAULT = "ollama_chat/qwen2.5-coder:7b"
 VLLM_T3_DEFAULT = VLLM_DEFAULT
 
@@ -124,6 +128,12 @@ def model_for(endpoint: Endpoint, tier: str | None = None) -> str:
                 f"Check that your Ollama is reachable, or use --tier t2/t3."
             )
 
+        # A vLLM endpoint that declares its served model wins over the tier
+        # table for vLLM tiers — the table's VLLM_DEFAULT only fits the
+        # first-listed endpoint.
+        if endpoint.backend == "vllm" and endpoint.model:
+            return endpoint.model
+
         key = (endpoint.backend, tier)
         if key in _TIER_MODEL:
             return _TIER_MODEL[key]
@@ -132,7 +142,7 @@ def model_for(endpoint: Endpoint, tier: str | None = None) -> str:
 
     # No tier specified: use backend-based default
     if endpoint.backend == "vllm":
-        return VLLM_DEFAULT
+        return endpoint.model or VLLM_DEFAULT
     return NEO_DEFAULT if endpoint.name == "neo" else STUDIO_DEFAULT
 
 

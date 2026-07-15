@@ -15,8 +15,9 @@ Statuses: `planned` | `in-progress` | `blocked` | `done`.
 | 005 | [Phase 10: PyPI-Ready](phase-10-pypi-ready.md) | done | — | — |
 | 006 | [Docs-RAG SME retrieval proxy](docs-rag-sme.md) | in-progress | — | — |
 | 007 | [vllm-host-1 session hardening](vllm-host-1-session-hardening.md) | done | — | — |
+| 008 | [2026-07-16 session: Phase 9 dogfood + docs-sme A/B](session-2026-07-16-loop-dogfood.md) | planned | — | — |
 
-Next free ID: **008**
+Next free ID: **009**
 
 ## Workflow for adding a new plan
 

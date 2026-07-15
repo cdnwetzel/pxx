@@ -9,40 +9,50 @@ workflow. It probes which Ollama endpoint is reachable, picks a matching
 model, applies safety and scoping gates, and `os.execv`s into aider. Once 
 aider takes over the process, pxx is out of the picture.
 
-Fleet (as of 2026-06-05 — `pxx` now runs **on the Mac Studio itself**, which
-folded in the orchestrator role the 8GB "Neo" MacBook used to hold):
+Fleet (as of 2026-07-15 — vllm-host-1 is the priority inference node after a
+head-to-head A/B benchmark; `pxx` runs on the Mac Studio and on the office
+MacBook):
 
+- **vllm-host-1** (`192.168.111.12`) — **priority endpoint.** vLLM serving
+  `Qwen3-Coder` (Qwen3-Coder-30B-A3B-Instruct, FP8, 32k ctx) directly on the
+  office LAN at `:8001`. Won the 2026-07-15 A/B 4/4 on quality with ~0.1s
+  TTFT at ~50 tok/s (vs devstral:24b and qwen3:30b-a3b on the Studio).
 - **Mac Studio** (`workstation`, M4 Max, 36GB) — runs `pxx` *and* Ollama
-  locally (`devstral:24b` default, plus `qwen2.5:32b`, `qwen2.5-coder:7b`).
-  Orchestrator and primary inference host are now the same machine.
+  locally (`devstral:24b` default, plus qwen2.5/qwen3 variants). Ollama is a
+  system LaunchDaemon (`ai.ollama.serve`, KeepAlive, models on
+  `/Volumes/Docking/ollama/models`) **bound to `127.0.0.1` by design** — see
+  `~/ai/ollama-migration-runbook.md` on the Studio. It is NOT reachable from
+  other machines; off-box use requires an SSH tunnel. Fallback tier only.
 - **T5810** (`gpu-node-1`, 2× RTX A4500 20GB, NVLink) — remote vLLM
   serving `qwen2.5-coder-14b` (+`coder-prod` LoRA) behind an
   audit-proxy on `:8003`. **SSH-only**: the office router NATs only port 22
   to it, so it is reached through a persistent SSH local-forward
   (`deploy/launchd/local.pxx.gpu-node-1-vllm-tunnel.plist` → `127.0.0.1:8003`).
-  Used for tier-2/3 sessions.
+  The old direct-LAN URL (`10.0.1.40:8003`) is dead — that subnet is gone.
+  Fallback tier only.
 - **inference-node** (RHEL 10) — a separate inference node (vLLM with legal
   LoRAs on `:8000`, Ollama on `:11434`). Not used by pxx today; it already
   runs the systemd twin of the Studio tunnel (`coder-tunnel.service`).
 
 The Asrock RTX 3060Ti is not part of the fleet; pxx never referenced it.
 
-**Studio Ollama endpoint:** `workstation.local:11434` — now
-resolves to localhost (this host *is* `workstation`). Set
-`PXX_OLLAMA_BASE` to override (rarely needed); `PXX_VLLM_URL` overrides the
-T5810 tunnel URL.
+**Hostname note:** on the office LAN use bare DNS names (`vllm-host-1`,
+`workstation` via the `splawoffice.local` search domain) — mDNS `.local`
+names do not resolve reliably.
 
 Endpoint detection (first reachable wins, 1s timeout per probe):
-`PXX_OLLAMA_BASE` override → vLLM (T5810 via tunnel) → Studio Ollama
-(LAN/VPN). Tier 1 forces local Ollama; tier 2/3 prefer the T5810 vLLM when
-the tunnel is up, else fall back to Studio Ollama.
+`PXX_OLLAMA_BASE` override → vLLM candidates in `PXX_VLLM_URL` order
+(vllm-host-1 first, then T5810 tunnel) → Ollama (`PXX_STUDIO_LAN_URL`, default
+localhost). Tier 1 forces local Ollama; tier 2/3 prefer the first reachable
+vLLM. `PXX_VLLM_URL`/`PXX_VLLM_MODEL` accept comma-separated lists, paired
+positionally.
 
-**Security posture:** the Studio binds Ollama to `0.0.0.0:11434` and the
-T5810 audit-proxy binds `0.0.0.0:8003`, both with no authentication. This is
-only safe because the network boundary is the auth layer: trusted LAN at the
-office, SSL VPN for remote, and for the T5810 the SSH tunnel *is* the
-boundary (only port 22 is exposed). If the Studio ever moves to an untrusted
-network, set Ollama's `OLLAMA_HOST` to `127.0.0.1:11434` first.
+**Security posture:** nothing on the fleet has request-level auth; the
+network boundary is the auth layer. The Studio's Ollama binds `127.0.0.1`
+only (deliberate — see the migration runbook; SSH is the off-box path).
+vllm-host-1's vLLM `:8001` is open on the trusted office LAN. The T5810
+audit-proxy binds `0.0.0.0:8003` but only port 22 is NATed to it, so the
+SSH tunnel *is* the boundary.
 
 ### Phase 5 Infrastructure (Tier 1-4)
 
@@ -345,9 +355,9 @@ If a task seems to require editing one of these, stop and ask. The
 | `PXX_OLLAMA_BASE`      | Skip detection entirely, use this URL |
 | `PXX_STUDIO_LAN_URL`   | Override the primary Ollama URL (default `http://localhost:11434`) |
 | `PXX_STUDIO_REMOTE_URL`| Second Ollama URL, e.g. VPN-reachable (empty by default) |
-| `PXX_VLLM_URL`         | Optional vLLM endpoint (default `http://127.0.0.1:8003`) |
+| `PXX_VLLM_URL`         | Optional vLLM endpoint(s), comma-separated, probed in order (default `http://127.0.0.1:8003`) |
 | `PXX_MODEL`            | Force a specific model regardless of endpoint |
-| `PXX_OLLAMA_MODEL` / `PXX_VLLM_MODEL` | Per-backend default models |
+| `PXX_OLLAMA_MODEL` / `PXX_VLLM_MODEL` | Per-backend default models; `PXX_VLLM_MODEL` may be a comma list paired positionally with `PXX_VLLM_URL` |
 | `PXX_DRIFT_SSH_TARGET` / `PXX_DRIFT_REMOTE_PATH` | Enable the cross-machine drift check |
 | `PXX_AUTOCHECK_DRIFT`  | Set to `1` to run a drift check before every `--edit` session |
 | `PXX_REVIEW_BACKEND`   | `--loop`/`--review` reviewer: `local` (default, sovereign — reviews the diff via a local model) or `claude` (frontier agent, for supervised runs) |

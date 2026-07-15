@@ -39,9 +39,10 @@ Assumptions pxx makes:
   haven't pulled it, set `PXX_MODEL` or `PXX_OLLAMA_MODEL` to a model you have.
 - **aider takes over your terminal** once launched — pxx execs into it and gets
   out of the way.
-- Endpoint detection probes (1s timeout each): `PXX_OLLAMA_BASE` override → an
-  optional vLLM endpoint (`PXX_VLLM_URL`, default `127.0.0.1:8003`) → Ollama
-  (`PXX_STUDIO_LAN_URL`, default `localhost:11434`). First reachable wins.
+- Endpoint detection probes (1s timeout each): `PXX_OLLAMA_BASE` override →
+  optional vLLM endpoint(s) (`PXX_VLLM_URL`, comma-separated, probed in
+  order; default `127.0.0.1:8003`) → Ollama (`PXX_STUDIO_LAN_URL`, default
+  `localhost:11434`). First reachable wins.
 
 ## Quick Start
 
@@ -199,7 +200,9 @@ PXX_OLLAMA_MODEL=ollama_chat/llama3.1:8b         # Default Ollama model
                                                  #   (ships as devstral:24b — set
                                                  #   this to a model you've pulled)
 PXX_VLLM_MODEL=openai/your-served-model          # Model id if you use a vLLM
-                                                 #   endpoint (server-specific)
+                                                 #   endpoint (server-specific).
+                                                 #   Comma list pairs with a
+                                                 #   comma list in PXX_VLLM_URL
 
 # Memory (optional)
 AGENTMEMORY_RETENTION_DAYS=90                    # Observation TTL

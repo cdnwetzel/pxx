@@ -19,7 +19,6 @@ import pytest
 
 from pxx.cli import (
     COMMANDS_CONTEXT_FILE,
-    NEO_DEFAULT,
     REPO_ROOT,
     SAFETY_TAG_PREFIX,
     STUDIO_DEFAULT,
@@ -47,10 +46,6 @@ from pxx.endpoints import Endpoint
 
 
 class TestModelFor:
-    def test_neo_endpoint_returns_neo_default(self, monkeypatch):
-        monkeypatch.delenv("PXX_MODEL", raising=False)
-        assert model_for(Endpoint("neo", "http://localhost:11434")) == NEO_DEFAULT
-
     def test_studio_endpoint_returns_studio_default(self, monkeypatch):
         monkeypatch.delenv("PXX_MODEL", raising=False)
         assert model_for(Endpoint("studio_lan", "http://x:11434")) == STUDIO_DEFAULT
@@ -66,7 +61,7 @@ class TestModelFor:
 
     def test_pxx_model_env_overrides_all_endpoints(self, monkeypatch):
         monkeypatch.setenv("PXX_MODEL", "ollama_chat/custom")
-        for name in ("neo", "studio_lan", "studio_remote", "override"):
+        for name in ("studio_lan", "studio_remote", "override"):
             assert model_for(Endpoint(name, "http://x:11434")) == "ollama_chat/custom"
 
 
@@ -160,7 +155,7 @@ class TestModelForTier:
         from pxx.cli import T1_DEFAULT, model_for
 
         monkeypatch.delenv("PXX_MODEL", raising=False)
-        ep = Endpoint("neo", "http://localhost:11434", backend="ollama")
+        ep = Endpoint("studio_lan", "http://localhost:11434", backend="ollama")
         assert model_for(ep, tier="t1") == T1_DEFAULT
 
     def test_t2_tier_returns_vllm_default(self, monkeypatch):
@@ -485,7 +480,7 @@ class TestTrustedPathGate:
         monkeypatch.setattr(
             cli_module,
             "detect_endpoint",
-            lambda **kwargs: Endpoint("neo", "http://x:11434"),
+            lambda **kwargs: Endpoint("studio_lan", "http://x:11434"),
         )
         monkeypatch.setattr(cli_module.os, "execve", lambda *_: None)
         monkeypatch.setattr(cli_module, "_find_aider", lambda: "/x/aider")
@@ -770,7 +765,7 @@ class TestSelfImproveFlag:
         monkeypatch.setattr(
             cli_module,
             "detect_endpoint",
-            lambda **kwargs: Endpoint("neo", "http://x:11434"),
+            lambda **kwargs: Endpoint("studio_lan", "http://x:11434"),
         )
         monkeypatch.setattr(cli_module.os, "execve", lambda *_: None)
         monkeypatch.setattr(cli_module, "_find_aider", lambda: "/x/aider")
@@ -844,7 +839,7 @@ class TestSelfImproveFlag:
         monkeypatch.setattr(
             cli_module,
             "detect_endpoint",
-            lambda **kwargs: Endpoint("neo", "http://x:11434"),
+            lambda **kwargs: Endpoint("studio_lan", "http://x:11434"),
         )
         monkeypatch.setattr(cli_module.os, "execve", fake_execv)
         monkeypatch.setattr(cli_module, "_find_aider", lambda: "/x/aider")
@@ -876,7 +871,7 @@ class TestSelfImproveFlag:
         monkeypatch.setattr(
             cli_module,
             "detect_endpoint",
-            lambda **kwargs: Endpoint("neo", "http://x:11434"),
+            lambda **kwargs: Endpoint("studio_lan", "http://x:11434"),
         )
         monkeypatch.setattr(cli_module.os, "execve", fake_execv)
         monkeypatch.setattr(cli_module, "_find_aider", lambda: "/x/aider")
@@ -1095,7 +1090,7 @@ class TestSelfFixFlag:
         monkeypatch.setattr(
             cli_module,
             "detect_endpoint",
-            lambda **kwargs: Endpoint("neo", "http://x:11434"),
+            lambda **kwargs: Endpoint("studio_lan", "http://x:11434"),
         )
         monkeypatch.setattr(cli_module.os, "execve", lambda *_: None)
         monkeypatch.setattr(cli_module, "_find_aider", lambda: "/x/aider")
@@ -1207,7 +1202,7 @@ class TestSelfFixFlag:
         monkeypatch.setattr(
             cli_module,
             "detect_endpoint",
-            lambda **kwargs: Endpoint("neo", "http://x:11434"),
+            lambda **kwargs: Endpoint("studio_lan", "http://x:11434"),
         )
         monkeypatch.setattr(cli_module, "_find_aider", lambda: "/x/aider")
 
@@ -1238,7 +1233,7 @@ class TestSelfFixFlag:
         monkeypatch.setattr(
             cli_module,
             "detect_endpoint",
-            lambda **kwargs: Endpoint("neo", "http://x:11434"),
+            lambda **kwargs: Endpoint("studio_lan", "http://x:11434"),
         )
         monkeypatch.setattr(cli_module, "_find_aider", lambda: "/x/aider")
 
@@ -1281,7 +1276,7 @@ class TestSelfFixFlag:
         monkeypatch.setattr(
             cli_module,
             "detect_endpoint",
-            lambda **kwargs: Endpoint("neo", "http://x:11434"),
+            lambda **kwargs: Endpoint("studio_lan", "http://x:11434"),
         )
         monkeypatch.setattr(cli_module, "_find_aider", lambda: "/x/aider")
 

@@ -93,7 +93,6 @@ SELF_FIX_DIFF_CAP = self_modes.SELF_FIX_DIFF_CAP
 # needs the openai/ prefix to route an OpenAI-compatible endpoint via
 # OPENAI_API_BASE.
 STUDIO_DEFAULT = os.environ.get("PXX_OLLAMA_MODEL", "ollama_chat/devstral:24b")
-NEO_DEFAULT = "ollama_chat/qwen3:4b"
 # PXX_VLLM_MODEL may be a comma list pairing entries with PXX_VLLM_URL; the
 # first entry doubles as the fallback for endpoints without a paired model.
 VLLM_DEFAULT = (
@@ -143,7 +142,7 @@ def model_for(endpoint: Endpoint, tier: str | None = None) -> str:
     # No tier specified: use backend-based default
     if endpoint.backend == "vllm":
         return endpoint.model or VLLM_DEFAULT
-    return NEO_DEFAULT if endpoint.name == "neo" else STUDIO_DEFAULT
+    return STUDIO_DEFAULT
 
 
 def _extract_tier(argv: list[str]) -> tuple[str | None, list[str]]:

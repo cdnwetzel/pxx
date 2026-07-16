@@ -367,10 +367,14 @@ gate is the effective lint boundary — it worked. The `review/` findings
 artifact was untracked and `is_dirty` counts untracked files, so residue
 from one loop would block the next — now gitignored (`/review/`).
 
-**Finding (open, candidate hardening):** `_run_local_review` maps *empty*
-reviewer output to "# Review pass: no findings." (`review_gate.py`,
-`content.strip() or` fallback) — a hollow response silently becomes
-APPROVE instead of NO_REVIEW. Not observed live; worth failing closed.
+**Finding (fixed same-day):** `_run_local_review` mapped *empty* reviewer
+output to "# Review pass: no findings." — a hollow response silently became
+APPROVE instead of NO_REVIEW. Now fails closed (empty output → rc 1 → NO_REVIEW).
+Same commit adds `preflight_review_backend()`: the loop refuses to start when
+the review backend is unreachable or (for authoritative model listings,
+including Ollama's `"data": null` empty shape) not serving the configured
+model — run A paid a full edit+test leg before discovering that; now it costs
+one GET.
 
 ## Success Criteria
 

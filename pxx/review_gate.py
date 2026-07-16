@@ -132,6 +132,58 @@ def _post_chat(url: str, model: str, prompt: str, timeout: float) -> str:
     return payload["choices"][0]["message"]["content"]
 
 
+def _review_url() -> str:
+    return os.environ.get("PXX_REVIEW_URL", "http://127.0.0.1:11434")
+
+
+def _review_model() -> str:
+    return os.environ.get("PXX_REVIEW_MODEL", "qwen2.5:7b-instruct")
+
+
+def _get_models(url: str, timeout: float) -> dict:
+    """GET the backend's /v1/models listing (OpenAI shape). Raises on transport
+    or parse failure; the caller maps that to a preflight verdict."""
+    with urllib.request.urlopen(
+        url.rstrip("/") + "/v1/models", timeout=timeout
+    ) as resp:
+        return json.loads(resp.read())
+
+
+def preflight_review_backend(timeout: float = 5.0) -> str | None:
+    """Cheap usability check of the configured review backend, for callers that
+    want to fail before spending an edit round (the loop). Returns an error
+    message, or None when the backend looks usable.
+
+    The local backend must answer /v1/models, and when the response carries a
+    model list the configured id must be in it — a reachable server missing the
+    model (live dogfood #2, run A) otherwise surfaces only as a 404 after the
+    edit and test legs have already been paid for.
+    """
+    backend = _review_backend()
+    if backend == "claude":
+        if _get_claude_bin() is None:
+            return "claude binary not found (PXX_REVIEW_BACKEND=claude)"
+        return None
+    if backend != "local":
+        return f"unknown PXX_REVIEW_BACKEND={backend!r} (use 'local' or 'claude')"
+    url = _review_url()
+    model = _review_model()
+    try:
+        payload = _get_models(url, timeout)
+    except (urllib.error.URLError, TimeoutError, ValueError, OSError) as e:
+        return f"review endpoint unreachable ({url}): {e}"
+    # Ollama reports zero installed models as "data": null (not []) — both mean
+    # an authoritative empty listing. Only an absent "data" key is treated as an
+    # unknown shape and waved through.
+    data = payload.get("data") or []
+    if "data" in payload and isinstance(data, list):
+        ids = [m.get("id") for m in data if isinstance(m, dict)]
+        if model not in ids:
+            found = ", ".join(str(i) for i in ids) or "none"
+            return f"model {model!r} not served at {url} (found: {found})"
+    return None
+
+
 def _run_local_review(project_root: Path, timeout: float, diff_base: str | None) -> int:
     """Sovereign review: feed the round's diff to a local OpenAI-compatible model
     (PXX_REVIEW_URL + PXX_REVIEW_MODEL) and write its findings to
@@ -142,8 +194,8 @@ def _run_local_review(project_root: Path, timeout: float, diff_base: str | None)
     precisely why the local path avoids the headless-permission failure the
     claude agent hits.
     """
-    url = os.environ.get("PXX_REVIEW_URL", "http://127.0.0.1:11434")
-    model = os.environ.get("PXX_REVIEW_MODEL", "qwen2.5:7b-instruct")
+    url = _review_url()
+    model = _review_model()
     out_dir = project_root / "review" / "claude"
     out_file = out_dir / "claude-findings.md"
     diff = _git_diff(project_root, diff_base)
@@ -159,10 +211,17 @@ def _run_local_review(project_root: Path, timeout: float, diff_base: str | None)
         print(f"pxx: local review failed ({url}): {e}", file=sys.stderr)
         return 1
 
+    if not content.strip():
+        # An empty response is absent evidence, not a clean bill — writing the
+        # "no findings" line here would turn reviewer failure into APPROVE.
+        print(
+            f"pxx: local review returned empty output ({url}) — failing closed",
+            file=sys.stderr,
+        )
+        return 1
+
     out_dir.mkdir(parents=True, exist_ok=True)
-    out_file.write_text(
-        (content.strip() or "# Review pass: no findings.") + "\n", encoding="utf-8"
-    )
+    out_file.write_text(content.strip() + "\n", encoding="utf-8")
     return 0
 
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from pxx import review_gate
 from pxx.review_gate import (
     Finding,
     build_healing_prompt,
@@ -255,6 +256,68 @@ class TestRunReviewPass:
 
         monkeypatch.setattr("pxx.review_gate._post_chat", boom)
         assert run_review_pass(tmp_path) == 1
+
+    def test_local_empty_model_output_fails_closed(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("PXX_REVIEW_BACKEND", "local")
+        monkeypatch.setattr("pxx.review_gate._git_diff", lambda *a: "diff\n+x")
+        monkeypatch.setattr("pxx.review_gate._post_chat", lambda *a, **k: "   \n")
+        assert run_review_pass(tmp_path) == 1
+        assert not (tmp_path / "review" / "claude" / "claude-findings.md").exists()
+
+
+class TestPreflightReviewBackend:
+    def _models(self, monkeypatch, payload):
+        monkeypatch.setenv("PXX_REVIEW_BACKEND", "local")
+        monkeypatch.setenv("PXX_REVIEW_MODEL", "m1")
+        monkeypatch.setattr("pxx.review_gate._get_models", lambda url, timeout: payload)
+
+    def test_model_present_passes(self, monkeypatch):
+        self._models(monkeypatch, {"data": [{"id": "m1"}, {"id": "m2"}]})
+        assert review_gate.preflight_review_backend() is None
+
+    def test_model_missing_fails_with_served_list(self, monkeypatch):
+        self._models(monkeypatch, {"data": [{"id": "other"}]})
+        err = review_gate.preflight_review_backend()
+        assert err is not None and "m1" in err and "other" in err
+
+    def test_empty_model_list_fails(self, monkeypatch):
+        self._models(monkeypatch, {"data": []})
+        err = review_gate.preflight_review_backend()
+        assert err is not None and "none" in err
+
+    def test_null_model_list_fails(self, monkeypatch):
+        # Ollama with zero installed models: {"object": "list", "data": null}
+        self._models(monkeypatch, {"object": "list", "data": None})
+        err = review_gate.preflight_review_backend()
+        assert err is not None and "none" in err
+
+    def test_unknown_listing_shape_is_lenient(self, monkeypatch):
+        self._models(monkeypatch, {})
+        assert review_gate.preflight_review_backend() is None
+
+    def test_unreachable_endpoint_fails(self, monkeypatch):
+        monkeypatch.setenv("PXX_REVIEW_BACKEND", "local")
+
+        def boom(url, timeout):
+            raise OSError("connection refused")
+
+        monkeypatch.setattr("pxx.review_gate._get_models", boom)
+        err = review_gate.preflight_review_backend()
+        assert err is not None and "unreachable" in err
+
+    def test_claude_backend_requires_binary(self, monkeypatch):
+        monkeypatch.setenv("PXX_REVIEW_BACKEND", "claude")
+        monkeypatch.setattr("pxx.review_gate._get_claude_bin", lambda: None)
+        assert review_gate.preflight_review_backend() is not None
+        monkeypatch.setattr(
+            "pxx.review_gate._get_claude_bin", lambda: "/usr/bin/claude"
+        )
+        assert review_gate.preflight_review_backend() is None
+
+    def test_unknown_backend_fails(self, monkeypatch):
+        monkeypatch.setenv("PXX_REVIEW_BACKEND", "frontier")
+        err = review_gate.preflight_review_backend()
+        assert err is not None and "frontier" in err
 
 
 class TestBuildHealingPrompt:

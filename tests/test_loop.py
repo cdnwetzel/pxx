@@ -27,6 +27,9 @@ class _Harness:
 
         monkeypatch.setattr(loop, "_head_sha", lambda root: "base")
         monkeypatch.setattr(loop, "_require_hooks", lambda root: True)
+        monkeypatch.setattr(
+            "pxx.review_gate.preflight_review_backend", lambda timeout=5.0: None
+        )
         monkeypatch.setattr(loop, "_format_scope", lambda root, scope: None)
         monkeypatch.setattr(loop, "_diff_lines_since", lambda root, sha: diff_lines)
         monkeypatch.setattr(
@@ -147,6 +150,17 @@ class TestRunLoopGuards:
 
     def test_unmeasurable_baseline_refuses_to_start(self, monkeypatch, tmp_path):
         h = _Harness(monkeypatch, tmp_path, verdicts=[], failings=[None])
+        assert h.run() == 1
+        assert h.edits == []
+
+    def test_review_preflight_failure_refuses_to_start(self, monkeypatch, tmp_path):
+        # failings=[] would raise on pop — proof the refusal precedes the
+        # baseline measurement, not just the first edit.
+        h = _Harness(monkeypatch, tmp_path, verdicts=[], failings=[])
+        monkeypatch.setattr(
+            "pxx.review_gate.preflight_review_backend",
+            lambda timeout=5.0: "model 'x' not served",
+        )
         assert h.run() == 1
         assert h.edits == []
 

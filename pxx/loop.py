@@ -358,6 +358,10 @@ def run_loop(
     started = time.monotonic()
     if not _require_hooks(root):
         return 1
+    preflight_err = review_gate.preflight_review_backend()
+    if preflight_err:
+        _say(f"review backend preflight failed: {preflight_err} — refusing to start.")
+        return 1
     start_sha = _head_sha(root)
 
     baseline = _failing_tests(root)

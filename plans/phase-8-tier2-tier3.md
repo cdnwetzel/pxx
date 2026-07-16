@@ -2,6 +2,15 @@
 > Backlog ID: 002
 
 > **Prerequisite:** Phase 8 Tier 1 (HNSW persistence, BM25 indexing, concurrency tests) — COMPLETE ✅
+>
+> **2026-07-16 audit:** 8.4 is `done` (see its section); 8.5 has its own plan
+> (backlog 003); 8.6–8.8 have not started and nothing is actively in flight —
+> backlog status corrected `in-progress` → `planned`. Whether to invest in the
+> Tier 2/3 team/scale features at all is an open direction decision (solo
+> usage + the Phase 9 loop have been the actual priority since June); see
+> plans/open-items-2026-07-16.md, decision D4. The "Target Release: v1.1.0"
+> line below predates the loop work — v1.1.0 is now scoped around Phase 9
+> (see CHANGELOG.md), not Tier 2.
 
 ---
 

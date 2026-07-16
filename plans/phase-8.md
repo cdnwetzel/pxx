@@ -5,7 +5,12 @@
 
 **Goal:** Fix critical infrastructure gaps discovered in v1.0.0 code review. Enable confident scaling to 100k+ observations and multi-machine deployments.
 
-**Status:** `in-progress` — Tier 1 (8.1–8.3) complete; Tier 2 underway (8.4 done, 8.5 designed). See `phase-8-tier2-tier3.md` and `phase-8.5-confidence-scoring.md`.
+**Status:** `done` (2026-07-16 audit) — Tier 1 (8.1–8.3) complete and verified
+in code (`vector_index.py` save/load/remove_embedding, BM25 index persistence,
+`test_concurrency.py`); the checkbox lists below predate completion and were
+not ticked retroactively. Everything else this plan pointed at has its own
+backlog ID: Tier 2/3 is 002, 8.5 confidence scoring is 003 — this plan's own
+scope is exhausted.
 
 **Timeline:** 4-6 weeks (Tier 1), then 6-8 weeks (Tier 2)
 

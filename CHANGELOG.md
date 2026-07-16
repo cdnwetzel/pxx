@@ -2,6 +2,67 @@
 
 All notable changes to pxx and its ecosystem across development phases.
 
+## [1.1.0] — Unreleased
+
+**Closed-loop autonomy (`pxx --loop`), sovereign local review, and
+multi-endpoint vLLM chains.**
+
+### Added
+
+- **`pxx --loop "<task>" --scope <path>`** (experimental): bounded autonomous
+  edit → test → review → heal rounds to a terminal verdict. Fail-closed
+  verdict semantics (`NO_REVIEW` on missing/empty review evidence), three
+  independent guards (round cap, baseline-failing-set progress, cumulative
+  diff budget) plus a wall-clock budget, healing prompts built from the
+  actual failing-test list and lint output, per-round audit records, and
+  commits tagged `[autonomous]` — the loop never pushes. Live-validated
+  2026-07-16 (APPROVE on a genuine task with zero manual intervention).
+- **`pxx --review [--heal]`**: standalone review pass; `--heal` runs exactly
+  one REVISE round from the findings.
+- **Local review backend** (`PXX_REVIEW_BACKEND=local`, the default): the
+  session diff is judged by a local OpenAI-compatible model
+  (`PXX_REVIEW_URL` / `PXX_REVIEW_MODEL` / `PXX_REVIEW_TIMEOUT`) — sovereign
+  by default; `claude` opt-in for supervised runs.
+- **Loop safety hardening**: review-backend preflight (the loop refuses to
+  start when the reviewer endpoint is unreachable or not serving the
+  configured model), empty reviewer output fails closed instead of counting
+  as "no findings", and a loop-level scope guard stops the loop fail-closed
+  (`OUT_OF_SCOPE`) if any change escapes `--scope` — aider commits bypass
+  git hooks, so the loop enforces the boundary itself.
+- **Multi-candidate vLLM chains**: `PXX_VLLM_URL` / `PXX_VLLM_MODEL` accept
+  comma-separated lists paired positionally (per-endpoint models); probes in
+  order, first reachable wins; warns when the model list doesn't pair every
+  URL.
+- **`PXX_DEBUG=1`**: per-candidate probe-failure logging during endpoint
+  detection; detection failure now names every candidate tried.
+- **Headless hardening**: when stdin is not a TTY and no consent flag was
+  passed, pxx appends `--yes` for aider (with a stderr notice) — one-shot
+  `--message` runs, cron, and the loop no longer crash on interactive
+  confirms.
+- **Cross-session capture**: terminal loop verdicts store a summary
+  observation (best-effort, degrades silently when agentmemory is down).
+
+### Changed
+
+- `--no-gitignore` is always passed to aider: ask mode is guaranteed
+  read-only — no more silent `.gitignore` mutation.
+- The local-review prompt judges the post-change code, not removed lines.
+- Model configs (ship with a repo checkout): `openai/Qwen3-Coder` registered
+  (28k input / 4k output, diff edit format).
+
+### Fixed
+
+- Scope-aware lint gate: pre-existing format debt outside `--scope` no
+  longer deadlocks a loop's APPROVE.
+- Endpoint detection retries a vLLM probe once before falling through;
+  retired a stale localhost candidate.
+- Edit rounds retry once on genuine aider failure (malformed-edit flakiness
+  with smaller models).
+
+*Packaging note (unchanged from 1.0.0): `config/` files ship only with a
+repo checkout; the pip-installed CLI uses fallback paths and may show a
+litellm metadata warning for unregistered models.*
+
 ## [1.0.0] — 2026-06-04 Release
 
 **Production-ready: pxx orchestrator with full memory enhancement and advanced search.**

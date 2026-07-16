@@ -5,8 +5,6 @@ Covers determine_session_class and extract_self_fix_task from pxx/self_modes.py.
 
 from __future__ import annotations
 
-import pytest
-
 from pxx.self_modes import determine_session_class, extract_self_fix_task
 
 

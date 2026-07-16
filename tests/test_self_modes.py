@@ -12,44 +12,101 @@ from pxx.self_modes import determine_session_class, extract_self_fix_task
 
 class TestDetermineSessionClass:
     def test_self_fix_wins_over_all_others(self):
-        assert determine_session_class(
-            edit_mode=True, dry_run=True, self_improve_mode=True, self_fix_mode=True
-        ) == "self-fix"
-        assert determine_session_class(
-            edit_mode=False, dry_run=True, self_improve_mode=True, self_fix_mode=True
-        ) == "self-fix"
-        assert determine_session_class(
-            edit_mode=True, dry_run=False, self_improve_mode=False, self_fix_mode=True
-        ) == "self-fix"
+        assert (
+            determine_session_class(
+                edit_mode=True, dry_run=True, self_improve_mode=True, self_fix_mode=True
+            )
+            == "self-fix"
+        )
+        assert (
+            determine_session_class(
+                edit_mode=False,
+                dry_run=True,
+                self_improve_mode=True,
+                self_fix_mode=True,
+            )
+            == "self-fix"
+        )
+        assert (
+            determine_session_class(
+                edit_mode=True,
+                dry_run=False,
+                self_improve_mode=False,
+                self_fix_mode=True,
+            )
+            == "self-fix"
+        )
 
     def test_self_improve_wins_over_dry_run_and_edit(self):
-        assert determine_session_class(
-            edit_mode=True, dry_run=True, self_improve_mode=True, self_fix_mode=False
-        ) == "self-improve"
-        assert determine_session_class(
-            edit_mode=True, dry_run=False, self_improve_mode=True, self_fix_mode=False
-        ) == "self-improve"
-        assert determine_session_class(
-            edit_mode=False, dry_run=True, self_improve_mode=True, self_fix_mode=False
-        ) == "self-improve"
+        assert (
+            determine_session_class(
+                edit_mode=True,
+                dry_run=True,
+                self_improve_mode=True,
+                self_fix_mode=False,
+            )
+            == "self-improve"
+        )
+        assert (
+            determine_session_class(
+                edit_mode=True,
+                dry_run=False,
+                self_improve_mode=True,
+                self_fix_mode=False,
+            )
+            == "self-improve"
+        )
+        assert (
+            determine_session_class(
+                edit_mode=False,
+                dry_run=True,
+                self_improve_mode=True,
+                self_fix_mode=False,
+            )
+            == "self-improve"
+        )
 
     def test_dry_run_only_counts_when_edit_mode_true(self):
-        assert determine_session_class(
-            edit_mode=True, dry_run=True, self_improve_mode=False, self_fix_mode=False
-        ) == "dry-run"
-        assert determine_session_class(
-            edit_mode=False, dry_run=True, self_improve_mode=False, self_fix_mode=False
-        ) == "ask"
+        assert (
+            determine_session_class(
+                edit_mode=True,
+                dry_run=True,
+                self_improve_mode=False,
+                self_fix_mode=False,
+            )
+            == "dry-run"
+        )
+        assert (
+            determine_session_class(
+                edit_mode=False,
+                dry_run=True,
+                self_improve_mode=False,
+                self_fix_mode=False,
+            )
+            == "ask"
+        )
 
     def test_edit_mode_returns_edit(self):
-        assert determine_session_class(
-            edit_mode=True, dry_run=False, self_improve_mode=False, self_fix_mode=False
-        ) == "edit"
+        assert (
+            determine_session_class(
+                edit_mode=True,
+                dry_run=False,
+                self_improve_mode=False,
+                self_fix_mode=False,
+            )
+            == "edit"
+        )
 
     def test_default_returns_ask(self):
-        assert determine_session_class(
-            edit_mode=False, dry_run=False, self_improve_mode=False, self_fix_mode=False
-        ) == "ask"
+        assert (
+            determine_session_class(
+                edit_mode=False,
+                dry_run=False,
+                self_improve_mode=False,
+                self_fix_mode=False,
+            )
+            == "ask"
+        )
 
 
 class TestExtractSelfFixTask:

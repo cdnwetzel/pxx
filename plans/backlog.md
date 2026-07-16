@@ -16,8 +16,9 @@ Statuses: `planned` | `in-progress` | `blocked` | `done`.
 | 006 | [Docs-RAG SME retrieval proxy](docs-rag-sme.md) | in-progress | — | — |
 | 007 | [vllm-host-1 session hardening](vllm-host-1-session-hardening.md) | done | — | — |
 | 008 | [2026-07-16 session: Phase 9 dogfood + docs-sme A/B](session-2026-07-16-loop-dogfood.md) | in-progress | — | — |
+| 009 | [Open items & remediation plan (post-dogfood sweep)](open-items-2026-07-16.md) | planned | — | — |
 
-Next free ID: **009**
+Next free ID: **010**
 
 ## Workflow for adding a new plan
 

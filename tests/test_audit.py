@@ -23,6 +23,7 @@ from pxx.audit import (
     prune_old_logs,
     todays_log_file,
     write_session_start,
+    _scrub_url,
 )
 
 
@@ -80,6 +81,33 @@ class TestNowIso:
         assert re.match(
             r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}[+-]\d{2}:\d{2}$", s
         ), s
+
+
+class TestScrubUrl:
+    def test_scrubs_basic_auth_credentials(self):
+        """URL with user:password basic-auth credentials is scrubbed to scheme + host."""
+        result = _scrub_url("http://user:pass@example.com:8080/path")
+        assert result == "http://example.com:8080/path"
+
+    def test_no_credentials_unchanged(self):
+        """URL without credentials is returned unchanged."""
+        result = _scrub_url("https://api.example.com/v1/data")
+        assert result == "https://api.example.com/v1/data"
+
+    def test_empty_string_returns_empty(self):
+        """Empty string returns empty."""
+        result = _scrub_url("")
+        assert result == ""
+
+    def test_bare_string_unchanged(self):
+        """Bare non-URL string is returned as-is."""
+        result = _scrub_url("not-a-url")
+        assert result == "not-a-url"
+
+    def test_uppercase_scheme_scrubs(self):
+        """Uppercase-scheme URL still scrubs."""
+        result = _scrub_url("HTTPS://USER:PASS@EXAMPLE.COM:443/PATH")
+        assert result == "HTTPS://EXAMPLE.COM:443/PATH"
 
 
 class TestIsSensitiveEnv:

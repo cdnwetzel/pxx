@@ -16,3 +16,8 @@ temp-phase1/
 # untracked residue would block the next --loop's clean-tree check). Only the
 # claude namespace — review/codex|copilot|gemini hold tracked review content.
 /review/claude/
+
+# Real fleet identifiers (hostnames, LAN ranges, search domain). This repo is
+# PUBLIC; machine truth lives here and in ~/.config/pxx/env, never in tracked
+# files. Mirrors the tracked docs 1:1 so the public copy stays placeholder-only.
+/private/

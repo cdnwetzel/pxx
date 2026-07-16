@@ -13,7 +13,7 @@ Fleet (as of 2026-07-15 — vllm-host-1 is the priority inference node after a
 head-to-head A/B benchmark; `pxx` runs on the Mac Studio and on the office
 MacBook):
 
-- **vllm-host-1** (`192.168.111.12`) — **priority endpoint.** vLLM serving
+- **vllm-host-1** (office LAN, resolve by hostname) — **priority endpoint.** vLLM serving
   `Qwen3-Coder` (Qwen3-Coder-30B-A3B-Instruct, FP8, 32k ctx) directly on the
   office LAN at `:8001`. Won the 2026-07-15 A/B 4/4 on quality with ~0.1s
   TTFT at ~50 tok/s (vs devstral:24b and qwen3:30b-a3b on the Studio).
@@ -28,7 +28,7 @@ MacBook):
   audit-proxy on `:8003`. **SSH-only**: the office router NATs only port 22
   to it, so it is reached through a persistent SSH local-forward
   (`deploy/launchd/local.pxx.gpu-node-1-vllm-tunnel.plist` → `127.0.0.1:8003`).
-  The old direct-LAN URL (`10.0.1.40:8003`) is dead — that subnet is gone.
+  The old direct-LAN URL is dead — that subnet is gone.
   Fallback tier only.
 - **inference-node** (RHEL 10) — a separate inference node (vLLM with legal
   LoRAs on `:8000`, Ollama on `:11434`). Not used by pxx today; it already
@@ -37,7 +37,7 @@ MacBook):
 The Asrock RTX 3060Ti is not part of the fleet; pxx never referenced it.
 
 **Hostname note:** on the office LAN use bare DNS names (`vllm-host-1`,
-`workstation` via the `splawoffice.local` search domain) — mDNS `.local`
+`workstation` via your office search domain) — mDNS `.local`
 names do not resolve reliably.
 
 Endpoint detection (first reachable wins, 1s timeout per probe):

@@ -313,7 +313,7 @@ agentmemory server --host 0.0.0.0 --port 3111    # ⚠️ Needs firewall
 **Firewall example (ufw):**
 ```bash
 # Allow only from LAN subnet
-sudo ufw allow from 192.168.1.0/24 to any port 3111
+sudo ufw allow from <your-lan-cidr> to any port 3111
 ```
 
 ## Next Steps

@@ -46,10 +46,10 @@
 **Finding:** github.com/cdnwetzel/pxx is **public**, and pushed `main`
 carries internal infrastructure details that the a256a04 de-identification
 sweep existed to prevent: `CLAUDE.md` (fleet hostnames, LAN IPs like
-`192.168.111.12`, the `splawoffice.local` search domain, and the explicit
+office LAN IPs, the office search domain, and the explicit
 "nothing on the fleet has request-level auth; the network boundary is the
 auth layer" posture), plus ~19 more files (plans/, docs/, deploy/README,
-review/) matching `192.168.111|splawoffice|vllm-host-1|workstation`. The
+review/) matching the fleet identifier set (see D1 notes). The
 6 unpushed commits add 3 more such files. No credentials are exposed —
 this is topology + posture, all RFC1918/behind NAT.
 

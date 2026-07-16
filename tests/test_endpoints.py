@@ -144,7 +144,7 @@ class TestDetectEndpoint:
 
     def test_all_unreachable_error_names_tried_candidates(self, monkeypatch):
         monkeypatch.delenv("PXX_OLLAMA_BASE", raising=False)
-        monkeypatch.setenv("PXX_VLLM_URL", "http://vllm-host-1-down:8001")
+        monkeypatch.setenv("PXX_VLLM_URL", "http://gpu-node-down:8001")
         monkeypatch.setenv("PXX_STUDIO_LAN_URL", "http://studio-down:11434")
         monkeypatch.setenv("PXX_STUDIO_REMOTE_URL", "")
         monkeypatch.setattr("pxx.endpoints._probe_ollama", lambda url: False)
@@ -152,7 +152,7 @@ class TestDetectEndpoint:
         with pytest.raises(RuntimeError) as exc:
             detect_endpoint()
         msg = str(exc.value)
-        assert "http://vllm-host-1-down:8001" in msg
+        assert "http://gpu-node-down:8001" in msg
         assert "http://studio-down:11434" in msg
         # empty-URL candidates (unset studio_remote) stay out of the list
         assert "studio_remote" not in msg
@@ -160,7 +160,7 @@ class TestDetectEndpoint:
     def test_pxx_debug_logs_each_failed_probe(self, monkeypatch, capsys):
         monkeypatch.delenv("PXX_OLLAMA_BASE", raising=False)
         monkeypatch.setenv("PXX_DEBUG", "1")
-        monkeypatch.setenv("PXX_VLLM_URL", "http://vllm-host-1-down:8001")
+        monkeypatch.setenv("PXX_VLLM_URL", "http://gpu-node-down:8001")
         monkeypatch.setenv("PXX_STUDIO_LAN_URL", "http://studio-ok:11434")
         monkeypatch.setattr("pxx.endpoints._probe_vllm", lambda url: False)
         monkeypatch.setattr(
@@ -169,13 +169,13 @@ class TestDetectEndpoint:
         result = detect_endpoint()
         assert result.url == "http://studio-ok:11434"
         err = capsys.readouterr().err
-        assert "probe failed m1_vllm http://vllm-host-1-down:8001" in err
+        assert "probe failed m1_vllm http://gpu-node-down:8001" in err
         assert "studio-ok" not in err  # successful probe is not logged
 
     def test_no_debug_env_stays_silent_on_failed_probes(self, monkeypatch, capsys):
         monkeypatch.delenv("PXX_OLLAMA_BASE", raising=False)
         monkeypatch.delenv("PXX_DEBUG", raising=False)
-        monkeypatch.setenv("PXX_VLLM_URL", "http://vllm-host-1-down:8001")
+        monkeypatch.setenv("PXX_VLLM_URL", "http://gpu-node-down:8001")
         monkeypatch.setenv("PXX_STUDIO_LAN_URL", "http://studio-ok:11434")
         monkeypatch.setattr("pxx.endpoints._probe_vllm", lambda url: False)
         monkeypatch.setattr(
@@ -204,29 +204,29 @@ class TestDetectEndpoint:
 
 class TestVllmCandidateList:
     def test_single_url_keeps_legacy_name_and_default_model(self, monkeypatch):
-        monkeypatch.setenv("PXX_VLLM_URL", "http://vllm-host-1:8001")
+        monkeypatch.setenv("PXX_VLLM_URL", "http://gpu-node:8001")
         monkeypatch.delenv("PXX_VLLM_MODEL", raising=False)
         (ep,) = endpoints._vllm_candidates()
         assert ep.name == "m1_vllm"
-        assert ep.url == "http://vllm-host-1:8001"
+        assert ep.url == "http://gpu-node:8001"
         assert ep.model is None
 
     def test_comma_list_probed_in_order_first_reachable_wins(self, monkeypatch):
         monkeypatch.delenv("PXX_OLLAMA_BASE", raising=False)
-        monkeypatch.setenv("PXX_VLLM_URL", "http://vllm-host-1:8001, http://127.0.0.1:8003")
+        monkeypatch.setenv("PXX_VLLM_URL", "http://gpu-node:8001, http://127.0.0.1:8003")
         monkeypatch.setenv(
             "PXX_VLLM_MODEL", "openai/Qwen3-Coder, openai/qwen2.5-coder-14b"
         )
         first, second = endpoints._vllm_candidates()
-        assert (first.url, first.model) == ("http://vllm-host-1:8001", "openai/Qwen3-Coder")
+        assert (first.url, first.model) == ("http://gpu-node:8001", "openai/Qwen3-Coder")
         assert (second.url, second.model) == (
             "http://127.0.0.1:8003",
             "openai/qwen2.5-coder-14b",
         )
-        assert first.name == "vllm_vllm-host-1"
+        assert first.name == "vllm_gpu-node"
         assert second.name == "vllm_127_0_0_1"
 
-        # vllm-host-1 down -> the second candidate is selected with its own model.
+        # gpu-node down -> the second candidate is selected with its own model.
         monkeypatch.setattr(
             "pxx.endpoints._probe_vllm", lambda url: url == "http://127.0.0.1:8003"
         )

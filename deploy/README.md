@@ -9,7 +9,7 @@ reproducible and reviewable, the same way `inference-node` keeps its
 
 | Node | Role | Inference |
 |---|---|---|
-| **vllm-host-1** (`dgx-spark-2`, GB10, office LAN) | **priority endpoint** — work-owned | vLLM `Qwen3-Coder` (30B-A3B-Instruct FP8, 32k ctx) on `:8001` |
+| **vllm-host-1** (GB10, office LAN) | **priority endpoint** — work-owned | vLLM `Qwen3-Coder` (30B-A3B-Instruct FP8, 32k ctx) on `:8001` |
 | **Mac Studio** (`workstation`, M4 Max, 36GB) | runs `pxx` locally | Ollama `:11434` — `devstral:24b`, `qwen2.5:32b`, `qwen2.5-coder:7b` |
 | **Mac Mini** (M4 16GB, home LAN) | OpenClaw → pxx autonomous bridge | none local; consumes vllm-host-1 + T5810 over tunnels (see below) |
 | **T5810** (`gpu-node-1`, 2× RTX A4500 20GB NVLink) | remote vLLM + **public SSH rendezvous** (`<rendezvous-host>:22`) | vLLM `qwen2.5-coder-14b` (+`coder-prod` LoRA), TP-2, behind audit-proxy `:8003` |

@@ -30,11 +30,12 @@ The other CC CLI owns `deploy/README.md` (modified),
 ## Task 1 — execute D1: privacy scrub (user decision, then ~1 hour)
 
 On the user's go for option (a) scrub-forward (recommended in 009):
-1. Sweep tracked files matching `192.168.111|splawoffice|vllm-host-1|
-   workstation|172.16.30` — CLAUDE.md, plans/, docs/, deploy/,
-   config comments. Replace with role placeholders (`<lan-vllm-host>`,
-   `<office-domain>`); keep roles and architecture intact so the docs
-   stay useful.
+1. Sweep tracked files for the fleet identifier set (fleet hostnames,
+   office/home LAN ranges, search domain) — CLAUDE.md, plans/, docs/,
+   deploy/, config comments. Replace with role placeholders
+   (`<lan-vllm-host>`, `<office-domain>`); keep roles and architecture
+   intact so the docs stay useful. The literal identifier list is
+   deliberately NOT written here: this repo is public.
 2. Machine truth lives on in `~/.config/pxx/env` comments and Claude's
    session memory — verify both are current before deleting from docs.
 3. `review/codex|copilot|gemini` files are other agents' namespaces:

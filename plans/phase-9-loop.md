@@ -7,7 +7,7 @@
 cycle: edit → test → review → heal → repeat, until the change is approved or a
 guard stops it.
 
-**Status:** `in-progress` — 9.1+9.1b done (verifier hardening), 9.2+9.3 done (driver+guards, born together), live dogfood of `pxx --loop` done 2026-07-16 (APPROVE on a genuine task, vllm-host-1/Qwen3-Coder — see Live dogfood #2); remaining: 9.4 cross-session capture, deferred `--rollback` opt-in.
+**Status:** `done` (2026-07-16) — 9.1+9.1b (verifier hardening), 9.2+9.3 (driver+guards), live dogfood (APPROVE on a genuine task, vllm-host-1/Qwen3-Coder — see Live dogfood #2), and 9.4 cross-session capture + privacy check all landed. Only the `--rollback` opt-in remains, explicitly deferred by decision (stop-and-report is the shipped default); it does not hold this plan open.
 
 **Key Finding:** Every component of an autonomous loop already exists in main —
 *except the loop itself*. There is a state machine (`workflow.py`), a
@@ -208,14 +208,37 @@ runtime observer) stores a summary observation for future sessions.
 **Tasks:**
 - [x] Driver passes round-N failing tests directly into the round-N+1 healing
       prompt (no retrieval on this path; built with the 9.2 driver).
-- [ ] On terminal verdict, `tool_capture.capture_session_tools()` stores the
-      loop summary for cross-session recall.
-- [ ] Privacy check: loop audit/memory records must honor the de-identification
+- [x] On terminal verdict, `tool_capture.capture_session_tools()` stores the
+      loop summary for cross-session recall. (2026-07-16: `_capture_loop_summary`
+      fires on APPROVE/REJECT/NO_REVIEW — terminal review verdicts, not guard
+      aborts; best-effort, degrades to a no-op when agentmemory is down.)
+- [x] Privacy check: loop audit/memory records must honor the de-identification
       contract (commit a256a04) — no machine paths/hostnames in anything that
-      could reach a public artifact.
+      could reach a public artifact. (2026-07-16 result: memory observations
+      carry only repo-relative paths — test-pinned; per-round audit records are
+      likewise repo-relative; the top-level loop session record includes `cwd`,
+      acceptable because audit logs are local-only state. HOWEVER the check
+      surfaced a breach in a different surface: the public GitHub repo's
+      CLAUDE.md/plans carry fleet hostnames/IPs — tracked as a user decision in
+      plans/open-items-2026-07-16.md, not a loop-record issue.)
 
-**Effort:** 1 day (shrunk by dropping in-loop retrieval). **Status:** `planned`
+**Effort:** 1 day (shrunk by dropping in-loop retrieval). **Status:** `done`
 (8.5 confidence scoring is **off the loop's critical path entirely**)
+
+### Post-dogfood hardening (2026-07-16, same day as live dogfood #2)
+
+- Scope gate: aider commits with `--no-verify`, so the pre-commit scope gate
+  never sees the loop's own commits (confirmed empirically: an off-scope
+  commit with `PXX_SCOPE` set lands silently under `--no-verify`).
+  **Decision — loop-level guard, not `--git-commit-verify`:** forcing aider
+  through the full hook would re-run pytest per aider commit and let the
+  hook's diff-cap deadlock legitimate rounds; lint/tests/diff already have
+  loop-level gates ("judge only what the loop can own"). The missing one was
+  scope: `_out_of_scope_changes()` now checks every round (committed + dirty
+  + untracked vs the start SHA) and stops the loop fail-closed with verdict
+  `OUT_OF_SCOPE`.
+- Review leg: empty reviewer output fails closed; `preflight_review_backend()`
+  refuses to start against an unusable backend (see Live dogfood #2 findings).
 
 ---
 

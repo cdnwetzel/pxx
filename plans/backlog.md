@@ -11,7 +11,7 @@ Statuses: `planned` | `in-progress` | `blocked` | `done`.
 | 001 | [Phase 8: Infrastructure Hardening & Scaling](phase-8.md) | in-progress | — | — |
 | 002 | [Phase 8 Tier 2/3: Feature Expansion & Intelligence](phase-8-tier2-tier3.md) | in-progress | — | — |
 | 003 | [Phase 8.5: Observation Confidence Scoring](phase-8.5-confidence-scoring.md) | planned | — | — |
-| 004 | [Phase 9: Closed-Loop Autonomy (`pxx --loop`)](phase-9-loop.md) | in-progress | — | — |
+| 004 | [Phase 9: Closed-Loop Autonomy (`pxx --loop`)](phase-9-loop.md) | done | — | — |
 | 005 | [Phase 10: PyPI-Ready](phase-10-pypi-ready.md) | done | — | — |
 | 006 | [Docs-RAG SME retrieval proxy](docs-rag-sme.md) | in-progress | — | — |
 | 007 | [vllm-host-1 session hardening](vllm-host-1-session-hardening.md) | done | — | — |

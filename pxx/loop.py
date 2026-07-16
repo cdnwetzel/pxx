@@ -34,7 +34,8 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from pxx import audit, review_gate, workflow
+from pxx import audit, review_gate, tool_capture, workflow
+from pxx.scope import is_in_scope
 
 DEFAULT_MAX_ROUNDS = 3
 DEFAULT_DIFF_BUDGET_LINES = 150
@@ -342,6 +343,67 @@ def _healing_message(
     return "\n\n".join(parts)
 
 
+def _out_of_scope_changes(root: Path, start_sha: str, scope: str) -> list[str]:
+    """Changed paths since the loop's start commit that fall outside its scope.
+
+    aider commits with ``--no-verify``, so the pre-commit scope gate never sees
+    the loop's own commits (confirmed empirically 2026-07-16) — this is the
+    loop-level enforcement of the same boundary. Covers committed changes plus
+    anything dirty/untracked (the loop starts on a clean tree, so everything
+    that appears mid-loop is the loop's own doing).
+    """
+    committed = subprocess.run(
+        ["git", "diff", "--name-only", f"{start_sha}..HEAD"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    ).stdout.splitlines()
+    status = subprocess.run(
+        ["git", "status", "--porcelain"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    ).stdout.splitlines()
+    dirty = [line[3:].split(" -> ")[-1] for line in status if line.strip()]
+    paths = {p.strip() for p in committed + dirty if p.strip()}
+    return sorted(p for p in paths if not is_in_scope(p, [scope]))
+
+
+def _capture_loop_summary(
+    root: Path, start_sha: str, scope: str, task: str, verdict: str, rounds: int
+) -> None:
+    """Cross-session capture on a terminal review verdict (9.4). Best-effort:
+    agentmemory being down degrades to a no-op; never affects the exit code.
+
+    Privacy (a256a04): observation content carries the repo-relative scope, the
+    task text, and loop metadata — never absolute paths or hostnames.
+    """
+    try:
+        tool_capture.capture_session_tools(start_sha, root, project=scope)
+        tool_capture.post_observations_to_memory(
+            [
+                {
+                    "content": (
+                        f"pxx --loop terminal verdict {verdict} after {rounds} "
+                        f"round(s) on scope {scope}: {task}"
+                    )[:500],
+                    "metadata": {
+                        "type": "loop_summary",
+                        "verdict": verdict,
+                        "rounds": rounds,
+                    },
+                }
+            ],
+            project=scope,
+        )
+    except Exception:
+        pass
+
+
 def run_loop(
     root: Path,
     task: str,
@@ -425,6 +487,19 @@ def run_loop(
             )
             return 1
 
+        off_scope = _out_of_scope_changes(root, start_sha, scope)
+        if off_scope:
+            _say(
+                "out-of-scope changes detected (aider commits bypass the "
+                f"pre-commit scope gate): {', '.join(off_scope)} — "
+                "stopping (fail closed). Tree left for inspection."
+            )
+            workflow.save_state(
+                workflow.transition(state, "rejected", review_verdict="OUT_OF_SCOPE"),
+                root,
+            )
+            return 1
+
         baseline_failing = failing & baseline
         introduced_failing = failing - baseline
         if introduced_failing:
@@ -489,6 +564,7 @@ def run_loop(
                 workflow.transition(state, "approved", review_verdict="APPROVE"),
                 root,
             )
+            _capture_loop_summary(root, start_sha, scope, task, "APPROVE", round_no)
             _say(
                 "APPROVE — stopping. Commits stay local ([autonomous]); push is yours."
             )
@@ -497,6 +573,7 @@ def run_loop(
             workflow.save_state(
                 workflow.transition(state, "rejected", review_verdict="REJECT"), root
             )
+            _capture_loop_summary(root, start_sha, scope, task, "REJECT", round_no)
             _say("REJECT (P0) — stopping for a human. Tree left for inspection.")
             return 1
         if result.verdict == "NO_REVIEW":
@@ -504,6 +581,7 @@ def run_loop(
                 workflow.transition(state, "rejected", review_verdict="NO_REVIEW"),
                 root,
             )
+            _capture_loop_summary(root, start_sha, scope, task, "NO_REVIEW", round_no)
             _say(
                 result.note
                 or "no usable review evidence — fix/re-run the review, not "

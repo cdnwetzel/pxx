@@ -21,12 +21,22 @@ class _Harness:
 
     def __init__(self, monkeypatch, tmp_path, verdicts, failings, diff_lines=0):
         self.edits: list[str] = []
+        self.captures: list[tuple] = []
         self._verdicts = list(verdicts)
         self._failings = list(failings)
         self.tmp_path = tmp_path
 
+        monkeypatch.setattr(
+            loop,
+            "_capture_loop_summary",
+            lambda root, sha, scope, task, verdict, rounds: self.captures.append(
+                (verdict, rounds)
+            ),
+        )
+
         monkeypatch.setattr(loop, "_head_sha", lambda root: "base")
         monkeypatch.setattr(loop, "_require_hooks", lambda root: True)
+        monkeypatch.setattr(loop, "_out_of_scope_changes", lambda root, sha, scope: [])
         monkeypatch.setattr(
             "pxx.review_gate.preflight_review_backend", lambda timeout=5.0: None
         )
@@ -152,6 +162,71 @@ class TestRunLoopGuards:
         h = _Harness(monkeypatch, tmp_path, verdicts=[], failings=[None])
         assert h.run() == 1
         assert h.edits == []
+
+    def test_terminal_verdicts_trigger_cross_session_capture(
+        self, monkeypatch, tmp_path
+    ):
+        h = _Harness(
+            monkeypatch,
+            tmp_path,
+            verdicts=[loop.RoundResult("APPROVE", [])],
+            failings=[set(), set()],
+        )
+        assert h.run() == 0
+        assert h.captures == [("APPROVE", 1)]
+
+    def test_guard_stops_do_not_capture(self, monkeypatch, tmp_path):
+        h = _Harness(
+            monkeypatch,
+            tmp_path,
+            verdicts=[loop.RoundResult("REVISE", [_p1()])] * 3,
+            failings=[set()] * 4,
+        )
+        assert h.run() == 1  # round cap
+        assert h.captures == []
+
+    def test_out_of_scope_changes_stop_the_loop(self, monkeypatch, tmp_path):
+        h = _Harness(
+            monkeypatch,
+            tmp_path,
+            verdicts=[],  # popping would raise — proves review is never reached
+            failings=[set(), set()],
+        )
+        monkeypatch.setattr(
+            loop, "_out_of_scope_changes", lambda root, sha, scope: ["README.md"]
+        )
+        assert h.run() == 1
+        assert len(h.edits) == 1
+        assert h.captures == []
+
+    def test_capture_is_best_effort(self, monkeypatch, tmp_path):
+        calls: list[str] = []
+
+        def boom(*a, **k):
+            calls.append("called")
+            raise OSError("agentmemory down")
+
+        monkeypatch.setattr("pxx.tool_capture.capture_session_tools", boom)
+        monkeypatch.setattr(
+            "pxx.tool_capture.post_observations_to_memory", lambda *a, **k: 0
+        )
+        loop._capture_loop_summary(tmp_path, "sha", "pxx/", "task", "APPROVE", 1)
+        assert calls == ["called"]  # raised inside, swallowed, no propagation
+
+    def test_capture_content_has_no_machine_paths(self, monkeypatch, tmp_path):
+        posted: list[dict] = []
+        monkeypatch.setattr("pxx.tool_capture.capture_session_tools", lambda *a, **k: 0)
+        monkeypatch.setattr(
+            "pxx.tool_capture.post_observations_to_memory",
+            lambda obs, project="default": posted.extend(obs) or len(obs),
+        )
+        loop._capture_loop_summary(
+            tmp_path, "sha", "tests/x.py", "fix the thing", "REJECT", 2
+        )
+        assert len(posted) == 1
+        content = posted[0]["content"]
+        assert "REJECT" in content and "tests/x.py" in content
+        assert str(tmp_path) not in content  # a256a04: no absolute paths
 
     def test_review_preflight_failure_refuses_to_start(self, monkeypatch, tmp_path):
         # failings=[] would raise on pop — proof the refusal precedes the
@@ -617,3 +692,59 @@ class TestLintAwareHealing:
         assert loop._lint_scope(tmp_path, "pxx/duration.py") == 0
         assert all("pxx/duration.py" in cmd for cmd in seen)
         assert not any("tests/" in cmd for cmd in seen)
+
+
+class TestOutOfScopeChanges:
+    """Loop-level scope enforcement — aider commits bypass the pre-commit gate."""
+
+    def _repo(self, tmp_path):
+        import subprocess
+
+        def g(*args):
+            subprocess.run(
+                ["git", *args], cwd=tmp_path, check=True, capture_output=True
+            )
+
+        g("init", "-q")
+        g("config", "user.email", "t@t")
+        g("config", "user.name", "t")
+        (tmp_path / "pxx").mkdir()
+        (tmp_path / "pxx" / "a.py").write_text("x = 1\n")
+        (tmp_path / "README.md").write_text("hi\n")
+        g("add", "-A")
+        g("commit", "-q", "-m", "base", "--no-verify")
+        sha = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        return g, sha
+
+    def test_in_scope_commit_is_clean(self, tmp_path):
+        g, sha = self._repo(tmp_path)
+        (tmp_path / "pxx" / "a.py").write_text("x = 2\n")
+        g("add", "-A")
+        g("commit", "-q", "-m", "edit", "--no-verify")
+        assert loop._out_of_scope_changes(tmp_path, sha, "pxx/") == []
+
+    def test_off_scope_commit_is_detected(self, tmp_path):
+        g, sha = self._repo(tmp_path)
+        (tmp_path / "README.md").write_text("changed\n")
+        g("add", "-A")
+        g("commit", "-q", "-m", "sneaky", "--no-verify")
+        assert loop._out_of_scope_changes(tmp_path, sha, "pxx/") == ["README.md"]
+
+    def test_off_scope_untracked_file_is_detected(self, tmp_path):
+        _, sha = self._repo(tmp_path)
+        (tmp_path / "stray.txt").write_text("new\n")
+        assert loop._out_of_scope_changes(tmp_path, sha, "pxx/") == ["stray.txt"]
+
+    def test_single_file_scope_matches_exactly(self, tmp_path):
+        g, sha = self._repo(tmp_path)
+        (tmp_path / "pxx" / "a.py").write_text("x = 3\n")
+        g("add", "-A")
+        g("commit", "-q", "-m", "edit", "--no-verify")
+        assert loop._out_of_scope_changes(tmp_path, sha, "pxx/a.py") == []
+        assert loop._out_of_scope_changes(tmp_path, sha, "pxx/other.py") == ["pxx/a.py"]

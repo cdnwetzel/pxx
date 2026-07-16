@@ -12,3 +12,6 @@ temp-phase1/
 /build/
 # pxx local runtime state (workflow.save_state) — was once accidentally tracked
 .pxx/
+# loop/review findings artifact (review_gate writes here every review pass;
+# untracked residue would block the next --loop's clean-tree check)
+/review/

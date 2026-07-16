@@ -7,7 +7,7 @@
 cycle: edit → test → review → heal → repeat, until the change is approved or a
 guard stops it.
 
-**Status:** `in-progress` — 9.1+9.1b done (verifier hardening), 9.2+9.3 done (driver+guards, born together); remaining: 9.4 cross-session capture, deferred `--rollback` opt-in, live dogfood of `pxx --loop`.
+**Status:** `in-progress` — 9.1+9.1b done (verifier hardening), 9.2+9.3 done (driver+guards, born together), live dogfood of `pxx --loop` done 2026-07-16 (APPROVE on a genuine task, vllm-host-1/Qwen3-Coder — see Live dogfood #2); remaining: 9.4 cross-session capture, deferred `--rollback` opt-in.
 
 **Key Finding:** Every component of an autonomous loop already exists in main —
 *except the loop itself*. There is a state machine (`workflow.py`), a
@@ -327,11 +327,57 @@ converged in one round; the review→heal leg never got to run.
 task; success criterion: a REVISE round's healing prompt visibly steers
 round 2 — measured via the persisted per-round messages, not vibes.
 
+## Live dogfood #2 (2026-07-16) — first APPROVE, vllm-host-1/Qwen3-Coder
+
+Two runs, both genuine test-gap tasks (not seeded), office MacBook →
+vllm-host-1 (`Qwen3-Coder` 30B-A3B FP8). Full transcripts in the 2026-07-16
+audit log (`session_class: loop-round`).
+
+**Run A** — add `_scrub_url` tests to `tests/test_audit.py` (zero prior
+coverage): edit leg 28s, clean diff-format edit on the first attempt,
+model self-corrected the missing import mid-response (second S/R block,
+unprompted). Commit `a6a0c97`. Verdict `NO_REVIEW`: the review default
+(`127.0.0.1:11434` + `qwen2.5:7b-instruct`) cannot work on this MacBook —
+its Ollama has no models — so the leg 404'd and the loop correctly failed
+closed. Fixed machine-locally: `PXX_REVIEW_URL=http://vllm-host-1:8001`,
+`PXX_REVIEW_MODEL=Qwen3-Coder` in `~/.config/pxx/env` (trade-off noted
+there: editor and reviewer are the same model until an independent
+reviewer exists).
+
+**Run B** — create `tests/test_self_modes.py` (`determine_session_class`,
+`extract_self_fix_task`; both untested): round 1 edit 45s, reviewer said
+APPROVE but `lint_rc=1` (F401 unused import) blocked termination — the
+healing prompt carried the verbatim ruff output into round 2, which fixed
+it in 17s → **APPROVE, exit 0**, commits `b5123f8`/`98c54ca`/`76492c2`.
+This is the "healing prompt visibly steers round 2" criterion, observed
+live. Wall-clock ≈90s of a 1800s budget; reviews sub-second.
+
+**Hypothesis confirmed:** the 9ca1a22 malformed-edit retry path never
+fired across three edit legs — it is T5810-legacy under Qwen3-Coder.
+Keep it: it costs nothing when idle and the T5810 is still tier 3.
+
+**Reviewer calibration:** the vllm-host-1 reviewer was hand-verified against a
+planted-bug diff (two deliberate logic errors) — both flagged as P0 in
+correct F-NNN format. The "no findings" APPROVE is a judgment, not a
+rubber stamp.
+
+**Findings (fixed):** aider's own commits bypass the pre-commit hook
+(aider defaults `--no-git-commit-verify`), so the loop's `_lint_scope`
+gate is the effective lint boundary — it worked. The `review/` findings
+artifact was untracked and `is_dirty` counts untracked files, so residue
+from one loop would block the next — now gitignored (`/review/`).
+
+**Finding (open, candidate hardening):** `_run_local_review` maps *empty*
+reviewer output to "# Review pass: no findings." (`review_gate.py`,
+`content.strip() or` fallback) — a hollow response silently becomes
+APPROVE instead of NO_REVIEW. Not observed live; worth failing closed.
+
 ## Success Criteria
 
 - [x] `review_gate`, `workflow`, `governance` have unit tests (9.1 ✅).
 - [x] `pxx --loop "<task>" --scope <file>` drives edit→test→review→heal to a
-      terminal verdict (unit/guard-tested; live dogfood pending).
+      terminal verdict (unit/guard-tested; live dogfood ✅ 2026-07-16 —
+      APPROVE on a genuine task, see Live dogfood #2).
 - [x] `healing_attempts` increments; `build_healing_prompt` is called; `--heal`
       is real (one REVISE round; `--loop` folds over it — see Decisions).
 - [x] All three guards demonstrably stop a pathological loop (round cap,

@@ -11,7 +11,7 @@
       audit-proxy (port 8003), which fronts the 2x RTX A4500 vLLM serving
       qwen2.5-coder-14b. The T5810 is SSH-only (office NAT forwards
       only port 22), so this tunnel is BOTH the transport and the security
-      boundary -- the audit-proxy has no auth of its own.
+      boundary -- the audit-proxy relies on SSH for access control.
 
       Result: http://127.0.0.1:8003 on the Studio -> T5810 vLLM.
       pxx reads DEFAULT_VLLM / PXX_VLLM_URL to find it.

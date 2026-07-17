@@ -150,10 +150,12 @@ _HOME_PATH_PLACEHOLDERS = {
     "you",
     "user",
     "username",
+    "your-username",
     "yourname",
     "example",
     "USER",
     "foo",
+    "dev",
 }
 
 # Generated dependency metadata — four-part version strings false-positive

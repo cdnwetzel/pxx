@@ -206,7 +206,7 @@ litellm metadata warning for unregistered models.*
 - HNSW doesn't support true deletion (mappings cleaned, data remains)
 - Vector search trades ~10% recall for speed
 - Archive search uses simple substring (not semantic)
-- No authentication layer on agentmemory (LAN only)
+- agentmemory is unauthenticated by design — deploy localhost/trusted-LAN only
 
 ### Future Enhancements
 - Archive restoration (undelete capability)

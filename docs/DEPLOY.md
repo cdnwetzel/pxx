@@ -298,7 +298,7 @@ cp ~/pxx-memory-backup.db ~/.pxx/memory.db
 
 ## Security Notes
 
-⚠️ **Important:** agentmemory has no authentication. Only expose on trusted networks.
+⚠️ **Important:** agentmemory does not authenticate requests. Only expose on trusted networks.
 
 ```bash
 # Development (safe — local only)
@@ -307,7 +307,7 @@ agentmemory server --host 127.0.0.1 --port 3111  # ✓
 # Production on LAN (add firewall rules)
 agentmemory server --host 0.0.0.0 --port 3111    # ⚠️ Needs firewall
 
-# Never expose to internet without auth layer (reverse proxy, VPN, etc.)
+# Never expose to the internet directly — front with an authenticating reverse proxy or VPN
 ```
 
 **Firewall example (ufw):**

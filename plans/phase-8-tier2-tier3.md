@@ -172,7 +172,7 @@ Neo (local)                  Studio (central)
 ```bash
 # Neo: .pxxrc
 [memory]
-central_url = http://studio.local:3111
+central_url = http://studio:3111
 api_key = <generated>
 sync_interval = 300s  # sync every 5 min
 

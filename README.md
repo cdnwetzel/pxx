@@ -33,7 +33,7 @@ weekly and can change behavior pxx depends on).
 Assumptions pxx makes:
 
 - **Ask mode is the default** (read-only). Nothing is edited until you pass `--edit`.
-- **Your LLM endpoint is trusted.** pxx talks to Ollama/vLLM with no auth — run it
+- **Your LLM endpoint is trusted.** pxx sends no credentials to Ollama/vLLM — run it
   against localhost or a network you trust, not the open internet.
 - **The default model is `devstral:24b`** (a public Ollama model, ~14 GB). If you
   haven't pulled it, set `PXX_MODEL` or `PXX_OLLAMA_MODEL` to a model you have.
@@ -259,7 +259,7 @@ See [docs/DEPLOY.md](https://github.com/cdnwetzel/pxx/blob/main/docs/DEPLOY.md) 
 
 ## Security
 
-⚠️ **agentmemory has no authentication.** Only expose on trusted networks (LAN, VPN). See [docs/DEPLOY.md](https://github.com/cdnwetzel/pxx/blob/main/docs/DEPLOY.md) for firewall recommendations.
+⚠️ **agentmemory does not authenticate requests.** Only expose on trusted networks (LAN, VPN). See [docs/DEPLOY.md](https://github.com/cdnwetzel/pxx/blob/main/docs/DEPLOY.md) for firewall recommendations.
 
 ## Common Issues
 

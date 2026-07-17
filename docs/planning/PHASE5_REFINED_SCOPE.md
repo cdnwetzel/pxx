@@ -409,7 +409,7 @@ providers:
   # Primary: Studio Ollama
   studio_ollama:
     type: openai_compatible
-    base_url: http://workstation.local:11434/v1
+    base_url: http://workstation:11434/v1
     model: devstral:24b
     priority: 1
 

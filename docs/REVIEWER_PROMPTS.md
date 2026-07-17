@@ -101,7 +101,7 @@ Task: Produce an OPERATIONS review examining:
 
 1. Deployment & Scaling
    - Single machine: ready ✓. Multi-machine: issues?
-   - agentmemory: no authentication. Acceptable for LAN. At scale?
+   - agentmemory: unauthenticated by design. Acceptable for LAN. At scale?
    - Failure modes: If Ollama dies? If agentmemory crashes? Silent failures?
    - Data locality: Where does observation data live? On disk? In memory?
 

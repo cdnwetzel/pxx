@@ -57,11 +57,11 @@ the dev fallback (now relative — `pxx/router.py:_SERVICE_DIR`).
 **Tasks:**
 - [x] `pxx/router.py:68`, `pxx/memory.py:89` — relative `_SERVICE_DIR` + env
       overrides (done, commit `cdac9fa`).
-- [ ] `pxx/drift.py:42-43` — `cwetzel@workstation` / `/Users/you/...` are
+- [ ] `pxx/drift.py:42-43` — `<user>@workstation` / personal home-path defaults are
       not env-overridable. Add `PXX_DRIFT_SSH_TARGET` / `PXX_DRIFT_REMOTE_PATH`,
       and skip the drift feature cleanly when unset (it's inherently personal —
       cross-machine sync between *specific* hosts).
-- [ ] `pxx/endpoints.py:29` — default `workstation.local` →
+- [ ] `pxx/endpoints.py:29` — default `workstation` →
       a generic default (`localhost:11434`) or none; document the env overrides.
 - [ ] `pxx/_core_files.py:49` — cosmetic `/Users/...` docstring example → generic.
 

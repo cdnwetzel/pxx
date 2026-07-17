@@ -507,7 +507,9 @@ def main() -> None:
             sys.exit(1)
         sys.exit(
             governance.run_governance_check(
-                root, full_content="--all-files" in sys.argv
+                root,
+                full_content="--all-files" in sys.argv,
+                shipped_content="--shipped" in sys.argv,
             )
         )
 

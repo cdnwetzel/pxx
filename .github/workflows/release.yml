@@ -10,7 +10,23 @@ on:
     tags: ["v*"]
 
 jobs:
+  gate:
+    # Public-content scanner over the files that actually ship to PyPI
+    # (roadmap Phase 0.1). Blocks the release if a hostname, private IP,
+    # home path, or unprotected-service statement reaches shipped code.
+    # Scoped to shipped paths on purpose: dev-only trees (review/, docs/,
+    # plans/) never reach PyPI, so they don't gate a publish.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the scanner uses git ls-files
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync
+      - run: uv run pxx --check --shipped
+
   build:
+    needs: gate
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

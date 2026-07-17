@@ -549,3 +549,46 @@ class TestContentScannerFalsePositives:
 
         monkeypatch.setattr("pxx.governance.subprocess.run", mock_run)
         assert scan_public_content(tmp_path, full_tree=True) == []
+
+
+class TestShippedContentScan:
+    """Release gate scans only what reaches PyPI (2026-07-17)."""
+
+    def test_shipped_scope_excludes_dev_trees(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "nowhere"))
+        # A leak in review/ (dev-only) must NOT gate a release; the same leak
+        # in pxx/ (shipped) MUST.
+        (tmp_path / "review").mkdir()
+        (tmp_path / "review" / "notes.md").write_text(
+            "deploy to box.lan tonight\n"  # pxx-content: allow
+        )
+        (tmp_path / "pxx").mkdir()
+        (tmp_path / "pxx" / "leak.py").write_text(
+            "HOST = 'rack.internal'\n"  # pxx-content: allow
+        )
+
+        def mock_run(cmd, *args, **kwargs):
+            result = MagicMock()
+            result.returncode = 0
+            result.stdout = (
+                "review/notes.md\npxx/leak.py" if cmd[1] == "ls-files" else ""
+            )
+            return result
+
+        monkeypatch.setattr("pxx.governance.subprocess.run", mock_run)
+        hits = scan_public_content(tmp_path, shipped_only=True)
+        files = {v.detail.split(":")[0] for v in hits}
+        assert "pxx/leak.py" in files
+        assert "review/notes.md" not in files
+
+    def test_shipped_prefixes_are_the_packaged_set(self):
+        from pxx.governance import _SHIPPED_PREFIXES
+
+        # Guards against drift from the sdist manifest; if packaging changes,
+        # this list and the check must move together.
+        assert set(_SHIPPED_PREFIXES) == {
+            "pxx/",
+            "tests/",
+            "README.md",
+            "pyproject.toml",
+        }

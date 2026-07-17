@@ -231,21 +231,32 @@ def _scan_content_lines(
     return violations
 
 
+# Top-level paths that ship in the PyPI sdist/wheel (verified against the
+# built 1.1.0 artifact). The release gate scans ONLY these — dev-only trees
+# (review/, docs/, plans/, config/) never reach PyPI, so scanning them at
+# release time would block publishes on other agents' review notes for no
+# distribution risk. The pre-commit staged scan still guards the whole repo.
+_SHIPPED_PREFIXES: tuple[str, ...] = ("pxx/", "tests/", "README.md", "pyproject.toml")
+
+
 def scan_public_content(
-    repo_root: Path, full_tree: bool = False
+    repo_root: Path, full_tree: bool = False, shipped_only: bool = False
 ) -> list[GovernanceViolation]:
     """Scan for infrastructure identifiers that must not reach the public repo.
 
     Default mode scans STAGED content (`git show :<path>`, same mechanism as
     the secrets scanner) — the gate for new content. ``full_tree`` scans every
-    tracked file's worktree content — the audit mode for existing content
-    (`pxx --check --all-files`).
+    tracked file's worktree content — the audit mode (`pxx --check
+    --all-files`). ``shipped_only`` restricts the full-tree scan to files that
+    actually ship to PyPI — the release gate (`pxx --check --shipped`).
     """
     violations: list[GovernanceViolation] = []
     denylist = load_content_denylist(repo_root)
 
     list_cmd = (
-        ["git", "ls-files"] if full_tree else ["git", "diff", "--cached", "--name-only"]
+        ["git", "ls-files"]
+        if (full_tree or shipped_only)
+        else ["git", "diff", "--cached", "--name-only"]
     )
     try:
         result = subprocess.run(
@@ -264,7 +275,9 @@ def scan_public_content(
             continue
         if Path(filepath).name in _CONTENT_SKIP_FILENAMES:
             continue
-        if full_tree:
+        if shipped_only and not filepath.startswith(_SHIPPED_PREFIXES):
+            continue
+        if full_tree or shipped_only:
             full = repo_root / filepath
             try:
                 content = full.read_text(encoding="utf-8", errors="replace")
@@ -435,7 +448,9 @@ def check_review_verdict(repo_root: Path) -> list[GovernanceViolation]:
     return violations
 
 
-def run_governance_check(repo_root: Path, full_content: bool = False) -> int:
+def run_governance_check(
+    repo_root: Path, full_content: bool = False, shipped_content: bool = False
+) -> int:
     """Run all governance checks and report violations.
 
     Returns 0 if no errors, 1 if any error-severity violations found.
@@ -462,7 +477,11 @@ def run_governance_check(repo_root: Path, full_content: bool = False) -> int:
     violations.extend(scan_staged_secrets(repo_root))
 
     # Public-content scan (always runs; the repo is public)
-    violations.extend(scan_public_content(repo_root, full_tree=full_content))
+    violations.extend(
+        scan_public_content(
+            repo_root, full_tree=full_content, shipped_only=shipped_content
+        )
+    )
 
     # Version sync (if .pxx/governance.json exists)
     gov_config_path = repo_root / ".pxx" / "governance.json"

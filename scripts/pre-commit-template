@@ -36,12 +36,22 @@ if ! command -v uv >/dev/null 2>&1; then
     exit 1
 fi
 
-# 2. Lint gate.
+# 2. Lint gate — check AND format, matching CI exactly (a format-only diff
+# that passes `ruff check` but fails `ruff format --check` slipped past the
+# hook and was caught only by CI once; the two must agree).
 echo "pxx pre-commit: running ruff check..."
 if ! uv run ruff check; then
     echo
     echo "pxx pre-commit: ruff check FAILED — commit aborted."
     echo "  Fix the lint errors above, or:"
+    echo "    PXX_PRECOMMIT_SKIP=1 git commit ...   (emergency bypass)"
+    exit 1
+fi
+echo "pxx pre-commit: running ruff format --check..."
+if ! uv run ruff format --check; then
+    echo
+    echo "pxx pre-commit: ruff format --check FAILED — commit aborted."
+    echo "  Run: uv run ruff format   (then re-stage), or:"
     echo "    PXX_PRECOMMIT_SKIP=1 git commit ...   (emergency bypass)"
     exit 1
 fi

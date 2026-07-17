@@ -58,6 +58,12 @@ dev = [
 
 [tool.ruff]
 target-version = "py311"
+# Vendored subprojects (services/*) carry their own pyproject.toml and their
+# own formatting — the parent repo must not lint or format code it doesn't
+# own. This makes the config state what CI already scoped to (pxx/ + tests/),
+# so bare `ruff check` / `ruff format --check` are correct whole-tree and the
+# pre-commit hook and CI can use identical generic commands (no drift).
+extend-exclude = ["services"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W"]

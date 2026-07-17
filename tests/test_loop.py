@@ -41,6 +41,7 @@ class _Harness:
         monkeypatch.setattr(
             "pxx.review_gate.preflight_review_backend", lambda timeout=5.0: None
         )
+        monkeypatch.setattr("pxx.review_gate.review_mode", lambda: "blocking")
         monkeypatch.setattr(loop, "_format_scope", lambda root, scope: None)
         monkeypatch.setattr(loop, "_diff_lines_since", lambda root, sha: diff_lines)
         monkeypatch.setattr(
@@ -845,3 +846,72 @@ class TestIntroducedRegressionGate:
         )
         assert h.run() == 0
         assert "tests/test_x.py::test_new" in h.edits[1]
+
+
+class TestAdvisoryReviewMode:
+    """PXX_REVIEW_MODE=advisory: deterministic gates decide, reviewer advises
+    (2026-07-17 — no fleet reviewer both catches defects and stays quiet)."""
+
+    def _advisory(self, monkeypatch):
+        monkeypatch.setattr("pxx.review_gate.review_mode", lambda: "advisory")
+
+    def test_reject_does_not_block_when_gates_green(self, monkeypatch, tmp_path):
+        h = _Harness(
+            monkeypatch,
+            tmp_path,
+            verdicts=[loop.RoundResult("REJECT", [])],
+            failings=[set(), set()],
+        )
+        self._advisory(monkeypatch)
+        assert h.run() == 0  # blocking mode would return 1 here
+        terminal = [
+            r for r in h.audit_records if r.get("session_class") == "loop-terminal"
+        ]
+        assert terminal[-1]["terminal_code"] == "APPROVED"
+
+    def test_no_review_does_not_block_when_gates_green(self, monkeypatch, tmp_path):
+        h = _Harness(
+            monkeypatch,
+            tmp_path,
+            verdicts=[loop.RoundResult("NO_REVIEW", [])],
+            failings=[set(), set()],
+        )
+        self._advisory(monkeypatch)
+        assert h.run() == 0
+
+    def test_deterministic_gates_still_enforce(self, monkeypatch, tmp_path):
+        # Advisory does NOT weaken the deterministic gates: an introduced
+        # regression still blocks APPROVE and heals.
+        h = _Harness(
+            monkeypatch,
+            tmp_path,
+            verdicts=[loop.RoundResult("APPROVE", []), loop.RoundResult("APPROVE", [])],
+            failings=[set(), {"t_new"}, set()],
+        )
+        self._advisory(monkeypatch)
+        assert h.run() == 0
+        assert len(h.edits) == 2  # round 1 regressed, round 2 repaired
+
+    def test_advisory_starts_despite_dead_reviewer(self, monkeypatch, tmp_path):
+        h = _Harness(
+            monkeypatch,
+            tmp_path,
+            verdicts=[loop.RoundResult("APPROVE", [])],
+            failings=[set(), set()],
+        )
+        self._advisory(monkeypatch)
+        monkeypatch.setattr(
+            "pxx.review_gate.preflight_review_backend",
+            lambda timeout=5.0: "endpoint unreachable",
+        )
+        assert h.run() == 0  # blocking mode would refuse with REVIEW_UNAVAILABLE
+
+    def test_blocking_mode_unchanged_by_default(self, monkeypatch, tmp_path):
+        # The harness pins blocking; REJECT still stops. Guards the default.
+        h = _Harness(
+            monkeypatch,
+            tmp_path,
+            verdicts=[loop.RoundResult("REJECT", [])],
+            failings=[set(), set()],
+        )
+        assert h.run() == 1

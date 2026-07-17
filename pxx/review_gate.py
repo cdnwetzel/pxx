@@ -67,6 +67,21 @@ def _review_backend() -> str:
     return os.environ.get("PXX_REVIEW_BACKEND", "local").strip().lower()
 
 
+def review_mode() -> str:
+    """Whether the reviewer's verdict GATES the loop or only advises it.
+
+    ``blocking`` (default): REVISE heals, REJECT/NO_REVIEW stop the loop —
+    the reviewer is a gate. ``advisory``: findings are still produced,
+    recorded, and surfaced, but never block a run whose DETERMINISTIC gates
+    (tests, lint, scope, regression) are green. Chosen when calibration shows
+    no local reviewer both catches defects and stays quiet on correct code
+    (2026-07-17): a blocking false-positive reviewer spins the healing loop,
+    so advisory keeps the signal without letting a confidently-wrong model
+    block correct work. Set via PXX_REVIEW_MODE.
+    """
+    return os.environ.get("PXX_REVIEW_MODE", "blocking").strip().lower()
+
+
 # v2 (2026-07-17, calibration-driven): the v1 prompt produced fp_rate=1.00 on
 # Qwen3-Coder — every clean diff flagged. The three measured FP classes were
 # (a) intentional requested changes read as breaking regressions, (b) code

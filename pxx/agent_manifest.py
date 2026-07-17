@@ -39,6 +39,7 @@ class AgentManifest:
     editor_model: str
     reviewer_backend: str  # "local" | "claude"
     reviewer_model: str
+    reviewer_mode: str  # "blocking" | "advisory" — whether the reviewer gates
     edit_prompt_hash: str
     healing_prompt_hash: str
     review_prompt_hash: str
@@ -117,6 +118,7 @@ def current_manifest(
         editor_model=editor_model,
         reviewer_backend=review_gate._review_backend(),
         reviewer_model=review_gate._review_model(),
+        reviewer_mode=review_gate.review_mode(),
         edit_prompt_hash=_edit_prompt_hash(),
         healing_prompt_hash=_sha(inspect.getsource(review_gate.build_healing_prompt)),
         review_prompt_hash=_sha(

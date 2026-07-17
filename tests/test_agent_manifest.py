@@ -60,3 +60,10 @@ class TestAgentVersionId:
         monkeypatch.setenv("PXX_REVIEW_MODEL", "model-b")
         b = agent_manifest.agent_version_id(_mf())
         assert a != b
+
+    def test_review_mode_changes_id(self, monkeypatch):
+        monkeypatch.setenv("PXX_REVIEW_MODE", "blocking")
+        blocking = agent_manifest.agent_version_id(_mf())
+        monkeypatch.setenv("PXX_REVIEW_MODE", "advisory")
+        advisory = agent_manifest.agent_version_id(_mf())
+        assert blocking != advisory

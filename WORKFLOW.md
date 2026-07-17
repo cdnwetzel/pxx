@@ -25,6 +25,14 @@ test = ["uv", "run", "pytest", "-q"]
 lint = ["uv", "run", "ruff", "check"]
 format_check = ["uv", "run", "ruff", "format", "--check"]
 
+[review]
+# blocking = the reviewer's verdict gates (REVISE heals, REJECT/NO_REVIEW
+# stop). advisory = findings are recorded and surfaced but never block a run
+# whose deterministic gates are green (calibration showed no local reviewer
+# both catches defects and stays quiet). Set via PXX_REVIEW_MODE; part of the
+# agent_version_id.
+mode = "blocking"
+
 [permissions]
 filesystem = "workspace-write"      # scoped by --scope + trusted-paths (#003)
 network = "llm-endpoints-only"      # model calls only; no other egress

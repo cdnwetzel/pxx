@@ -480,12 +480,22 @@ def run_loop(
     started = time.monotonic()
     if run_id is None:
         run_id = audit.make_session_id()
+    advisory = review_gate.review_mode() == "advisory"
     if not _require_hooks(root):
         return _terminal(1, "HOOKS_MISSING", 0, run_id, agent_version)
     preflight_err = review_gate.preflight_review_backend()
     if preflight_err:
-        _say(f"review backend preflight failed: {preflight_err} — refusing to start.")
-        return _terminal(1, "REVIEW_UNAVAILABLE", 0, run_id, agent_version)
+        # Advisory mode: a down reviewer must not block a run the
+        # deterministic gates can still carry — warn, don't refuse.
+        if advisory:
+            _say(
+                f"review backend preflight failed: {preflight_err} — advisory mode, continuing."
+            )
+        else:
+            _say(
+                f"review backend preflight failed: {preflight_err} — refusing to start."
+            )
+            return _terminal(1, "REVIEW_UNAVAILABLE", 0, run_id, agent_version)
     start_sha = _head_sha(root)
 
     baseline = _failing_tests(root)
@@ -662,13 +672,22 @@ def run_loop(
         except Exception:
             pass
 
+        mode_note = " (advisory)" if advisory else ""
         _say(
-            f"round {round_no}: verdict={result.verdict} "
+            f"round {round_no}: verdict={result.verdict}{mode_note} "
             f"baseline-failing={len(baseline_failing)} diff={spent}"
         )
+        if advisory and result.healable:
+            _say(
+                f"advisory: reviewer raised {len(result.healable)} finding(s) — "
+                "recorded, not gating (deterministic gates decide)."
+            )
 
+        # Advisory mode: the deterministic gates alone decide APPROVE; the
+        # reviewer's verdict is recorded but never required. Blocking mode:
+        # the reviewer must also say APPROVE.
         if (
-            result.verdict == "APPROVE"
+            (advisory or result.verdict == "APPROVE")
             and not baseline_failing
             and not introduced_failing
             and lint_rc == 0
@@ -699,7 +718,10 @@ def run_loop(
                 start_sha,
                 _head_sha(root),
             )
-        if result.verdict == "REJECT":
+        # The reviewer-verdict-driven stops below are the GATE. In advisory
+        # mode they are skipped entirely — a REJECT/NO_REVIEW never blocks a
+        # run whose deterministic gates would otherwise heal or pass.
+        if not advisory and result.verdict == "REJECT":
             workflow.save_state(
                 workflow.transition(state, "rejected", review_verdict="REJECT"), root
             )
@@ -723,7 +745,7 @@ def run_loop(
                 start_sha,
                 _head_sha(root),
             )
-        if result.verdict == "NO_REVIEW":
+        if not advisory and result.verdict == "NO_REVIEW":
             workflow.save_state(
                 workflow.transition(state, "rejected", review_verdict="NO_REVIEW"),
                 root,

@@ -72,3 +72,68 @@ class TestAnalyze:
     def test_all_observations_are_correlation_strength(self):
         runs = [_run(f"r{i}", "a", "NO_TEST_PROGRESS") for i in range(4)]
         assert all(o.evidence_strength == "correlation" for o in analyze(runs))
+
+
+class TestProposeFromObservations:
+    """observation -> validated candidate (Phase 16 auto-generation link).
+    Invariant: every emitted candidate passes the integrity validator."""
+
+    def _dominant(self, code):
+        from pxx.improvement import Observation
+
+        return Observation(
+            kind="dominant-failure",
+            summary=f"{code} is the most common failure (8/10 failed runs, 20 total)",
+            evidence_strength="correlation",
+            metric=0.8,
+            evidence=("r1", "r2"),
+        )
+
+    def test_no_test_progress_under_blocking_proposes_advisory(self):
+        from pxx.improvement import propose_from_observations
+
+        cands = propose_from_observations(
+            [self._dominant("NO_TEST_PROGRESS")], current_review_mode="blocking"
+        )
+        assert len(cands) == 1
+        assert cands[0].field == "review_mode" and cands[0].value == "advisory"
+        assert "NO_TEST_PROGRESS" in cands[0].from_observation
+
+    def test_already_advisory_proposes_nothing(self):
+        from pxx.improvement import propose_from_observations
+
+        assert (
+            propose_from_observations(
+                [self._dominant("NO_TEST_PROGRESS")], current_review_mode="advisory"
+            )
+            == []
+        )
+
+    def test_unrelated_failure_proposes_nothing(self):
+        from pxx.improvement import propose_from_observations
+
+        assert (
+            propose_from_observations(
+                [self._dominant("EDIT_FAILED")], current_review_mode="blocking"
+            )
+            == []
+        )
+
+    def test_every_emitted_candidate_is_valid(self):
+        # The invariant: propose_from_observations never emits an invalid
+        # candidate — the validator is the gate even for auto-generated ones.
+        from pxx import candidates
+        from pxx.improvement import propose_from_observations
+
+        for code in ("NO_TEST_PROGRESS", "REVIEW_REJECTED"):
+            for c in propose_from_observations(
+                [self._dominant(code)], current_review_mode="blocking"
+            ):
+                assert candidates.validate_candidate(c).ok
+
+    def test_no_duplicate_field_proposals(self):
+        from pxx.improvement import propose_from_observations
+
+        obs = [self._dominant("NO_TEST_PROGRESS"), self._dominant("REVIEW_REJECTED")]
+        cands = propose_from_observations(obs, current_review_mode="blocking")
+        assert len({c.field for c in cands}) == len(cands)

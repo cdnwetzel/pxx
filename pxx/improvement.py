@@ -121,3 +121,65 @@ def analyze(runs: list[RunOutcome]) -> list[Observation]:
 
 def analyze_recent(limit: int = 200) -> list[Observation]:
     return analyze(outcomes.recent_outcomes(limit=limit))
+
+
+# --- Auto-generation: observation -> validated candidate (Phase 16 link) -----
+#
+# Deterministic, evidence-backed rules mapping a mined weakness to a
+# constrained candidate. Every rule is grounded in something this project
+# actually measured — no speculative tuning. Each proposal is run through the
+# candidate integrity validator before being returned, so the invariant holds:
+# propose_from_observations NEVER emits an invalid candidate. Rules produce
+# proposals; a human still promotes (Phase 16 stops before auto-apply).
+
+# Failure codes whose root cause this session traced to the reviewer blocking
+# on false positives — advisory mode is the measured fix (r5 flipped live).
+_REVIEWER_BLOCKING_FAILURES = frozenset({"NO_TEST_PROGRESS", "REVIEW_REJECTED"})
+
+
+def propose_from_observations(
+    observations: list[Observation], current_review_mode: str
+) -> list:
+    """Map observations to VALIDATED candidates. Returns candidates.Candidate
+    objects (imported lazily to keep the analyzer dependency-light)."""
+    from pxx import candidates
+
+    proposals: list = []
+
+    for obs in observations:
+        # Rule 1: a dominant reviewer-blocking failure under a BLOCKING
+        # reviewer → propose advisory. Grounded: this session measured that
+        # the local reviewer's false positives spin the heal loop
+        # (NO_TEST_PROGRESS) or hard-reject correct code (REVIEW_REJECTED),
+        # and advisory mode removes the reviewer from the enforcement path
+        # while the deterministic gates still hold.
+        if (
+            obs.kind == "dominant-failure"
+            and current_review_mode == "blocking"
+            and any(code in obs.summary for code in _REVIEWER_BLOCKING_FAILURES)
+        ):
+            cand = candidates.Candidate(
+                candidate_id="cand-auto-advisory-review",
+                field="review_mode",
+                value="advisory",
+                baseline_value="blocking",
+                rationale=(
+                    "Dominant failures are reviewer-blocking codes; advisory "
+                    "mode keeps the reviewer's findings as advice while the "
+                    "deterministic gates enforce (measured to fix the r5 "
+                    "false-positive heal-spin)."
+                ),
+                from_observation=obs.summary,
+            )
+            if candidates.validate_candidate(cand).ok:
+                proposals.append(cand)
+
+    # Never emit duplicates for the same field (one variable per candidate,
+    # and re-running shouldn't stack).
+    seen: set[str] = set()
+    unique = []
+    for c in proposals:
+        if c.field not in seen:
+            seen.add(c.field)
+            unique.append(c)
+    return unique

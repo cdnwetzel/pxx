@@ -672,12 +672,40 @@ def main() -> None:
         # usage: pxx --propose <field> <value> --because <observation-id>
         from pxx import candidates
 
+        # Auto mode: mine weaknesses (Phase 15) → propose validated candidates
+        # (Phase 16) in one step. The chain, self-starting.
+        if "--auto" in sys.argv:
+            from pxx import improvement
+
+            obs = improvement.analyze_recent()
+            cands = improvement.propose_from_observations(
+                obs, current_review_mode=review_gate.review_mode()
+            )
+            if not cands:
+                print(
+                    "pxx propose --auto: no candidate proposed "
+                    "(no rule matched the current weaknesses)."
+                )
+                sys.exit(0)
+            root = _git_repo_root() or Path.cwd()
+            for c in cands:
+                candidates.save_candidate(root, c)
+                print(f"pxx propose --auto: {c.candidate_id} — {c.field}={c.value}")
+                print(f"    from: {c.from_observation}")
+                print(f"    why:  {c.rationale}")
+            print(
+                "  next: evaluate baseline vs candidate, then pxx --compare "
+                "(human-gated; nothing auto-applies)"
+            )
+            sys.exit(0)
+
         idx = sys.argv.index("--propose")
         rest = sys.argv[idx + 1 :]
         if len(rest) < 2:
             print(
                 "pxx: usage: pxx --propose <field> <value> "
-                "[--because <obs>] [--baseline <val>] [--why <text>]",
+                "[--because <obs>] [--baseline <val>] [--why <text>]\n"
+                "       pxx --propose --auto   (mine weaknesses → validated candidates)",
                 file=sys.stderr,
             )
             sys.exit(2)

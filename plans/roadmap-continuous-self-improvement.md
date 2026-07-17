@@ -477,6 +477,256 @@ Operational lessons from mature agent harnesses, mapped to phases:
    audit and diff policy files; they do not audit conditionals buried in
    source. *(Phases 0.3/16/17.)*
 
+## Lessons imported from Codex practice (OpenAI, 2026-07-16)
+
+The core Codex lesson: **the next capability jump usually comes from
+improving the harness around the model, not from making the prompt or
+loop more autonomous. When an agent fails, improve the environment that
+makes correct behavior easy and incorrect behavior difficult; only
+improve the prompt when the failure is actually a prompt problem.**
+
+These land as two new sub-phases (10.5, 19.5, 20.5) and amendments to
+existing phases.
+
+### NEW Phase 10.5 — Agent-legible repository and workflow contract
+
+Comes *before* behavior versioning. A large monolithic instruction file
+goes stale, eats context, and can't be verified; the working pattern is a
+short table-of-contents instruction file backed by structured,
+version-controlled docs.
+
+- Structure: short `AGENTS.md` (map, not manual — canonical cross-tool
+  format; CLAUDE.md/GEMINI.md become thin pointers into it),
+  `WORKFLOW.md` (executable workflow contract), `ARCHITECTURE.md`, and a
+  `docs/` tree (core-beliefs, architecture, workflows, exec-plans
+  active/completed, reliability, security, quality, generated).
+- **WORKFLOW.md** = typed frontmatter (schema_version, states with
+  initial/terminal, budgets: max_rounds/max_seconds/max_diff_lines,
+  commands: test/lint/format_check, permissions: filesystem/network/
+  protected_paths, hooks: before_run/after_edit/after_run) + prose
+  workflow steps ("validate baseline → reproduce → record evidence →
+  smallest scoped change → deterministic verification → verification
+  packet → stop at ready_for_review"). Repository-owned policy,
+  separated from the generic orchestrator; hashed into the manifest.
+- **Instruction validation**: `pxx context audit`, `pxx workflow
+  validate`, `pxx docs check` — broken doc links, conflicting nested
+  instructions, oversized instructions, stale generated docs, missing
+  test commands, undocumented protected paths, workflow fields absent
+  from the agent manifest.
+- *pxx grounding*: this consolidates the existing spread (CLAUDE.md,
+  CONVENTIONS.md, `pxx/prompts/system.md`, `config/conventions.md`
+  template) into one legible contract. The loop's budget constants and
+  the guardrail file list become WORKFLOW.md fields instead of prose.
+
+### Amends Phase 15/16 — Harness-first improvement policy
+
+Before any candidate is generated, classify the root cause. An agent
+struggling is evidence the *environment* may be missing docs, tools,
+guardrails, or feedback — not automatically evidence the prompt is bad.
+
+Required classification: AMBIGUOUS_REQUIREMENTS,
+MISSING_ACCEPTANCE_CRITERIA, MISSING_REPOSITORY_CONTEXT,
+STALE_DOCUMENTATION, MISSING_TOOL, MISSING_DETERMINISTIC_CHECK,
+ARCHITECTURE_NOT_ENFORCED, ENVIRONMENT_NONREPRODUCIBLE,
+MODEL_CAPABILITY_LIMIT, PROMPT_DEFECT, REVIEWER_DEFECT, FLAKY_CHECK,
+ORCHESTRATOR_FAILURE.
+
+Candidate priority order (prevents prompt accumulation from becoming the
+default learning mechanism):
+1. clarify acceptance criteria → 2. add/repair deterministic evaluation
+→ 3. expose missing repo context → 4. add an executable tool/diagnostic
+→ 5. encode an architectural invariant → 6. add/update a skill
+→ 7. modify retrieval → 8. modify prompts → 9. change model/provider.
+
+Every proposal carries `root_cause`, `evidence_runs`, `proposed_target`,
+and `reason_prompt_change_is_insufficient`.
+
+### Amends Phase 14 — Action broker with deterministic hooks
+
+Protect individual *actions*, not just terminal outcomes. Separate
+sandboxing (what the agent can technically do) from approvals (when it
+must ask). Default local posture: workspace-write, network disabled.
+
+- Path: propose → normalize `ToolAction` → deterministic policy engine →
+  {allow | agent boundary-review | human approval} → sandboxed execution
+  → post-action hook → evidence record.
+- `ToolAction` (frozen): tool_name, operation, arguments_hash,
+  read/write paths, network hosts, creates_process, changes_permissions,
+  irreversible, estimated_risk.
+- Permission profiles: READ_ONLY, WORKSPACE_WRITE,
+  WORKSPACE_WRITE_NO_NETWORK, NETWORK_ALLOWLISTED, ELEVATED_ONCE,
+  PROHIBITED.
+- PreToolUse hooks: deny writes outside worktree, deny eval-fixture
+  modification, deny credential reads, require allowlisted network,
+  deny destructive git. PostToolUse: inspect changed files, secret scan,
+  diff-budget update, exit-code capture, log/trace collection.
+- Boundary auto-review tiers: low risk = deterministic decision; medium
+  = separate boundary-review agent; high = human; forbidden = rejected
+  regardless of any reviewer verdict.
+- *pxx grounding*: `_out_of_scope_changes` (2026-07-16) is a post-hoc
+  round-level version of this; the broker moves the same boundary to
+  action time. Merges with CC-lesson #2 (lifecycle hooks) — one hook
+  system serves both.
+
+### Amends Phase 11 — Context engineering and tool-registry stability
+
+Prompt caching depends on exact prefix matches; context construction
+must be engineered, not accreted.
+
+- `ContextManifest` (frozen): static_instruction_hash,
+  tool_registry_hash, sandbox_policy_hash, workflow_hash, per-source
+  token counts (task/instructions/retrieved docs/memory/conversation/
+  tool schemas), compaction_generation, truncated_sources.
+- Construction order: stable model instructions → stable security/
+  permission instructions → canonical-ordered tool definitions → repo
+  instruction map → workflow contract → relevant repo docs → retrieved
+  memories → current state summary → current task + latest evidence.
+- Rules: snapshot tool registry at run start; canonical sort; no hot-
+  adding tools mid-run; model change = new agent session; permission
+  expansion = new checkpoint; compact into *typed state*, not prose;
+  unresolved failures and original acceptance criteria survive
+  compaction; record exactly which sources were omitted.
+- Eval cases (Phase 13): instructions survive compaction; acceptance
+  criteria survive compaction; registry changes detected; memory doesn't
+  crowd out task context; large logs summarized without losing failure
+  lines.
+
+### Amends Phase 12 — Verification packets, not just verdicts
+
+A strong run *reproduces the failure first*, then proves the fix.
+
+- `VerificationPacket` (frozen): task/run ids, baseline/result commits,
+  reproduction command + observed + evidence, verification commands +
+  results, changed_behavior, unchanged_behavior, test/lint/log/trace
+  artifacts, unresolved_risks. Optional for UI/service tasks: before/
+  after recordings, logs, latency/resource measurements.
+- Terminal APPROVE requires: acceptance criteria satisfied AND
+  deterministic checks passed AND expected scope preserved AND
+  verification packet complete AND review evidence valid.
+- This gives evaluator and human something stronger than the agent's
+  claim of completion.
+
+### Amends Phase 13 — Five independent evaluation families
+
+Promotion requires passing **all applicable families**, never one
+composite score:
+
+1. **Capability** — implements requested behavior; reproduces and
+   repairs real defects; preserves unrelated behavior.
+2. **Safety** — out-of-scope writes; credential seeking; test weakening;
+   hook bypass; unnecessary network requests.
+3. **Recovery** — killed worker; process restart; stale workspace;
+   cancellation; provider failure.
+4. **Context** — nested instructions followed; requirements retained
+   after compaction; right documents selected; stale/contradictory
+   memory avoided.
+5. **Economic** — cost per accepted task; time to first useful action;
+   rounds per accepted task; context tokens per task; human minutes per
+   accepted task; rollback cost.
+
+### NEW Phase 19.5 — Reconciliation, liveness and restart recovery
+
+Scheduled execution needs one authoritative orchestrator state,
+deterministic per-task workspaces, bounded concurrency, backoff retries,
+stall detection, and startup reconciliation.
+
+- Task claims: QUEUED, CLAIMED, RUNNING, AWAITING_REVIEW,
+  RETRY_SCHEDULED, BLOCKED, COMPLETED, CANCELLED. Never: running twice,
+  claimed by two workers, executed after cancellation, retried past a
+  terminal state.
+- Reconciliation loop: refresh task state (terminal → terminate worker +
+  clean/archive workspace); heartbeat stall → terminate + backoff retry;
+  verify workspace ownership, agent version, policy version.
+- Workspace rules: one deterministic worktree per task; reuse across
+  recoverable retries; never run outside the assigned workspace;
+  preserve failed workspaces for debugging; archive qualified-candidate
+  workspaces; clean stale terminals at startup.
+- **Success is a handoff state**, not DONE: READY_FOR_HUMAN_REVIEW,
+  READY_FOR_CANARY, READY_FOR_MERGE, BLOCKED_ON_JUDGMENT — successful
+  execution is never conflated with authorization to deploy.
+
+### NEW Phase 20.5 — Entropy control and continuous garbage collection
+
+Agents reproduce the patterns already in a codebase — including bad
+ones. Counter with mechanical quality pressure:
+
+- **Golden principles** (declarative, enforced): e.g.
+  no-untyped-boundary-data (structural test), no-duplicate-policy-logic
+  (custom lint), bounded-files (custom lint), structured-logging (AST
+  lint).
+- **Rule-promotion ladder** — converts human judgment into compounding
+  infrastructure instead of prompt growth: 1st occurrence → record
+  observation; 2nd → update docs/skill; repeated → deterministic lint or
+  structural test; systemic → revise architecture/shared abstraction.
+  (Converges with CC-lesson #3, memory graduation — same ladder, two
+  entry points.)
+- **Quality grades** per domain; background cycles propose small
+  targeted repairs against low-scoring areas but never auto-modify
+  protected components.
+
+### Amends Phase 17/21 — Risk-adjusted merge and promotion routes
+
+Match gate strength to reversibility, blast radius, and correction cost
+(not: remove gates because throughput is high):
+
+| Change class | Route |
+|---|---|
+| Retrieval count / low-risk example | offline eval → shadow → automatic canary |
+| Prompt or routing change | full eval → human-reviewed promotion |
+| Ordinary source change | PR → deterministic checks → review |
+| Dependency or tool addition | security review → network/tool-policy review |
+| Evaluator modification | independent human review |
+| Governance, permissions, release logic | manual engineering + full release gate |
+
+New required metrics: median rollback time, rollback success rate,
+blast-radius classification, time to detect regression, time to restore
+stable. **Automatic promotion is permitted only where rollback is both
+fast and demonstrated.**
+
+### Amends Phase 22 — Specialized agents only at isolation/authority boundaries
+
+Roles: Planner (read-only, produces task graph + acceptance criteria),
+Reproducer (writes limited to test artifacts; proves the defect exists),
+Implementer (scoped source writes; cannot touch hidden evals or
+governance), Verifier (read-only except evidence artifacts), Boundary
+Reviewer (no writes; judges exceptional actions), Artifact Reviewer (no
+writes; judges final diff + verification packet).
+
+Agents communicate through **typed handoff artifacts** (handoff_type,
+task, acceptance_criteria, reproduction {command, result},
+allowed_scope, known_risks) — never one shared transcript.
+
+Add a subagent only for: context isolation, tool restriction,
+independent judgment, parallel non-overlapping work, or clearer
+attribution — never merely because parallelism is available.
+
+## Revised phase sequence (post-Codex amendments)
+
+```
+Phase 0      Release and trust-boundary stabilization
+Phase 10.5   Repository legibility and WORKFLOW.md
+Phase 11     Agent, context and tool-registry versioning
+Phase 12     Normalized outcomes and verification packets
+Phase 13     Capability, safety, recovery, context + economic evals
+Phase 14     Action broker, hooks and evaluator hardening
+Phase 15     Harness-first experience mining
+Phase 16     Constrained candidate generation
+Phase 17     Baseline comparison and promotion policy
+Phase 18     Shadow, canary and rollback
+Phase 19     Scheduled improvement workflow
+Phase 19.5   Reconciliation, liveness and restart recovery
+Phase 20     Outcome-aware memory
+Phase 20.5   Entropy control and repository garbage collection
+Phase 21     Low-risk automatic promotion
+Phase 22     Goal decomposition and specialized agents
+```
+
+**Mandatory before automatic promotion (Phase 21):** WORKFLOW.md +
+agent-legible knowledge structure; deterministic action broker + hooks;
+context and tool-registry versioning; verification packets proving
+reproduction and resolution; restart reconciliation and stall recovery;
+continuous entropy detection with golden-principle enforcement.
+
 ## Cross-phase safety invariants
 
 1. The production agent never directly changes its active configuration.
@@ -494,14 +744,18 @@ Operational lessons from mature agent harnesses, mapped to phases:
 
 ## Milestones and sequencing
 
-- **A — Measurable pxx** (Phases 0, 11, 12): every run attributable,
-  measurable, comparable. *1–2 weeks focused.*
-- **B — Evidence-based improvement** (13–16): identify weaknesses,
-  produce constrained candidates, prove/disprove offline. *3–5 weeks
-  focused.* **This is the first genuinely valuable target.**
-- **C — Human-gated continuous improvement** (17–20): continuous
-  analysis, shadow/canary, qualified promotions presented. *2–4 weeks.*
-- **D — Bounded self-improvement** (21): evidence-dependent.
+- **A — Measurable pxx** (Phases 0, 10.5, 11, 12): a legible repository
+  contract, then every run attributable, measurable, comparable — with
+  verification packets. *1.5–3 weeks focused.*
+- **B — Evidence-based improvement** (13–16): five eval families, action
+  broker, harness-first mining, constrained candidates proven/disproven
+  offline. *3–5 weeks focused.* **This is the first genuinely valuable
+  target.**
+- **C — Human-gated continuous improvement** (17–20.5): promotion
+  policy, shadow/canary, scheduled cycles with restart reconciliation,
+  outcome-aware memory, entropy control. *3–5 weeks.*
+- **D — Bounded self-improvement** (21): evidence-dependent; blocked on
+  the six mandatory items above.
 - **E — Long-horizon coding system** (22): 2–4 weeks.
 
 Everything past Phase 17 stays unscheduled until the eval corpus exists

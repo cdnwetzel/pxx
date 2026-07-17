@@ -666,6 +666,43 @@ def main() -> None:
             )
         sys.exit(0)
 
+    if "--evaluate-candidate" in sys.argv:
+        # Candidate evaluation (#016→17): both-arms live eval + compare for a
+        # persisted candidate → a promotion verdict. Human-gated; never applies.
+        from pxx import candidate_eval, candidates
+
+        idx = sys.argv.index("--evaluate-candidate")
+        if idx + 1 >= len(sys.argv):
+            print(
+                "pxx: usage: pxx --evaluate-candidate <candidate-id>", file=sys.stderr
+            )
+            sys.exit(2)
+        root = _git_repo_root() or Path.cwd()
+        cand = candidates.load_candidate(root, sys.argv[idx + 1])
+        if cand is None:
+            print(f"pxx: no candidate {sys.argv[idx + 1]!r}", file=sys.stderr)
+            sys.exit(2)
+        print(
+            f"pxx: evaluating {cand.candidate_id} ({cand.field}={cand.value}) "
+            "— baseline vs candidate over the live corpus, this drives real "
+            "loops and will take a while..."
+        )
+        record = candidate_eval.evaluate_candidate(cand, candidate_eval.live_runner())
+        if record.get("error"):
+            print(f"pxx: {record['error']}", file=sys.stderr)
+            for r in record.get("reasons", []):
+                print(f"  - {r}", file=sys.stderr)
+            sys.exit(1)
+        print(f"  gained: {record['gained'] or '(none)'}")
+        print(f"  lost:   {record['lost'] or '(none)'}")
+        for reason in record["policy_reasons"]:
+            print(f"  {reason}")
+        print(
+            f"promotion: {'ELIGIBLE' if record['policy_eligible'] else 'NOT ELIGIBLE'}"
+            " — human-gated; nothing applied."
+        )
+        sys.exit(0 if record["policy_eligible"] else 1)
+
     if "--propose" in sys.argv:
         # Candidate proposal (#016): declarative delta on an ALLOWLISTED
         # behavior field, integrity-validated, persisted, NEVER auto-applied.

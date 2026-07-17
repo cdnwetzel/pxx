@@ -147,6 +147,23 @@ def candidate_dir(root: Path, candidate_id: str) -> Path:
     return root / ".pxx" / "candidates" / candidate_id
 
 
+def load_candidate(root: Path, candidate_id: str) -> Candidate | None:
+    """Round-trip a persisted candidate by id, or None if absent."""
+    f = candidate_dir(root, candidate_id) / "candidate.json"
+    if not f.exists():
+        return None
+    d = json.loads(f.read_text(encoding="utf-8"))
+    return Candidate(
+        candidate_id=d["candidate_id"],
+        field=d["field"],
+        value=d["value"],
+        baseline_value=d.get("baseline_value"),
+        rationale=d.get("rationale", ""),
+        from_observation=d.get("from_observation", ""),
+        protected_targets_touched=tuple(d.get("protected_targets_touched", ())),
+    )
+
+
 def save_candidate(root: Path, c: Candidate) -> Path:
     """Persist a declarative candidate. `.pxx/` is gitignored — candidates are
     local proposals, not committed artifacts."""

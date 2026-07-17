@@ -13,7 +13,7 @@ Statuses: `planned` | `in-progress` | `blocked` | `done`.
 | 003 | [Phase 8.5: Observation Confidence Scoring](phase-8.5-confidence-scoring.md) | planned | — | — |
 | 004 | [Phase 9: Closed-Loop Autonomy (`pxx --loop`)](phase-9-loop.md) | done | — | — |
 | 005 | [Phase 10: PyPI-Ready](phase-10-pypi-ready.md) | done | — | — |
-| 006 | [Docs-RAG SME retrieval proxy](docs-rag-sme.md) | in-progress | — | — |
+| 006 | [Docs-RAG SME retrieval proxy](docs-rag-sme.md) | done | — | — |
 | 007 | [vllm-host-1 session hardening](vllm-host-1-session-hardening.md) | done | — | — |
 | 008 | [2026-07-16 session: Phase 9 dogfood + docs-sme A/B](session-2026-07-16-loop-dogfood.md) | done | — | — |
 | 009 | [Open items & remediation plan (post-dogfood sweep)](open-items-2026-07-16.md) | done | — | — |

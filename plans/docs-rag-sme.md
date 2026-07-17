@@ -1,9 +1,10 @@
 # Docs-RAG SME: version-aware "perpetual SME" retrieval proxy
 > Backlog ID: 006
 
-> Backlog ID: 009
-
-> **Status:** `in-progress` — T0–T4 + T2b + `pxx --with-docs` all landed and
+> **Status:** `done` (2026-07-17) — §6 model A/B run and recorded (the last
+> open item): SME retrieval lifts the fallback 14b +1 to 100%, net-neutral for
+> the priority Qwen3-Coder. No prod swap indicated. Earlier:
+> T0–T4 + T2b + `pxx --with-docs` all landed and
 > validated live. Through the SME, qwen2.5-coder corrected its own incomplete
 > `asyncio.TaskGroup.create_task` signature (added the `context=` param it
 > didn't know) from the real 3.12 docs. Store holds 1715 chunks across stdlib +
@@ -176,7 +177,39 @@ T5810, co-located with vLLM and the existing audit-proxy.
 
 ---
 
-## §6 Model A/B (left open per 2026-06-10 decision)
+## §6 Model A/B — RUN 2026-07-17 (RESULTS BELOW)
+
+**Result (fleet incumbent vs priority, both through the SME on a fresh
+1,715-chunk store — 49/49 sources, 12 stdlib-API questions, temp 0):**
+
+| Model | docs-off | docs-on | retrieval lift |
+|---|---|---|---|
+| `qwen2.5-coder-14b-coder-lora` (incumbent, T5810) | 11/12 (92%) | **12/12 (100%)** | **+1** |
+| `Qwen3-Coder` (priority, vllm-host-1) | 11/12 (92%) | 11/12 (92%) | +0 (one gain, one loss) |
+
+**Findings:**
+- Both models already answer 3.12-era stdlib questions at 92% from frozen
+  weights — the base bar is high, so retrieval has little room.
+- Retrieval **helps the 14b** (closes its one gap: `TaskGroup.create_task`
+  signature) and is **net-neutral for Qwen3-Coder** — it gained the same
+  TaskGroup case but *lost* `subprocess_capture`, where injected docs
+  distracted a correct base answer. Classic RAG failure mode (Decision-B
+  cache/relevance risk in §7), visible on the fleet's own primary model.
+- **Decision:** the SME earns its place in front of the *fallback* 14b, not
+  the *priority* Qwen3-Coder, which needs no augmentation to hit 92% and is
+  occasionally hurt by it. No prod model swap — the 2026-07-15 A/B already
+  settled Qwen3-Coder as priority on edit quality; this §6 pass settles the
+  narrower "does the SME help each model" question, which was its actual
+  scope. The candidate models below (Qwen3-Coder-Next, Gemma 4) were never
+  deployed and remain deferred until a reason to deploy them appears.
+- Raw reports: `eval/run_ab.py` output for each arm (scratchpad, 2026-07-17).
+
+**Infra note:** the eval store is a machine-local Postgres 17 + pgvector
+(`docs_sme` DB) built for this A/B; query embeddings via local Ollama
+`nomic-embed-text`. Not promoted to a running service — that's a separate
+infra decision, out of this plan's scope.
+
+## §6 (original framing, left open per 2026-06-10 decision)
 
 The SME proxy is **model-agnostic** — it augments whatever vLLM serves. But the
 backing coding model is worth an explicit A/B *independent of* this plan:

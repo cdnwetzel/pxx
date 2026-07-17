@@ -107,7 +107,7 @@ class TestArmSemantics:
 
 class TestShippedCorpus:
     def test_corpus_is_complete(self):
-        for tier, expected in (("micro", 5), ("regression", 6), ("adversarial", 5)):
+        for tier, expected in (("micro", 10), ("regression", 10), ("adversarial", 10)):
             assert len(load_suite(tier)) == expected, tier
 
     def test_every_shipped_case_self_checks(self):

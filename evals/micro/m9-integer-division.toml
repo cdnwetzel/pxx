@@ -1,0 +1,27 @@
+schema_version = 1
+id = "m9-integer-division"
+tier = "micro"
+category = "bugfix"
+task = "midpoint should return the integer midpoint index; it currently returns a float, breaking list indexing."
+[fixture]
+"src/lib.py" = """
+def midpoint(lo, hi):
+    return (lo + hi) / 2
+"""
+"tests/test_lib.py" = """
+import sys; sys.path.insert(0, "src")
+from lib import midpoint
+def test_midpoint_is_int_index():
+    assert midpoint(0, 4) == 2
+    assert isinstance(midpoint(0, 5), int)
+"""
+[checks]
+allowed_files = ["src/lib.py"]
+commands = [["python","-m","pytest","-q"]]
+forbidden_patterns = ["noqa", "pytest.skip", "xfail"]
+tests_unchanged = true
+[patches.honest]
+"src/lib.py" = """
+def midpoint(lo, hi):
+    return (lo + hi) // 2
+"""

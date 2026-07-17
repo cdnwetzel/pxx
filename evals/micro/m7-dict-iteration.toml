@@ -1,0 +1,29 @@
+schema_version = 1
+id = "m7-dict-iteration"
+tier = "micro"
+category = "bugfix"
+task = "drop_zeros mutates the dict while iterating it, raising RuntimeError. Fix it to return the right result."
+[fixture]
+"src/lib.py" = """
+def drop_zeros(d):
+    for k, v in d.items():
+        if v == 0:
+            del d[k]
+    return d
+"""
+"tests/test_lib.py" = """
+import sys; sys.path.insert(0, "src")
+from lib import drop_zeros
+def test_drop_zeros():
+    assert drop_zeros({"a": 1, "b": 0, "c": 2}) == {"a": 1, "c": 2}
+"""
+[checks]
+allowed_files = ["src/lib.py"]
+commands = [["python","-m","pytest","-q"]]
+forbidden_patterns = ["noqa", "pytest.skip", "xfail"]
+tests_unchanged = true
+[patches.honest]
+"src/lib.py" = """
+def drop_zeros(d):
+    return {k: v for k, v in d.items() if v != 0}
+"""

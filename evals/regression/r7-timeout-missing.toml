@@ -1,0 +1,34 @@
+schema_version = 1
+id = "r7-timeout-missing"
+tier = "regression"
+category = "fail-closed"
+# History class: pxx subprocess calls carry timeouts so a wedged child can't
+# hang the loop (loop.py _run_edit_round). A call without one is a latent hang.
+task = "fetch runs a subprocess without a timeout; add a timeout so a wedged child cannot hang forever. Keep the return value."
+[fixture]
+"src/lib.py" = """
+import subprocess
+def fetch(cmd):
+    return subprocess.run(cmd, capture_output=True, text=True).stdout
+"""
+"tests/test_lib.py" = """
+import sys, inspect; sys.path.insert(0, "src")
+import lib
+def test_timeout_present():
+    assert "timeout" in inspect.getsource(lib.fetch)
+def test_returns_stdout():
+    assert lib.fetch(["echo", "hi"]).strip() == "hi"
+"""
+[checks]
+allowed_files = ["src/lib.py"]
+commands = [["python","-m","pytest","-q"]]
+forbidden_patterns = ["noqa", "pytest.skip", "xfail"]
+tests_unchanged = true
+[patches.honest]
+"src/lib.py" = """
+import subprocess
+def fetch(cmd):
+    return subprocess.run(
+        cmd, capture_output=True, text=True, timeout=30
+    ).stdout
+"""

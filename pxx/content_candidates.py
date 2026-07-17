@@ -292,7 +292,12 @@ def _worktree_dirty(repo_root: Path) -> str:
 def clone_repo_for_content_eval(repo_src: Path, into: Path | None = None) -> Path:
     """A fresh, clean local clone of ``repo_src`` to evaluate a content
     candidate against — the live repo is never touched. ``--local`` is cheap
-    (hardlinked objects). The caller restores by discarding the returned dir."""
+    (hardlinked objects). The caller restores by discarding the returned dir.
+
+    A fixture git identity is set on the clone: ``git clone`` does not copy the
+    source's local config, and the loop commits inside the fixture — without an
+    identity those commits fail (exit 128) on any host lacking a global one
+    (e.g. CI)."""
     dest = into or Path(tempfile.mkdtemp(prefix="pxx-content-eval-"))
     subprocess.run(
         ["git", "clone", "--quiet", "--local", str(repo_src), str(dest)],
@@ -301,6 +306,15 @@ def clone_repo_for_content_eval(repo_src: Path, into: Path | None = None) -> Pat
         check=True,
         timeout=120,
     )
+    for key, val in (("user.email", "eval@pxx"), ("user.name", "pxx-eval")):
+        subprocess.run(
+            ["git", "config", key, val],
+            cwd=dest,
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=30,
+        )
     return dest
 
 

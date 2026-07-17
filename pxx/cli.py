@@ -626,6 +626,22 @@ def main() -> None:
             )
         sys.exit(0)
 
+    if "--analyze" in sys.argv:
+        # Experience mining (#015): deterministic weakness clustering over the
+        # run-outcome stream. Surfaces what to look at; proposes nothing.
+        from pxx import improvement
+
+        obs = improvement.analyze_recent()
+        if not obs:
+            print("pxx: no patterns (need more recorded runs).")
+            sys.exit(0)
+        for o in obs:
+            print(f"[{o.kind}] {o.summary}")
+            print(
+                f"    evidence: {len(o.evidence)} run(s), strength={o.evidence_strength}"
+            )
+        sys.exit(0)
+
     if "--verify" in sys.argv:
         # VerificationPacket for one run (#012 consumption): the evidence a
         # reviewer reads instead of trusting a claim of completion. With no

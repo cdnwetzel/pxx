@@ -1167,9 +1167,11 @@ installed hook's shebang was on line 2 (marker prepended above it), so git
 ran it under dash on Ubuntu where `set -o pipefail` is illegal; fixed +
 regression-tested. **The axis is working: of the fail-open gates named
 across two review passes, all are now fail-closed with tests, verified in a
-published artifact within hours.** Still to verify (queued): `pxx --calibrate`
-and `pxx --eval-live` are the other repo-only surfaces — confirm they fail
-closed on an install the way `--eval` now does, not silently green.
+published artifact within hours.** Verified (2026-07-17): `pxx --calibrate` (exit 2) and `pxx --eval-live`
+(exit 2) both fail closed on an install — confirmed on the published 1.2.0
+wheel. --calibrate gained an explicit NO-CASES-FOUND guard for a loud
+message rather than an incidental 0-recall exit. The whole eval/calibration
+family fails loud on a pip install; none is silently green.
 
 The shape of the remaining ~73%: it is now genuinely *construction-heavy*,
 not projection. The cheap schema-and-projection layers (A, most of the

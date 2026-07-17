@@ -538,6 +538,18 @@ def main() -> None:
         # against ground-truth diffs. Threshold breach exits non-zero.
         from pxx import calibration
 
+        # Fail closed + LOUD on an empty corpus, same as --eval: the cases
+        # ship only with a repo checkout, so a pip-installed copy has none.
+        # (Without this it exits 1 incidentally via 0-recall — correct
+        # outcome, misleading message.)
+        if not calibration.load_calibration_cases():
+            print(
+                f"pxx calibrate: NO CASES FOUND in {calibration.CALIBRATION_DIR} "
+                "— the calibration corpus ships only with a repo checkout. "
+                "Failing closed.",
+                file=sys.stderr,
+            )
+            sys.exit(2)
         report = calibration.run_calibration()
         for v in report.verdicts:
             mark = "ok " if v.correct else "MISS" if v.kind == "defect" else "FP  "

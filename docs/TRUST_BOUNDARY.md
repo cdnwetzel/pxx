@@ -40,19 +40,16 @@ commit, or promote changes to them autonomously:
 2. The pre-commit hook's scope check on non-aider commits.
 3. `.aiderignore` refuse-and-ask (editor-level).
 
-**KNOWN GAP (flagged 2026-07-17, independent review).** `.aiderignore`
-currently lists only the *config* guardrails (`config/*.yml`,
-`pyproject.toml`, `.aiderignore`, `CONVENTIONS.md`) — **not** the protected
-*code and fixture* paths in the table above (`pxx/evaluation.py`,
-`calibration.py`, `promotion.py`, `governance.py`, `review_gate.py`,
-`safety.py`, `scope.py`, `loop.py`, `evals/`, `tests/`). So a
-`pxx --self-fix --scope pxx/evaluation.py` would be permitted to edit the
-gate that grades it — the roadmap's central rule ("the candidate generator
-cannot modify its own evaluator") has **no editor-level mechanism yet**,
-only the scope gate's discipline. Closing this is a prerequisite for any
-automated candidate flow (Phase 16+): add the protected paths to
-`.aiderignore` (a hard-guardrail file, so a human edit) and add the same
-list to Phase 16's candidate-integrity validation.
+**GAP CLOSED (2026-07-17, from independent review).** `.aiderignore` now
+lists the protected code modules (`safety`, `scope`, `governance`,
+`review_gate`, `loop`, `evaluation`, `calibration`, `promotion`), `evals/`,
+and the specific tests that grade them — so aider (and therefore
+`--self-fix`/`--loop`) refuses to edit its own gates or evaluator, the
+editor-level backstop this layer always claimed. Precise per-file rather than
+a blanket `tests/`, so the loop can still write legitimate tests elsewhere.
+Phase 16's candidate-integrity validation must enforce the SAME list
+mechanically (defense in depth); until it exists, `.aiderignore` + the scope
+gate are the enforcement.
 4. This document: the declared policy that Phase 16's candidate-integrity
    validation MUST enforce mechanically — reject any change whose target
    matches the table above.

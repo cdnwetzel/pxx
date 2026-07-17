@@ -15,3 +15,29 @@ pyproject.toml
 # Meta — the guardrails themselves
 .aiderignore
 CONVENTIONS.md
+
+# Optimizer-protected: the candidate generator must never edit its own gates,
+# evaluator, or hidden checks (docs/TRUST_BOUNDARY.md). The loop's scope gate
+# is the primary boundary; this is the editor-level backstop the trust
+# boundary claims. Precise per-file (not blanket tests/) so the loop can still
+# do legitimate test work elsewhere.
+pxx/safety.py
+pxx/scope.py
+pxx/governance.py
+pxx/review_gate.py
+pxx/loop.py
+pxx/evaluation.py
+pxx/calibration.py
+pxx/promotion.py
+evals/
+tests/test_safety.py
+tests/test_scope.py
+tests/test_governance.py
+tests/test_review_gate.py
+tests/test_loop.py
+tests/test_evaluation.py
+tests/test_calibration.py
+tests/test_promotion.py
+tests/test_outcomes.py
+tests/test_improvement.py
+tests/test_workflow_contract.py

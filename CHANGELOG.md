@@ -2,7 +2,7 @@
 
 All notable changes to pxx and its ecosystem across development phases.
 
-## [1.2.0] — Unreleased
+## [1.2.0] — 2026-07-17
 
 **The measurement-and-evaluation foundation: pxx now attributes, scores, and
 mines its own runs — the base layer of the continuous-self-improvement

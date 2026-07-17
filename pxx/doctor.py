@@ -88,6 +88,9 @@ class RemoteStats:
 
     local_sha: str | None
     remotes: dict[str, str | None]
+    # Expected mirrors with no local remote entry at all — informational, not
+    # a sync failure (some machines carry a subset of the mirror set).
+    not_configured: tuple[str, ...] = ()
 
     @property
     def in_sync(self) -> bool:
@@ -111,6 +114,8 @@ class RemoteStats:
                 lines.append(f"    {name}: {sha[:7]} ✓")
             else:
                 lines.append(f"    {name}: {sha[:7]} ✗ (behind/ahead)")
+        for name in self.not_configured:
+            lines.append(f"    {name}: not configured on this machine (info)")
         return "\n".join(lines)
 
 
@@ -137,9 +142,15 @@ class Doctor:
         Each remote is probed with `git ls-remote` (one network round-trip);
         an unreachable remote is reported as such rather than as diverged.
         """
+        configured = _git.configured_remotes()
         return RemoteStats(
             local_sha=_git.head_sha(),
-            remotes={name: _git.remote_head_sha(name) for name in remotes},
+            remotes={
+                name: _git.remote_head_sha(name)
+                for name in remotes
+                if name in configured
+            },
+            not_configured=tuple(n for n in remotes if n not in configured),
         )
 
     def check_router(self) -> RouterStats:

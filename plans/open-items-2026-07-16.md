@@ -1,9 +1,10 @@
 # Open items & remediation plan — post-dogfood sweep
 > Backlog ID: 009
 
-> Status: in-progress — execution sweep run 2026-07-16 (same day). Every item
-> below is CLOSED or carries a **DECISION** block for the user. This plan
-> closes when the D1–D5 decisions are made and their follow-through lands.
+> Status: done — all decisions D1–D5 made and executed (D1/D2/D3 on
+> 2026-07-16; D4 parked-on-trigger and D5 resolved 2026-07-17). Remaining
+> follow-through lives in its own homes: the §6 A/B run (plan 006) and the
+> release-workflow scanner step (user-gated, roadmap Phase 0).
 
 ## Scoreboard
 
@@ -99,38 +100,31 @@ work. Remaining steps are yours (guardrails + credentials):
 6 weeks of user-facing features, and Task 1's edit-mode validation (the
 release gate you set) passed today.
 
-### D4 — Phase 8 Tier 2/3 direction (no urgency)
+### D4 — Phase 8 Tier 2/3 direction — DECIDED 2026-07-17
 
-8.6–8.8 (multi-machine sync, team features, self-optimizing memory) are
-untouched since June and target a multi-user scale you don't currently
-operate at. **Recommendation: leave 002 parked at `planned`** and spend
-the effort on loop-adjacent work (e.g. plan 003's confidence scoring
-feeding review quality) — revisit only if a second daily-driver machine
-or a teammate materializes. Deciding "parked indefinitely" vs "queued
-next" is yours.
+**PARKED, revisit on trigger** (user decision): plan 002 stays `planned`;
+the revival triggers are a second daily-driver machine or a teammate
+needing shared observation memory. Roadmap Phase 20 supersedes the old
+8.5/8.7 intelligence-layer design regardless.
 
-### D5 — T5810 access from this MacBook + mirror mirror + §6 A/B scope
+### D5 — T5810 + mirror + A/B scope — RESOLVED 2026-07-17
 
-Three intertwined infra facts found today: `gpu-node-1` doesn't resolve on
-the office LAN from this MacBook (no `~/.ssh/config` alias, no tunnel
-plist installed here — that setup lives on the Studio); the `mirror`
-mirror remote that `pxx --doctor` checks isn't configured on this
-machine (and `mirror/pxx` isn't visible to your gh auth — different
-name, or private to another account); and docs-sme §6's A/B needs the
-T5810 incumbent plus candidates (Qwen3-Coder-Next, Gemma 4) that are
-deployed nowhere in the fleet.
-
-**Decisions:**
-- T5810 from this MacBook: (i) give me the SSH alias/host details and I
-  install the tunnel plist here (restores tier-2 fallback + the §6
-  incumbent arm), or (ii) accept vllm-host-1-only on this machine (env file
-  already documents the posture). **Recommendation: (i)** — one-time,
-  small, and the loop's review/endpoint fallbacks get real again.
-- mirror: give me the mirror URL to `git remote add mirror <url>` here,
-  or accept the doctor warning on this machine as expected output.
-- §6 A/B scope: **recommendation — re-scope to incumbent
-  (qwen2.5-coder-14b-coder-lora) vs vllm-host-1 Qwen3-Coder through the SME
-  proxy**, both already deployed (needs only T5810 access). Defer
-  Qwen3-Coder-Next/Gemma until you decide to deploy them (Gemma 4 26B
-  fits 2×A4500 quantized; Qwen3-Coder-Next likely doesn't fit 40GB).
-  Plan 006 stays `in-progress` until you pick.
+- **T5810 access from this MacBook: DONE.** SSH alias installed
+  (machine-local config), persistent tunnel agent loaded
+  (`local.pxx.gpu-node-1-vllm-tunnel`), verified: `127.0.0.1:8003` serves
+  `qwen2.5-coder-14b-coder-lora` (16k ctx). Tier-2 fallback restored; pxx
+  detection order unchanged (vllm-host-1 first). Bonus measurement unlocked
+  and taken: the 14b calibrates at recall 0.25 / fp 0.00 under the v2
+  prompt — strictly dominates the 7b (0.00/0.00) as a quiet reviewer,
+  but switching production would add a tunnel-availability dependency
+  to every loop preflight for +0.25 recall; recommendation: keep the
+  always-local 7b default, 14b recorded as the measured alternative
+  (`evals/baselines/reviewer-qwen2.5-coder-14b-coder-lora.json`).
+- **mirror mirror: resolved by clarification** — pxx has no standalone
+  mirror there (it ships integrated inside another tree); doctor now
+  reports expected-but-unconfigured mirrors as informational
+  ("not configured on this machine") instead of "unreachable".
+- **§6 A/B: unblocked** — the incumbent arm is reachable through the
+  restored tunnel; contender set per the standing recommendation
+  (incumbent vs Qwen3-Coder through the SME proxy). Execution is
+  scheduling, not decision; plan 006 closes when it runs.

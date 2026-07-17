@@ -268,9 +268,10 @@ class TestRemoteStats:
         assert "not a git repo" in str(stats)
 
     @patch("pxx.doctor._git.remote_head_sha")
+    @patch("pxx.doctor._git.configured_remotes", return_value={"origin", "mirror"})
     @patch("pxx.doctor._git.head_sha", return_value="deadbeef")
     def test_check_remotes_probes_each_mirror(
-        self, _head: Mock, mock_remote: Mock
+        self, _head: Mock, _configured: Mock, mock_remote: Mock
     ) -> None:
         """check_remotes probes every configured mirror remote."""
         mock_remote.side_effect = lambda name, ref="main": "deadbeef"
@@ -301,3 +302,32 @@ class TestDoctorEnvVars:
 
         assert doctor.router_api == "http://custom:9000"
         assert doctor.memory_api == "http://custom:3111"
+
+
+class TestUnconfiguredMirrors:
+    """A machine carrying a subset of the mirror set is informational,
+    not out-of-sync (D5 resolution, 2026-07-17)."""
+
+    def test_not_configured_is_info_not_unreachable(self):
+        from pxx.doctor import RemoteStats
+
+        stats = RemoteStats(
+            local_sha="a" * 40,
+            remotes={"origin": "a" * 40},
+            not_configured=("mirror",),
+        )
+        assert stats.in_sync is True
+        text = str(stats)
+        assert "mirror: not configured on this machine (info)" in text
+        assert "unreachable" not in text
+
+    def test_check_remotes_filters_unconfigured(self, monkeypatch):
+        from pxx import doctor as doctor_mod
+
+        monkeypatch.setattr("pxx._git.configured_remotes", lambda: {"origin"})
+        monkeypatch.setattr("pxx._git.head_sha", lambda: "a" * 40)
+        monkeypatch.setattr("pxx._git.remote_head_sha", lambda name: "a" * 40)
+        d = doctor_mod.Doctor()
+        stats = d.check_remotes(("origin", "mirror"))
+        assert list(stats.remotes) == ["origin"]
+        assert stats.not_configured == ("mirror",)

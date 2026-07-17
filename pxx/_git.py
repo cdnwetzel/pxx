@@ -91,6 +91,20 @@ def head_sha() -> str | None:
         return None
 
 
+def configured_remotes() -> set[str]:
+    """Names of remotes configured in the local repo (no network)."""
+    result = subprocess.run(
+        ["git", "remote"],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=5,
+    )
+    if result.returncode != 0:
+        return set()
+    return {line.strip() for line in result.stdout.splitlines() if line.strip()}
+
+
 def remote_head_sha(remote: str, ref: str = "main") -> str | None:
     """Return a remote ref's SHA-1 via `git ls-remote`, or None on any failure.
 

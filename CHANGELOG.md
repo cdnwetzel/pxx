@@ -2,6 +2,49 @@
 
 All notable changes to pxx and its ecosystem across development phases.
 
+## [1.2.1] — 2026-07-17
+
+**Fail-closed hardening: gates that passed on silence now fail loud.** Two
+independent review passes found five gates whose failure mode was silence
+rather than refusal; all are fixed, several verified in the published 1.2.0
+wheel.
+
+### Fixed
+
+- **Test oracle blind to pytest ERRORs.** The loop's test gate ran `-rf`
+  (FAILED lines only), so an all-ERROR suite (raising fixture, import break)
+  parsed to an empty set and read *green* — and in advisory mode that oracle
+  is the sole enforcement gate. Now `-rfE` with `^(FAILED|ERROR)` parsing.
+- **Review oracle accepted prose as a clean bill.** A local-reviewer reply
+  like "The code looks correct." parsed to zero findings → APPROVE (the
+  blocking-mode default reviewer hits this routinely). Non-compliant output —
+  neither the exact no-findings line nor a parseable F-NNN finding — now
+  fails closed.
+- **Governance scanner failed open on git error.** A scan that couldn't run
+  git returned an empty violation list ("clean"); it now returns an
+  error-severity violation and blocks.
+- **`pxx --eval` / `--calibrate` green on an empty corpus.** The corpus ships
+  only with a repo checkout, so a pip install self-checked zero cases and
+  exited 0 — an unconditionally-green gate. Both now fail closed (exit 2)
+  with an explicit "no cases found" message.
+- **Pre-commit hook shebang portability.** The installer put the pxx-managed
+  marker above the shebang, so git ran the hook under `/bin/sh` — bash on
+  macOS, dash on Ubuntu (where `set -o pipefail` is illegal). Shebang is now
+  line 1; regression-tested.
+
+### Added
+
+- **CI on push/PR** (`.github/workflows/ci.yml`): runs lint + the full suite
+  + the shipped-content gate on every push and PR to `main` — previously the
+  tests ran only through a skippable local hook.
+- **Trust-boundary enforcement**: `.aiderignore` now protects the evaluator,
+  gate modules, `evals/`, and their grading tests — the candidate generator
+  cannot edit its own grader.
+- **Constrained candidate generation (experimental, `pxx --propose`)**: a
+  declarative, single-variable, allowlisted behavior proposal with a
+  fail-closed integrity validator; validated and persisted, never
+  auto-applied. Repo-checkout feature.
+
 ## [1.2.0] — 2026-07-17
 
 **The measurement-and-evaluation foundation: pxx now attributes, scores, and

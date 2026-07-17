@@ -700,6 +700,104 @@ Add a subagent only for: context isolation, tool restriction,
 independent judgment, parallel non-overlapping work, or clearer
 attribution — never merely because parallelism is available.
 
+## Lessons from the wider agent landscape (2026-07-16)
+
+Sources beyond Claude Code and Codex, each mapped to phases. Two of
+these are *counterweights* — recorded precisely because they push back
+on parts of this roadmap.
+
+1. **Aider — the engine pxx already wraps.** Its deepest lesson is that
+   the **edit format is a measured, per-model capability contract**, not
+   a preference: aider's own benchmark drove diff vs whole vs udiff
+   selection per model, and repo-map size is a tunable budget with
+   measurable effects (pxx saw 1024 → 3584 tokens change behavior when
+   Qwen3-Coder got registered). Fold in: Tier A eval cases double as
+   **edit-format calibration** per model; edit-format failure rate and
+   repo-map budget become tracked `RunOutcome` fields and legitimate
+   candidate targets. *(Phases 12/13/16.)*
+
+2. **SWE-agent — the Agent-Computer Interface result.** Princeton showed
+   the *interface* the agent sees (bounded file-viewer windows, capped
+   search results, edits rejected at the interface with guiding lint
+   errors) changes success rates as much as model choice. The tool
+   surface is a first-class experimental variable: design tool outputs
+   for model consumption (bounded, structured, error messages that say
+   what to do next), hash the tool surface into the manifest (already
+   planned), and add ACI-focused eval cases — "does a capped search
+   output still let the agent find the target?" *(Phases 10.5/13/14.)*
+
+3. **Cursor — three portable mechanisms.** (a) **Path-scoped rules**:
+   instructions attached to glob patterns, loaded only when matching
+   files are touched — strictly better than monolithic conventions;
+   adopt for 10.5's docs tree and Phase 22 skills. (b) **Apply-model
+   separation**: generating a change and applying it are different
+   competencies; pxx's malformed-edit retry is a crude version — if
+   edit-format failures return with weaker models, a small dedicated
+   apply step beats prompt surgery. (c) **Shadow workspace**: verify an
+   edit compiles/lints in a hidden copy *before surfacing it* — the
+   same primitive as Phase 18 shadow, applied at edit granularity.
+   *(Phases 10.5/16/18.)*
+
+4. **Gemini CLI — per-action checkpointing.** Automatic snapshot before
+   every mutating tool call, with a restore command. pxx's #002 safety
+   tag is session-granular; the action broker (Phase 14) should add
+   action-granular restore points so rollback isn't all-or-nothing.
+   Cheap under git. *(Phases 14/18.)*
+
+5. **Cognition/Devin — the multi-agent counterweight.** Their argument:
+   *actions carry implicit decisions*; agents working from fragmented
+   contexts make conflicting assumptions, and typed handoffs are lossy
+   by construction. This directly tensions Phase 22 and the
+   conclusions-not-transcripts rule. Resolution recorded here:
+   parallelize only **provably disjoint** decomposition; prefer
+   sequential single-context execution otherwise; the integrator treats
+   every handoff artifact as a *claim to re-verify against the actual
+   diff*, never as ground truth. If a decomposition can't be made
+   disjoint, it isn't ready for parallel agents. *(Phase 22.)*
+
+6. **OpenHands — event-sourced agent state.** An append-only event
+   stream is the single source of truth; all state is derived from it,
+   and replay = re-derivation. pxx's audit JSONL is already close —
+   formalize: run directories (11.4) store *events*, and `RunOutcome`/
+   workflow state are derived views that can be rebuilt. Also: version
+   the sandbox/runtime image into the manifest. *(Phase 11.)*
+
+7. **Copilot Workspace — editable intermediate artifacts.** Spec and
+   plan are human-editable checkpoints *before* implementation; editing
+   a plan is far cheaper than editing a diff. For `pxx --goal`: the
+   planner's task DAG + acceptance criteria are emitted as a reviewable
+   artifact with an explicit pause point before any loop launches.
+   *(Phase 22.)*
+
+8. **Voyager — skills as verified executable units.** Skill libraries
+   work when each entry is executable, was verified in the environment
+   before storage, and is retrieved by task match — not prose tips.
+   Extends the rule-promotion ladder: the "update docs/skill" rung
+   should prefer *executable* form (a check, a command, a fixture) over
+   text whenever possible. *(Phases 20/20.5.)*
+
+9. **AlphaEvolve — the evaluator ceiling.** Evolutionary candidate
+   search works exactly where automated evaluation is airtight, and
+   nowhere else. Two imports: **the autonomy ceiling equals the
+   evaluator ceiling** — expand Phase 21's allowlist only where the
+   relevant eval family is demonstrably strong; and maintain modest
+   candidate *diversity* within a cluster budget rather than one
+   candidate per hypothesis, since the first idea is rarely the best.
+   *(Phases 16/17/21.)*
+
+10. **External benchmark anchoring.** A private eval corpus drifts
+    toward what the harness is already good at. Periodically run a
+    small fixed subset of a public benchmark (SWE-bench-verified-class,
+    terminal-bench-class) as a *calibration anchor* — not a target to
+    optimize, a drift detector for the corpus itself. *(Phases 13/17.)*
+
+11. **The AutoGPT-era negative result** — unbounded goal loops without
+    environmental feedback drift and confabulate progress; verbal
+    self-reflection amplifies rather than corrects without ground
+    truth. pxx's central design rule (bounded primitive, deterministic
+    feedback, fail closed) *is* the antidote; this entry exists so the
+    lesson survives personnel and model changes. *(All phases.)*
+
 ## Revised phase sequence (post-Codex amendments)
 
 ```

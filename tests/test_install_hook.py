@@ -70,6 +70,17 @@ class TestInstallerDropsBothHooks:
             content = (repo / ".git" / "hooks" / name).read_text()
             assert "# pxx-managed pre-commit hook" in content
 
+    def test_shebang_is_line_one(self, tmp_path):
+        # The marker must go AFTER the shebang, not before it — otherwise git
+        # ignores the shebang and runs the hook under /bin/sh (dash on Ubuntu),
+        # where the template's `set -o pipefail` is illegal. CI caught this on
+        # its first run (2026-07-17); this test keeps it caught.
+        repo = _init_repo(tmp_path)
+        _run_installer(repo)
+        for name in ALL_HOOKS:
+            first = (repo / ".git" / "hooks" / name).read_text().splitlines()[0]
+            assert first.startswith("#!"), f"{name} line 1 is not a shebang: {first!r}"
+
     def test_reinstall_is_idempotent(self, tmp_path):
         repo = _init_repo(tmp_path)
         _run_installer(repo)

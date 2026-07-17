@@ -81,9 +81,14 @@ install_one_hook() {
     fi
 
     mkdir -p "$HOOKS_DIR"
+    # The template's shebang MUST stay line 1, or git ignores it and runs the
+    # hook under /bin/sh — which is bash on macOS (pipefail works) but dash on
+    # Ubuntu (pipefail is illegal). Inject the pxx-managed marker AFTER the
+    # shebang, not before it. (CI caught this on its first run, 2026-07-17.)
     {
+        head -n 1 "$template"          # shebang, verbatim, line 1
         printf '%s\n' "$MARKER"
-        cat "$template"
+        tail -n +2 "$template"         # the rest of the template
     } > "$hook"
     chmod +x "$hook"
     echo "Installed pxx $hook_name hook at $hook"

@@ -453,6 +453,11 @@ def main() -> None:
         remote_stats = doctor.Doctor().print_report()
         sys.exit(0 if remote_stats.in_sync else 1)
 
+    if "--upgrade" in sys.argv or "--update" in sys.argv:
+        from pxx import upgrade
+
+        sys.exit(upgrade.upgrade_main())
+
     if "--install-hook" in sys.argv:
         _install_precommit_hook()
 

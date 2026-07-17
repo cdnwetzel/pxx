@@ -511,6 +511,22 @@ def main() -> None:
             )
         )
 
+    if "--runs" in sys.argv:
+        # Outcome inspection (#012): recent loop runs, newest first, projected
+        # from the audit stream — terminal codes, never message parsing.
+        from pxx import outcomes
+
+        rows = outcomes.recent_outcomes(limit=20)
+        if not rows:
+            print("pxx: no recorded loop runs (terminal records start 2026-07-16).")
+            sys.exit(0)
+        for o in rows:
+            print(
+                f"{o.run_id}  {o.terminal_code:<22} rounds={o.rounds} "
+                f"diff={o.diff_lines:<5} {o.agent_version_id or '-'}"
+            )
+        sys.exit(0)
+
     if "--manifest" in sys.argv:
         # Behavior identity inspection (#011): print the current AgentManifest
         # and its agent_version_id as JSON, then exit.

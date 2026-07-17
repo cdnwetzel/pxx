@@ -373,6 +373,39 @@ def _out_of_scope_changes(root: Path, start_sha: str, scope: str) -> list[str]:
     return sorted(p for p in paths if not is_in_scope(p, [scope]))
 
 
+def _terminal(
+    rc: int,
+    code: str,
+    rounds: int,
+    run_id: str | None,
+    agent_version: str | None,
+    start_sha: str | None = None,
+    end_sha: str | None = None,
+) -> int:
+    """Write the run's machine-readable terminal record (#012) and return rc.
+
+    The terminal_code names WHY the loop stopped — downstream projection
+    (pxx/outcomes.py) never parses messages. Best-effort like every audit
+    write; the code must be a member of outcomes.FAILURE_CODES.
+    """
+    try:
+        audit.write_session_start(
+            {
+                "session_class": "loop-terminal",
+                "run_id": run_id,
+                "agent_version_id": agent_version,
+                "terminal_code": code,
+                "rounds": rounds,
+                "exit": rc,
+                "start_sha": start_sha,
+                "end_sha": end_sha,
+            }
+        )
+    except Exception:
+        pass
+    return rc
+
+
 def _capture_loop_summary(
     root: Path,
     start_sha: str,
@@ -436,17 +469,17 @@ def run_loop(
     if run_id is None:
         run_id = audit.make_session_id()
     if not _require_hooks(root):
-        return 1
+        return _terminal(1, "HOOKS_MISSING", 0, run_id, agent_version)
     preflight_err = review_gate.preflight_review_backend()
     if preflight_err:
         _say(f"review backend preflight failed: {preflight_err} — refusing to start.")
-        return 1
+        return _terminal(1, "REVIEW_UNAVAILABLE", 0, run_id, agent_version)
     start_sha = _head_sha(root)
 
     baseline = _failing_tests(root)
     if baseline is None:
         _say("cannot measure the test baseline (pytest run broke) — refusing.")
-        return 1
+        return _terminal(1, "TEST_RUN_FAILED", 0, run_id, agent_version, start_sha)
     _say(f"baseline: {len(baseline)} failing test(s); cap={max_rounds} rounds.")
 
     state = workflow.load_state(root) or workflow.WorkflowState()
@@ -460,7 +493,14 @@ def run_loop(
         elapsed = time.monotonic() - started
         if elapsed > max_seconds:
             _say(f"wall-clock budget ({max_seconds:.0f}s) exhausted — stopping.")
-            return 1
+            return _terminal(
+                1,
+                "TIME_BUDGET_EXCEEDED",
+                round_no - 1,
+                run_id,
+                agent_version,
+                start_sha,
+            )
 
         _say(f"round {round_no}: edit")
         # The subprocess gets the REMAINING budget (floored) so a wedged aider
@@ -488,7 +528,15 @@ def run_loop(
                 )
             except Exception:
                 pass
-            return 1
+            return _terminal(
+                1,
+                "EDIT_TIMEOUT" if edit_rc == 124 else "EDIT_FAILED",
+                round_no,
+                run_id,
+                agent_version,
+                start_sha,
+                _head_sha(root),
+            )
 
         _format_scope(root, scope)
 
@@ -498,7 +546,15 @@ def run_loop(
         test_s = time.monotonic() - t0
         if failing is None:
             _say("test run broke mid-loop — stopping (fail closed).")
-            return 1
+            return _terminal(
+                1,
+                "TEST_RUN_FAILED",
+                round_no,
+                run_id,
+                agent_version,
+                start_sha,
+                _head_sha(root),
+            )
         lint_rc = _lint_scope(root, scope)
 
         spent = _diff_lines_since(root, start_sha)
@@ -506,7 +562,15 @@ def run_loop(
             _say(
                 f"cumulative diff budget exceeded ({spent} > {diff_budget}) — stopping."
             )
-            return 1
+            return _terminal(
+                1,
+                "DIFF_BUDGET_EXCEEDED",
+                round_no,
+                run_id,
+                agent_version,
+                start_sha,
+                _head_sha(root),
+            )
 
         off_scope = _out_of_scope_changes(root, start_sha, scope)
         if off_scope:
@@ -519,7 +583,15 @@ def run_loop(
                 workflow.transition(state, "rejected", review_verdict="OUT_OF_SCOPE"),
                 root,
             )
-            return 1
+            return _terminal(
+                1,
+                "OUT_OF_SCOPE",
+                round_no,
+                run_id,
+                agent_version,
+                start_sha,
+                _head_sha(root),
+            )
 
         baseline_failing = failing & baseline
         introduced_failing = failing - baseline
@@ -600,7 +672,15 @@ def run_loop(
             _say(
                 "APPROVE — stopping. Commits stay local ([autonomous]); push is yours."
             )
-            return 0
+            return _terminal(
+                0,
+                "APPROVED",
+                round_no,
+                run_id,
+                agent_version,
+                start_sha,
+                _head_sha(root),
+            )
         if result.verdict == "REJECT":
             workflow.save_state(
                 workflow.transition(state, "rejected", review_verdict="REJECT"), root
@@ -616,7 +696,15 @@ def run_loop(
                 agent_version=agent_version,
             )
             _say("REJECT (P0) — stopping for a human. Tree left for inspection.")
-            return 1
+            return _terminal(
+                1,
+                "REVIEW_REJECTED",
+                round_no,
+                run_id,
+                agent_version,
+                start_sha,
+                _head_sha(root),
+            )
         if result.verdict == "NO_REVIEW":
             workflow.save_state(
                 workflow.transition(state, "rejected", review_verdict="NO_REVIEW"),
@@ -637,7 +725,15 @@ def run_loop(
                 or "no usable review evidence — fix/re-run the review, not "
                 "another edit round."
             )
-            return 1
+            return _terminal(
+                1,
+                "REVIEW_UNAVAILABLE",
+                round_no,
+                run_id,
+                agent_version,
+                start_sha,
+                _head_sha(root),
+            )
 
         # REVISE (or APPROVE blocked by failing baseline tests / lint):
         # progress guard before another round. With a non-empty baseline the
@@ -659,7 +755,15 @@ def run_loop(
                         ),
                         root,
                     )
-                    return 1
+                    return _terminal(
+                        1,
+                        "NO_TEST_PROGRESS",
+                        round_no,
+                        run_id,
+                        agent_version,
+                        start_sha,
+                        _head_sha(root),
+                    )
             elif prev_healable is not None and len(result.healable) >= prev_healable:
                 _say(
                     "no progress on healable findings "
@@ -671,7 +775,15 @@ def run_loop(
                     ),
                     root,
                 )
-                return 1
+                return _terminal(
+                    1,
+                    "NO_TEST_PROGRESS",
+                    round_no,
+                    run_id,
+                    agent_version,
+                    start_sha,
+                    _head_sha(root),
+                )
         prev_baseline_failing = baseline_failing
         prev_healable = len(result.healable)
         message = _healing_message(task, result.healable, failing)
@@ -684,7 +796,15 @@ def run_loop(
     workflow.save_state(
         workflow.transition(state, "rejected", review_verdict="ROUND_CAP"), root
     )
-    return 1
+    return _terminal(
+        1,
+        "ROUND_CAP_EXCEEDED",
+        max_rounds,
+        run_id,
+        agent_version,
+        start_sha,
+        _head_sha(root),
+    )
 
 
 def heal_once(root: Path, scope: str) -> int:

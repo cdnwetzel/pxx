@@ -63,7 +63,7 @@ class TestFailsClosedOnDiffPathShapes:
 
     def test_absolute_path_fails_closed(self):
         assert is_protected_path("/etc/passwd")
-        assert is_protected_path("/Users/x/pxx/evaluation.py")
+        assert is_protected_path("/Users/you/pxx/evaluation.py")
 
     def test_repo_escaping_traversal_fails_closed(self):
         assert is_protected_path("../../secrets")

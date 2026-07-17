@@ -1004,10 +1004,15 @@ strength. When one lands, its ledger row updates and it leaves this list.
    blocking sweep — now PASSES in advisory mode with that same reviewer, the
    FP recorded not gated. Machine default flipped to advisory. `blocking`
    stays for a supervised frontier reviewer.
-2. **Cross-model skeptic** — the reviewer variant not yet tried: a
-   *different* family audits Qwen3's findings (14b or a frontier model as
-   the skeptic), since self-audit failed on confident hallucination. One
-   `pxx --calibrate`-shaped run per candidate against the 20-case suite.
+2. **Cross-model skeptic — DONE (2026-07-17), REJECTED.** Qwen3 flags, the
+   14b (different family, fp 0.0) audits each finding: FP crushed 0.75→0.08
+   but recall collapsed 1.00→0.00 — the conservative model drops every
+   finding, truths included (mirror of self-audit, which keeps its own
+   hallucinations). Confirms the recall/precision tradeoff is fundamental to
+   fleet-local models. Practical upshot: for advisory use, the high-recall
+   flagger SOLO (Qwen3-Coder) is optimal — both skeptic layers reduce
+   advisory value. Skeptic thread closed; deterministic gates remain the only
+   trustworthy enforcement. Reopen only with a frontier skeptic.
 3. **Consume the VerificationPacket — DONE (2026-07-17).** No longer typed-
    but-unread: the loop's APPROVE prints a one-line evidence summary and a
    `pxx --verify <run-id>` pointer; `--verify` (and `--verify` with no id =

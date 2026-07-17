@@ -5,8 +5,12 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 from pxx.governance import (
+    CONTENT_ALLOW_PRAGMA,
+    _scan_content_lines,
     check_review_verdict,
     check_version_sync,
+    load_content_denylist,
+    scan_public_content,
     scan_staged_secrets,
 )
 
@@ -379,3 +383,169 @@ class TestRunGovernanceCheck:
         rc = run_governance_check(repo)
         assert rc == 0  # warning, not error
         assert "invalid JSON" in capsys.readouterr().err
+
+
+class TestScanContentLines:
+    """Pattern logic for the public-content scanner (roadmap Phase 0.1)."""
+
+    def _hits(self, content: str, denylist=()) -> list[str]:
+        return [v.detail for v in _scan_content_lines("f.md", content, list(denylist))]
+
+    def test_private_ipv4_ranges_flagged(self):
+        import re as _re  # noqa: F401
+
+        assert self._hits("host at 10.1.2.3")  # pxx-content: allow
+        assert self._hits("host at 172.20.1.1")  # pxx-content: allow
+        assert self._hits("host at 192.168.5.9")  # pxx-content: allow
+
+    def test_non_private_addresses_pass(self):
+        assert self._hits("loopback 127.0.0.1:8003") == []
+        assert self._hits("public 8.8.8.8 and 172.32.1.1") == []
+        assert self._hits("docs example 192.0.2.7") == []
+
+    def test_internal_hostname_suffix_flagged(self):
+        assert self._hits("reach box.local now")  # pxx-content: allow
+        assert self._hits("via gpu.internal path")  # pxx-content: allow
+
+    def test_localhost_is_not_an_internal_suffix(self):
+        assert self._hits("http://localhost:11434") == []
+
+    def test_home_path_real_username_flagged(self):
+        assert self._hits("/Users/jsmith/ai/repo")  # pxx-content: allow
+        assert self._hits("/home/jsmith/work")  # pxx-content: allow
+
+    def test_home_path_placeholders_pass(self):
+        assert self._hits("cd /Users/you/project") == []
+        assert self._hits("cd /home/user/project") == []
+        assert self._hits("cd /Users/example/project") == []
+
+    def test_unprotected_service_statement_flagged(self):
+        assert self._hits("the fleet has no auth at all")  # pxx-content: allow
+        assert self._hits("runs without authentication")  # pxx-content: allow
+
+    def test_auth_prose_passes(self):
+        assert self._hits("requests require authentication") == []
+        assert self._hits("auth is enforced at the proxy") == []
+
+    def test_pragma_line_is_exempt(self):
+        line = f"host at 10.1.2.3  # {CONTENT_ALLOW_PRAGMA}"  # pxx-content: allow
+        assert self._hits(line) == []
+
+    def test_one_report_per_pattern_per_file(self):
+        content = "a 10.1.1.1\nb 10.2.2.2"  # pxx-content: allow
+        hits = self._hits(content)
+        assert len(hits) == 1
+
+    def test_denylist_match_does_not_echo_term(self):
+        import re
+
+        deny = [re.compile(re.escape("hushpuppy-node"), re.IGNORECASE)]
+        hits = self._hits("deploy to HUSHPUPPY-NODE tonight", deny)
+        assert len(hits) == 1
+        assert "hushpuppy-node" not in hits[0].lower()
+        assert "denylist entry #1" in hits[0]
+
+
+class TestContentDenylistLoading:
+    def test_loads_repo_private_and_config_files(self, tmp_path, monkeypatch):
+        repo = tmp_path / "repo"
+        (repo / "private").mkdir(parents=True)
+        (repo / "private" / "content-denylist.txt").write_text(
+            "# comment\nalpha-host\n\nbeta-host\n"
+        )
+        cfg = tmp_path / "xdg" / "pxx"
+        cfg.mkdir(parents=True)
+        (cfg / "content-denylist").write_text("gamma-user\n")
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+        patterns = load_content_denylist(repo)
+        assert len(patterns) == 3
+        assert any(p.search("ALPHA-HOST") for p in patterns)
+
+    def test_missing_files_mean_empty_denylist(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "nowhere"))
+        assert load_content_denylist(tmp_path) == []
+
+
+class TestScanPublicContent:
+    def test_staged_mode_scans_index_content(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "nowhere"))
+        staged = "server at 10.9.9.9 tonight"  # pxx-content: allow
+
+        def mock_run(cmd, *args, **kwargs):
+            result = MagicMock()
+            result.returncode = 0
+            if cmd[1] == "diff":
+                result.stdout = "notes.md"
+            elif cmd[1] == "show":
+                result.stdout = staged
+            return result
+
+        monkeypatch.setattr("pxx.governance.subprocess.run", mock_run)
+        violations = scan_public_content(tmp_path)
+        assert len(violations) == 1
+        assert violations[0].check == "public-content"
+        assert "notes.md:1" in violations[0].detail
+
+    def test_full_tree_mode_reads_tracked_worktree_files(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "nowhere"))
+        (tmp_path / "doc.md").write_text(
+            "connect to rack.lan today\n"  # pxx-content: allow
+        )
+
+        def mock_run(cmd, *args, **kwargs):
+            result = MagicMock()
+            result.returncode = 0
+            result.stdout = "doc.md" if cmd[1] == "ls-files" else ""
+            return result
+
+        monkeypatch.setattr("pxx.governance.subprocess.run", mock_run)
+        violations = scan_public_content(tmp_path, full_tree=True)
+        assert len(violations) == 1
+        assert "internal-hostname-suffix" in violations[0].detail
+
+    def test_clean_content_passes_both_modes(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "nowhere"))
+        (tmp_path / "doc.md").write_text("use <lan-vllm-host> on 127.0.0.1\n")
+
+        def mock_run(cmd, *args, **kwargs):
+            result = MagicMock()
+            result.returncode = 0
+            if cmd[1] == "ls-files":
+                result.stdout = "doc.md"
+            elif cmd[1] == "diff":
+                result.stdout = ""
+            return result
+
+        monkeypatch.setattr("pxx.governance.subprocess.run", mock_run)
+        assert scan_public_content(tmp_path) == []
+        assert scan_public_content(tmp_path, full_tree=True) == []
+
+
+class TestContentScannerFalsePositives:
+    """FP classes found by the first live audit (2026-07-16)."""
+
+    def _hits(self, content: str) -> list[str]:
+        return [v.detail for v in _scan_content_lines("f.py", content, [])]
+
+    def test_path_home_calls_pass(self):
+        assert self._hits('log = Path.home() / ".local" / "state"') == []
+
+    def test_local_method_call_passes(self):
+        assert self._hits("value = obj.local()") == []
+
+    def test_users_foo_fixture_passes(self):
+        assert self._hits('"/Users/foo/ai/repo/cli.py"') == []
+
+    def test_lockfiles_are_skipped(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "nowhere"))
+        quad = 'version = "10.4.0.35"\n'  # pxx-content: allow
+        (tmp_path / "uv.lock").write_text(quad)
+
+        def mock_run(cmd, *args, **kwargs):
+            result = MagicMock()
+            result.returncode = 0
+            result.stdout = "uv.lock" if cmd[1] == "ls-files" else ""
+            return result
+
+        monkeypatch.setattr("pxx.governance.subprocess.run", mock_run)
+        assert scan_public_content(tmp_path, full_tree=True) == []

@@ -502,7 +502,11 @@ def main() -> None:
         if root is None:
             print("pxx: --check requires a git repo.", file=sys.stderr)
             sys.exit(1)
-        sys.exit(governance.run_governance_check(root))
+        sys.exit(
+            governance.run_governance_check(
+                root, full_content="--all-files" in sys.argv
+            )
+        )
 
     if "--loop" in sys.argv:
         # EXPERIMENTAL (#009). Most conservative posture: pxx repo only (the

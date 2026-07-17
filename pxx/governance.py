@@ -108,6 +108,188 @@ def scan_staged_secrets(repo_root: Path) -> list[GovernanceViolation]:
     return violations
 
 
+# Public-content scanner (roadmap Phase 0.1): infrastructure identifiers that
+# must never enter the PUBLIC repository, per the a256a04 de-identification
+# contract. Only generic CLASSES are defined here — machine-specific literals
+# (real hostnames, usernames, domains) load from untracked denylist files,
+# because committing that list would itself be the leak.
+#
+# A line containing the allow pragma is exempt (for test fixtures and docs
+# that discuss the patterns themselves).
+CONTENT_ALLOW_PRAGMA = "pxx-content: allow"
+
+PUBLIC_CONTENT_PATTERNS: list[tuple[str, re.Pattern]] = [
+    (
+        "private-ipv4",
+        re.compile(
+            r"\b(?:10\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01])|192\.168)"
+            r"\.\d{1,3}\.\d{1,3}\b"
+        ),
+    ),
+    # `.home` is deliberately absent (Path.home() would false-positive on
+    # every use); the trailing lookahead skips method calls like x.local().
+    (
+        "internal-hostname-suffix",
+        re.compile(r"\b[a-zA-Z0-9][a-zA-Z0-9-]*\.(?:local|lan|internal)\b(?!\()"),
+    ),
+    (
+        "home-directory-path",
+        re.compile(r"(?:/Users|/home)/([a-zA-Z][a-zA-Z0-9_-]*)"),
+    ),
+    (
+        "unprotected-service-statement",
+        re.compile(
+            r"(?i)\b(?:no|without|lacks)\s+(?:request-level\s+|any\s+)?"
+            r"auth(?:entication)?\b"
+        ),
+    ),
+]
+
+# Placeholder usernames that make a home path documentation, not a leak.
+_HOME_PATH_PLACEHOLDERS = {
+    "you",
+    "user",
+    "username",
+    "yourname",
+    "example",
+    "USER",
+    "foo",
+}
+
+# Generated dependency metadata — four-part version strings false-positive
+# the IP pattern, and lockfiles never carry infra topology.
+_CONTENT_SKIP_FILENAMES = {"uv.lock", "package-lock.json", "poetry.lock", "Cargo.lock"}
+
+
+def _content_denylist_paths(repo_root: Path) -> list[Path]:
+    config_base = os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
+    return [
+        repo_root / "private" / "content-denylist.txt",
+        Path(config_base) / "pxx" / "content-denylist",
+    ]
+
+
+def load_content_denylist(repo_root: Path) -> list[re.Pattern]:
+    """Machine-local identifier literals (one per line, # comments) compiled
+    case-insensitively. Both locations are untracked by design."""
+    patterns: list[re.Pattern] = []
+    for path in _content_denylist_paths(repo_root):
+        if not path.exists():
+            continue
+        for line in path.read_text(encoding="utf-8").splitlines():
+            term = line.strip()
+            if not term or term.startswith("#"):
+                continue
+            patterns.append(re.compile(re.escape(term), re.IGNORECASE))
+    return patterns
+
+
+def _scan_content_lines(
+    filepath: str, content: str, denylist: list[re.Pattern]
+) -> list[GovernanceViolation]:
+    violations = []
+    seen: set[str] = set()
+    for line_num, line in enumerate(content.splitlines(), 1):
+        if CONTENT_ALLOW_PRAGMA in line:
+            continue
+        for pattern_name, pattern in PUBLIC_CONTENT_PATTERNS:
+            if pattern_name in seen:
+                continue
+            m = pattern.search(line)
+            if not m:
+                continue
+            if (
+                pattern_name == "home-directory-path"
+                and m.group(1) in _HOME_PATH_PLACEHOLDERS
+            ):
+                continue
+            seen.add(pattern_name)
+            violations.append(
+                GovernanceViolation(
+                    check="public-content",
+                    severity="error",
+                    detail=f"{filepath}:{line_num} matches {pattern_name}",
+                )
+            )
+        for i, pattern in enumerate(denylist):
+            key = f"denylist-{i}"
+            if key in seen:
+                continue
+            if pattern.search(line):
+                seen.add(key)
+                # Deliberately do NOT echo the matched term — the report
+                # itself must stay safe to paste into public artifacts.
+                violations.append(
+                    GovernanceViolation(
+                        check="public-content",
+                        severity="error",
+                        detail=f"{filepath}:{line_num} matches private denylist entry #{i + 1}",
+                    )
+                )
+    return violations
+
+
+def scan_public_content(
+    repo_root: Path, full_tree: bool = False
+) -> list[GovernanceViolation]:
+    """Scan for infrastructure identifiers that must not reach the public repo.
+
+    Default mode scans STAGED content (`git show :<path>`, same mechanism as
+    the secrets scanner) — the gate for new content. ``full_tree`` scans every
+    tracked file's worktree content — the audit mode for existing content
+    (`pxx --check --all-files`).
+    """
+    violations: list[GovernanceViolation] = []
+    denylist = load_content_denylist(repo_root)
+
+    list_cmd = (
+        ["git", "ls-files"] if full_tree else ["git", "diff", "--cached", "--name-only"]
+    )
+    try:
+        result = subprocess.run(
+            list_cmd,
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return violations
+
+    for filepath in result.stdout.strip().splitlines():
+        if not filepath:
+            continue
+        if Path(filepath).name in _CONTENT_SKIP_FILENAMES:
+            continue
+        if full_tree:
+            full = repo_root / filepath
+            try:
+                content = full.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+        else:
+            try:
+                show = subprocess.run(
+                    ["git", "show", f":{filepath}"],
+                    cwd=repo_root,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    check=False,
+                    timeout=5,
+                )
+            except (FileNotFoundError, subprocess.TimeoutExpired):
+                continue
+            if show.returncode != 0:
+                continue
+            content = show.stdout
+        violations.extend(_scan_content_lines(filepath, content, denylist))
+
+    return violations
+
+
 def check_version_sync(repo_root: Path, config: dict) -> list[GovernanceViolation]:
     """Check version consistency across files per config.
 
@@ -251,11 +433,14 @@ def check_review_verdict(repo_root: Path) -> list[GovernanceViolation]:
     return violations
 
 
-def run_governance_check(repo_root: Path) -> int:
+def run_governance_check(repo_root: Path, full_content: bool = False) -> int:
     """Run all governance checks and report violations.
 
     Returns 0 if no errors, 1 if any error-severity violations found.
     Warnings are reported but don't fail the check.
+
+    ``full_content`` switches the public-content scan from staged-only (the
+    gate for new content) to every tracked file (the audit mode).
 
     PXX_GOVERNANCE_SKIP env var bypasses checks (tests only; set by pytest).
     """
@@ -273,6 +458,9 @@ def run_governance_check(repo_root: Path) -> int:
 
     # Secrets scan (always runs)
     violations.extend(scan_staged_secrets(repo_root))
+
+    # Public-content scan (always runs; the repo is public)
+    violations.extend(scan_public_content(repo_root, full_tree=full_content))
 
     # Version sync (if .pxx/governance.json exists)
     gov_config_path = repo_root / ".pxx" / "governance.json"

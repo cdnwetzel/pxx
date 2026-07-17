@@ -1064,7 +1064,7 @@ section whenever a phase's status line changes.
 
 | Phase | % | Grounding |
 |---|---|---|
-| 0 | 55% | Built: D1 scrub (bec8310, pushed); [1.1.0] changelog. Seed: `governance.scan_staged_secrets` — the content scanner exists for *secrets*; extending it to topology/identifier classes is the 0.1 work. Absent: published 1.1.0, baseline tag, trust-boundary doc. |
+| 0 | 70% | Built: D1 scrub (bec8310, pushed); [1.1.0] changelog; **public-content scanner** (`governance.scan_public_content`, 2026-07-16): four generic classes + untracked machine-local denylist, staged gate in `pxx --check` / `run_governance_check`, audit mode `pxx --check --all-files`, allow-pragma, lockfile skip; first audit ran (82 findings, all in docs/deploy/plans/review — the D1 residual, zero in code). Absent: published 1.1.0, baseline tag, trust-boundary doc, scanner step in the release workflow. |
 | 10.5 | 15% | Seed: `pxx/skills.py` + `pxx/commands/*.md` registry; CLAUDE.md/CONVENTIONS.md — the monolithic pattern the phase replaces. Absent: AGENTS/WORKFLOW.md typed contract, `context audit`/`workflow validate`/`docs check`. |
 | 10.75 | 10% | Seed: supervisor mode already runs aider as a supervised `Popen` subprocess with an observer thread (`cli.py:994–999`), and every loop round is a supervised subprocess — pxx has both execution postures; what's absent is the `AgentBackend` protocol, event sink, cancel/resume. |
 | 10.8 | 15% | Seed: append-only audit JSONL, one stream discriminated by `session_class`; workflow state persisted (`workflow.load_state/save_state/resume_state`). Absent: typed event vocabulary, hash chain, headless API. |

@@ -18,7 +18,7 @@ Statuses: `planned` | `in-progress` | `blocked` | `done`.
 | 008 | [2026-07-16 session: Phase 9 dogfood + docs-sme A/B](session-2026-07-16-loop-dogfood.md) | in-progress | — | — |
 | 009 | [Open items & remediation plan (post-dogfood sweep)](open-items-2026-07-16.md) | in-progress | — | — |
 | 010 | [2026-07-17 session: decisions, scrub, push, v1.1.0](session-2026-07-17-decisions-and-release.md) | planned | — | 009 |
-| 011 | [Roadmap: continuous self-improvement (Phases 11–22)](roadmap-continuous-self-improvement.md) | planned | — | 010 |
+| 011 | [Roadmap: continuous self-improvement (Phases 11–22)](roadmap-continuous-self-improvement.md) | in-progress | — | 010 |
 
 Next free ID: **012**
 

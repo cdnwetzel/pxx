@@ -626,6 +626,29 @@ def main() -> None:
             )
         sys.exit(0)
 
+    if "--verify" in sys.argv:
+        # VerificationPacket for one run (#012 consumption): the evidence a
+        # reviewer reads instead of trusting a claim of completion. With no
+        # run-id, the most recent run.
+        from pxx import outcomes
+
+        idx = sys.argv.index("--verify")
+        run_arg = (
+            sys.argv[idx + 1]
+            if idx + 1 < len(sys.argv) and not sys.argv[idx + 1].startswith("-")
+            else None
+        )
+        if run_arg:
+            outcome = outcomes.outcome_for_run(run_arg)
+        else:
+            recent = outcomes.recent_outcomes(limit=1)
+            outcome = recent[0] if recent else None
+        if outcome is None:
+            print(f"pxx: no run found for {run_arg or 'latest'}", file=sys.stderr)
+            sys.exit(1)
+        print(outcomes.format_packet(outcomes.verification_packet(outcome)))
+        sys.exit(0)
+
     if "--manifest" in sys.argv:
         # Behavior identity inspection (#011): print the current AgentManifest
         # and its agent_version_id as JSON, then exit.

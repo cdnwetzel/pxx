@@ -194,3 +194,27 @@ def recent_outcomes(limit: int = 10, directory: Path | None = None) -> list[RunO
         if len(outcomes) >= limit:
             break
     return outcomes
+
+
+def outcome_for_run(run_id: str, directory: Path | None = None) -> RunOutcome | None:
+    """Project a single run's outcome by id — the seam behind `pxx --verify`."""
+    records = [r for r in _iter_audit_records(directory) if r.get("run_id") == run_id]
+    return outcome_from_records(records) if records else None
+
+
+def format_packet(packet: VerificationPacket) -> str:
+    """Human-readable VerificationPacket — the evidence a reviewer reads
+    instead of trusting the agent's claim of completion."""
+    lines = [
+        f"verification packet — run {packet.run_id}",
+        f"  outcome:   {packet.terminal_code} (accepted={packet.accepted})",
+        f"  baseline:  {packet.baseline_commit}",
+        f"  result:    {packet.result_commit}",
+        "  ran:       " + " ; ".join(packet.verification_commands),
+        "  evidence:  " + " ".join(packet.verification_results),
+    ]
+    if packet.unresolved_risks:
+        lines.append("  risks:     " + "; ".join(packet.unresolved_risks))
+    else:
+        lines.append("  risks:     none")
+    return "\n".join(lines)

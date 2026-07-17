@@ -706,8 +706,17 @@ def run_loop(
                 run_id=run_id,
                 agent_version=agent_version,
             )
+            # APPROVE ships EVIDENCE, not just a verdict (#012 packet): the
+            # deterministic facts that earned it, on one line. Full packet via
+            # `pxx --verify <run-id>`.
             _say(
-                "APPROVE — stopping. Commits stay local ([autonomous]); push is yours."
+                f"evidence: tests green (0 baseline, 0 introduced), lint clean, "
+                f"{spent} diff line(s) over {round_no} round(s), "
+                f"review={result.verdict}{mode_note}"
+            )
+            _say(
+                "APPROVE — stopping. Commits stay local ([autonomous]); push is yours. "
+                f"Evidence: pxx --verify {run_id}"
             )
             return _terminal(
                 0,

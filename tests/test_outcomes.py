@@ -150,3 +150,37 @@ class TestRecentOutcomes:
             lines.append(json.dumps(_terminal("APPROVED", run_id=rid)))
         (tmp_path / "log.jsonl").write_text("\n".join(lines) + "\n")
         assert len(outcomes.recent_outcomes(limit=3, directory=tmp_path)) == 3
+
+
+class TestPacketConsumption:
+    """VerificationPacket is now READ, not just typed (#012 consumption)."""
+
+    def test_outcome_for_run_projects_by_id(self, tmp_path):
+        import json as _json
+
+        recs = [
+            _round(1, run_id="20260717T090000-aa"),
+            _terminal("APPROVED", run_id="20260717T090000-aa"),
+        ]
+        other = [_terminal("OUT_OF_SCOPE", run_id="20260717T090000-bb")]
+        (tmp_path / "log.jsonl").write_text(
+            "\n".join(_json.dumps(r) for r in recs + other) + "\n"
+        )
+        o = outcomes.outcome_for_run("20260717T090000-aa", directory=tmp_path)
+        assert o is not None and o.terminal_code == "APPROVED"
+        assert outcomes.outcome_for_run("nope", directory=tmp_path) is None
+
+    def test_format_packet_is_human_readable_evidence(self):
+        o = outcome_from_records([_round(1), _terminal("APPROVED", rounds=1)])
+        text = outcomes.format_packet(verification_packet(o))
+        assert "verification packet" in text
+        assert "APPROVED" in text
+        assert "aaa" in text and "bbb" in text  # baseline + result commits
+        assert "risks:     none" in text
+
+    def test_format_packet_surfaces_risks(self):
+        o = outcome_from_records(
+            [_round(1, introduced_failing=1), _terminal("ROUND_CAP_EXCEEDED", rounds=1)]
+        )
+        text = outcomes.format_packet(verification_packet(o))
+        assert "newly failing" in text

@@ -30,6 +30,7 @@ MANIFEST_VERSION = 1
 @dataclass(frozen=True)
 class AgentManifest:
     manifest_version: int
+    workflow_hash: str  # WORKFLOW.md contract (10.5) — editing it is a behavior change
     pxx_version: str
     pxx_commit: str
     aider_version: str
@@ -76,6 +77,14 @@ def _aider_version() -> str:
         return "unknown"
 
 
+def _workflow_hash() -> str:
+    path = Path(pxx.__file__).resolve().parent.parent / "WORKFLOW.md"
+    try:
+        return _sha(path.read_text(encoding="utf-8"))
+    except OSError:
+        return "missing"
+
+
 def _edit_prompt_hash() -> str:
     path = Path(pxx.__file__).resolve().parent / "prompts" / "system.md"
     try:
@@ -99,6 +108,7 @@ def current_manifest(
     """
     return AgentManifest(
         manifest_version=MANIFEST_VERSION,
+        workflow_hash=_workflow_hash(),
         pxx_version=getattr(pxx, "__version__", "unknown"),
         pxx_commit=_pxx_commit(),
         aider_version=_aider_version(),

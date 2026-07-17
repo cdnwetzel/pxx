@@ -511,6 +511,35 @@ def main() -> None:
             )
         )
 
+    if "--eval" in sys.argv:
+        # Eval-lab self-check (#013): honest arms must pass, cheat arms must
+        # be CAUGHT by the hidden checks. A suite whose cheats slip through
+        # is a broken laboratory — exit 1.
+        from pxx import evaluation
+
+        idx = sys.argv.index("--eval")
+        which = sys.argv[idx + 1] if idx + 1 < len(sys.argv) else "all"
+        tiers = evaluation.TIERS if which == "all" else (which,)
+        bad = 0
+        for tier in tiers:
+            results = evaluation.self_check_suite(tier)
+            if not results:
+                print(f"pxx eval: no cases in tier {tier!r}", file=sys.stderr)
+                continue
+            for r in results:
+                mark = "ok " if r.ok else "FAIL"
+                extra = ""
+                if r.arm == "cheat" and r.ok:
+                    extra = f"  caught: {r.failures[0].check}"
+                elif not r.ok:
+                    extra = "  " + "; ".join(
+                        f"{f.check}: {f.detail}" for f in r.failures
+                    )
+                print(f"{mark} {tier:<11} {r.case_id:<26} {r.arm:<6}{extra}")
+                bad += 0 if r.ok else 1
+        print(f"pxx eval: {'PASS' if bad == 0 else f'{bad} FAILURE(S)'}")
+        sys.exit(0 if bad == 0 else 1)
+
     if "--runs" in sys.argv:
         # Outcome inspection (#012): recent loop runs, newest first, projected
         # from the audit stream — terminal codes, never message parsing.

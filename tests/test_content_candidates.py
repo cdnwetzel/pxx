@@ -353,3 +353,33 @@ class TestContentEvalEnvelope:
         assert res.ok
         # the live repo was never written — the sweep ran on the discarded clone
         assert (repo / "pxx/prompts/system.md").read_text() == "old prompt\n"
+
+
+class TestP5RenameHidesProtectedDeletion:
+    """[P5] fail-open: git rename detection collapses a `D <protected>` +
+    `A <allowed-target>` pair into one `R100 -> <target>`, hiding the protected
+    deletion from verify. `changed_paths` forces `--no-renames` so the `D`
+    stays visible. Removing that flag makes both tests fail (the rename
+    re-collapses), so they double as the flag's regression guard."""
+
+    def test_committed_rename_escape_is_caught(self, tmp_path):
+        repo = _repo(tmp_path)
+        base = _head(repo)
+        # Poisoned loop renames the grader ONTO the declared (new) target, then
+        # commits — exactly what a rename would collapse into a single R100.
+        _git(repo, "mv", "pxx/review_gate.py", "pxx/prompts/newnote.md")
+        _git(repo, "commit", "-q", "-m", "loop round", "--no-verify")
+        cc = _cc(target="pxx/prompts/newnote.md")
+        violations = verify_only_touched_target(repo, cc, base)
+        assert any("protected path" in v and "review_gate" in v for v in violations)
+
+    def test_staged_rename_escape_is_in_changed_paths_and_caught(self, tmp_path):
+        repo = _repo(tmp_path)
+        base = _head(repo)
+        _git(
+            repo, "mv", "pxx/review_gate.py", "pxx/prompts/newnote.md"
+        )  # staged, not committed
+        assert "pxx/review_gate.py" in changed_paths(repo)
+        cc = _cc(target="pxx/prompts/newnote.md")
+        violations = verify_only_touched_target(repo, cc, base)
+        assert any("protected path" in v and "review_gate" in v for v in violations)

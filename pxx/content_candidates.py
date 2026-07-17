@@ -171,13 +171,21 @@ def changed_paths(repo_root: Path, base_sha: str | None = None) -> list[str]:
 
     ``-z`` (NUL-separated) is load-bearing: without it git C-quotes and octal-
     escapes any path with a space or non-ASCII byte, and those quotes would
-    survive into ``canonical_repo_path`` → a spurious "unexpected path". It also
-    removes the "orig -> new" rename split ambiguity: with ``-z`` a rename is
-    ``XY new\\0orig\\0``, so we take ``new`` and skip the following ``orig``
-    field explicitly."""
+    survive into ``canonical_repo_path`` → a spurious "unexpected path".
+
+    ``--no-renames`` is a SAFETY invariant, not an optimization: with rename
+    detection ON (git's default for ``diff``, and available to ``status``), a
+    ``D pxx/review_gate.py`` + ``A <allowed-target>`` pair collapses into a
+    single ``R100 review_gate.py -> <allowed-target>`` and the protected
+    DELETION never reaches ``is_protected_path`` — a fail-open escape (a
+    poisoned prompt does ``git mv`` a grader onto its declared target). Forcing
+    both reads to report a rename as separate ``D <source>`` + ``A <dest>``
+    keeps the protected ``D`` visible. The two flags MUST stay together on
+    :status: below — dropping ``--no-renames`` re-opens this exact hole via the
+    rename-source skip branch."""
     paths: set[str] = set()
     status = subprocess.run(
-        ["git", "status", "--porcelain", "-z", "--untracked-files=all"],
+        ["git", "status", "--porcelain", "--no-renames", "-z", "--untracked-files=all"],
         cwd=repo_root,
         capture_output=True,
         text=True,
@@ -191,12 +199,15 @@ def changed_paths(repo_root: Path, base_sha: str | None = None) -> list[str]:
         xy, path = entry[:2], entry[3:]  # "XY <path>"; path is raw (no quoting)
         if path:
             paths.add(path)
+        # Dead while --no-renames is set (no R/C entries), kept belt-and-
+        # suspenders: if that flag is ever dropped, this skip alone would hide
+        # the rename SOURCE (the protected path) again. Tied to the flag above.
         if "R" in xy or "C" in xy:
             i += 1  # rename/copy: the next NUL field is the source — skip it
         i += 1
     if base_sha:
         r = subprocess.run(
-            ["git", "diff", "--name-only", "-z", f"{base_sha}..HEAD"],
+            ["git", "diff", "--no-renames", "--name-only", "-z", f"{base_sha}..HEAD"],
             cwd=repo_root,
             capture_output=True,
             text=True,

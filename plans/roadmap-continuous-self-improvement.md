@@ -988,6 +988,34 @@ Feeds the VerificationPacket's optional UI fields.
 10. **Model/extension drift controls** — changed infrastructure cannot
     enter production without evaluation.
 
+## Near-term evidence-directed queue (2026-07-17)
+
+These are the concrete next work items the last build sessions surfaced —
+each traceable to a measured result, not speculation. Ordered by evidence
+strength. When one lands, its ledger row updates and it leaves this list.
+
+1. **Advisory (non-blocking) review mode** — *the strongest evidence.* The
+   reviewer-candidate search proved no fleet model passes recall≥0.75 ∧
+   fp≤0.25 (Qwen3 catches everything but false-positives 0.75; 7b is silent;
+   14b quiet but 0.25 recall; two-stage self-audit rejected). A blocking
+   reviewer that false-positives on correct fixes sends the loop into
+   healing spins (7× in live sweep 2). Fix: `PXX_REVIEW_MODE=advisory` —
+   findings are captured, attached to the run record, and surfaced, but do
+   NOT gate the verdict; the deterministic gates (tests, lint, scope,
+   regression) carry enforcement. `blocking` stays available for a
+   frontier reviewer. Small, high-value, unblocks trustworthy loop runs.
+2. **Cross-model skeptic** — the reviewer variant not yet tried: a
+   *different* family audits Qwen3's findings (14b or a frontier model as
+   the skeptic), since self-audit failed on confident hallucination. One
+   `pxx --calibrate`-shaped run per candidate against the 20-case suite.
+3. **Consume the VerificationPacket** — it is typed (Phase 12) but nothing
+   reads it yet. Wire it into the loop's terminal output and the promotion
+   comparison so APPROVE ships evidence, not just a verdict.
+4. **Grow the eval corpus toward Phase 13's ≥30 bar** — currently 16
+   (+ r6); mine future live failures as they occur (the corpus-growth
+   discipline is already proven: 8 calibration clean cases came straight
+   from sweep-2 FP transcripts).
+
 ## Revised phase sequence (all amendments)
 
 ```

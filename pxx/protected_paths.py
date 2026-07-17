@@ -39,6 +39,7 @@ PROTECTED_PREFIXES: tuple[str, ...] = (
     "pxx/promotion.py",
     "pxx/candidates.py",
     "pxx/candidate_eval.py",
+    "pxx/content_candidates.py",
     "pxx/improvement.py",
     "pxx/protected_paths.py",
     # Fixtures + hidden checks.
@@ -51,11 +52,16 @@ PROTECTED_PREFIXES: tuple[str, ...] = (
 )
 
 
-def _canonical(path: str) -> str | None:
+def canonical_repo_path(path: str) -> str | None:
     """Normalize to a repo-relative, forward-slash, casefolded path — or None
     if it cannot be safely classified (empty, absolute, or escaping the repo).
     None means the caller must fail closed: a boundary that can't classify an
-    input must treat it as protected, not wave it through."""
+    input must treat it as protected, not wave it through.
+
+    This is THE one path normalization in the system. ``is_protected_path``
+    and the content-candidate check both derive their path from it, so a
+    content candidate's validated path and written path cannot come from two
+    normalizations that disagree (review requirement #1)."""
     if not isinstance(path, str) or not path.strip():
         return None
     p = path.strip().replace("\\", "/")  # windows-style diff paths
@@ -96,7 +102,7 @@ def is_protected_path(path: str) -> bool:
 
     prefixes = [pre.casefold() for pre in PROTECTED_PREFIXES]
     for form in forms:
-        c = _canonical(form)
+        c = canonical_repo_path(form)
         if c is None:
             return True  # a form we can't classify → fail closed
         for pre in prefixes:

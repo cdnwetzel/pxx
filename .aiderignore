@@ -31,6 +31,7 @@ pxx/calibration.py
 pxx/promotion.py
 pxx/candidates.py
 pxx/candidate_eval.py
+pxx/content_candidates.py
 pxx/improvement.py
 pxx/protected_paths.py
 evals/

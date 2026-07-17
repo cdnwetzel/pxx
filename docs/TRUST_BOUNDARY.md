@@ -31,7 +31,7 @@ enforce the mirrors.**
 | `pxx/loop.py` | Round/diff/time budgets, progress + scope guards, fail-closed branches |
 | `pxx/evaluation.py`, `evals/` | The eval harness + fixtures/hidden checks — the grader |
 | `pxx/calibration.py`, `pxx/promotion.py` | Reviewer scoring + comparison policy — the judges |
-| `pxx/candidates.py`, `pxx/candidate_eval.py`, `pxx/improvement.py` | Candidate generation, evaluation, and mining — the optimizer must not edit itself |
+| `pxx/candidates.py`, `pxx/candidate_eval.py`, `pxx/content_candidates.py`, `pxx/improvement.py` | Candidate generation, evaluation, content-change-class, and mining — the optimizer must not edit itself |
 | `pxx/protected_paths.py` | The protected list itself — rewriting it defeats the boundary |
 | `tests/` for the above | A gate whose tests the optimizer can edit is not a gate |
 | Promotion configuration | (future) — thresholds, allowlists, risk classes |

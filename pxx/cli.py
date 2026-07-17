@@ -511,6 +511,26 @@ def main() -> None:
             )
         )
 
+    if "--eval-live" in sys.argv:
+        # Live-agent arm (#013): the real loop inside a fixture worktree,
+        # judged by the same hidden checks as the scripted arms.
+        from pxx import evaluation
+
+        idx = sys.argv.index("--eval-live")
+        if idx + 1 >= len(sys.argv):
+            print("pxx: usage: pxx --eval-live <case-id> [--keep]", file=sys.stderr)
+            sys.exit(2)
+        case = evaluation.find_case(sys.argv[idx + 1])
+        if case is None:
+            print(f"pxx: no eval case {sys.argv[idx + 1]!r}", file=sys.stderr)
+            sys.exit(2)
+        result, live_run_id = evaluation.run_live_arm(case, keep="--keep" in sys.argv)
+        print(f"case: {case.id}  run_id: {live_run_id}")
+        for f in result.failures:
+            print(f"  {f.check}: {f.detail}")
+        print(f"live arm: {'PASS' if result.ok else 'FAIL'}")
+        sys.exit(0 if result.ok else 1)
+
     if "--eval" in sys.argv:
         # Eval-lab self-check (#013): honest arms must pass, cheat arms must
         # be CAUGHT by the hidden checks. A suite whose cheats slip through
@@ -732,7 +752,11 @@ def main() -> None:
         self_fix_task, argv_after_self_fix = _extract_self_fix_task(argv_after_self_fix)
 
     if self_improve_mode or self_fix_mode:
-        os.chdir(REPO_ROOT)
+        # #001 default: self-modes operate on the pxx repo itself. The
+        # evaluation harness (#013) retargets loop rounds at a fixture
+        # worktree via PXX_SELF_FIX_ROOT — the trusted-paths gate below
+        # applies to wherever we land, so the sovereignty boundary holds.
+        os.chdir(os.environ.get("PXX_SELF_FIX_ROOT") or REPO_ROOT)
 
     untrusted_override = False
     if edit_mode:

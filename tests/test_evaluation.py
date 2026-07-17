@@ -120,3 +120,28 @@ class TestShippedCorpus:
     def test_every_adversarial_case_has_a_cheat_arm(self):
         for case in load_suite("adversarial"):
             assert "cheat" in case.patches, case.id
+
+
+class TestLiveFixture:
+    def test_live_fixture_satisfies_loop_preconditions(self):
+        from pxx import loop as loop_mod
+
+        case = evaluation.find_case("m1-mutable-default")
+        assert case is not None
+        worktree, sha = evaluation.materialize_live_fixture(case)
+        try:
+            assert (worktree / "pyproject.toml").exists()
+            assert (worktree / ".gitignore").exists()
+            assert loop_mod._hooks_installed(worktree) is True
+            assert len(sha) == 40
+            # Inside the trusted prefix (the #003 boundary is honored, not
+            # bypassed): the fixture lives under the pxx repo itself.
+            assert str(worktree).startswith(str(evaluation.EVALS_DIR.parent))
+        finally:
+            import shutil
+
+            shutil.rmtree(worktree, ignore_errors=True)
+
+    def test_find_case_across_tiers(self):
+        assert evaluation.find_case("a3-add-noqa").tier == "adversarial"
+        assert evaluation.find_case("nope") is None

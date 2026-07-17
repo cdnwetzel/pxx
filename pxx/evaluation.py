@@ -151,7 +151,13 @@ def run_checks(case: EvalCase, worktree: Path, fixture_sha: str) -> list[CheckFa
     failures: list[CheckFailure] = []
 
     for argv in case.commands:
-        cmd = [sys.executable if a == "python" else a for a in argv]
+        # Live-capable fixtures carry a pyproject: run checks inside the
+        # FIXTURE's own uv environment (same env the loop's gates use).
+        # Plain scripted fixtures fall back to this process's interpreter.
+        if (worktree / "pyproject.toml").exists():
+            cmd = ["uv", "run", "--quiet", *argv]
+        else:
+            cmd = [sys.executable if a == "python" else a for a in argv]
         try:
             r = subprocess.run(
                 cmd,
@@ -240,3 +246,129 @@ def self_check_suite(tier: str, evals_dir: Path | None = None) -> list[ArmResult
         for arm in sorted(case.patches):
             results.append(run_arm(case, arm))
     return results
+
+
+# --- Live-agent arm -------------------------------------------------------
+#
+# Runs the REAL pxx loop inside a fixture worktree instead of applying a
+# scripted patch. Fixtures live under <pxx-repo>/.pxx/eval/ — inside the
+# trusted-paths prefix — so the #003 sovereignty boundary is honored, never
+# bypassed (no --anywhere, no env overrides). .pxx/ is already gitignored.
+
+LIVE_MAX_ROUNDS = 2
+LIVE_MAX_SECONDS = 600.0
+LIVE_DIFF_BUDGET = 100
+
+_FIXTURE_PYPROJECT = """[project]
+name = "pxx-eval-fixture"
+version = "0.0.0"
+requires-python = ">=3.11"
+dependencies = []
+
+[dependency-groups]
+dev = ["pytest", "ruff"]
+"""
+
+_FIXTURE_GITIGNORE = """.venv/
+__pycache__/
+*.pyc
+uv.lock
+.aider*
+.pxx/
+review/
+"""
+
+# Minimal pxx-managed hooks: inside an eval fixture the loop's OWN gates
+# (tests, scoped lint, diff budget, out-of-scope guard) carry enforcement;
+# the hooks exist to satisfy _require_hooks and to keep commit mechanics
+# identical to a real session.
+_FIXTURE_HOOKS = {
+    "pre-commit": "#!/bin/sh\n# pxx-managed (eval-fixture minimal)\nexit 0\n",
+    "prepare-commit-msg": "#!/bin/sh\n# pxx-managed (eval-fixture minimal)\nexit 0\n",
+}
+
+
+def materialize_live_fixture(case: EvalCase) -> tuple[Path, str]:
+    """Fixture repo bootstrapped for a real loop: pyproject (pytest+ruff via
+    uv), .gitignore for runtime artifacts, and pxx-managed hooks."""
+    base = EVALS_DIR.parent / ".pxx" / "eval"
+    base.mkdir(parents=True, exist_ok=True)
+    worktree = Path(tempfile.mkdtemp(prefix=f"{case.id}-", dir=base))
+    for rel, content in case.fixture_files.items():
+        dest = worktree / rel
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(content, encoding="utf-8")
+    (worktree / "pyproject.toml").write_text(_FIXTURE_PYPROJECT, encoding="utf-8")
+    (worktree / ".gitignore").write_text(_FIXTURE_GITIGNORE, encoding="utf-8")
+    _git(worktree, "init", "-q")
+    hooks_dir = worktree / ".git" / "hooks"
+    for name, body in _FIXTURE_HOOKS.items():
+        hook = hooks_dir / name
+        hook.write_text(body, encoding="utf-8")
+        hook.chmod(0o755)
+    _git(worktree, "add", "-A")
+    _git(worktree, "commit", "-q", "--no-verify", "-m", "fixture")
+    sha = _git(worktree, "rev-parse", "HEAD").stdout.strip()
+    return worktree, sha
+
+
+def run_live_arm(
+    case: EvalCase,
+    keep: bool = False,
+    max_rounds: int = LIVE_MAX_ROUNDS,
+    max_seconds: float = LIVE_MAX_SECONDS,
+    diff_budget: int = LIVE_DIFF_BUDGET,
+) -> tuple[ArmResult, str]:
+    """One case against the real agent: pxx loop in the fixture, then the
+    SAME hidden checks the scripted arms use — an APPROVE that cheated is
+    still a failure here. Returns (result, run_id) so outcomes stay linked."""
+    from pxx import audit
+    from pxx import loop as loop_mod
+
+    worktree, sha = materialize_live_fixture(case)
+    scope = case.allowed_files[0] if case.allowed_files else "src/"
+    run_id = audit.make_session_id()
+    agent_version = None
+    try:  # identity is best-effort, never gates the run (#011)
+        from pxx import agent_manifest
+        from pxx.cli import model_for
+        from pxx.endpoints import detect_endpoint
+
+        endpoint = detect_endpoint()
+        agent_version = agent_manifest.agent_version_id(
+            agent_manifest.current_manifest(
+                editor_backend=endpoint.backend,
+                editor_model=model_for(endpoint),
+                max_rounds=max_rounds,
+                max_seconds=max_seconds,
+                diff_budget=diff_budget,
+            )
+        )
+    except Exception:
+        pass
+    try:
+        rc = loop_mod.run_loop(
+            worktree,
+            case.task,
+            scope,
+            max_rounds=max_rounds,
+            diff_budget=diff_budget,
+            max_seconds=max_seconds,
+            run_id=run_id,
+            agent_version=agent_version,
+        )
+        failures = list(run_checks(case, worktree, sha))
+        if rc != 0:
+            failures.insert(0, CheckFailure("loop", f"run_loop exited {rc}"))
+    finally:
+        if not keep:
+            shutil.rmtree(worktree, ignore_errors=True)
+    return ArmResult(case.id, "live", ok=not failures, failures=tuple(failures)), run_id
+
+
+def find_case(case_id: str, evals_dir: Path | None = None) -> EvalCase | None:
+    for tier in TIERS:
+        for case in load_suite(tier, evals_dir):
+            if case.id == case_id:
+                return case
+    return None

@@ -27,6 +27,7 @@ tagged commits.
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 import sys
@@ -179,8 +180,12 @@ def _run_edit_round(
         "--yes",
         "--no-stream",
     ]
+    # The child self-fix chdirs to the pxx repo by default (#001); tell it
+    # the loop's actual root so eval-fixture loops (#013) edit the fixture,
+    # not pxx. For pxx-repo loops this is the same directory as before.
+    env = os.environ | {"PXX_SELF_FIX_ROOT": str(root)}
     try:
-        r = subprocess.run(cmd, cwd=root, check=False, timeout=timeout)
+        r = subprocess.run(cmd, cwd=root, env=env, check=False, timeout=timeout)
     except subprocess.TimeoutExpired:
         return 124
     return r.returncode

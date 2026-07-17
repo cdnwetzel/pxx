@@ -20,17 +20,19 @@ class TestDetectInstallMethod:
         )
 
     def test_uv_tool_location(self):
-        loc = "/Users/x/.local/share/uv/tools/pxx-orchestrator/lib/python3.12/site-packages"
+        # Non-home roots: detection keys on the /uv/tools/ substring, and the
+        # shipped-content gate flags home-directory paths in tracked tests.
+        loc = "/opt/share/uv/tools/pxx-orchestrator/lib/python3.12/site-packages"
         assert (
             upgrade.detect_install_method(loc, editable=False) is InstallMethod.UV_TOOL
         )
 
     def test_pipx_location(self):
-        loc = "/Users/x/.local/pipx/venvs/pxx-orchestrator/lib/python3.12/site-packages"
+        loc = "/opt/pipx/venvs/pxx-orchestrator/lib/python3.12/site-packages"
         assert upgrade.detect_install_method(loc, editable=False) is InstallMethod.PIPX
 
     def test_plain_venv_falls_back_to_pip(self):
-        loc = "/Users/x/proj/.venv/lib/python3.12/site-packages"
+        loc = "/opt/proj/.venv/lib/python3.12/site-packages"
         assert upgrade.detect_install_method(loc, editable=False) is InstallMethod.PIP
 
 

@@ -2,9 +2,17 @@
 
 # pxx 1.3.1 — Install & Upgrade UX
 
-**Status:** planned
-**Type:** patch release (metadata + docs + one new CLI verb; **no change to the
-orchestration/edit behavior of 1.3.0**)
+**Status:** done — shipped in 1.3.1 (all workstreams A–F implemented; reviewer
+wheel-verification is the post-publish delivery gate)
+**Type:** patch release (metadata + docs + one new CLI verb + one safety-spine
+fix; **no change to the orchestration/edit behavior of 1.3.0**)
+
+**Reviewer-decision resolutions (2026-07-17, user-directed same-day ship):**
+(1) services publishing — **source-install only** for 1.3.1; docs corrected to
+match, PyPI publishing of 9router/agentmemory deferred. (2) verb spelling —
+**`--upgrade` primary, `--update` alias**. (3) ceiling — **hard `<3.13`**
+(mirrors aider-chat). Also folded in: the P5 rename-collapse safety fix from
+`.pxx/review/OPEN-content-rename-escape.md`.
 **Motivating incident (2026-07-17):** two faces of the same "too-new Python"
 gap. (1) A first-user `uv tool install pxx-orchestrator@latest` selected
 CPython **3.13**; pxx's own banner ran, then aider crashed at import —

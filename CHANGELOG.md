@@ -2,6 +2,46 @@
 
 All notable changes to pxx and its ecosystem across development phases.
 
+## [1.3.1] — 2026-07-17
+
+Install & upgrade UX, plus a safety-spine hardening. No change to orchestration
+behavior — this is a patch that makes a clean install work by default, tells the
+truth about how to install/upgrade, and closes one fail-open escape.
+
+### Fixed
+
+- **Install works on a default interpreter.** `requires-python` was capped
+  `>=3.11,<3.13`. Without the ceiling, `uv tool install` / `pip install`
+  auto-selected Python 3.13+, where aider crashes at import — PEP 594 removed
+  the `audioop` stdlib module that `aider-chat`'s `pydub` needs (on 3.14 it
+  surfaces earlier as a raw `ResolutionImpossible`). The bound tracks
+  `aider-chat`'s own `<3.13` and is revisited under the aider upgrade
+  discipline. Pinned by `tests/test_packaging.py`.
+- **content-candidate safety spine: rename-collapse escape closed.**
+  `changed_paths` now passes `--no-renames` to both git reads, so a
+  `git mv <protected-grader> <allowed-target>` can no longer collapse the
+  protected DELETION into its destination and slip past
+  `verify_only_touched_target` (a fail-open hole in the 1.3.0 spine). Regression
+  test fails before the flag, passes after.
+
+### Added
+
+- **`pxx --upgrade`** (alias `--update`) — self-updates the installed
+  distribution: detects `uv tool` / `pipx` / `pip`, reports current → latest
+  from PyPI, and refuses on an editable checkout (use `git pull` there).
+  Offline-safe. Pure-function tests, no network in the suite.
+
+### Docs
+
+- Install docs corrected: canonical name `pxx-orchestrator` (not `pxx`, an
+  unrelated project); no fictional `pxx[all|memory|router]` extras; optional
+  services (`agentmemory`, `9router`) are source-installed, not PyPI packages.
+- Python range stated as **3.11 or 3.12** with the `<3.13` rationale, plus a
+  troubleshooting entry mapping the too-new-Python symptoms to the fix.
+- An "Upgrading" section (per install method) in README and INSTALL.
+- Scrubbed fleet hostnames from `docs/INSTALL.md` and `docs/DEPLOY.md`
+  (placeholders only — public-repo privacy contract).
+
 ## [1.3.0] — 2026-07-17
 
 **Content change-class candidates.** The self-improvement system gains its

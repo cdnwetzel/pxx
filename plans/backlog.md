@@ -20,7 +20,7 @@ Statuses: `planned` | `in-progress` | `blocked` | `done`.
 | 010 | [2026-07-17 session: decisions, scrub, push, v1.1.0](session-2026-07-17-decisions-and-release.md) | done | — | — |
 | 011 | [Roadmap: continuous self-improvement (Phases 11–22)](roadmap-continuous-self-improvement.md) | in-progress | — | — |
 | 012 | Phase 0.5: Continuous verification (CI + package smoke) — tracked in roadmap 011 | planned | — | — |
-| 013 | [pxx 1.3.1 — Install & Upgrade UX](pxx-1.3.1-install-upgrade.md) | planned | — | — |
+| 013 | [pxx 1.3.1 — Install & Upgrade UX](pxx-1.3.1-install-upgrade.md) | done | — | — |
 
 Next free ID: **014**
 

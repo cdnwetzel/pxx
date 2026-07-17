@@ -2,6 +2,63 @@
 
 All notable changes to pxx and its ecosystem across development phases.
 
+## [1.2.0] — Unreleased
+
+**The measurement-and-evaluation foundation: pxx now attributes, scores, and
+mines its own runs — the base layer of the continuous-self-improvement
+roadmap (Phases 11–15, minimum slices).**
+
+### Added — ships in the package, works pip-installed
+
+- **Advisory review mode** (`PXX_REVIEW_MODE=advisory`): the local reviewer's
+  verdict is recorded and surfaced but never blocks a run whose deterministic
+  gates (tests, lint, scope, regression) are green — resolves the finding
+  that no local reviewer both catches defects and stays quiet, so a
+  false-positive reviewer could otherwise spin the heal loop. `blocking`
+  (default) is unchanged.
+- **Introduced-regression gate**: a loop round that fixes its target but
+  breaks a previously-passing test can no longer earn APPROVE; such a stop
+  terminates as `TEST_REGRESSION`.
+- **Behavior identity** (`pxx --manifest`): every run carries an
+  `AgentManifest` and a stable `agent_version_id` (versions, models, prompt
+  hashes, budgets, review mode) plus a `run_id` threaded through rounds,
+  child sessions, and capture. Model ids only — no endpoints or paths.
+- **Normalized outcomes + failure taxonomy** (`pxx --runs`): every loop exit
+  writes a machine-readable terminal record (19 canonical codes); outcomes
+  are projected from the audit stream, never parsed from messages.
+- **Verification packets** (`pxx --verify [run-id]`): APPROVE ships evidence
+  — baseline/result commits, the deterministic commands run, results, and
+  risks — not just a verdict.
+- **Experience mining** (`pxx --analyze`): deterministic weakness clustering
+  over the run stream (dominant failures, per-agent failure rate, regression
+  vs peers), every observation traceable to run ids.
+- **Promotion comparison policy** (`pxx --compare a.json b.json`): exact
+  case-by-case verdicts with a hard gate on adversarial-containment
+  regressions and an on-the-record human-override field.
+- **Public-content scanner in governance** (`pxx --check --all-files`,
+  `--shipped`): flags private IPs, internal hostnames, home paths, and
+  unprotected-service statements; the release workflow gates on the shipped
+  file set.
+
+### Added — repo-checkout only (like `--with-router`/`--with-memory`)
+
+- **Evaluation laboratory** (`pxx --eval`, `--eval-live`, `--calibrate`):
+  a 30-case corpus (micro/regression/adversarial) with hidden anti-cheat
+  checks, a live-agent arm that runs the real loop in disposable worktrees,
+  and a reviewer-calibration suite. These read `evals/` and `WORKFLOW.md`,
+  which ship only with a repo checkout — not in the pip package.
+
+### Changed
+
+- The review prompt is task-aware (v2): the requested change is marked
+  intentional, out-of-scope code is off-limits, and a finding must name a
+  concrete failing input — calibration-driven, cut the local reviewer's
+  false-positive rate materially.
+
+*Packaging note (unchanged): `config/` and `evals/` ship only with a repo
+checkout; the pip-installed CLI's editing/measurement surfaces work, while
+the eval/calibration harness is a checkout feature.*
+
 ## [1.1.0] — 2026-07-16
 
 **Closed-loop autonomy (`pxx --loop`), sovereign local review, and

@@ -2,7 +2,7 @@
 
 All notable changes to pxx and its ecosystem across development phases.
 
-## [1.1.0] — Unreleased
+## [1.1.0] — 2026-07-16
 
 **Closed-loop autonomy (`pxx --loop`), sovereign local review, and
 multi-endpoint vLLM chains.**

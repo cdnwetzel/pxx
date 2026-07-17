@@ -24,7 +24,7 @@ Production setup for pxx and optional services.
                     │
                     ▼
            ┌──────────────────┐
-           │ Ollama (Studio)  │
+           │ Ollama (server)  │
            │ (LLM inference)  │
            └──────────────────┘
 ```
@@ -36,8 +36,8 @@ All services on one machine. Default pxx behavior.
 ### Setup
 
 ```bash
-# 1. Install pxx with all optional services
-pip install pxx[all]
+# 1. Install pxx (core). Optional services are source-installed — see INSTALL.md
+pip install pxx-orchestrator
 
 # 2. Start Ollama (if not already running)
 ollama serve
@@ -68,13 +68,14 @@ pxx --edit --with-memory
 
 ## Two-Machine Deployment (LAN)
 
-**Studio (Ollama + agentmemory)** ← **Neo (pxx orchestrator)**
+**Inference host (Ollama + agentmemory)** ← **Orchestrator host (pxx)**
 
-### Studio Setup (workstation)
+### Inference host setup
 
 ```bash
-# 1. Install dependencies
-pip install agentmemory
+# 1. Install the agentmemory service from a repo checkout (not on PyPI)
+git clone https://github.com/cdnwetzel/pxx && cd pxx
+pip install -e services/agentmemory
 
 # 2. Start agentmemory service
 agentmemory server --port 3111 &
@@ -83,34 +84,34 @@ agentmemory server --port 3111 &
 curl http://127.0.0.1:3111/health
 ```
 
-### Neo Setup (8GB MacBook)
+### Orchestrator host setup
 
 ```bash
 # 1. Install pxx
-pip install pxx
+pip install pxx-orchestrator
 
-# 2. Configure Studio endpoint
+# 2. Configure the inference-host endpoint
 export PXX_STUDIO_LAN_URL=http://your-ollama-host:11434
 export AGENTMEMORY_URL=http://your-ollama-host:3111
 
-# 3. Run pxx with memory pointing to Studio
+# 3. Run pxx with memory pointing at the inference host
 pxx --edit --with-memory
 ```
 
 **What happens:**
-1. pxx detects Studio Ollama endpoint (LAN)
-2. pxx queries Studio's agentmemory service for observations
-3. aider runs on Neo, uses Studio's Ollama for inference
-4. Tool calls captured and sent back to Studio's agentmemory
+1. pxx detects the inference host's Ollama endpoint (LAN)
+2. pxx queries its agentmemory service for observations
+3. aider runs on the orchestrator host, using the inference host's Ollama
+4. Tool calls captured and sent back to the inference host's agentmemory
 
 ## VPN Deployment (Remote)
 
-**Studio (office)** ← **VPN** ← **Neo (remote)**
+**Inference host (LAN)** ← **VPN** ← **Orchestrator host (remote)**
 
-Same as two-machine, but use VPN hostname:
+Same as two-machine, but use the VPN hostname:
 
 ```bash
-# On Neo (remote, over VPN)
+# On the remote orchestrator host, over VPN
 export PXX_STUDIO_REMOTE_URL=https://workstation-vpn.example.com:11434
 export AGENTMEMORY_URL=https://workstation-vpn.example.com:3111
 
@@ -160,7 +161,9 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-RUN pip install agentmemory
+# agentmemory ships from this repo, not PyPI — copy the service in and install it
+COPY services/agentmemory /app/agentmemory
+RUN pip install /app/agentmemory
 
 EXPOSE 3111
 
@@ -254,7 +257,7 @@ agentmemory server --port 3112
 export AGENTMEMORY_URL=http://127.0.0.1:3112
 ```
 
-**Connection timeout to Studio:**
+**Connection timeout to the inference host:**
 ```bash
 # Check network connectivity
 ping your-ollama-host

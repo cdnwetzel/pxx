@@ -21,7 +21,7 @@ Before installing, you need:
 
 | Prerequisite | Why | Notes |
 |---|---|---|
-| **Python 3.11+** | runs pxx and aider | 3.12 is what's tested day-to-day |
+| **Python 3.11 or 3.12** | runs pxx and aider | 3.12 is tested day-to-day. **Not 3.13+** — the pinned `aider-chat` requires `<3.13` (its `pydub` needs the `audioop` module PEP 594 removed in 3.13). Installers auto-select a supported interpreter. |
 | **[Ollama](https://ollama.com)** installed and running | the LLM backend | `ollama serve`; local `localhost:11434` by default, or any reachable host via `PXX_OLLAMA_BASE` |
 | **At least one pulled model** | aider needs a model that exists | e.g. `ollama pull qwen2.5-coder:7b`, then `export PXX_MODEL=ollama_chat/qwen2.5-coder:7b` |
 | **git** (recommended) | auto-commits, safety tags, scoping | pxx works outside a git repo too (it passes `--no-git` to aider) |
@@ -152,6 +152,17 @@ uv sync --extra dev
 uv run pytest -q
 ```
 
+**Upgrading:** `pxx --upgrade` detects how pxx was installed and runs the right
+command (it refuses on an editable checkout — use `git pull` there). Or do it
+by hand:
+
+| Installed via | Upgrade |
+|---|---|
+| `uv tool install` | `uv tool upgrade pxx-orchestrator` |
+| `pipx` | `pipx upgrade pxx-orchestrator` |
+| `pip` (in a venv) | `pip install -U pxx-orchestrator` |
+| editable checkout | `git pull && uv sync --extra dev` |
+
 See [docs/INSTALL.md](https://github.com/cdnwetzel/pxx/blob/main/docs/INSTALL.md) for platform-specific notes and troubleshooting.
 
 ## Usage
@@ -239,9 +250,9 @@ See [docs/DEPLOY.md](https://github.com/cdnwetzel/pxx/blob/main/docs/DEPLOY.md) 
 
 ## System Requirements
 
-- **Python:** 3.11+
+- **Python:** 3.11 or 3.12 (not 3.13+ — `aider-chat` pins `<3.13`)
 - **Ollama:** Local or remote LLM endpoint
-- **Optional:** 9router, agentmemory services
+- **Optional:** 9router, agentmemory services (run from a repo checkout — not published on PyPI)
 
 ## Performance
 

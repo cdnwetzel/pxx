@@ -67,6 +67,16 @@ def _git(repo, *args):
     subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True)
 
 
+def _head(repo):
+    return subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+
+
 def _repo(tmp_path):
     _git(tmp_path, "init", "-q")
     _git(tmp_path, "config", "user.email", "t@t")
@@ -221,6 +231,37 @@ class TestP4PorcelainQuoting:
         c = _cc(target="pxx/prompts/café.md", content="x\n")
         applied = apply_content_candidate(repo, c)
         assert verify_only_touched_target(repo, c, applied.base_sha) == []
+
+
+class TestG1PositiveVerification:
+    """[G1] The required base_sha stops a DROPPED sha but not a WRONG one: a
+    rev-parse taken AFTER the auto-commit is a valid string with an empty diff,
+    which an all-negative check passes vacuously. verify must POSITIVELY require
+    the target to appear in the changed set."""
+
+    def test_post_commit_base_sha_on_committed_escape_is_not_vacuous(self, tmp_path):
+        repo = _repo(tmp_path)
+        apply_content_candidate(repo, _cc(content="new\n"))
+        (repo / "pxx" / "review_gate.py").write_text("# TAMPERED\n")
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-q", "-m", "loop round", "--no-verify")
+        wrong = _head(repo)  # rev-parse AFTER the auto-commit → empty base..HEAD
+        violations = verify_only_touched_target(repo, _cc(), wrong)
+        assert violations != []  # fails closed, not a vacuous clean pass
+
+    def test_correct_base_sha_committed_legit_write_still_clean(self, tmp_path):
+        repo = _repo(tmp_path)
+        applied = apply_content_candidate(repo, _cc(content="new\n"))
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-q", "-m", "loop round", "--no-verify")
+        assert verify_only_touched_target(repo, _cc(), applied.base_sha) == []
+
+    def test_noop_write_target_unchanged_is_a_violation(self, tmp_path):
+        repo = _repo(tmp_path)
+        # content identical to the fixture's system.md → git shows no change
+        applied = apply_content_candidate(repo, _cc(content="old prompt\n"))
+        violations = verify_only_touched_target(repo, _cc(), applied.base_sha)
+        assert any("expected target" in v for v in violations)
 
 
 class TestRequirementOneEquivalence:

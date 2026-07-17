@@ -218,10 +218,19 @@ def verify_only_touched_target(
     ``base_sha`` is REQUIRED (no default): the live sweep auto-commits, so a
     tree-only check would see a committed escape as clean → a vacuous pass.
     Pass ``AppliedContent.base_sha`` from the matching apply so the pre-write
-    HEAD and the verify can't be mismatched."""
+    HEAD and the verify can't be mismatched.
+
+    The required arg stops a DROPPED sha, not a WRONG one — a ``git rev-parse``
+    taken AFTER the auto-commit is a valid string whose ``base..HEAD`` diff is
+    empty, and an all-negative check passes an empty set vacuously. So this also
+    verifies POSITIVELY (G1): the declared target must APPEAR in the changed
+    set. An empty or target-absent set is a violation ("nothing to evaluate"),
+    not a clean pass — closing the vacuous class regardless of how ``base_sha``
+    was derived."""
     violations: list[str] = []
     canonical = _canonical_target(c.target)
     cf_target = canonical.casefold() if canonical is not None else None
+    target_seen = False
     for path in changed_paths(repo_root, base_sha):
         if is_protected_path(path):
             violations.append(f"touched protected path: {path}")
@@ -229,6 +238,12 @@ def verify_only_touched_target(
         cp = canonical_repo_path(path)
         # canonical is case-preserving; fold both sides symmetrically for the
         # boundary decision (same policy is_protected_path uses).
-        if cp is None or cf_target is None or cp.casefold() != cf_target:
+        if cp is not None and cf_target is not None and cp.casefold() == cf_target:
+            target_seen = True
+        else:
             violations.append(f"touched unexpected path (not the target): {path}")
+    if not target_seen:
+        violations.append(
+            f"expected target not in changed set (nothing to evaluate): {c.target}"
+        )
     return violations

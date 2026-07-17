@@ -666,6 +666,52 @@ def main() -> None:
             )
         sys.exit(0)
 
+    if "--propose" in sys.argv:
+        # Candidate proposal (#016): declarative delta on an ALLOWLISTED
+        # behavior field, integrity-validated, persisted, NEVER auto-applied.
+        # usage: pxx --propose <field> <value> --because <observation-id>
+        from pxx import candidates
+
+        idx = sys.argv.index("--propose")
+        rest = sys.argv[idx + 1 :]
+        if len(rest) < 2:
+            print(
+                "pxx: usage: pxx --propose <field> <value> "
+                "[--because <obs>] [--baseline <val>] [--why <text>]",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+        field, value = rest[0], rest[1]
+
+        def _opt(flag: str, default: str) -> str:
+            return sys.argv[sys.argv.index(flag) + 1] if flag in sys.argv else default
+
+        cand = candidates.Candidate(
+            candidate_id=f"cand-{audit.make_session_id()}",
+            field=field,
+            value=value,
+            baseline_value=_opt("--baseline", None) or None,
+            rationale=_opt("--why", "(none given)"),
+            from_observation=_opt("--because", ""),
+        )
+        result = candidates.validate_candidate(cand)
+        if not result.ok:
+            print("pxx propose: REJECTED (fail closed)", file=sys.stderr)
+            for r in result.reasons:
+                print(f"  - {r}", file=sys.stderr)
+            sys.exit(1)
+        root = _git_repo_root() or Path.cwd()
+        d = candidates.save_candidate(root, cand)
+        print(f"pxx propose: candidate {cand.candidate_id} VALIDATED")
+        print(
+            f"  {cand.field} = {cand.value}  (overlay: {candidates.env_overlay(cand)})"
+        )
+        print(f"  saved: {d}")
+        print(
+            "  next: evaluate baseline vs candidate, then pxx --compare (human-gated)"
+        )
+        sys.exit(0)
+
     if "--verify" in sys.argv:
         # VerificationPacket for one run (#012 consumption): the evidence a
         # reviewer reads instead of trusting a claim of completion. With no

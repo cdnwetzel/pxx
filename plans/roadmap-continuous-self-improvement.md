@@ -1065,6 +1065,8 @@ strength. When one lands, its ledger row updates and it leaves this list.
    risks. `outcomes.outcome_for_run` + `format_packet` are the seams.
    Proven live end-to-end. Still open: attach packets to the promotion
    comparison as the per-arm evidence unit.
+5. **Single-source the protected-path list** (review round 4, structural): `candidates.PROTECTED_PREFIXES`, `.aiderignore`, and `docs/TRUST_BOUNDARY.md` are three independent expressions of the same set; a test pins the first two but the doc drifts by hand. Derive `.aiderignore`'s protected block and the doc's table from the one canonical list. Not a defect (no live divergence found); do before the protected set grows.
+
 4. **Grow the eval corpus — DONE (2026-07-17): 16 → 30, the Phase 13 bar.**
    Now 10 micro + 10 regression + 10 adversarial, all self-checking in CI.
    New failure modes covered: recursion base case, dict-mutation-in-iteration,
@@ -1190,6 +1192,23 @@ corpus_fingerprint`: content hash + count) and `compare()` refuses mismatches
 — a missing fingerprint differs from a present one, so pre-fingerprint
 baselines are correctly refused ("re-score"). Same class as rounds 1–2: a
 gate reporting a confident verdict on an input it didn't validate.
+
+**Round 4 (2026-07-17, fourth pass).** One novel gate, same signature,
+fixed: (8) the tighten-only budget guard ran its monotonicity check only
+`if c.baseline_value is not None`, so a hand-edited candidate that nulled
+`baseline_value` skipped it entirely and ran the candidate arm with a
+LOOSENED budget — inflating the very eval number the loop exists to produce
+(`load_candidate` reads the field straight from JSON, so this is in the
+"a persisted candidate could be hand-edited" threat model the function's own
+docstring claims). Now a MONOTONE_BUDGETS field with a missing or
+non-integer baseline REJECTS (fail closed) rather than skips. Moderate
+severity — candidates never auto-apply, so the blast radius is a distorted
+signal a human still reads, not a production change. **Eight pass-on-silence
+gates found and closed across four review passes; each bites only once a
+human stops reading the reasons.** Structural follow-up (not a defect, filed
+below): PROTECTED_PREFIXES / .aiderignore / TRUST_BOUNDARY.md are three
+hand-synced expressions of the protected set — a test pins the first two,
+the doc is prose; single-source them before the set grows further.
 
 The shape of the remaining ~73%: it is now genuinely *construction-heavy*,
 not projection. The cheap schema-and-projection layers (A, most of the

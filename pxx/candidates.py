@@ -115,12 +115,23 @@ def validate_candidate(c: Candidate) -> ValidationResult:
         )
         return ValidationResult(ok=False, reasons=tuple(reasons))
 
-    # Budget monotonicity: tighten-only.
-    if c.field in MONOTONE_BUDGETS and c.baseline_value is not None:
-        new, base = _as_int(c.value), _as_int(c.baseline_value)
+    # Budget monotonicity: tighten-only, and fail CLOSED when it can't be
+    # verified. The check cannot run without a numeric baseline, so a missing
+    # or non-integer baseline_value must REJECT — not skip. Otherwise a
+    # hand-edited candidate that nulls baseline_value (load_candidate reads it
+    # straight from JSON) sidesteps the tighten-only rule entirely and runs
+    # the candidate arm with a loosened budget, inflating the eval signal.
+    if c.field in MONOTONE_BUDGETS:
+        new = _as_int(c.value)
+        base = _as_int(c.baseline_value) if c.baseline_value is not None else None
         if new is None:
             reasons.append(f"{c.field} value {c.value!r} is not an integer")
-        elif base is not None and new > base:
+        elif base is None:
+            reasons.append(
+                f"{c.field} is a tighten-only budget — a numeric baseline_value "
+                "is required to prove it is not a loosening (fail closed)"
+            )
+        elif new > base:
             reasons.append(
                 f"{c.field} may only be lowered ({base} → {new} is a loosening; "
                 "budget increases are a human decision)"

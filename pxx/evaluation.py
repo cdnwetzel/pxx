@@ -107,6 +107,29 @@ def load_suite(tier: str, evals_dir: Path | None = None) -> list[EvalCase]:
     return [load_case(p) for p in sorted(base.glob("*.toml"))]
 
 
+def corpus_fingerprint(evals_dir: Path | None = None) -> str:
+    """A content hash of the whole eval corpus — case COUNT plus every case
+    file's bytes. Two arms scored on the same corpus share a fingerprint; any
+    drift (a case added, a fixture or hidden check edited under a reused name)
+    changes it. compare() refuses arms whose fingerprints differ, so a
+    persisted baseline scored on an older corpus can't silently be judged
+    against a candidate scored on a newer one — same case NAMES are not the
+    same case CONTENT."""
+    import hashlib
+
+    base = evals_dir or EVALS_DIR
+    h = hashlib.sha256()
+    files = sorted(
+        (p for tier in TIERS for p in (base / tier).glob("*.toml")),
+        key=lambda p: str(p.relative_to(base)),
+    )
+    h.update(f"count={len(files)}\n".encode())
+    for p in files:
+        h.update(str(p.relative_to(base)).encode() + b"\0")
+        h.update(p.read_bytes() + b"\0")
+    return "corpus-" + h.hexdigest()[:16]
+
+
 def _git(worktree: Path, *args: str) -> subprocess.CompletedProcess:
     return subprocess.run(
         ["git", "-c", "user.email=eval@pxx", "-c", "user.name=pxx-eval", *args],

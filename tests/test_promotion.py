@@ -117,3 +117,67 @@ class TestPromotionRecord:
         rec = promotion_record(BASE, cand, d)
         assert rec["promoted"] is d.eligible
         assert rec["human_override"] is None
+
+
+class TestHardGateIsAbsolute:
+    """human_override cannot rescue an adversarial-containment regression —
+    the 'no trade-offs' claim must have force (reviewer finding, 2026-07-17)."""
+
+    def test_override_cannot_promote_a_hard_gate_failure(self):
+        # baseline passes a1 (adversarial), candidate regresses it.
+        base = _card("b", [("a1", "adversarial", True), ("m1", "micro", True)])
+        cand = _card("c", [("a1", "adversarial", False), ("m1", "micro", True)])
+        d = compare(base, cand)
+        assert d.hard_gate_failures == ("a1",)
+        rec = promotion_record(base, cand, d, human_override="looks fine to me")
+        assert rec["promoted"] is False
+        assert rec["override_refused_hard_gate"] is True
+
+    def test_override_still_rescues_ordinary_ineligibility(self):
+        # A lost MICRO case (no hard gate) is overridable, on the record.
+        base = _card("b", [("m1", "micro", True), ("m2", "micro", True)])
+        cand = _card("c", [("m1", "micro", True), ("m2", "micro", False)])
+        d = compare(base, cand)
+        assert not d.hard_gate_failures and d.lost == ("m2",)
+        rec = promotion_record(base, cand, d, human_override="m2 is a known-flaky case")
+        assert rec["promoted"] is True
+        assert rec["override_refused_hard_gate"] is False
+
+
+class TestCorpusFingerprint:
+    """compare() must refuse arms scored on different corpus CONTENT, not just
+    accept matching case names (reviewer finding, 2026-07-17)."""
+
+    def _fp_card(self, fp, rows):
+        c = _card("x", rows)
+        c["corpus_fingerprint"] = fp
+        return c
+
+    def test_matching_fingerprints_compare(self):
+        base = self._fp_card("corpus-abc", [("m1", "micro", True)])
+        cand = self._fp_card("corpus-abc", [("m1", "micro", False)])
+        # names match, fingerprints match -> proceeds to case comparison
+        d = compare(base, cand)
+        assert "fingerprint mismatch" not in " ".join(d.reasons)
+
+    def test_differing_fingerprints_refused(self):
+        base = self._fp_card("corpus-OLD", [("m1", "micro", True)])
+        cand = self._fp_card("corpus-NEW", [("m1", "micro", True)])
+        d = compare(base, cand)
+        assert not d.eligible
+        assert any("fingerprint mismatch" in r for r in d.reasons)
+
+    def test_missing_fingerprint_on_one_arm_refused(self):
+        # The exact reuse hazard: an un-fingerprinted persisted baseline vs a
+        # fingerprinted fresh candidate.
+        base = _card("x", [("m1", "micro", True)])  # no fingerprint (legacy)
+        cand = self._fp_card("corpus-new", [("m1", "micro", True)])
+        d = compare(base, cand)
+        assert not d.eligible
+        assert any("fingerprint mismatch" in r for r in d.reasons)
+
+    def test_both_missing_stays_backward_compatible(self):
+        base = _card("x", [("m1", "micro", False)])
+        cand = _card("x", [("m1", "micro", True)])
+        d = compare(base, cand)  # both None == None -> allowed
+        assert "fingerprint mismatch" not in " ".join(d.reasons)

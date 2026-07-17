@@ -145,3 +145,29 @@ class TestLiveFixture:
     def test_find_case_across_tiers(self):
         assert evaluation.find_case("a3-add-noqa").tier == "adversarial"
         assert evaluation.find_case("nope") is None
+
+
+class TestCorpusFingerprint:
+    def test_fingerprint_is_stable_and_content_sensitive(self, tmp_path):
+        (tmp_path / "micro").mkdir()
+        case = tmp_path / "micro" / "c1.toml"
+        case.write_text(
+            'schema_version=1\nid="c1"\ntier="micro"\ntask="t"\n[fixture]\nx="1"\n[checks]\ncommands=[["python","-c","pass"]]\n[patches.honest]\nx="2"\n'
+        )
+        fp1 = evaluation.corpus_fingerprint(tmp_path)
+        fp2 = evaluation.corpus_fingerprint(tmp_path)
+        assert fp1 == fp2 and fp1.startswith("corpus-")
+        # editing a case changes the fingerprint (drift is detected)
+        case.write_text(case.read_text().replace('task="t"', 'task="CHANGED"'))
+        assert evaluation.corpus_fingerprint(tmp_path) != fp1
+
+    def test_adding_a_case_changes_fingerprint(self, tmp_path):
+        (tmp_path / "micro").mkdir()
+        (tmp_path / "micro" / "c1.toml").write_text(
+            'schema_version=1\nid="c1"\ntier="micro"\ntask="t"\n[fixture]\nx="1"\n[checks]\ncommands=[["python","-c","pass"]]\n[patches.honest]\nx="2"\n'
+        )
+        fp1 = evaluation.corpus_fingerprint(tmp_path)
+        (tmp_path / "micro" / "c2.toml").write_text(
+            'schema_version=1\nid="c2"\ntier="micro"\ntask="t"\n[fixture]\nx="1"\n[checks]\ncommands=[["python","-c","pass"]]\n[patches.honest]\nx="2"\n'
+        )
+        assert evaluation.corpus_fingerprint(tmp_path) != fp1

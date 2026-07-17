@@ -25,15 +25,24 @@ ArmRunner = Callable[[evaluation.EvalCase, dict[str, str]], bool]
 
 
 def _scorecard(
-    agent_id: str, cases: list[evaluation.EvalCase], runner: ArmRunner, overlay: dict
+    agent_id: str,
+    cases: list[evaluation.EvalCase],
+    runner: ArmRunner,
+    overlay: dict,
+    corpus_fingerprint: str,
 ) -> dict:
     """Run every case through one arm and shape the result for
-    promotion.compare (which keys on case/tier/ok)."""
+    promotion.compare (which keys on case/tier/ok). Stamped with the corpus
+    fingerprint so compare() can refuse arms scored on a drifted corpus."""
     rows = []
     for case in cases:
         ok = runner(case, overlay)
         rows.append({"case": case.id, "tier": case.tier, "ok": ok})
-    return {"agent_version_id": agent_id, "cases": rows}
+    return {
+        "agent_version_id": agent_id,
+        "corpus_fingerprint": corpus_fingerprint,
+        "cases": rows,
+    }
 
 
 def evaluate_candidate(
@@ -66,12 +75,14 @@ def evaluate_candidate(
             "promoted": False,
         }
 
-    baseline = _scorecard("baseline", cases, runner, {})
+    fp = evaluation.corpus_fingerprint(evals_dir)
+    baseline = _scorecard("baseline", cases, runner, {}, fp)
     candidate_card = _scorecard(
         f"candidate:{cand.field}={cand.value}",
         cases,
         runner,
         candidates.env_overlay(cand),
+        fp,
     )
     decision = promotion.compare(baseline, candidate_card)
     record = promotion.promotion_record(baseline, candidate_card, decision)

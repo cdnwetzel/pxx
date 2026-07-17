@@ -57,7 +57,29 @@ def load_scorecard(path: Path) -> dict:
 
 
 def compare(baseline: dict, candidate: dict) -> PromotionDecision:
-    """Exact case-by-case verdict. Fails closed on mismatched corpora."""
+    """Exact case-by-case verdict. Fails closed on mismatched corpora.
+
+    Comparability is checked by CONTENT, not just case names: the two arms
+    must carry the same corpus fingerprint. Same names are not the same cases
+    — a persisted baseline scored on the 15-case corpus vs a candidate scored
+    on 30, where a shared case's fixture or hidden checks changed underneath,
+    would otherwise get an authoritative verdict on two arms that never ran
+    the same test. A missing fingerprint (a pre-fingerprint baseline) differs
+    from a present one, so it's correctly refused — re-score it.
+    """
+    base_fp = baseline.get("corpus_fingerprint")
+    cand_fp = candidate.get("corpus_fingerprint")
+    if base_fp != cand_fp:
+        return PromotionDecision(
+            eligible=False,
+            reasons=(
+                f"corpus fingerprint mismatch — arms scored on different corpora "
+                f"(baseline={base_fp}, candidate={cand_fp}); re-score the baseline",
+            ),
+            gained=(),
+            lost=(),
+        )
+
     base = _cases(baseline)
     cand = _cases(candidate)
     if set(base) != set(cand):
@@ -114,7 +136,20 @@ def promotion_record(
 ) -> dict:
     """The auditable artifact (roadmap 17.5). ``human_override`` is the
     on-the-record reason a human promoted despite an ineligible verdict —
-    never a way to silence the policy's stated reasons."""
+    never a way to silence the policy's stated reasons.
+
+    HARD GATE is absolute (roadmap invariant, "no trade-offs"): a candidate
+    with adversarial-containment regressions is NOT promotable, and
+    ``human_override`` cannot rescue it — otherwise overriding a security
+    regression takes the same one string as overriding a lost micro-case,
+    and the "no trade-offs" claim is fiction. Override rescues ordinary
+    ineligibility only (a lost non-adversarial case, no gain); a hard-gate
+    failure needs a code-level change to this policy or a separate,
+    materially harder path, not a free-text note.
+    """
+    hard_failed = bool(decision.hard_gate_failures)
+    override_applies = human_override is not None and not hard_failed
+    override_refused = human_override is not None and hard_failed
     return {
         "baseline_agent": baseline.get("agent_version_id"),
         "candidate_agent": candidate.get("agent_version_id"),
@@ -124,5 +159,6 @@ def promotion_record(
         "lost": list(decision.lost),
         "hard_gate_failures": list(decision.hard_gate_failures),
         "human_override": human_override,
-        "promoted": decision.eligible or human_override is not None,
+        "override_refused_hard_gate": override_refused,
+        "promoted": decision.eligible or override_applies,
     }

@@ -62,8 +62,16 @@ def scan_staged_secrets(repo_root: Path) -> list[GovernanceViolation]:
             timeout=5,
         )
         staged_files = result.stdout.strip().splitlines()
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        return violations
+    except (FileNotFoundError, subprocess.TimeoutExpired) as e:
+        # "Couldn't run the scanner" is NOT "no secrets" — a release/commit
+        # gate that can't scan must fail closed, not wave the commit through.
+        return [
+            GovernanceViolation(
+                check="secrets",
+                severity="error",
+                detail=f"secret scan could not run (git unavailable/timeout): {e}",
+            )
+        ]
 
     for filepath in staged_files:
         if not filepath:
@@ -267,8 +275,16 @@ def scan_public_content(
             check=False,
             timeout=10,
         )
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        return violations
+    except (FileNotFoundError, subprocess.TimeoutExpired) as e:
+        # Fail closed: a content scan that couldn't list files must block the
+        # release, not report a clean tree (the gate's whole purpose).
+        return [
+            GovernanceViolation(
+                check="public-content",
+                severity="error",
+                detail=f"content scan could not run (git unavailable/timeout): {e}",
+            )
+        ]
 
     for filepath in result.stdout.strip().splitlines():
         if not filepath:

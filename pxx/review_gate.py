@@ -112,6 +112,11 @@ EXACTLY this single line and nothing else:
 # Review pass: no findings.
 """
 
+# The exact clean-bill line — the ONLY non-finding output that counts as a
+# reviewed pass. Anything else (prose, apologies, refusals) is non-compliant
+# and fails closed. Mirrors calibration._NO_FINDINGS_LINE.
+NO_FINDINGS_LINE = "# Review pass: no findings."
+
 _TASK_CONTEXT_TEMPLATE = """
 The diff was written to satisfy this request; the requested change itself is
 INTENTIONAL and must not be reported as a defect or breaking change:
@@ -262,7 +267,8 @@ def _run_local_review(
         print(f"pxx: local review failed ({url}): {e}", file=sys.stderr)
         return 1
 
-    if not content.strip():
+    stripped = content.strip()
+    if not stripped:
         # An empty response is absent evidence, not a clean bill — writing the
         # "no findings" line here would turn reviewer failure into APPROVE.
         print(
@@ -271,8 +277,23 @@ def _run_local_review(
         )
         return 1
 
+    # Output-contract compliance: a clean bill is ONLY the exact no-findings
+    # line or ≥1 parseable F-NNN finding. Prose like "The code looks correct."
+    # parses to zero findings and would otherwise read as APPROVE — a
+    # fail-open the blocking-mode 7B default (recall ~0) hits routinely. A
+    # reviewer that didn't follow the contract has produced no usable verdict;
+    # fail closed. (Same check as calibration.judge_response, now in prod.)
+    if stripped != NO_FINDINGS_LINE and not parse_findings(content):
+        print(
+            f"pxx: local review output is non-compliant (neither the "
+            f"no-findings line nor an F-NNN finding) — failing closed:\n"
+            f"    {stripped[:120]!r}",
+            file=sys.stderr,
+        )
+        return 1
+
     out_dir.mkdir(parents=True, exist_ok=True)
-    out_file.write_text(content.strip() + "\n", encoding="utf-8")
+    out_file.write_text(stripped + "\n", encoding="utf-8")
     return 0
 
 

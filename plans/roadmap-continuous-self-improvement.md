@@ -1149,6 +1149,28 @@ errored/malformed input — Phase 21 (auto-promotion) must not rely on any gate
 lacking that proof.** The percentages above are unchanged, but read them
 knowing effort-weighting rewards built surface, not fail-closed rigor.
 
+**Round 2 (2026-07-17, second review pass — all verified in the published
+1.2.0 wheel).** The reviewer downloaded the artifact and confirmed the two
+headline fixes work in shipped code (`-rfE` catches ERRORs; `--eval` exits 2
+on an empty corpus), then named two remaining fail-open gates — both now
+FIXED: (4) the review oracle accepted PROSE as a clean bill — a reviewer
+reply like "The code looks correct." parsed to zero findings → APPROVE,
+which the shipped blocking-mode 7B default (recall ~0) hits routinely.
+`_run_local_review` now applies the output-contract compliance check that
+only `calibration.judge_response` had: non-compliant output (neither the
+exact no-findings line nor a parseable F-NNN) fails closed. (5) the
+governance scanner returned an EMPTY violation list on git error — "couldn't
+scan" read as "clean," so a release gate that can't run git would pass; both
+scanner sites now return an error-severity violation and fail closed. Plus
+CI itself (Tier A) caught a real portability bug on its FIRST run — the
+installed hook's shebang was on line 2 (marker prepended above it), so git
+ran it under dash on Ubuntu where `set -o pipefail` is illegal; fixed +
+regression-tested. **The axis is working: of the fail-open gates named
+across two review passes, all are now fail-closed with tests, verified in a
+published artifact within hours.** Still to verify (queued): `pxx --calibrate`
+and `pxx --eval-live` are the other repo-only surfaces — confirm they fail
+closed on an install the way `--eval` now does, not silently green.
+
 The shape of the remaining ~73%: it is now genuinely *construction-heavy*,
 not projection. The cheap schema-and-projection layers (A, most of the
 measurement foundation) are spent. What's left is real building —

@@ -94,7 +94,10 @@ class TestScanStagedSecrets:
         # Should be empty or only have non-secret violations
         assert all(v.check != "secrets" for v in violations)
 
-    def test_handles_git_failure_gracefully(self, tmp_path, monkeypatch):
+    def test_git_failure_fails_closed(self, tmp_path, monkeypatch):
+        # "Couldn't run the scanner" must NOT read as "no secrets" — a gate
+        # that can't scan blocks, it doesn't wave the commit through
+        # (reviewer finding, 2026-07-17).
         monkeypatch.chdir(tmp_path)
 
         def mock_run(*args, **kwargs):
@@ -103,7 +106,9 @@ class TestScanStagedSecrets:
         monkeypatch.setattr("pxx.governance.subprocess.run", mock_run)
 
         violations = scan_staged_secrets(tmp_path)
-        assert violations == []
+        assert len(violations) == 1
+        assert violations[0].severity == "error"
+        assert "could not run" in violations[0].detail
 
     def test_index_worktree_boundary_catches_staged_secret_modified_after(
         self, tmp_path, monkeypatch
@@ -592,3 +597,17 @@ class TestShippedContentScan:
             "README.md",
             "pyproject.toml",
         }
+
+
+class TestContentScanFailsClosed:
+    def test_git_failure_blocks_content_scan(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "nowhere"))
+
+        def boom(*a, **k):
+            raise FileNotFoundError("git gone")
+
+        monkeypatch.setattr("pxx.governance.subprocess.run", boom)
+        violations = scan_public_content(tmp_path, full_tree=True)
+        assert len(violations) == 1
+        assert violations[0].severity == "error"
+        assert "could not run" in violations[0].detail

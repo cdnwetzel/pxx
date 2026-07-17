@@ -476,3 +476,35 @@ class TestHealingPromptOrdering:
         prompt = build_healing_prompt(findings)
         positions = [prompt.index(fid) for fid in ("F-003", "F-001", "F-002")]
         assert positions == sorted(positions)
+
+
+class TestReviewOutputCompliance:
+    """Prose that isn't the contract is not a clean bill (reviewer finding,
+    2026-07-17): the blocking-mode default reviewer replying 'looks correct'
+    parsed to zero findings -> APPROVE. Fail closed on non-compliant output."""
+
+    def _run(self, tmp_path, monkeypatch, content):
+        monkeypatch.setenv("PXX_REVIEW_BACKEND", "local")
+        monkeypatch.setattr("pxx.review_gate._git_diff", lambda *a: "diff\n+x")
+        monkeypatch.setattr("pxx.review_gate._post_chat", lambda *a, **k: content)
+        return run_review_pass(tmp_path)
+
+    def test_prose_without_contract_fails_closed(self, tmp_path, monkeypatch):
+        assert self._run(tmp_path, monkeypatch, "The code looks correct.") == 1
+        assert not (tmp_path / "review" / "claude" / "claude-findings.md").exists()
+
+    def test_exact_no_findings_line_passes(self, tmp_path, monkeypatch):
+        assert self._run(tmp_path, monkeypatch, "# Review pass: no findings.") == 0
+
+    def test_real_finding_passes(self, tmp_path, monkeypatch):
+        rc = self._run(
+            tmp_path,
+            monkeypatch,
+            "### F-001 — bug in a.py:3 (P1, state: open)",
+        )
+        assert rc == 0
+
+    def test_finding_with_surrounding_prose_still_passes(self, tmp_path, monkeypatch):
+        # A parseable F-NNN anywhere is compliant even with chatter around it.
+        content = "Here is my review:\n### F-002 — off-by-one in b.py:9 (P1, state: open)\nHTH"
+        assert self._run(tmp_path, monkeypatch, content) == 0

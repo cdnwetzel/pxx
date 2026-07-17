@@ -374,7 +374,14 @@ def _out_of_scope_changes(root: Path, start_sha: str, scope: str) -> list[str]:
 
 
 def _capture_loop_summary(
-    root: Path, start_sha: str, scope: str, task: str, verdict: str, rounds: int
+    root: Path,
+    start_sha: str,
+    scope: str,
+    task: str,
+    verdict: str,
+    rounds: int,
+    run_id: str | None = None,
+    agent_version: str | None = None,
 ) -> None:
     """Cross-session capture on a terminal review verdict (9.4). Best-effort:
     agentmemory being down degrades to a no-op; never affects the exit code.
@@ -395,6 +402,8 @@ def _capture_loop_summary(
                         "type": "loop_summary",
                         "verdict": verdict,
                         "rounds": rounds,
+                        "run_id": run_id,
+                        "agent_version_id": agent_version,
                     },
                 }
             ],
@@ -411,13 +420,21 @@ def run_loop(
     max_rounds: int = DEFAULT_MAX_ROUNDS,
     diff_budget: int = DEFAULT_DIFF_BUDGET_LINES,
     max_seconds: float = DEFAULT_MAX_SECONDS,
+    run_id: str | None = None,
+    agent_version: str | None = None,
 ) -> int:
     """Drive bounded edit→test→review rounds to a terminal verdict.
 
     Returns 0 only on APPROVE; 1 on every guard stop, REJECT, or no-review
     outcome (fail closed). Never pushes.
+
+    ``run_id``/``agent_version`` (#011): one id links the loop session, every
+    round record, child sessions, and the cross-session capture; callers that
+    omit them get a generated run_id and no version claim.
     """
     started = time.monotonic()
+    if run_id is None:
+        run_id = audit.make_session_id()
     if not _require_hooks(root):
         return 1
     preflight_err = review_gate.preflight_review_backend()
@@ -433,6 +450,8 @@ def run_loop(
     _say(f"baseline: {len(baseline)} failing test(s); cap={max_rounds} rounds.")
 
     state = workflow.load_state(root) or workflow.WorkflowState()
+    state.run_id = run_id
+    state.agent_version_id = agent_version
     prev_baseline_failing = baseline
     prev_healable: int | None = None
     message = task
@@ -463,6 +482,8 @@ def run_loop(
                         "round": round_no,
                         "verdict": "EDIT_FAILED",
                         "edit_rc": edit_rc,
+                        "run_id": run_id,
+                        "agent_version_id": agent_version,
                     }
                 )
             except Exception:
@@ -531,6 +552,8 @@ def run_loop(
                 {
                     "session_class": "loop-round",
                     "round": round_no,
+                    "run_id": run_id,
+                    "agent_version_id": agent_version,
                     "verdict": result.verdict,
                     "baseline_failing": len(baseline_failing),
                     "introduced_failing": len(introduced_failing),
@@ -564,7 +587,16 @@ def run_loop(
                 workflow.transition(state, "approved", review_verdict="APPROVE"),
                 root,
             )
-            _capture_loop_summary(root, start_sha, scope, task, "APPROVE", round_no)
+            _capture_loop_summary(
+                root,
+                start_sha,
+                scope,
+                task,
+                "APPROVE",
+                round_no,
+                run_id=run_id,
+                agent_version=agent_version,
+            )
             _say(
                 "APPROVE — stopping. Commits stay local ([autonomous]); push is yours."
             )
@@ -573,7 +605,16 @@ def run_loop(
             workflow.save_state(
                 workflow.transition(state, "rejected", review_verdict="REJECT"), root
             )
-            _capture_loop_summary(root, start_sha, scope, task, "REJECT", round_no)
+            _capture_loop_summary(
+                root,
+                start_sha,
+                scope,
+                task,
+                "REJECT",
+                round_no,
+                run_id=run_id,
+                agent_version=agent_version,
+            )
             _say("REJECT (P0) — stopping for a human. Tree left for inspection.")
             return 1
         if result.verdict == "NO_REVIEW":
@@ -581,7 +622,16 @@ def run_loop(
                 workflow.transition(state, "rejected", review_verdict="NO_REVIEW"),
                 root,
             )
-            _capture_loop_summary(root, start_sha, scope, task, "NO_REVIEW", round_no)
+            _capture_loop_summary(
+                root,
+                start_sha,
+                scope,
+                task,
+                "NO_REVIEW",
+                round_no,
+                run_id=run_id,
+                agent_version=agent_version,
+            )
             _say(
                 result.note
                 or "no usable review evidence — fix/re-run the review, not "

@@ -959,8 +959,10 @@ class TestLoopFlag:
 
         calls: list[tuple] = []
 
-        def fake_run_loop(root, task, scope, max_rounds):
-            calls.append((root, task, scope, max_rounds))
+        def fake_run_loop(
+            root, task, scope, max_rounds, run_id=None, agent_version=None
+        ):
+            calls.append((root, task, scope, max_rounds, run_id, agent_version))
             return 5
 
         monkeypatch.setattr(
@@ -971,6 +973,11 @@ class TestLoopFlag:
         monkeypatch.setattr(cli_module, "_git_repo_root", lambda: cli_module.REPO_ROOT)
         monkeypatch.setattr(cli_module, "_git_dirty", lambda: False)
         monkeypatch.setattr(cli_module.loop_mod, "run_loop", fake_run_loop)
+        # Identity capture is best-effort; keep the test hermetic (no probes).
+        monkeypatch.setattr(
+            cli_module, "detect_endpoint", lambda: cli_module.Endpoint("t", "http://x")
+        )
+        monkeypatch.setattr(cli_module, "model_for", lambda ep, tier=None: "m")
 
         with pytest.raises(SystemExit) as exc:
             cli_module.main()

@@ -28,6 +28,8 @@ class WorkflowState:
     autonomous: bool = False
     ts_phase_changed: str = ""
     healing_attempts: int = 0
+    run_id: str | None = None  # behavior identity (#011)
+    agent_version_id: str | None = None
 
 
 def state_path(repo_root: Path) -> Path:

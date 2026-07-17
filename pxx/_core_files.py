@@ -29,6 +29,7 @@ from pathlib import PurePosixPath
 CORE_FILES: tuple[str, ...] = (
     "pxx/_core_files.py",
     "pxx/_git.py",
+    "pxx/agent_manifest.py",
     "pxx/audit.py",
     "pxx/cli.py",
     "pxx/commands_index.py",

@@ -7,6 +7,8 @@ path-prefix scoping, and dispatches to various dogfooding modes.
 from __future__ import annotations
 
 import contextlib
+import dataclasses
+import json
 import logging
 import os
 import shutil
@@ -15,6 +17,7 @@ import sys
 import tempfile
 from pathlib import Path
 
+from pxx import agent_manifest
 from pxx import (
     _git,
     audit,
@@ -508,6 +511,33 @@ def main() -> None:
             )
         )
 
+    if "--manifest" in sys.argv:
+        # Behavior identity inspection (#011): print the current AgentManifest
+        # and its agent_version_id as JSON, then exit.
+        try:
+            mf_endpoint = detect_endpoint()
+            mf_model = model_for(mf_endpoint)
+        except RuntimeError as e:
+            print(f"pxx: --manifest: {e}", file=sys.stderr)
+            sys.exit(1)
+        mf = agent_manifest.current_manifest(
+            editor_backend=mf_endpoint.backend,
+            editor_model=mf_model,
+            max_rounds=loop_mod.DEFAULT_MAX_ROUNDS,
+            max_seconds=loop_mod.DEFAULT_MAX_SECONDS,
+            diff_budget=loop_mod.DEFAULT_DIFF_BUDGET_LINES,
+        )
+        print(
+            json.dumps(
+                {
+                    "agent_version_id": agent_manifest.agent_version_id(mf),
+                    "manifest": dataclasses.asdict(mf),
+                },
+                indent=2,
+            )
+        )
+        sys.exit(0)
+
     if "--loop" in sys.argv:
         # EXPERIMENTAL (#009). Most conservative posture: pxx repo only (the
         # self-fix rounds chdir there), --scope required, clean tree required,
@@ -557,10 +587,49 @@ def main() -> None:
             "pushes; stops on APPROVE/REJECT/no-progress/budget.",
             file=sys.stderr,
         )
+        # Behavior identity (#011 minimum): one run_id ties the loop session,
+        # every round record, each child self-fix session (via PXX_RUN_ID),
+        # and the cross-session capture together; agent_version_id names the
+        # behavior configuration that produced them. Best-effort: identity
+        # capture must never gate or break a run — the loop's own preflight
+        # does the real gating.
+        run_id = audit.make_session_id()
+        os.environ["PXX_RUN_ID"] = run_id
+        version_id: str | None = None
+        manifest_dict: dict | None = None
+        try:
+            loop_endpoint = detect_endpoint()
+            manifest = agent_manifest.current_manifest(
+                editor_backend=loop_endpoint.backend,
+                editor_model=model_for(loop_endpoint),
+                max_rounds=max_rounds,
+                max_seconds=loop_mod.DEFAULT_MAX_SECONDS,
+                diff_budget=loop_mod.DEFAULT_DIFF_BUDGET_LINES,
+            )
+            version_id = agent_manifest.agent_version_id(manifest)
+            manifest_dict = dataclasses.asdict(manifest)
+        except Exception:
+            pass
         _try_write_session_start(
-            {"session_class": "loop", "cwd": str(Path.cwd()), "task": task}
+            {
+                "session_class": "loop",
+                "cwd": str(Path.cwd()),
+                "task": task,
+                "run_id": run_id,
+                "agent_version_id": version_id,
+                "manifest": manifest_dict,
+            }
         )
-        sys.exit(loop_mod.run_loop(root, task, loop_scopes[0], max_rounds=max_rounds))
+        sys.exit(
+            loop_mod.run_loop(
+                root,
+                task,
+                loop_scopes[0],
+                max_rounds=max_rounds,
+                run_id=run_id,
+                agent_version=version_id,
+            )
+        )
 
     _self_sanity_check()
     _emit_core_restart_banner()
@@ -883,6 +952,21 @@ def main() -> None:
         "untrusted_path": untrusted_override,
         "aider_history_path": ".aider.chat.history.md",
     }
+    # Behavior identity (#011 minimum): every session record names the exact
+    # behavior configuration that ran it. Loop children inherit PXX_RUN_ID so
+    # their sessions group under the parent run. Best-effort — identity
+    # capture must never break a session.
+    with contextlib.suppress(Exception):
+        session_manifest = agent_manifest.current_manifest(
+            editor_backend=endpoint.backend,
+            editor_model=model,
+            max_rounds=loop_mod.DEFAULT_MAX_ROUNDS,
+            max_seconds=loop_mod.DEFAULT_MAX_SECONDS,
+            diff_budget=loop_mod.DEFAULT_DIFF_BUDGET_LINES,
+        )
+        record["agent_version_id"] = agent_manifest.agent_version_id(session_manifest)
+        record["manifest"] = dataclasses.asdict(session_manifest)
+    record["run_id"] = os.environ.get("PXX_RUN_ID")
     _try_write_session_start(record)
 
     # Build isolated environment for aider to prevent OPENAI_API_KEY from

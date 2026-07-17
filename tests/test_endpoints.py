@@ -213,12 +213,17 @@ class TestVllmCandidateList:
 
     def test_comma_list_probed_in_order_first_reachable_wins(self, monkeypatch):
         monkeypatch.delenv("PXX_OLLAMA_BASE", raising=False)
-        monkeypatch.setenv("PXX_VLLM_URL", "http://gpu-node:8001, http://127.0.0.1:8003")
+        monkeypatch.setenv(
+            "PXX_VLLM_URL", "http://gpu-node:8001, http://127.0.0.1:8003"
+        )
         monkeypatch.setenv(
             "PXX_VLLM_MODEL", "openai/Qwen3-Coder, openai/qwen2.5-coder-14b"
         )
         first, second = endpoints._vllm_candidates()
-        assert (first.url, first.model) == ("http://gpu-node:8001", "openai/Qwen3-Coder")
+        assert (first.url, first.model) == (
+            "http://gpu-node:8001",
+            "openai/Qwen3-Coder",
+        )
         assert (second.url, second.model) == (
             "http://127.0.0.1:8003",
             "openai/qwen2.5-coder-14b",

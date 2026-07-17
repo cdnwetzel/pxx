@@ -26,13 +26,14 @@ class _Harness:
         self._failings = list(failings)
         self.tmp_path = tmp_path
 
-        monkeypatch.setattr(
-            loop,
-            "_capture_loop_summary",
-            lambda root, sha, scope, task, verdict, rounds: self.captures.append(
-                (verdict, rounds)
-            ),
-        )
+        self.audit_records: list[dict] = []
+        self.capture_ids: list[tuple] = []
+
+        def _fake_capture(root, sha, scope, task, verdict, rounds, **kw):
+            self.captures.append((verdict, rounds))
+            self.capture_ids.append((kw.get("run_id"), kw.get("agent_version")))
+
+        monkeypatch.setattr(loop, "_capture_loop_summary", _fake_capture)
 
         monkeypatch.setattr(loop, "_head_sha", lambda root: "base")
         monkeypatch.setattr(loop, "_require_hooks", lambda root: True)
@@ -58,7 +59,9 @@ class _Harness:
         monkeypatch.setattr(loop, "_lint_scope", lambda root, scope: 0)
         monkeypatch.setattr(
             "pxx.audit.write_session_start",
-            lambda record, log_path=None: Path("/dev/null"),
+            lambda record, log_path=None: (
+                self.audit_records.append(record) or Path("/dev/null")
+            ),
         )
 
     def run(self, **kw):
@@ -748,3 +751,46 @@ class TestOutOfScopeChanges:
         g("commit", "-q", "-m", "edit", "--no-verify")
         assert loop._out_of_scope_changes(tmp_path, sha, "pxx/a.py") == []
         assert loop._out_of_scope_changes(tmp_path, sha, "pxx/other.py") == ["pxx/a.py"]
+
+
+class TestBehaviorIdentity:
+    """#011 minimum: run_id/agent_version stamped through the loop."""
+
+    def test_explicit_ids_reach_rounds_and_capture(self, monkeypatch, tmp_path):
+        h = _Harness(
+            monkeypatch,
+            tmp_path,
+            verdicts=[loop.RoundResult("APPROVE", [])],
+            failings=[set(), set()],
+        )
+        assert h.run(run_id="run-test-1", agent_version="agent-abc") == 0
+        rounds = [r for r in h.audit_records if r.get("session_class") == "loop-round"]
+        assert rounds and all(r["run_id"] == "run-test-1" for r in rounds)
+        assert all(r["agent_version_id"] == "agent-abc" for r in rounds)
+        assert h.capture_ids == [("run-test-1", "agent-abc")]
+
+    def test_run_id_generated_when_omitted(self, monkeypatch, tmp_path):
+        h = _Harness(
+            monkeypatch,
+            tmp_path,
+            verdicts=[loop.RoundResult("APPROVE", [])],
+            failings=[set(), set()],
+        )
+        assert h.run() == 0
+        rounds = [r for r in h.audit_records if r.get("session_class") == "loop-round"]
+        assert rounds and all(r["run_id"] for r in rounds)
+
+    def test_workflow_state_carries_identity(self, monkeypatch, tmp_path):
+        saved: list = []
+        monkeypatch.setattr(
+            "pxx.workflow.save_state", lambda state, root: saved.append(state)
+        )
+        h = _Harness(
+            monkeypatch,
+            tmp_path,
+            verdicts=[loop.RoundResult("APPROVE", [])],
+            failings=[set(), set()],
+        )
+        assert h.run(run_id="run-x", agent_version="agent-y") == 0
+        assert saved and saved[-1].run_id == "run-x"
+        assert saved[-1].agent_version_id == "agent-y"

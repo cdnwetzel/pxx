@@ -26,7 +26,10 @@ hidden checks) judges WHETHER the rewrite is good; a human promotes.
 from __future__ import annotations
 
 import hashlib
+import shutil
 import subprocess
+import tempfile
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -247,3 +250,102 @@ def verify_only_touched_target(
             f"expected target not in changed set (nothing to evaluate): {c.target}"
         )
     return violations
+
+
+# --- Increment 1: live-eval envelope --------------------------------------
+#
+# Wires a content candidate into the live sweep: clone → apply → run → verify
+# → restore. The loop runner is INJECTED (as in candidate_eval.ArmRunner) so
+# the orchestration is unit-testable without driving a real loop; the CLI wires
+# the live loop. Two structural guards ride here (order CR-...-increment1):
+#   G2 — verify is called with apply's OWN base_sha, never a fresh rev-parse.
+#   G3 — the fixture must be clean before apply; a dirty tree false-flags verify
+#        and can mask a real escape in the noise. Assert it, fail loud.
+
+# runner(fixture_root, applied) -> loop return code (0 == success).
+ContentLoopRunner = Callable[[Path, "AppliedContent"], int]
+
+
+@dataclass(frozen=True)
+class ContentEvalResult:
+    candidate_id: str
+    base_sha: str  # apply's pre-write HEAD — the one threaded into verify (G2)
+    loop_rc: int
+    violations: list[str]
+    ok: bool
+
+
+def _worktree_dirty(repo_root: Path) -> str:
+    """The porcelain listing of any pending change, or '' when clean. Uses -z
+    only to be consistent with changed_paths; the raw text is for the message."""
+    r = subprocess.run(
+        ["git", "status", "--porcelain", "--untracked-files=all"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    return r.stdout.strip()
+
+
+def clone_repo_for_content_eval(repo_src: Path, into: Path | None = None) -> Path:
+    """A fresh, clean local clone of ``repo_src`` to evaluate a content
+    candidate against — the live repo is never touched. ``--local`` is cheap
+    (hardlinked objects). The caller restores by discarding the returned dir."""
+    dest = into or Path(tempfile.mkdtemp(prefix="pxx-content-eval-"))
+    subprocess.run(
+        ["git", "clone", "--quiet", "--local", str(repo_src), str(dest)],
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=120,
+    )
+    return dest
+
+
+def run_content_candidate_in_fixture(
+    fixture_root: Path, c: ContentCandidate, runner: ContentLoopRunner
+) -> ContentEvalResult:
+    """Apply the candidate in a CLEAN fixture, run the loop, then verify only
+    the target was touched — the safety envelope of the live sweep.
+
+    G3: the fixture must start clean. A pre-dirtied tree is rejected BEFORE the
+    write (a false positive in the changed set could otherwise mask a real
+    escape). G2: verify is called with ``applied.base_sha`` — the pre-write HEAD
+    apply captured — so a loop that auto-commits an escape is still caught,
+    with no seam for a re-derived sha to slip through."""
+    dirty = _worktree_dirty(fixture_root)
+    if dirty:
+        raise RuntimeError(
+            f"fixture is not clean before apply (would mask escapes): {dirty!r}"
+        )
+    applied = apply_content_candidate(fixture_root, c)
+    loop_rc = runner(fixture_root, applied)
+    violations = verify_only_touched_target(fixture_root, c, applied.base_sha)
+    return ContentEvalResult(
+        candidate_id=c.candidate_id,
+        base_sha=applied.base_sha,
+        loop_rc=loop_rc,
+        violations=violations,
+        ok=(loop_rc == 0 and not violations),
+    )
+
+
+def evaluate_content_candidate(
+    repo_src: Path,
+    c: ContentCandidate,
+    runner: ContentLoopRunner,
+    *,
+    keep: bool = False,
+) -> ContentEvalResult:
+    """Full envelope: clean-clone ``repo_src`` → apply → run → verify →
+    restore. The clone isolates the live repo; it is discarded (restore) unless
+    ``keep``. Validation runs inside apply, so an invalid candidate raises
+    before any fixture work matters."""
+    fixture = clone_repo_for_content_eval(repo_src)
+    try:
+        return run_content_candidate_in_fixture(fixture, c, runner)
+    finally:
+        if not keep:
+            shutil.rmtree(fixture, ignore_errors=True)

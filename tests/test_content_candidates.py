@@ -13,6 +13,9 @@ from pxx.content_candidates import (
     ContentCandidate,
     apply_content_candidate,
     changed_paths,
+    clone_repo_for_content_eval,
+    evaluate_content_candidate,
+    run_content_candidate_in_fixture,
     validate_content_candidate,
     verify_only_touched_target,
 )
@@ -275,3 +278,78 @@ class TestRequirementOneEquivalence:
         assert applied.dest == repo / "pxx/prompts/system.md"
         # verify (git-derived) sees exactly that path -> clean
         assert verify_only_touched_target(repo, c, applied.base_sha) == []
+
+
+def _commit_runner(fixture, applied):
+    # a loop that commits its work (as aider does), touching nothing extra
+    _git(fixture, "add", "-A")
+    _git(fixture, "commit", "-q", "-m", "loop round", "--no-verify")
+    return 0
+
+
+def _escape_runner(fixture, applied):
+    # a loop that ALSO commits an escape to the grader
+    (fixture / "pxx" / "review_gate.py").write_text("# TAMPERED\n")
+    _git(fixture, "add", "-A")
+    _git(fixture, "commit", "-q", "-m", "loop round", "--no-verify")
+    return 0
+
+
+class TestG2FixtureThreadsApplysSha:
+    """[G2] The envelope verifies with apply's OWN base_sha — never a fresh
+    rev-parse. A committed escape stays catchable as a protected-path
+    violation, which is only possible if the pre-write sha was threaded."""
+
+    def test_wiring_catches_a_committed_escape(self, tmp_path):
+        repo = _repo(tmp_path)
+        res = run_content_candidate_in_fixture(
+            repo, _cc(content="new\n"), _escape_runner
+        )
+        # "protected path" (not merely G1's "expected target") proves the diff
+        # spanned the run — i.e. apply's pre-write sha was used, not a re-derive.
+        assert any("protected path" in v for v in res.violations)
+        assert not res.ok
+
+    def test_wiring_happy_path_is_clean(self, tmp_path):
+        repo = _repo(tmp_path)
+        res = run_content_candidate_in_fixture(
+            repo, _cc(content="new\n"), _commit_runner
+        )
+        assert res.violations == [] and res.ok
+        assert res.base_sha  # apply's pre-write sha, surfaced on the result
+
+
+class TestG3CleanFixtureAsserted:
+    """[G3] A dirty fixture false-flags verify AND can mask a real escape in
+    the noise — reject it before apply, fail loud."""
+
+    def test_dirty_fixture_rejected_before_apply(self, tmp_path):
+        import pytest
+
+        repo = _repo(tmp_path)
+        (repo / "stray.txt").write_text("dirty\n")  # pre-dirty the tree
+        with pytest.raises(RuntimeError):
+            run_content_candidate_in_fixture(repo, _cc(content="new\n"), _commit_runner)
+        # apply never ran — the target is untouched
+        assert (repo / "pxx/prompts/system.md").read_text() == "old prompt\n"
+
+
+class TestContentEvalEnvelope:
+    """clone → apply → run → verify → restore, on a clone (live repo untouched)."""
+
+    def test_clone_is_clean_and_isolated(self, tmp_path):
+        repo = _repo(tmp_path)
+        clone = clone_repo_for_content_eval(repo)
+        try:
+            assert (clone / "pxx/prompts/system.md").read_text() == "old prompt\n"
+        finally:
+            import shutil
+
+            shutil.rmtree(clone, ignore_errors=True)
+
+    def test_evaluate_runs_on_a_clone_and_leaves_source_untouched(self, tmp_path):
+        repo = _repo(tmp_path)
+        res = evaluate_content_candidate(repo, _cc(content="new\n"), _commit_runner)
+        assert res.ok
+        # the live repo was never written — the sweep ran on the discarded clone
+        assert (repo / "pxx/prompts/system.md").read_text() == "old prompt\n"

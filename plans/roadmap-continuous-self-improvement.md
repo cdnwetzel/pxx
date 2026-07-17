@@ -1032,6 +1032,32 @@ Phase 16); Tier C low (whenever).** This is the fail-closed standing rule
 applied to the release surface itself. Current state ≈ 10% (manual procedure
 exists, run 3×; nothing automated or committed).
 
+## Next build — Phase 16 content change-classes (green-lit, spec'd by review)
+
+The change-class expansion from config fields to CONTENT targets (prompt /
+skill / few-shot files). Green-lit after five review passes hardened the
+enforcement floor: `is_protected_path` is one authoritative decision that
+can't be fooled by the path shapes a diff carries. **Hard requirements,
+carried from the review so they're not re-derived at build time:**
+
+1. **Path derived once, from the same source used to write.** The content-
+   check MUST derive the path it validates from `git diff --name-only` /
+   `--numstat` (clean, repo-relative paths) — NOT by parsing raw `--- a/` /
+   `+++ b/` diff headers. The residual leak risk is entirely in the caller:
+   if the check strips `a/` to validate but the write resolves the path
+   differently, the two disagree. One path, derived once, checked AND written
+   from the same value. **Test that equivalence on day two** (it is the
+   day-two guidance, not a defect in the boundary function).
+2. **Every changed path runs through `is_protected_path`; any protected hit,
+   or any path the function can't classify, rejects the whole candidate.**
+3. Content candidate still declarative + one-variable + evidence-backed +
+   fail-closed, exactly like config candidates — plus a content-hash so the
+   proposal is immutable, and a human-diff surface for the reviewer.
+4. Retracted non-finding (recorded so it isn't reopened): `a/b/evals/m1.toml`
+   is NOT a leak — git never emits `a/b/` concatenated (a/ = old, b/ = new,
+   separate lines), so that string is a real file under a top-level `b/` dir,
+   correctly not-protected. The single-prefix strip is right.
+
 ## Near-term evidence-directed queue (2026-07-17)
 
 These are the concrete next work items the last build sessions surfaced —

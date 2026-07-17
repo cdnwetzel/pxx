@@ -1054,3 +1054,46 @@ continuous entropy detection with golden-principle enforcement.
 
 Everything past Phase 17 stays unscheduled until the eval corpus exists
 and has history.
+
+## Grounded readiness ledger (repo sweep, 2026-07-16)
+
+Percentages tied to named artifacts, not vibes. Three states: **built**
+(operational code, in use), **seed** (verifiable precursor code that the
+phase would extend, not replace), **absent**. Re-sweep and update this
+section whenever a phase's status line changes.
+
+| Phase | % | Grounding |
+|---|---|---|
+| 0 | 55% | Built: D1 scrub (bec8310, pushed); [1.1.0] changelog. Seed: `governance.scan_staged_secrets` — the content scanner exists for *secrets*; extending it to topology/identifier classes is the 0.1 work. Absent: published 1.1.0, baseline tag, trust-boundary doc. |
+| 10.5 | 15% | Seed: `pxx/skills.py` + `pxx/commands/*.md` registry; CLAUDE.md/CONVENTIONS.md — the monolithic pattern the phase replaces. Absent: AGENTS/WORKFLOW.md typed contract, `context audit`/`workflow validate`/`docs check`. |
+| 10.75 | 10% | Seed: supervisor mode already runs aider as a supervised `Popen` subprocess with an observer thread (`cli.py:994–999`), and every loop round is a supervised subprocess — pxx has both execution postures; what's absent is the `AgentBackend` protocol, event sink, cancel/resume. |
+| 10.8 | 15% | Seed: append-only audit JSONL, one stream discriminated by `session_class`; workflow state persisted (`workflow.load_state/save_state/resume_state`). Absent: typed event vocabulary, hash chain, headless API. |
+| 11 | 15% | Seed: `write_session_start` already records a proto-manifest — endpoint name/url, model, git HEAD, scope, diff_cap, session_class, autonomous flag; `drift.py` checks cross-machine HEAD sync. Absent: hashes, `agent_version_id`, run directories, ACIManifest, ModelFingerprint. |
+| 12 | 30% | Built: canonical verdict strings (APPROVE/REJECT/REVISE/NO_REVIEW/OUT_OF_SCOPE/EDIT_FAILED) and per-round records with per-leg seconds, diff lines, lint rc, findings-by-severity, steering message; `cost_metrics.TokenMetrics` (incl. cache fields). Absent: `RunOutcome`/failure-code enum as types, VerificationPacket, ReviewPacket, pluggable cost accounting. |
+| 13 | 10% | Seed: `services/docs-rag-sme/eval/questions.toml` + `run_ab.py` — a working case-file + A/B runner in the exact Phase 13 pattern, pointed at retrieval rather than editing; 2026-07-15 ab_bench methodology. Absent: fixtures, tiers, hidden checks, worktree isolation, replay. |
+| 14 | 25% | Built: layered gating live in the loop (deterministic gates outrank model review — the core invariant already holds); independence level 3 in production; `preflight_review_backend`; `governance.run_governance_check` (secrets, version sync, review verdict); one manual reviewer calibration (2026-07-16, planted-bug diff). Absent: action broker, ToolAction, calibration *suite*, ambiguity gate, extension governance. |
+| 15 | 10% | Seed: no-progress guard (baseline-set monotonicity + healable-findings decrease) is the narrow ancestor of semantic loop detection. Absent: analyzer, clusters, proposals, ProgressVector, recovery ladder. |
+| 16 | 0% | Nothing candidate-shaped exists. |
+| 17 | 0% | Nothing promotion-shaped exists (`check_review_verdict` gates pushes, not promotions). |
+| 18 | 5% | Seed: #002 safety tags + `prune_old_tags` — session-granular rollback primitive. Absent: channels, shadow, canary, breakers. |
+| 19 | 10% | Seed: workflow state machine (idle→generating→review_pending→approved/rejected) with resume; supervisor-mode service lifecycle management. Absent: scheduler, task claims, control plane, triage inbox. |
+| 19.5 | 5% | Seed: `resume_state` + persisted workflow state. Absent: claims, heartbeats, reconciliation loop. |
+| 20 | 25% | Built (infrastructure): vector index save/load/remove, hybrid search, SearchCache, TTL cleanup, archival, migrations, 9.4 capture (today) whose loop-summary observation carries verdict metadata — the first evidence-confidence seed. Absent (the phase's actual point): utility measurement, provenance ranking, ablations, five-layer split. |
+| 20.5 | 10% | Seed: ruff + pre-commit (lint/tests/diff-cap/scope) + secrets scan = primitive golden-principle enforcement. Absent: declarative principles, grades, GC cycles, rule-promotion ladder. |
+| 21 | 0% | Correctly zero — gated on ten mandatory items. |
+| 22 | 10% | Built: the single-scope loop primitive it composes, live-validated. Seed: skills/commands registry the planner would load. Absent: planner, DAG, roles, handoffs. |
+
+**Headline numbers:** strictly **built-and-operational ≈ 8%** of roadmap
+scope; **verifiable seeds add ≈ 7%** (code that the phases extend rather
+than write from scratch); **≈ 85% aspirational**. Weighted by estimated
+effort. By milestone: A ≈ 25% (mostly a projection of data the audit log
+already emits), B ≈ 8% (the docs-sme eval runner is the only harness
+seed; the corpus is the unclimbed mountain), C ≈ 8%, D 0%, E ≈ 8%.
+
+Sweep corrections vs. the pre-sweep estimate: `governance.py` was
+undercounted (secrets scanner = Phase 0 seed; three checks live), the
+docs-sme eval harness was zero-credited (it's the Phase 13 pattern,
+built), audit's proto-manifest raises Phase 11, and supervisor mode is
+a real 10.75 precursor. Net: overall moved from ~8% to ~15%
+built-or-seeded. The shape is unchanged: zeros exactly where the
+roadmap's own gates demand zeros.

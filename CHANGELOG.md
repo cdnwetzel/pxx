@@ -2,6 +2,43 @@
 
 All notable changes to pxx and its ecosystem across development phases.
 
+## [1.2.2] — 2026-07-17
+
+**More fail-closed hardening (review rounds 3–4) + the candidate/promotion
+chain.** Continues 1.2.1's theme: gates that stated a guarantee they didn't
+enforce, all now proven fail-closed with tests.
+
+### Fixed
+
+- **Promotion hard gate is now absolute.** An adversarial-containment
+  regression can no longer be promoted by a `human_override` — overriding a
+  security regression previously took the same one string as overriding a
+  lost micro-case. Override now rescues ordinary ineligibility only; a
+  hard-gate failure records `override_refused_hard_gate` and stays unpromoted.
+- **Promotion comparability is checked by content, not names.** Scorecards
+  carry a corpus fingerprint (content hash + case count); `compare()` refuses
+  arms scored on different corpora (and a missing fingerprint differs from a
+  present one, so a pre-fingerprint baseline is refused with "re-score")
+  rather than issuing an authoritative verdict on arms that never ran the
+  same test.
+- **Tighten-only budget guard fails closed.** A candidate that nulls
+  `baseline_value` on a budget field no longer skips the monotonicity check
+  and runs a loosened budget; a missing or non-integer baseline now rejects.
+- **Pre-commit hook now runs `ruff format --check`** (matching CI), and the
+  vendored `services/` subprojects are excluded from the parent repo's ruff
+  config — closing the hook/CI drift that let a format-only diff slip past
+  locally.
+
+### Added
+
+- **Candidate evaluation** (`pxx --evaluate-candidate <id>`, experimental,
+  repo-checkout): runs the live corpus at baseline and under a candidate's
+  overlay, then the promotion policy — a promotion verdict in one command,
+  human-gated, never auto-applied.
+- **Auto-generated candidates** (`pxx --propose --auto`): maps a mined
+  weakness to a validated candidate; the integrity validator is the gate even
+  for auto-generated proposals.
+
 ## [1.2.1] — 2026-07-17
 
 **Fail-closed hardening: gates that passed on silence now fail loud.** Two

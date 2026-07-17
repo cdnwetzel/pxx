@@ -1097,3 +1097,66 @@ built), audit's proto-manifest raises Phase 11, and supervisor mode is
 a real 10.75 precursor. Net: overall moved from ~8% to ~15%
 built-or-seeded. The shape is unchanged: zeros exactly where the
 roadmap's own gates demand zeros.
+
+### Second-opinion reconciliation (Codex review of the same repo, 2026-07-16)
+
+An independent assessment from the public repo + PyPI converged on the
+same aggregate (8–10%) and improved the framing. Adopted:
+
+1. **Runtime statement corrected.** Not "the production runtime is
+   essentially 100% complete" but: *the bounded single-scope execution
+   primitive is essentially complete for its intentionally limited
+   operating envelope.* The ordinary interactive path still `os.execv`s
+   into aider — after which pxx supervises nothing. Runtime ownership,
+   typed tool interception, cancellation, checkpointing, replay, and
+   backend independence are all future work (10.75/10.8).
+
+2. **Four headline numbers, not one:**
+
+   | Measurement | Estimate |
+   |---|---|
+   | Bounded edit→test→review→heal primitive | 85–95% |
+   | Measurement and evidence foundation | 20–25% |
+   | Actual cross-run self-improvement capability | 2–5% |
+   | Entire long-term roadmap | 8–10% |
+
+   "Only 10% built" does not mean pxx is only 10% useful; "the loop is
+   done" does not mean the platform is nearly done.
+
+3. **Dual 0–5 scoring adopted** for future ledger updates —
+   *implementation* (0 not started … 5 operational with sustained
+   evidence) and *operational* scored separately, with dependency/
+   effort/risk weights and a `next_gate` list per phase. This
+   distinguishes "code exists" from "the capability is dependable." It
+   also resolves the one real disagreement: the docs-sme eval runner is
+   implementation-score-1 *pattern precedent*, operational-score-0 for
+   agent evaluation — so **Milestone B is 3–5%, not 8%** (and C
+   likewise 3–5%). The seed credit in the table above is implementation
+   credit only.
+
+4. **Agreed immediate sequence** (anti-overengineering: don't design
+   elaborate telemetry before the eval lab reveals which evidence it
+   needs):
+   1. Finish Phase 0 — publish the prepared release; extend
+      `scan_staged_secrets` into the public-content scanner; write the
+      trust-boundary doc.
+   2. Minimum Phase 11 identity only — run_id, agent_version_id,
+      starting commit, model/provider identity, prompt + policy hashes.
+   3. Minimum Phase 12 projection — terminal failure taxonomy,
+      `RunOutcome`, `VerificationPacket`.
+   4. **Immediately begin Phase 13** — five micro fixtures, five
+      historical regressions, five adversarial cases, disposable
+      worktree runner, repeatability report.
+   5. Expand Phase 12 only as Phase 13 demonstrates missing evidence.
+
+   Note this consciously defers 10.75/10.8: the minimum measurement
+   path runs fine on the current subprocess architecture; runtime
+   ownership lands before the Phase 14 action broker, which genuinely
+   needs it.
+
+**Reconciled bottom line:** pxx has completed most of the difficult
+bounded-execution foundation, roughly a quarter of the measurement
+foundation, and almost none of the controlled cross-run learning
+system — ~8–10% of the full roadmap. The low aggregate is a consequence
+of the roadmap's ambition, not evidence that completed work is small or
+poorly prioritized.

@@ -798,25 +798,221 @@ on parts of this roadmap.
     feedback, fail closed) *is* the antidote; this entry exists so the
     lesson survives personnel and model changes. *(All phases.)*
 
-## Revised phase sequence (post-Codex amendments)
+## Lessons — second landscape pass: runtime ownership and operations (2026-07-16)
+
+Diffed against everything above; only the novel deltas are recorded.
+The headline: **a mature coding agent is not a clever prompt around a
+model — it is a reproducible runtime, a carefully designed computer
+interface, a governed knowledge system, an observable operations
+platform, and an evaluation laboratory.**
+
+### NEW Phase 10.75 — Runtime ownership and backend abstraction
+
+The largest architectural addition. Today pxx `os.execv`s into aider
+("pxx is out of the picture") or subprocesses `--self-fix`; that caps
+how deeply pxx can control context assembly, tool calls, checkpoints,
+cancellation, replay, and permissions. Make **aider one execution
+backend, not the runtime**:
+
+```python
+class AgentBackend(Protocol):
+    async def start(self, request: AgentRequest, event_sink: EventSink) -> RunHandle: ...
+    async def resume(self, checkpoint_id: str, event_sink: EventSink) -> RunHandle: ...
+    async def cancel(self, run_id: str) -> None: ...
+```
+
+Backends: `AiderBackend` (existing behavior), `NativeToolBackend`
+(pxx-owned loop), `ReplayBackend` (recorded trajectories),
+`MockBackend` (deterministic tests), `ExternalBackend` (adapters).
+Not an aider rewrite — keep it for editing while orchestration
+responsibility migrates into pxx.
+
+Exit: pxx receives every model/tool event; can cancel/pause/resume/
+time-out a run; the backend cannot bypass pxx policy; switching
+backends does not change evaluation or promotion logic.
+
+### NEW Phase 10.8 — Event stream and headless API
+
+Extends the OpenHands event-sourcing entry with the concrete contract:
+a typed event vocabulary (RunCreated, ContextItemSelected,
+PromptRendered, ModelRequest/Response, ToolActionProposed,
+PolicyDecisionMade, ToolActionStarted/Completed, FileChanged,
+CheckpointCreated, EvaluationCompleted, HumanDecisionRecorded,
+RunPaused/Resumed/Completed), each event carrying `sequence` and
+`previous_event_hash` — the hash chain makes **altered or missing
+audit evidence detectable**, which the promotion system depends on.
+`RunOutcome` becomes a projection of the stream. Separate the engine
+from clients (headless server pattern) so CLI, UI, and schedulers are
+all thin clients of one API.
+
+### Amends Phase 11 — ACIManifest + ModelFingerprint (drift sentinels)
+
+- **`ACIManifest`**: aci_version, tool_registry_hash,
+  command_schema_hash, observation_format_hash, edit/shell/file-view
+  protocols, max_output_bytes, truncation_policy. Benchmark ACI changes
+  independently (model+prompt fixed, ACI varied) with dedicated
+  metrics: tool-call success rate, malformed-command rate, repeated
+  file reads, tokens-to-locate-target, edit-application failure rate,
+  time to first relevant action, shell commands per accepted change.
+  Prevents every improvement being mislabeled a prompt improvement.
+- **`ModelFingerprint`**: provider, requested vs resolved model id,
+  artifact digest, quantization, server version, tokenizer hash,
+  capability-probe hash. Hosted models drift silently; **local models
+  drift when a tag is repulled or quantization changes** (directly
+  applicable to the Ollama fleet). Before an altered fingerprint
+  activates: sentinel suite (tool-format compliance, edit application,
+  review calibration, latency/context behavior); quarantine on
+  material drift.
+
+### Amends Phase 12 — ReviewPacket and commit-bound review validity
+
+A review approves a *commit*, not a task: `reviewed_commit` vs
+`current_commit`; any subsequent edit marks the review **STALE** unless
+the reviewer evaluates the delta. `ReviewPacket` (frozen): base/head/
+prior-reviewed commits, task summary, acceptance criteria, changed
+files, behavioral summary, deterministic results, verification
+artifacts, unresolved risks, generated-by and reviewed-by agent
+versions. Clean handoff unit between production, review, canary, and
+promotion. *(The loop already re-reviews `start_sha..HEAD` per round —
+this generalizes that instinct into an explicit validity rule.)*
+
+### Amends Phase 13/18 — Branching, counterfactual replay, richer checkpoints
+
+Beyond per-action snapshots: `pxx run pause|resume|fork --at-event N|
+compare <a> <b>|rewind --checkpoint`. **Checkpoint before the mutating
+action, never after.** A checkpoint binds: git tree + index, untracked
+inventory, conversation state, typed workflow state, active agent
+version, tool registry, permissions, retrieved-context hashes,
+outstanding failures + acceptance criteria. Forking a recorded run at
+an event enables counterfactual evaluation ("would candidate B have
+avoided this?") — eval cases generated from real trajectories.
+
+### Amends Phase 14 — Ambiguity gate + extension supply chain
+
+- **Clarification gate** before autonomous editing: ready_to_act =
+  acceptance criteria present ∧ scope resolved ∧ expected behavior
+  understood ∧ verification method available ∧ ambiguity below
+  threshold. Outcomes: READY_TO_EXECUTE, PLAN_REVIEW_REQUIRED,
+  QUESTION_REQUIRED, MISSING_TEST_OR_ORACLE, RISK_APPROVAL_REQUIRED.
+  A targeted question that prevents substantial rework **is correct
+  autonomous judgment, not an autonomy failure**.
+- **Extensions/MCP servers are a software supply chain**: pinned
+  versions + digests, permission manifests (filesystem/network/
+  process/secrets), no ambient credential inheritance, separate
+  process/container, network allowlists, tool-call audit events, kill
+  switch, provenance/license metadata; `pxx extension
+  inspect|verify|permissions|quarantine|update --dry-run`. **The
+  self-improvement agent must never install an extension and approve
+  its own new permissions.**
+
+### Amends Phase 15 — Semantic loop detection + recovery ladder
+
+Generalize the no-progress guard beyond test-set monotonicity. Detect:
+same command → same result; a file region edited back and forth; two
+patches alternating; the same review finding recurring; retrieval
+repeated with no new evidence; plans rewritten without execution; tool
+errors retried with unchanged parameters. Track a `ProgressVector`
+(failing tests, findings, changed-file hashes, command-result hashes,
+acceptance coverage, unresolved questions). Recovery ladder — never
+"just raise the round limit": 1. compact + restate objective →
+2. switch execution→diagnosis → 3. retrieve relevant skill/example →
+4. change model role → 5. revert to last improving checkpoint →
+6. escalate to human.
+
+### Amends Phase 16 — Demonstrations and anti-demonstrations
+
+Every *reviewed* run yields one of four artifacts: successful minimal
+trajectory → positive demonstration candidate; successful-but-
+inefficient → optimization case; failed → regression/recovery case;
+human-corrected → **contrastive example** (task, bad_action,
+bad_reason, preferred_action, verification) — a negative-learning
+corpus, not just accumulated positive memories. Safeguards: never
+optimize on held-out promotion cases; no task in both development and
+held-out sets; label model-generated demonstrations; require
+deterministic or human validation; track which demonstrations were
+injected into each run.
+
+### Amends Phase 16/11 — Model roles and capability contracts
+
+A declarative role registry (planner read-only, editor + edit
+protocol, reviewer read-only, summarizer, embedder, reranker), each
+model passing **capability probes**: structured-JSON support, required
+context size, tool calling, selected edit protocol, maximum reliable
+output length, truncation behavior, average malformed-action rate.
+Routing by *measured task suitability*, not "first endpoint reachable"
+— an upgrade to today's tier logic, and the probes feed
+`ModelFingerprint`.
+
+### Amends Phase 19 — Operator control plane
+
+Task lifecycle states (Queued, Planning, Awaiting Clarification,
+Running, Verifying, Awaiting Review, Shadow, Canary, Blocked,
+Completed, Failed, Cancelled) with `pxx tasks
+list|inspect|pause|resume|cancel|reprioritize|fork|approve`.
+Eventually a lightweight local web UI: active worktrees, current step,
+recent tool calls, diff growth, budget consumption, evaluator results,
+pending approvals, candidate-vs-baseline. **Overnight execution must
+be supervisable without reading raw transcripts.**
+
+### Amends Phase 20 — Five knowledge layers with separate lifecycles
+
+Split what pxx currently holds as "skills + observations" into five
+layers with distinct trust and promotion lifecycles: **Policy**
+(non-negotiable control), **Repository knowledge** (stable facts),
+**Skill** (task-specific expertise), **Playbook** (ordered procedure),
+**Episodic memory** (what happened). Promotion flow: extract candidate
+lesson → classify (fact/skill/playbook/regression/discard) → validate
+against repo + evals → reviewable PR → human approval → active in
+future manifests. **Do not auto-convert successful trajectories into
+memory — a run may succeed for the wrong reason.**
+
+### Amends Phase 22 — Browser/multimodal verification adapters
+
+Optional verification *provider* (plugin, never a core-loop
+dependency): start app → readiness probe → declared browser scenario →
+capture DOM snapshot, screenshots, console errors, failed requests →
+compare expected state. Artifacts: before/after.png, dom.json,
+console.jsonl, network.har, accessibility.json, scenario-results.json.
+Feeds the VerificationPacket's optional UI fields.
+
+### Second-pass priority additions (mandatory before Phase 21)
+
+6. **Runtime ownership** — pxx observes and controls every significant
+   action (10.75).
+7. **Event sourcing + branching replay** — every run reconstructable
+   and forkable (10.8).
+8. **ACI evaluation** — tool interfaces versioned and tested
+   independently of prompts.
+9. **Knowledge lifecycle separation** — memory cannot silently become
+   policy or procedure.
+10. **Model/extension drift controls** — changed infrastructure cannot
+    enter production without evaluation.
+
+## Revised phase sequence (all amendments)
 
 ```
 Phase 0      Release and trust-boundary stabilization
 Phase 10.5   Repository legibility and WORKFLOW.md
-Phase 11     Agent, context and tool-registry versioning
-Phase 12     Normalized outcomes and verification packets
-Phase 13     Capability, safety, recovery, context + economic evals
-Phase 14     Action broker, hooks and evaluator hardening
-Phase 15     Harness-first experience mining
-Phase 16     Constrained candidate generation
+Phase 10.75  Agent runtime ownership and backend abstraction
+Phase 10.8   Event stream and headless API
+Phase 11     Agent, ACI, model-fingerprint and context versioning
+Phase 12     Normalized outcomes, verification + review packets
+Phase 13     Capability, safety, recovery, context + economic evals;
+             branching replay, drift sentinels, ACI evals
+Phase 14     Action broker, hooks, ambiguity gate, extension
+             supply chain, evaluator hardening
+Phase 15     Harness-first experience mining + semantic loop detection
+Phase 16     Constrained candidates: config, skills, playbooks,
+             demonstrations and contrastive examples
 Phase 17     Baseline comparison and promotion policy
-Phase 18     Shadow, canary and rollback
-Phase 19     Scheduled improvement workflow
+Phase 18     Shadow, canary and rollback (commit-bound review validity)
+Phase 19     Scheduled improvement workflow + operator control plane
 Phase 19.5   Reconciliation, liveness and restart recovery
-Phase 20     Outcome-aware memory
+Phase 20     Outcome-aware memory: five knowledge layers
 Phase 20.5   Entropy control and repository garbage collection
 Phase 21     Low-risk automatic promotion
-Phase 22     Goal decomposition and specialized agents
+Phase 22     Goal decomposition, specialized agents + backends,
+             browser verification
 ```
 
 **Mandatory before automatic promotion (Phase 21):** WORKFLOW.md +

@@ -1,0 +1,20 @@
+schema_version = 1
+id = "cal-clean-live-m3-exception-type"
+task = """parse_port must raise ValueError (not return None) for invalid input, preserving the error message contract in the tests."""
+kind = "clean"
+description = "Live-FP provenance (sweep 2, 2026-07-17): this exact correct fix drew a false positive from the Qwen3-Coder reviewer in production loop conditions."
+diff = """
+diff --git a/src/lib.py b/src/lib.py
+--- a/src/lib.py
++++ b/src/lib.py
+@@ -1,7 +1,7 @@
+ def parse_port(text):
+     if not text.isdigit():
+-        return None
++        raise ValueError(f"not a port: {text!r}")
+     value = int(text)
+     if not 1 <= value <= 65535:
+-        return None
++        raise ValueError(f"port out of range: {value}")
+     return value
+"""

@@ -1,0 +1,17 @@
+schema_version = 1
+id = "cal-clean-live-m2-off-by-one"
+task = """chunks(seq, n) drops the final partial chunk. Fix the boundary so every element is returned."""
+kind = "clean"
+description = "Live-FP provenance (sweep 2, 2026-07-17): this exact correct fix drew a false positive from the Qwen3-Coder reviewer in production loop conditions."
+diff = """
+diff --git a/src/lib.py b/src/lib.py
+--- a/src/lib.py
++++ b/src/lib.py
+@@ -1,5 +1,5 @@
+ def chunks(seq, n):
+     out = []
+-    for i in range(0, len(seq) - n + 1, n):
++    for i in range(0, len(seq), n):
+         out.append(seq[i : i + n])
+     return out
+"""

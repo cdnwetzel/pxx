@@ -54,8 +54,8 @@ class TestShippedCalibrationCorpus:
     def test_corpus_loads_and_is_balanced(self):
         cases = load_calibration_cases()
         kinds = [c.kind for c in cases]
-        assert len(cases) == 8
-        assert kinds.count("clean") == 4 and kinds.count("defect") == 4
+        assert len(cases) == 20
+        assert kinds.count("clean") == 12 and kinds.count("defect") == 8
 
     def test_r5_regression_case_is_permanent(self):
         ids = [c.id for c in load_calibration_cases()]

@@ -1,0 +1,37 @@
+name: CI
+
+# Runs the full suite on every push and PR — the safety net that was missing
+# (Phase 0.5 Tier A). Until this existed, the 851 tests ran only through a
+# local pre-commit hook the author could skip, so a regression could reach
+# main or ship in a release caught by nobody.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # governance scans use git ls-files / diff
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --extra dev
+      - name: Lint
+        # Scoped to pxx/ + tests/ — the project's canonical lint surface
+        # (matches pxx/self_modes.py::self_lint). The vendored
+        # services/docs-rag-sme/ subpackage owns its own formatting.
+        run: |
+          uv run ruff check pxx/ tests/
+          uv run ruff format --check pxx/ tests/
+      - name: Tests
+        run: uv run pytest -q
+      - name: Public-content gate (shipped files)
+        run: uv run pxx --check --shipped

@@ -66,9 +66,7 @@ class TestValidatorFailsClosed:
     def test_null_baseline_on_budget_field_fails_closed(self):
         # The bypass: nulling baseline_value skipped the tighten-only check
         # entirely, letting a loosened budget through (reviewer round 4).
-        r = validate_candidate(
-            _c(field="max_rounds", value="999", baseline_value=None)
-        )
+        r = validate_candidate(_c(field="max_rounds", value="999", baseline_value=None))
         assert not r.ok and any("tighten-only budget" in x for x in r.reasons)
 
     def test_non_integer_baseline_on_budget_field_fails_closed(self):

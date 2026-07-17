@@ -1,0 +1,42 @@
+{
+  "date": "2026-07-17",
+  "suite": "evals/calibration (20 cases)",
+  "candidates": [
+    {
+      "id": "prompt-v2",
+      "config": "task-aware v2 prompt",
+      "reviewer": "Qwen3-Coder",
+      "recall": 1.0,
+      "fp": 0.75,
+      "verdict": "already production; recall gain real, fp still high"
+    },
+    {
+      "id": "two-stage-self-audit",
+      "config": "Qwen3 flags -> Qwen3 skeptic must name a failing input or drop",
+      "recall": 0.88,
+      "fp": 0.58,
+      "verdict": "REJECTED",
+      "finding": "the skeptic upholds the flagger's own FPs \u2014 confident hallucination survives self-interrogation; every surviving FP is on a live-mined case (real loop diffs), so this is exactly the production failure mode, not a corpus artifact. Also cost one true defect (recall 1.00->0.88)."
+    }
+  ],
+  "reviewer_scores_20case": {
+    "qwen2.5:7b-instruct": {
+      "recall": 0.0,
+      "fp": 0.0
+    },
+    "Qwen3-Coder": {
+      "recall": 1.0,
+      "fp": 0.75
+    },
+    "qwen2.5-coder-14b-coder-lora": {
+      "recall": 0.25,
+      "fp": 0.0
+    }
+  },
+  "design_conclusion": "No fleet model, under any single-prompt or self-audit config tested, both catches defects and stays quiet on correct code (threshold recall>=0.75 AND fp<=0.25). The reviewer layer should therefore be ADVISORY (non-blocking) rather than gating until either (a) a cross-model skeptic is tried (different family auditing Qwen3's findings) or (b) a frontier reviewer is used for supervised runs (PXX_REVIEW_BACKEND=claude already exists). The deterministic gates + hidden eval checks remain the load-bearing independent layer regardless.",
+  "next_experiments": [
+    "cross-model skeptic (14b audits Qwen3 findings)",
+    "advisory review mode: findings surfaced, never blocking",
+    "frontier reviewer on the same suite for an upper-bound reference"
+  ]
+}

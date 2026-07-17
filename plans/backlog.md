@@ -19,8 +19,9 @@ Statuses: `planned` | `in-progress` | `blocked` | `done`.
 | 009 | [Open items & remediation plan (post-dogfood sweep)](open-items-2026-07-16.md) | done | — | — |
 | 010 | [2026-07-17 session: decisions, scrub, push, v1.1.0](session-2026-07-17-decisions-and-release.md) | done | — | — |
 | 011 | [Roadmap: continuous self-improvement (Phases 11–22)](roadmap-continuous-self-improvement.md) | in-progress | — | — |
+| 012 | Phase 0.5: Continuous verification (CI + package smoke) — tracked in roadmap 011 | planned | — | — |
 
-Next free ID: **012**
+Next free ID: **013**
 
 ## Workflow for adding a new plan
 

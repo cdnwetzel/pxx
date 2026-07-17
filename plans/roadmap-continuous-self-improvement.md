@@ -988,6 +988,50 @@ Feeds the VerificationPacket's optional UI fields.
 10. **Model/extension drift controls** — changed infrastructure cannot
     enter production without evaluation.
 
+## Cross-cutting track — Phase 0.5: Continuous verification (added 2026-07-17)
+
+**Not a self-improvement phase — a baseline-integrity track that sits beside
+the arc.** Phase 0 established a clean reproducible baseline *once*; 0.5 keeps
+it verified on every push and every release. Folded in after the packaging
+question surfaced that pxx ships to PyPI with **zero automated proof the
+package works** — the same "pass-on-silence" class the 2026-07-17 review
+flagged, one level up: we assume the wheel is good, nothing checks it.
+
+It is **not one priority — it splits into three tiers of very different
+urgency**, and conflating them would mis-rank the whole thing:
+
+- **Tier A — CI runs the suite on push/PR. HIGH / do-first.** *There is no
+  CI at all today* — the 851 tests run only via the local pre-commit hook
+  (author-skippable) and `pxx --self-test`. A regression can land on `main`,
+  or ship in a release, caught by nobody. This is a foundational safety net
+  that is simply *absent*, and it protects **everything downstream** — every
+  phase, every release. Its absence is a standing risk, not a feature gap.
+- **Tier B — package smoke: build → install in a throwaway venv → assert the
+  packaging contract. MEDIUM.** `scripts/smoke-package.sh` + a post-build
+  job so a broken wheel can't publish. Verifies wheel contents (`pxx/` in;
+  `evals/`/`config/`/`WORKFLOW.md` out), shipped surfaces work, and repo-only
+  surfaces **fail closed** (`--eval` exits 2). Automates the manual smoke
+  that has caught real bugs across 1.0/1.1/1.2 — valuable, but releases are
+  infrequent and hand-smoked today, so it's "make the manual thing
+  repeatable," not "stop the bleeding."
+- **Tier C — Python-version matrix (3.11–3.13) + TestPyPI dry-run. LOW.**
+  Polish; the wheel claims `>=3.11` but is only ever run on 3.12. Nice, not
+  blocking.
+
+**Strategic read (my assessment, pre-user-input):** this track is
+*operationally* important but *strategically orthogonal* — it advances none
+of Phases 16–22, and the self-improvement machinery runs from a checkout, so
+package verification unblocks no downstream phase. That argues for ranking
+the whole thing *below* Phase 16 (candidate generation), the marked frontier.
+**Except Tier A**, which I'd rank *above* Phase 16: protect what exists
+before extending it — a project shipping to PyPI on a skippable local hook,
+with no push CI, is one bad merge from a silent regression, and that risk
+compounds every day the self-improvement machinery grows on top of an
+unverified base. So: **Tier A high (before Phase 16); Tier B medium (after
+Phase 16); Tier C low (whenever).** This is the fail-closed standing rule
+applied to the release surface itself. Current state ≈ 10% (manual procedure
+exists, run 3×; nothing automated or committed).
+
 ## Near-term evidence-directed queue (2026-07-17)
 
 These are the concrete next work items the last build sessions surfaced —
@@ -1198,6 +1242,7 @@ section whenever a phase's status line changes.
 | Phase | % | Grounding |
 |---|---|---|
 | 0 | 100% | Built: D1 scrub **complete** (bec8310 + 992e314 — user decision executed: bare hostnames allowed, suffixed forms/IPs/personal/firm identifiers purged; `pxx --check --all-files` clean except 7 findings in review/codex\|copilot, other agents' namespaces); **public-content scanner** (`governance.scan_public_content`: four generic classes + untracked denylist, staged gate + audit mode, allow-pragma, lockfile skip); **trust-boundary doc** (docs/TRUST_BOUNDARY.md); v1.1.0 bumped/built/tagged (`v1.1.0` + `learning-baseline-1`, pushed). **v1.1.0 PUBLISHED** (2026-07-16: trusted publisher configured on pypi.org, workflow rerun green, clean-env pip smoke passed — the tokenless tag→publish path works for the first time). Release-workflow scanner gate landed (`gate` job runs `pxx --check --shipped`). **Phase 0 COMPLETE.** |
+| 0.5 | 10% | Cross-cutting continuous-verification track (added 2026-07-17). Tier A (push/PR CI running the suite) = HIGH, absent today — no CI at all, tests run only via the skippable local hook. Tier B (package smoke: build→install→assert the packaging contract, repo-only surfaces fail closed) = MEDIUM, manual procedure exists (3 hand-smokes) but nothing automated/committed. Tier C (py 3.11–3.13 matrix + TestPyPI dry-run) = LOW. Orthogonal to the self-improvement arc; Tier A ranks above Phase 16, B/C below. |
 | 10.5 | 45% | Built (2026-07-17, minimum slice): **AGENTS.md** (map-not-manual, links CI-checked) and **WORKFLOW.md** — machine-readable TOML contract (states, budgets, commands, permissions incl. protected_paths as the TRUST_BOUNDARY projection) with `tests/test_workflow_contract.py` asserting every field against the code it describes: the contract cannot drift silently. The agent manifest hashes WORKFLOW.md (editing policy = new agent_version_id, verified live). Absent: docs/ tree restructure, `pxx context audit`/`docs check` commands, CLAUDE.md slimming into the map. |
 | 10.75 | 10% | Seed: supervisor mode already runs aider as a supervised `Popen` subprocess with an observer thread (`cli.py:994–999`), and every loop round is a supervised subprocess — pxx has both execution postures; what's absent is the `AgentBackend` protocol, event sink, cancel/resume. |
 | 10.8 | 20% | Seed (sweep 2: loop-terminal records enriched the stream; `recent_outcomes` is a working projection reader over it): append-only audit JSONL, one stream discriminated by `session_class`; workflow state persisted (`workflow.load_state/save_state/resume_state`). Absent: typed event vocabulary, hash chain, headless API. |

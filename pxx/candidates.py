@@ -29,6 +29,11 @@ import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
+# The single authoritative protected set. Re-exported so callers/tests can
+# import it from here, but pxx/protected_paths.py is the one place it's defined.
+from pxx.protected_paths import PROTECTED_PREFIXES as PROTECTED_PREFIXES
+from pxx.protected_paths import is_protected_path
+
 # The only fields a candidate may set — each maps to a pxx env var, so a
 # candidate materializes as an overlay with zero source contact. Budgets are
 # "tighten only" (see MONOTONE_BUDGETS); the rest are free-choice within type.
@@ -49,24 +54,9 @@ MONOTONE_BUDGETS: dict[str, str] = {
     "edit_retries": "<=",
 }
 
-# Structural targets no candidate may name, ever. Prefix-matched. Kept in sync
-# with docs/TRUST_BOUNDARY.md and .aiderignore — the three must agree.
-PROTECTED_PREFIXES: tuple[str, ...] = (
-    "pxx/safety.py",
-    "pxx/scope.py",
-    "pxx/governance.py",
-    "pxx/review_gate.py",
-    "pxx/loop.py",
-    "pxx/evaluation.py",
-    "pxx/calibration.py",
-    "pxx/promotion.py",
-    "pxx/candidates.py",
-    "evals/",
-    ".github/workflows/",
-    ".aiderignore",
-    "config/",
-    "pyproject.toml",
-)
+# Structural targets no candidate may name — the SINGLE authoritative list
+# lives in pxx/protected_paths.py (imported at module top); the validator and
+# the eval content-check both consult is_protected_path().
 
 
 @dataclass(frozen=True)
@@ -104,8 +94,9 @@ def validate_candidate(c: Candidate) -> ValidationResult:
             f"names protected target(s): {', '.join(c.protected_targets_touched)}"
         )
     # A candidate whose declared field looks like a path into protected space
-    # is rejected regardless of the allowlist (defense in depth).
-    if any(c.field.startswith(p) or c.field == p for p in PROTECTED_PREFIXES):
+    # is rejected regardless of the allowlist (defense in depth) — via the
+    # single shared decision, the same one the eval content-check will use.
+    if is_protected_path(c.field):
         reasons.append(f"field {c.field!r} targets protected space")
 
     if c.field not in ALLOWED_FIELDS:

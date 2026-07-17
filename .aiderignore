@@ -30,7 +30,11 @@ pxx/evaluation.py
 pxx/calibration.py
 pxx/promotion.py
 pxx/candidates.py
+pxx/candidate_eval.py
+pxx/improvement.py
+pxx/protected_paths.py
 evals/
+.github/workflows/
 tests/test_safety.py
 tests/test_scope.py
 tests/test_governance.py

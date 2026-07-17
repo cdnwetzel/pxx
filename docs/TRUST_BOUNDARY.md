@@ -15,16 +15,25 @@ Candidate agents and any automated improvement process may **propose**
 changes to these (as reviewable diffs for a human), but may never apply,
 commit, or promote changes to them autonomously:
 
+**The authoritative machine list is `pxx/protected_paths.py::PROTECTED_PREFIXES`,
+and `is_protected_path()` is the one decision function the candidate validator
+and the eval content-check both call. This table and `.aiderignore` are static
+mirrors of that list (a doc can't import; aider can't run Python); tests hold
+both to it. Edit the list in one place — `protected_paths.py` — and the tests
+enforce the mirrors.**
+
 | Component | Why protected |
 |---|---|
 | `pxx/safety.py` | #002 safety tags — the rollback primitive |
 | `pxx/scope.py` | Scope resolution + trusted-path gates — the write boundary |
 | `pxx/governance.py` | Secrets + public-content scanning, version sync, verdict gating |
 | `pxx/review_gate.py` | Verdict engine, review backends, preflight — the checker |
-| `pxx/loop.py` guards | Round/diff/time budgets, progress + scope guards, fail-closed branches |
+| `pxx/loop.py` | Round/diff/time budgets, progress + scope guards, fail-closed branches |
+| `pxx/evaluation.py`, `evals/` | The eval harness + fixtures/hidden checks — the grader |
+| `pxx/calibration.py`, `pxx/promotion.py` | Reviewer scoring + comparison policy — the judges |
+| `pxx/candidates.py`, `pxx/candidate_eval.py`, `pxx/improvement.py` | Candidate generation, evaluation, and mining — the optimizer must not edit itself |
+| `pxx/protected_paths.py` | The protected list itself — rewriting it defeats the boundary |
 | `tests/` for the above | A gate whose tests the optimizer can edit is not a gate |
-| Eval fixtures & hidden checks (`evals/`, `pxx/evaluation.py`) | anti-cheat surface — exists as of Phase 13; NOT yet in `.aiderignore` (see gap below) |
-| Calibration + promotion (`pxx/calibration.py`, `pxx/promotion.py`) | reviewer scoring + comparison policy — the judges |
 | Promotion configuration | (future) — thresholds, allowlists, risk classes |
 | `.github/workflows/` | Release path and credentials — publish is human-controlled |
 | `.aiderignore`, `CONVENTIONS.md`, `pyproject.toml`, `config/*.yml` | Existing guardrail files (CLAUDE.md "Hard guardrails") |

@@ -22,6 +22,8 @@ would defeat the whole boundary).
 
 from __future__ import annotations
 
+import posixpath
+
 # Prefix-matched. A path is protected if it equals an entry or starts with one
 # (so "evals/" covers the whole tree, "pxx/loop.py" covers exactly that file).
 PROTECTED_PREFIXES: tuple[str, ...] = (
@@ -49,12 +51,55 @@ PROTECTED_PREFIXES: tuple[str, ...] = (
 )
 
 
+def _canonical(path: str) -> str | None:
+    """Normalize to a repo-relative, forward-slash, casefolded path — or None
+    if it cannot be safely classified (empty, absolute, or escaping the repo).
+    None means the caller must fail closed: a boundary that can't classify an
+    input must treat it as protected, not wave it through."""
+    if not isinstance(path, str) or not path.strip():
+        return None
+    p = path.strip().replace("\\", "/")  # windows-style diff paths
+    if p.startswith("/"):
+        return None  # absolute — not a repo-relative target
+    if p.startswith("./"):
+        p = p[2:]  # PREFIX strip, never lstrip('./') (that eats leading dots)
+    norm = posixpath.normpath(p)  # collapses a/../b and ./
+    if norm == ".." or norm.startswith("../"):
+        return None  # escapes the repo root
+    # casefold so a case-insensitive filesystem (macOS default) can't dodge
+    # the check via PXX/EVALUATION.PY — over-protecting a case-variant that
+    # doesn't exist costs nothing; under-protecting is the security hole.
+    return norm.casefold()
+
+
 def is_protected_path(path: str) -> bool:
     """True if ``path`` is (or is inside) a protected target. The single
     decision both the candidate validator and the eval content-check use.
 
-    NB: strip a leading ``./`` as a PREFIX, not via ``lstrip("./")`` — the
-    latter is a char-set strip that would eat the leading dot of ``.github``
-    and ``.aiderignore`` and silently unprotect them."""
-    p = path[2:] if path.startswith("./") else path
-    return any(p == pre.rstrip("/") or p.startswith(pre) for pre in PROTECTED_PREFIXES)
+    Fails CLOSED: normalizes the diff-path shapes a candidate can carry
+    (``a/``|``b/`` git prefixes, ``..`` traversal, backslashes, case, ``./``)
+    and returns True for anything it cannot cleanly classify — an unrecognized
+    path is the one case a boundary must never allow. Normalization lives HERE,
+    not in callers, so the config validator and the content-check can't drift
+    into normalizing differently."""
+    if not isinstance(path, str) or not path.strip():
+        return True  # unclassifiable → protected
+
+    # Consider the path AND its git-diff-prefix-stripped form: raw `git diff`
+    # prefixes every path with a/ or b/. Stripping can only ADD protection
+    # (we protect if EITHER form resolves into protected space), never remove.
+    raw = path.strip().replace("\\", "/")
+    forms = [raw]
+    for pre in ("a/", "b/"):
+        if raw.startswith(pre):
+            forms.append(raw[len(pre) :])
+
+    prefixes = [pre.casefold() for pre in PROTECTED_PREFIXES]
+    for form in forms:
+        c = _canonical(form)
+        if c is None:
+            return True  # a form we can't classify → fail closed
+        for pre in prefixes:
+            if c == pre.rstrip("/") or c.startswith(pre):
+                return True
+    return False

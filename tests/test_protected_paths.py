@@ -34,6 +34,61 @@ class TestIsProtectedPath:
         assert is_protected_path("pxx/protected_paths.py")
 
 
+class TestFailsClosedOnDiffPathShapes:
+    """The enforcement floor for content candidates: a diff path must not
+    dodge protection via git prefixes, traversal, case, or absolute paths
+    (reviewer day-one finding, 2026-07-17). Fail closed on anything
+    unclassifiable."""
+
+    def test_git_diff_ab_prefixes_do_not_dodge(self):
+        # raw `git diff` prefixes every path with a/ or b/.
+        assert is_protected_path("a/pxx/evaluation.py")
+        assert is_protected_path("b/evals/m1.toml")
+        assert is_protected_path("a/pxx/governance.py")
+
+    def test_dotdot_traversal_into_protected_space_caught(self):
+        assert is_protected_path("pxx/../evals/m1.toml")
+        assert is_protected_path("evals/../pxx/review_gate.py")
+
+    def test_case_insensitive_variant_caught(self):
+        # macOS default FS is case-insensitive; PXX/... writes the same file.
+        assert is_protected_path("PXX/EVALUATION.PY")
+        assert is_protected_path("pxx/Review_Gate.py")
+
+    def test_backslash_paths_caught(self):
+        assert is_protected_path("pxx\\loop.py")
+
+    def test_surrounding_whitespace_stripped(self):
+        assert is_protected_path("  pxx/promotion.py  ")
+
+    def test_absolute_path_fails_closed(self):
+        assert is_protected_path("/etc/passwd")
+        assert is_protected_path("/Users/x/pxx/evaluation.py")
+
+    def test_repo_escaping_traversal_fails_closed(self):
+        assert is_protected_path("../../secrets")
+        assert is_protected_path("..")
+
+    def test_empty_and_nonstring_fail_closed(self):
+        assert is_protected_path("")
+        assert is_protected_path("   ")
+        assert is_protected_path(None)  # type: ignore[arg-type]
+
+    def test_legit_paths_not_over_protected(self):
+        # Fail-closed must not become "protect everything" — real editable
+        # files still pass, including dirs that merely start with a/b letters.
+        for ok in (
+            "pxx/duration.py",
+            "pxx/endpoints.py",
+            "README.md",
+            "src/lib.py",
+            "app/main.py",
+            "a/b/note.md",
+            "tests/test_x.py",
+        ):
+            assert not is_protected_path(ok), ok
+
+
 class TestMirrorsMatchCanonical:
     def test_aiderignore_contains_every_protected_path(self):
         ignore = (REPO / ".aiderignore").read_text()

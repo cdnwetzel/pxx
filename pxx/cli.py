@@ -511,6 +511,26 @@ def main() -> None:
             )
         )
 
+    if "--compare" in sys.argv:
+        # Promotion policy (#017): exact case-by-case verdict over two
+        # persisted scorecards. Exit 0 only when the candidate is eligible.
+        from pxx import promotion
+
+        idx = sys.argv.index("--compare")
+        if idx + 2 >= len(sys.argv):
+            print(
+                "pxx: usage: pxx --compare <baseline.json> <candidate.json>",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+        base = promotion.load_scorecard(Path(sys.argv[idx + 1]))
+        cand = promotion.load_scorecard(Path(sys.argv[idx + 2]))
+        decision = promotion.compare(base, cand)
+        for reason in decision.reasons:
+            print(f"  {reason}")
+        print(f"promotion: {'ELIGIBLE' if decision.eligible else 'NOT ELIGIBLE'}")
+        sys.exit(0 if decision.eligible else 1)
+
     if "--calibrate" in sys.argv:
         # Reviewer calibration (#014.3): the production review path scored
         # against ground-truth diffs. Threshold breach exits non-zero.

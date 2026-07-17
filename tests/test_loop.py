@@ -915,3 +915,48 @@ class TestAdvisoryReviewMode:
             failings=[set(), set()],
         )
         assert h.run() == 1
+
+
+class TestFailingTestsOracle:
+    """The test oracle must not read a broken (errored) suite as green —
+    it is the only enforcement gate in advisory mode (reviewer finding,
+    2026-07-17)."""
+
+    def _mock_pytest(self, monkeypatch, stdout, rc):
+        import subprocess as _sp
+
+        def fake_run(cmd, *a, **k):
+            return _sp.CompletedProcess(cmd, rc, stdout=stdout, stderr="")
+
+        monkeypatch.setattr(loop.subprocess, "run", fake_run)
+
+    def test_errored_tests_count_as_failing(self, monkeypatch, tmp_path):
+        # An all-ERROR suite (raising fixture) previously parsed to set() = green.
+        out = (
+            "EE\n"
+            "ERROR test_x.py::test_a - RuntimeError: boom\n"
+            "ERROR test_x.py::test_b - RuntimeError: boom\n"
+            "2 errors in 0.01s\n"
+        )
+        self._mock_pytest(monkeypatch, out, 0)
+        result = loop._failing_tests(tmp_path)
+        assert result == {"test_x.py::test_a", "test_x.py::test_b"}
+
+    def test_failed_and_errored_both_captured(self, monkeypatch, tmp_path):
+        out = (
+            "FAILED test_a.py::test_1 - assert 0\n"
+            "ERROR test_b.py::test_2 - ImportError\n"
+        )
+        self._mock_pytest(monkeypatch, out, 1)
+        assert loop._failing_tests(tmp_path) == {
+            "test_a.py::test_1",
+            "test_b.py::test_2",
+        }
+
+    def test_clean_suite_is_empty(self, monkeypatch, tmp_path):
+        self._mock_pytest(monkeypatch, "5 passed in 0.1s\n", 0)
+        assert loop._failing_tests(tmp_path) == set()
+
+    def test_broken_run_returns_none(self, monkeypatch, tmp_path):
+        self._mock_pytest(monkeypatch, "usage error\n", 4)
+        assert loop._failing_tests(tmp_path) is None

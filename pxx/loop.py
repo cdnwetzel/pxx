@@ -115,7 +115,12 @@ def _failing_tests(root: Path, timeout: float = 600.0) -> set[str] | None:
     """
     try:
         r = subprocess.run(
-            ["uv", "run", "pytest", "-q", "--tb=no", "-rf"],
+            # -rfE reports FAILED *and* ERROR lines. A test that ERRORs (a
+            # raising fixture, a collection/import break) is not a pass — but
+            # -rf alone reported only FAILED, so an all-error suite parsed to
+            # an EMPTY set and read green. In advisory mode this test oracle is
+            # the only enforcement gate, so that silence became an APPROVE.
+            ["uv", "run", "pytest", "-q", "--tb=no", "-rfE"],
             cwd=root,
             capture_output=True,
             text=True,
@@ -125,8 +130,11 @@ def _failing_tests(root: Path, timeout: float = 600.0) -> set[str] | None:
         return None
     if r.returncode not in (0, 1):  # 0 = green, 1 = test failures; else broken
         return None
+    # Both FAILED and ERROR count as not-passing; either populates the set so
+    # the loop's gates never treat a broken suite as clean.
     return {
-        m.group(1) for m in re.finditer(r"^FAILED ([^\s]+)", r.stdout, re.MULTILINE)
+        m.group(2)
+        for m in re.finditer(r"^(FAILED|ERROR) ([^\s]+)", r.stdout, re.MULTILINE)
     }
 
 

@@ -1089,6 +1089,22 @@ What moved it since sweep 2 (all live-proven, same day):
   day's manual findings from 50 real runs, with traceable evidence.
 - Reviewer-candidate search closed (2 rejections, both recorded).
 
+**Fail-closed audit (independent review, 2026-07-17) — a caveat the
+effort-weighting cannot see.** Three gates scored "done" were passing on
+SILENCE rather than failing closed: (1) the test oracle read an all-ERROR
+suite as green (`-rf` reported only FAILED) — critical because advisory mode
+made it the sole enforcement gate; (2) `pxx --eval` exited 0 on an empty
+corpus, so every pip-installed copy had an unconditionally-green promotion
+gate; (3) the trust boundary claimed `.aiderignore` enforcement that does not
+cover the evaluator paths, so nothing yet stops a `--self-fix` from editing
+its own grader. (1) and (2) are FIXED (loop.py `-rfE` + ERROR parsing; eval
+fails closed on zero cases); (3) has its doc made honest and the
+`.aiderignore` fix staged for a human edit (guardrail file). **Standing rule
+added: a gate is not "done" until a test proves it fails closed on empty/
+errored/malformed input — Phase 21 (auto-promotion) must not rely on any gate
+lacking that proof.** The percentages above are unchanged, but read them
+knowing effort-weighting rewards built surface, not fail-closed rigor.
+
 The shape of the remaining ~73%: it is now genuinely *construction-heavy*,
 not projection. The cheap schema-and-projection layers (A, most of the
 measurement foundation) are spent. What's left is real building —

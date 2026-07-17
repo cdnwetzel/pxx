@@ -591,11 +591,13 @@ def main() -> None:
         which = sys.argv[idx + 1] if idx + 1 < len(sys.argv) else "all"
         tiers = evaluation.TIERS if which == "all" else (which,)
         bad = 0
+        total_cases = 0
         for tier in tiers:
             results = evaluation.self_check_suite(tier)
             if not results:
                 print(f"pxx eval: no cases in tier {tier!r}", file=sys.stderr)
                 continue
+            total_cases += len(results)
             for r in results:
                 mark = "ok " if r.ok else "FAIL"
                 extra = ""
@@ -607,6 +609,16 @@ def main() -> None:
                     )
                 print(f"{mark} {tier:<11} {r.case_id:<26} {r.arm:<6}{extra}")
                 bad += 0 if r.ok else 1
+        # Fail closed on an empty corpus: "no cases found" is NOT "all passed".
+        # evals/ ships only with a repo checkout, so a pip-installed copy has
+        # zero cases — that must exit non-zero, not a silent green gate.
+        if total_cases == 0:
+            print(
+                f"pxx eval: NO CASES FOUND in {evaluation.EVALS_DIR} — the eval "
+                "corpus ships only with a repo checkout. Failing closed.",
+                file=sys.stderr,
+            )
+            sys.exit(2)
         print(f"pxx eval: {'PASS' if bad == 0 else f'{bad} FAILURE(S)'}")
         sys.exit(0 if bad == 0 else 1)
 

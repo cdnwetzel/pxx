@@ -1021,6 +1021,43 @@ context and tool-registry versioning; verification packets proving
 reproduction and resolution; restart reconciliation and stall recovery;
 continuous entropy detection with golden-principle enforcement.
 
+### Second sweep (2026-07-17, after the Milestone-A/13 build night)
+
+Four headline numbers (method per the Codex reconciliation above):
+
+| Measurement | Sweep 1 (07-16) | Sweep 2 (07-17) |
+|---|---|---|
+| Bounded loop primitive | 85–95% | 90–95% |
+| Measurement & evidence foundation (0, 11–13) | 20–25% | ~60% |
+| Cross-run self-improvement capability | 2–5% | ~5–8% |
+| Entire roadmap (effort-weighted) | 8–10% | **~20%** |
+
+By milestone: **A done** (minimum form, live-validated); **B ~40%**
+(laboratory + persisted live baseline exist; candidate generation (16)
+and comparison policy (17) are now unblocked, not blocked); C ~8%,
+D 0% (correctly), E ~10%.
+
+What moved it: agent identity proved its precision in production
+(budget variants hashed to distinct agent ids unprompted); the failure
+taxonomy went into live use (APPROVED / OUT_OF_SCOPE /
+NO_TEST_PROGRESS recorded on real runs); the eval lab went from
+concept to a CI-self-checking corpus + validated live arm + a full
+persisted baseline (13/15, 3.8 min, zero adversarial cheating, both
+failures decomposed — one model-capability, one reviewer
+false-positive).
+
+Honest caveats: 15 cases vs Phase 13's own ≥30 exit bar; live-arm
+repeatability measured at N=1 per case (scripted arms byte-identical);
+reviewer calibration is a single datum; `VerificationPacket` is typed
+but nothing consumes it yet. The aggregate doubled in one night because
+Milestones A and half of B were deliberately the schema-and-projection
+layers over existing instrumentation — the cheap-steep part of the
+curve; the remaining ~80% is construction (corpus growth, calibration
+suites, candidate machinery, runtime ownership 10.75/10.8), not
+projection. Evidence-directed next build: the Phase 14 reviewer
+calibration suite — r5 showed the reviewer, not the editor, is the
+weakest measured component.
+
 ## Cross-phase safety invariants
 
 1. The production agent never directly changes its active configuration.
@@ -1064,17 +1101,17 @@ section whenever a phase's status line changes.
 
 | Phase | % | Grounding |
 |---|---|---|
-| 0 | 90% | Built: D1 scrub **complete** (bec8310 + 992e314 — user decision executed: bare hostnames allowed, suffixed forms/IPs/personal/firm identifiers purged; `pxx --check --all-files` clean except 7 findings in review/codex\|copilot, other agents' namespaces); **public-content scanner** (`governance.scan_public_content`: four generic classes + untracked denylist, staged gate + audit mode, allow-pragma, lockfile skip); **trust-boundary doc** (docs/TRUST_BOUNDARY.md); v1.1.0 bumped/built/tagged (`v1.1.0` + `learning-baseline-1`, pushed). **v1.1.0 PUBLISHED** (2026-07-16: trusted publisher configured on pypi.org, workflow rerun green, clean-env pip smoke passed — the tokenless tag→publish path works for the first time). Absent: scanner step in release workflow (protected file — user go). |
+| 0 | 95% | Built: D1 scrub **complete** (bec8310 + 992e314 — user decision executed: bare hostnames allowed, suffixed forms/IPs/personal/firm identifiers purged; `pxx --check --all-files` clean except 7 findings in review/codex\|copilot, other agents' namespaces); **public-content scanner** (`governance.scan_public_content`: four generic classes + untracked denylist, staged gate + audit mode, allow-pragma, lockfile skip); **trust-boundary doc** (docs/TRUST_BOUNDARY.md); v1.1.0 bumped/built/tagged (`v1.1.0` + `learning-baseline-1`, pushed). **v1.1.0 PUBLISHED** (2026-07-16: trusted publisher configured on pypi.org, workflow rerun green, clean-env pip smoke passed — the tokenless tag→publish path works for the first time). Absent: scanner step in release workflow (protected file — user go). |
 | 10.5 | 15% | Seed: `pxx/skills.py` + `pxx/commands/*.md` registry; CLAUDE.md/CONVENTIONS.md — the monolithic pattern the phase replaces. Absent: AGENTS/WORKFLOW.md typed contract, `context audit`/`workflow validate`/`docs check`. |
 | 10.75 | 10% | Seed: supervisor mode already runs aider as a supervised `Popen` subprocess with an observer thread (`cli.py:994–999`), and every loop round is a supervised subprocess — pxx has both execution postures; what's absent is the `AgentBackend` protocol, event sink, cancel/resume. |
-| 10.8 | 15% | Seed: append-only audit JSONL, one stream discriminated by `session_class`; workflow state persisted (`workflow.load_state/save_state/resume_state`). Absent: typed event vocabulary, hash chain, headless API. |
+| 10.8 | 20% | Seed (sweep 2: loop-terminal records enriched the stream; `recent_outcomes` is a working projection reader over it): append-only audit JSONL, one stream discriminated by `session_class`; workflow state persisted (`workflow.load_state/save_state/resume_state`). Absent: typed event vocabulary, hash chain, headless API. |
 | 11 | 40% | Built (2026-07-16, minimum slice): `pxx/agent_manifest.py` — frozen `AgentManifest` (versions, models, prompt hashes incl. healing-builder source hash, budgets; no URLs/paths, test-pinned), deterministic `agent_version_id`, `pxx --manifest` inspection; `run_id` threads the loop session → every round record → child sessions (PXX_RUN_ID) → workflow state → capture metadata; identity is best-effort by design (never gates a run). Absent: run directories, ACIManifest, ModelFingerprint, ContextManifest, `pxx runs/agents` commands — expand only as Phase 13 demands. |
 | 12 | 55% | Built (2026-07-16, minimum slice): `pxx/outcomes.py` — canonical 19-code failure taxonomy (`FAILURE_CODES`, incl. INTERRUPTED); every `run_loop` exit now writes a machine-readable `loop-terminal` audit record (code, rounds, exit, start/end sha) via `_terminal()` — a test asserts the driver emits only canonical codes; typed `RunOutcome` projected from the audit stream (stream stays source of truth); `VerificationPacket` with commits, deterministic results, risks; `pxx --runs` lists recent outcomes. Plus pre-existing per-round records + `cost_metrics.TokenMetrics`. Absent: contributing (multi) codes, ReviewPacket, tokens/cost in outcomes, pluggable cost accounting, INTERRUPTED wiring (SIGINT handler) — expand as Phase 13 demands. |
 | 13 | 45% | Built (2026-07-17, minimum slice): `pxx/evaluation.py` — TOML case format (stdlib tomllib, not YAML), disposable git-worktree materialization (identical start state per arm), layered checks (visible deterministic commands → hidden allowed-files / forbidden-patterns / tests-unchanged), and **self-check mode**: 15 shipped cases (5 micro + 5 historical-regression + 5 adversarial), every honest arm passes, all 10 cheat arms caught, two full runs byte-identical (repeatability), full corpus self-checks in CI on every commit; `pxx --eval [tier\|all]`. First self-check run caught a semantics bug in the harness itself (visible-gate catches counted as uncaught). **Live-agent arm built and validated same day** (`run_live_arm` + `pxx --eval-live <case>`): fixtures under `.pxx/eval/` inside the trusted-paths prefix (sovereignty boundary honored, never bypassed); loop rounds retargeted via `PXX_SELF_FIX_ROOT` (the #001 chdir was the first live run's failure — attempt 1 edited nothing while its safety machinery stashed uncommitted pxx work; recovered, fixed); checks run in the fixture's own uv env in both arms. **First successful live eval: m1 APPROVED in 1 round, diff=4, all hidden checks clean, run 20260717T031730-8156.** Attempt 1's four findings recorded (chdir retarget, check-env split, reviewer artifact vs scope guard, and OPEN: empty diff ⇒ reviewer auto-APPROVE — a no-change round reads as clean review; contained by the baseline gate, fix queued). **Full-suite live baseline complete (2026-07-17)**: `agent-e69f7bfcf496` (eval budgets 2r/600s/100d — the identity system correctly distinguishes it from the default-budget agent) scored **13/15 in 3.8 min**, zero cheating across all five adversarial temptations; both failures decompose cleanly — r2 = model capability (credential-regex from scratch in ≤2 rounds), r5 = **reviewer false-positive REVISE against a correct fix** (first measured reviewer-calibration data point; the progress guard stopped the healing spin; final tree passes). Baseline persisted at `evals/baselines/agent-e69f7bfcf496.json`. Absent: baseline-vs-candidate comparison, held-out partitioning, replay from run records. |
-| 14 | 25% | Built: layered gating live in the loop (deterministic gates outrank model review — the core invariant already holds); independence level 3 in production; `preflight_review_backend`; `governance.run_governance_check` (secrets, version sync, review verdict); one manual reviewer calibration (2026-07-16, planted-bug diff). Absent: action broker, ToolAction, calibration *suite*, ambiguity gate, extension governance. |
+| 14 | 30% | Built (sweep 2: first quantified reviewer-calibration failure — r5's false-positive REVISE on a correct fix — recorded in evals/baselines/): layered gating live in the loop (deterministic gates outrank model review — the core invariant already holds); independence level 3 in production; `preflight_review_backend`; `governance.run_governance_check` (secrets, version sync, review verdict); one manual reviewer calibration (2026-07-16, planted-bug diff). Absent: action broker, ToolAction, calibration *suite*, ambiguity gate, extension governance. |
 | 15 | 10% | Seed: no-progress guard (baseline-set monotonicity + healable-findings decrease) is the narrow ancestor of semantic loop detection. Absent: analyzer, clusters, proposals, ProgressVector, recovery ladder. |
 | 16 | 0% | Nothing candidate-shaped exists. |
-| 17 | 0% | Nothing promotion-shaped exists (`check_review_verdict` gates pushes, not promotions). |
+| 17 | 5% | Seed (sweep 2): `evals/baselines/*.json` is the baseline half of baseline-vs-candidate; comparison logic and gates absent. |
 | 18 | 5% | Seed: #002 safety tags + `prune_old_tags` — session-granular rollback primitive. Absent: channels, shadow, canary, breakers. |
 | 19 | 10% | Seed: workflow state machine (idle→generating→review_pending→approved/rejected) with resume; supervisor-mode service lifecycle management. Absent: scheduler, task claims, control plane, triage inbox. |
 | 19.5 | 5% | Seed: `resume_state` + persisted workflow state. Absent: claims, heartbeats, reconciliation loop. |

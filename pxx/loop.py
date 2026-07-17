@@ -12,7 +12,9 @@ Guards (any one fires → the loop stops):
 - round cap (default 3)
 - baseline-set monotonic progress: failures within the test set that was
   failing BEFORE round 1 must strictly decrease every round; tests the loop
-  itself introduces are tracked separately and reported, not gated on
+  itself introduces GATE APPROVE (a fix that breaks a neighbor cannot earn
+  exit 0 — m2 evidence, 2026-07-17) and a stop with live regressions
+  terminates as TEST_REGRESSION
 - cumulative diff budget across all rounds (the per-commit cap alone would let
   N rounds smuggle an N×cap rewrite)
 - wall-clock budget (inference is local/free, so the budget is time+rounds,
@@ -497,6 +499,7 @@ def run_loop(
     state.agent_version_id = agent_version
     prev_baseline_failing = baseline
     prev_healable: int | None = None
+    last_introduced: set[str] = set()
     message = task
 
     for round_no in range(1, max_rounds + 1):
@@ -607,7 +610,7 @@ def run_loop(
         introduced_failing = failing - baseline
         if introduced_failing:
             _say(
-                f"note: {len(introduced_failing)} new failing test(s) introduced by the loop (tracked, not gated)."
+                f"note: {len(introduced_failing)} new failing test(s) introduced by the loop — gating APPROVE."
             )
 
         t0 = time.monotonic()
@@ -664,7 +667,12 @@ def run_loop(
             f"baseline-failing={len(baseline_failing)} diff={spent}"
         )
 
-        if result.verdict == "APPROVE" and not baseline_failing and lint_rc == 0:
+        if (
+            result.verdict == "APPROVE"
+            and not baseline_failing
+            and not introduced_failing
+            and lint_rc == 0
+        ):
             workflow.save_state(
                 workflow.transition(state, "approved", review_verdict="APPROVE"),
                 root,
@@ -767,7 +775,7 @@ def run_loop(
                     )
                     return _terminal(
                         1,
-                        "NO_TEST_PROGRESS",
+                        "TEST_REGRESSION" if introduced_failing else "NO_TEST_PROGRESS",
                         round_no,
                         run_id,
                         agent_version,
@@ -787,7 +795,7 @@ def run_loop(
                 )
                 return _terminal(
                     1,
-                    "NO_TEST_PROGRESS",
+                    "TEST_REGRESSION" if introduced_failing else "NO_TEST_PROGRESS",
                     round_no,
                     run_id,
                     agent_version,
@@ -796,6 +804,7 @@ def run_loop(
                 )
         prev_baseline_failing = baseline_failing
         prev_healable = len(result.healable)
+        last_introduced = introduced_failing
         message = _healing_message(task, result.healable, failing)
         if lint_rc != 0:
             lint_note = _lint_feedback(root, scope)
@@ -808,7 +817,7 @@ def run_loop(
     )
     return _terminal(
         1,
-        "ROUND_CAP_EXCEEDED",
+        "TEST_REGRESSION" if last_introduced else "ROUND_CAP_EXCEEDED",
         max_rounds,
         run_id,
         agent_version,

@@ -796,3 +796,52 @@ class TestBehaviorIdentity:
         assert h.run(run_id="run-x", agent_version="agent-y") == 0
         assert saved and saved[-1].run_id == "run-x"
         assert saved[-1].agent_version_id == "agent-y"
+
+
+class TestIntroducedRegressionGate:
+    """A fix that breaks a neighbor test cannot earn exit 0 (m2, 2026-07-17)."""
+
+    def test_approve_with_regression_continues_then_succeeds(
+        self, monkeypatch, tmp_path
+    ):
+        # Green baseline; round 1 fixes the task but breaks t_new; round 2
+        # repairs it -> APPROVE terminates only when regressions are gone.
+        h = _Harness(
+            monkeypatch,
+            tmp_path,
+            verdicts=[loop.RoundResult("APPROVE", []), loop.RoundResult("APPROVE", [])],
+            failings=[set(), {"t_new"}, set()],
+        )
+        assert h.run() == 0
+        assert len(h.edits) == 2
+        terminal = [
+            r for r in h.audit_records if r.get("session_class") == "loop-terminal"
+        ]
+        assert terminal[-1]["terminal_code"] == "APPROVED"
+
+    def test_regression_at_progress_stop_terminates_as_test_regression(
+        self, monkeypatch, tmp_path
+    ):
+        # Regression never repaired: green-baseline progress guard fires at
+        # round 2 and the terminal code names the regression, not "no progress".
+        h = _Harness(
+            monkeypatch,
+            tmp_path,
+            verdicts=[loop.RoundResult("APPROVE", []), loop.RoundResult("APPROVE", [])],
+            failings=[set(), {"t_new"}, {"t_new"}],
+        )
+        assert h.run() == 1
+        terminal = [
+            r for r in h.audit_records if r.get("session_class") == "loop-terminal"
+        ]
+        assert terminal[-1]["terminal_code"] == "TEST_REGRESSION"
+
+    def test_healing_message_names_the_broken_test(self, monkeypatch, tmp_path):
+        h = _Harness(
+            monkeypatch,
+            tmp_path,
+            verdicts=[loop.RoundResult("APPROVE", []), loop.RoundResult("APPROVE", [])],
+            failings=[set(), {"tests/test_x.py::test_new"}, set()],
+        )
+        assert h.run() == 0
+        assert "tests/test_x.py::test_new" in h.edits[1]

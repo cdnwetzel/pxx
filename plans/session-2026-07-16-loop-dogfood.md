@@ -1,7 +1,12 @@
 # 2026-07-16 session plan — close Phase 9 via vllm-host-1, then docs-sme A/B
 > Backlog ID: 008
 
-> Status: planned
+> Status: done — Task 1 (live loop dogfood, APPROVE) and Task 2 (9.4 capture +
+> privacy check) closed plan 004 on 2026-07-16; Task 4 shipped as
+> pxx-orchestrator 1.1.0 on PyPI the same night (trusted publishing fixed and
+> verified, tags v1.1.0 + learning-baseline-1, clean-env smoke passed).
+> Task 3 (docs-sme §6 A/B) is tracked solely by plan 006 (re-scope decision
+> D5 pending in plan 009) — no remaining scope here.
 > Type: session work-order — sequences the remaining work of plans 004 and
 > 006; closes when its tasks land (which should take 004, and possibly 006,
 > to `done`). No new scope of its own.

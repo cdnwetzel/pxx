@@ -53,15 +53,23 @@ PROTECTED_PREFIXES: tuple[str, ...] = (
 
 
 def canonical_repo_path(path: str) -> str | None:
-    """Normalize to a repo-relative, forward-slash, casefolded path — or None
-    if it cannot be safely classified (empty, absolute, or escaping the repo).
-    None means the caller must fail closed: a boundary that can't classify an
-    input must treat it as protected, not wave it through.
+    """Normalize to a repo-relative, forward-slash, **case-preserving** path —
+    or None if it cannot be safely classified (empty, absolute, or escaping the
+    repo). None means the caller must fail closed: a boundary that can't
+    classify an input must treat it as protected, not wave it through.
 
     This is THE one path normalization in the system. ``is_protected_path``
     and the content-candidate check both derive their path from it, so a
     content candidate's validated path and written path cannot come from two
-    normalizations that disagree (review requirement #1)."""
+    normalizations that disagree (review requirement #1).
+
+    Case is **preserved**, not folded: this value is also the write path a
+    content candidate uses, and casefolding it would write ``System.md`` to
+    ``system.md`` — a different file on a case-sensitive FS (CI is Ubuntu, the
+    eval runs on vllm-host-1/Linux). Casefolding is applied only at *comparison*
+    time (``is_protected_path`` and the content check), symmetrically to both
+    sides — one derivation for I/O, one consistent fold for the boundary
+    decision, so the case-insensitive protection still holds."""
     if not isinstance(path, str) or not path.strip():
         return None
     p = path.strip().replace("\\", "/")  # windows-style diff paths
@@ -72,10 +80,7 @@ def canonical_repo_path(path: str) -> str | None:
     norm = posixpath.normpath(p)  # collapses a/../b and ./
     if norm == ".." or norm.startswith("../"):
         return None  # escapes the repo root
-    # casefold so a case-insensitive filesystem (macOS default) can't dodge
-    # the check via PXX/EVALUATION.PY — over-protecting a case-variant that
-    # doesn't exist costs nothing; under-protecting is the security hole.
-    return norm.casefold()
+    return norm
 
 
 def is_protected_path(path: str) -> bool:
@@ -105,7 +110,11 @@ def is_protected_path(path: str) -> bool:
         c = canonical_repo_path(form)
         if c is None:
             return True  # a form we can't classify → fail closed
+        # canonical is case-preserving; fold HERE (both sides) so a case-
+        # insensitive FS can't dodge via PXX/EVALUATION.PY. Over-protecting a
+        # case variant costs nothing; under-protecting is the security hole.
+        cf = c.casefold()
         for pre in prefixes:
-            if c == pre.rstrip("/") or c.startswith(pre):
+            if cf == pre.rstrip("/") or cf.startswith(pre):
                 return True
     return False

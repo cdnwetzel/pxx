@@ -9,10 +9,12 @@ Safety spine (review requirement #1, the standing review target): the path
 that is validated, the path that is written, and the path that is verified
 after the write all derive from ONE value — the declared ``target``,
 normalized once by ``protected_paths.canonical_repo_path`` — and the
-post-write check reads the ACTUAL changed paths from ``git diff --name-only``.
-So a write that lands anywhere other than the validated target (or touches a
-protected file, or more than one file) fails closed. There is no second path
-computation that could disagree with the first.
+post-write check reads the ACTUAL changed paths from git (``git status
+--porcelain -z`` for the working tree plus ``git diff`` since the pre-write
+HEAD, since the live sweep auto-commits). So a write that lands anywhere other
+than the validated target (or touches a protected file, or more than one file)
+fails closed, whether it stayed uncommitted or was already committed. There is
+no second path computation that could disagree with the first.
 
 Allowed targets are behavior text only (``pxx/prompts/``, ``pxx/commands/``).
 A prompt IS the agent's policy, so a content candidate can propose changing
@@ -47,6 +49,12 @@ class ContentCandidate:
     protected_targets_touched: tuple[str, ...] = field(default_factory=tuple)
 
 
+@dataclass(frozen=True)
+class AppliedContent:
+    dest: Path  # the case-preserving path actually written
+    base_sha: str  # pre-write HEAD — REQUIRED input to verify_only_touched_target
+
+
 def _canonical_target(target: str) -> str | None:
     """The single derivation of the candidate's path — the same normalization
     the protected boundary uses. Returns None (→ reject) when unclassifiable."""
@@ -54,7 +62,8 @@ def _canonical_target(target: str) -> str | None:
 
 
 def _in_content_allowlist(canonical: str) -> bool:
-    return any(canonical.startswith(pre.casefold()) for pre in CONTENT_TARGET_PREFIXES)
+    cf = canonical.casefold()  # canonical is case-preserving; fold at comparison
+    return any(cf.startswith(pre.casefold()) for pre in CONTENT_TARGET_PREFIXES)
 
 
 def validate_content_candidate(c: ContentCandidate) -> ValidationResult:
@@ -99,10 +108,28 @@ def content_sha256(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
 
 
-def apply_content_candidate(repo_root: Path, c: ContentCandidate) -> Path:
-    """Write the candidate's content to its ONE canonical target. Refuses to
-    apply an invalid candidate (the integrity gate applies at apply time too,
-    not only at proposal — a persisted candidate could be hand-edited)."""
+def _head_sha(repo_root: Path) -> str:
+    r = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    return r.stdout.strip()
+
+
+def apply_content_candidate(repo_root: Path, c: ContentCandidate) -> AppliedContent:
+    """Write the candidate's content to its ONE canonical target and return the
+    written path plus the PRE-write HEAD. Refuses to apply an invalid candidate
+    (the integrity gate applies at apply time too, not only at proposal — a
+    persisted candidate could be hand-edited).
+
+    The returned ``base_sha`` is the required input to
+    ``verify_only_touched_target``: the live sweep auto-commits, so verify must
+    diff against the moment before the write, not rely on the tree being dirty
+    (a committed escape would otherwise be invisible)."""
     result = validate_content_candidate(c)
     if not result.ok:
         raise ValueError(
@@ -110,47 +137,75 @@ def apply_content_candidate(repo_root: Path, c: ContentCandidate) -> Path:
         )
     canonical = _canonical_target(c.target)
     assert canonical is not None  # validate_content_candidate proved this
-    dest = repo_root / canonical
+
+    dest = repo_root / canonical  # case-preserving — write to the declared casing
+    # write_text FOLLOWS symlinks: a planted link inside the allowlisted dir
+    # (or a symlinked parent) could land the write ON the grader. Reject any
+    # destination whose real location isn't exactly where the canonical target
+    # says it should be — checked BEFORE the write, so the grader is never
+    # tampered even within the write→verify window.
+    expected_parent = (repo_root.resolve() / canonical).parent
+    if dest.is_symlink():
+        raise ValueError(f"refusing to write through a symlink: {c.target!r}")
+    if dest.parent.exists() and dest.parent.resolve() != expected_parent:
+        raise ValueError(
+            f"refusing: path parent redirects outside the target: {c.target!r}"
+        )
+
+    base_sha = _head_sha(repo_root)  # capture BEFORE the write
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_text(c.content, encoding="utf-8")
-    return dest
+    return AppliedContent(dest=dest, base_sha=base_sha)
 
 
 def changed_paths(repo_root: Path, base_sha: str | None = None) -> list[str]:
     """The ACTUAL changed paths, from git's own account — the single source of
-    truth for "what did this candidate touch". Uses ``git status --porcelain
+    truth for "what did this candidate touch". Uses ``git status --porcelain -z
     --untracked-files=all`` (modified + staged + UNTRACKED — plain
     ``diff --name-only`` misses new files, and a content write can create one
     in a protected dir), plus committed changes since ``base_sha`` when given.
-    A write can't hide by being uncommitted or untracked."""
+    A write can't hide by being uncommitted, untracked, or already committed.
+
+    ``-z`` (NUL-separated) is load-bearing: without it git C-quotes and octal-
+    escapes any path with a space or non-ASCII byte, and those quotes would
+    survive into ``canonical_repo_path`` → a spurious "unexpected path". It also
+    removes the "orig -> new" rename split ambiguity: with ``-z`` a rename is
+    ``XY new\\0orig\\0``, so we take ``new`` and skip the following ``orig``
+    field explicitly."""
     paths: set[str] = set()
     status = subprocess.run(
-        ["git", "status", "--porcelain", "--untracked-files=all"],
+        ["git", "status", "--porcelain", "-z", "--untracked-files=all"],
         cwd=repo_root,
         capture_output=True,
         text=True,
         check=False,
         timeout=30,
     )
-    for line in status.stdout.splitlines():
-        if line.strip():
-            # "XY path" or "XY orig -> path" (rename); take the destination.
-            paths.add(line[3:].split(" -> ")[-1].strip())
+    tokens = [t for t in status.stdout.split("\0") if t]
+    i = 0
+    while i < len(tokens):
+        entry = tokens[i]
+        xy, path = entry[:2], entry[3:]  # "XY <path>"; path is raw (no quoting)
+        if path:
+            paths.add(path)
+        if "R" in xy or "C" in xy:
+            i += 1  # rename/copy: the next NUL field is the source — skip it
+        i += 1
     if base_sha:
         r = subprocess.run(
-            ["git", "diff", "--name-only", f"{base_sha}..HEAD"],
+            ["git", "diff", "--name-only", "-z", f"{base_sha}..HEAD"],
             cwd=repo_root,
             capture_output=True,
             text=True,
             check=False,
             timeout=30,
         )
-        paths.update(line.strip() for line in r.stdout.splitlines() if line.strip())
+        paths.update(t for t in r.stdout.split("\0") if t)
     return sorted(paths)
 
 
 def verify_only_touched_target(
-    repo_root: Path, c: ContentCandidate, base_sha: str | None = None
+    repo_root: Path, c: ContentCandidate, base_sha: str
 ) -> list[str]:
     """After applying, confirm the candidate touched ONLY its declared target.
     Derives the changed set from git (not from the candidate's own claim), and
@@ -158,13 +213,22 @@ def verify_only_touched_target(
     protected file, or touched any file other than the target, is caught here
     regardless of what the candidate said. Returns violation messages (empty =
     clean). This is the requirement-#1 check: the verified path comes from the
-    same place git wrote, not a re-parse of the candidate."""
+    same place git wrote, not a re-parse of the candidate.
+
+    ``base_sha`` is REQUIRED (no default): the live sweep auto-commits, so a
+    tree-only check would see a committed escape as clean → a vacuous pass.
+    Pass ``AppliedContent.base_sha`` from the matching apply so the pre-write
+    HEAD and the verify can't be mismatched."""
     violations: list[str] = []
     canonical = _canonical_target(c.target)
+    cf_target = canonical.casefold() if canonical is not None else None
     for path in changed_paths(repo_root, base_sha):
         if is_protected_path(path):
             violations.append(f"touched protected path: {path}")
             continue
-        if canonical_repo_path(path) != canonical:
+        cp = canonical_repo_path(path)
+        # canonical is case-preserving; fold both sides symmetrically for the
+        # boundary decision (same policy is_protected_path uses).
+        if cp is None or cf_target is None or cp.casefold() != cf_target:
             violations.append(f"touched unexpected path (not the target): {path}")
     return violations

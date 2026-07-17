@@ -82,30 +82,30 @@ def _repo(tmp_path):
 class TestApplyAndVerify:
     def test_apply_writes_the_one_canonical_target(self, tmp_path):
         repo = _repo(tmp_path)
-        dest = apply_content_candidate(repo, _cc(content="new prompt\n"))
-        assert dest.read_text() == "new prompt\n"
-        assert dest == repo / "pxx/prompts/system.md"
+        applied = apply_content_candidate(repo, _cc(content="new prompt\n"))
+        assert applied.dest.read_text() == "new prompt\n"
+        assert applied.dest == repo / "pxx/prompts/system.md"
 
     def test_verify_clean_when_only_target_touched(self, tmp_path):
         repo = _repo(tmp_path)
-        apply_content_candidate(repo, _cc(content="new prompt\n"))
-        assert verify_only_touched_target(repo, _cc()) == []
+        applied = apply_content_candidate(repo, _cc(content="new prompt\n"))
+        assert verify_only_touched_target(repo, _cc(), applied.base_sha) == []
 
     def test_verify_catches_a_protected_file_also_changed(self, tmp_path):
         # Simulate a candidate/write that ALSO touched the evaluator. The
-        # verify derives paths from git --name-only, not the candidate's
-        # claim, so it catches this regardless of what the candidate declared.
+        # verify derives paths from git, not the candidate's claim, so it
+        # catches this regardless of what the candidate declared.
         repo = _repo(tmp_path)
-        apply_content_candidate(repo, _cc(content="new prompt\n"))
+        applied = apply_content_candidate(repo, _cc(content="new prompt\n"))
         (repo / "pxx" / "review_gate.py").write_text("# TAMPERED\n")
-        violations = verify_only_touched_target(repo, _cc())
+        violations = verify_only_touched_target(repo, _cc(), applied.base_sha)
         assert any("protected path" in v and "review_gate" in v for v in violations)
 
     def test_verify_catches_an_unexpected_extra_file(self, tmp_path):
         repo = _repo(tmp_path)
-        apply_content_candidate(repo, _cc(content="new prompt\n"))
+        applied = apply_content_candidate(repo, _cc(content="new prompt\n"))
         (repo / "pxx" / "prompts" / "other.md").write_text("stray\n")
-        violations = verify_only_touched_target(repo, _cc())
+        violations = verify_only_touched_target(repo, _cc(), applied.base_sha)
         assert any("unexpected path" in v for v in violations)
 
     def test_changed_paths_reads_from_git(self, tmp_path):
@@ -123,6 +123,106 @@ class TestApplyAndVerify:
         assert (repo / "pxx/review_gate.py").read_text() == "# the grader\n"
 
 
+class TestP1CommittedEscapesVisibleToVerify:
+    """[P1] fail-open: the live sweep auto-commits, so a tree-only verify sees a
+    committed escape as clean. verify diffs against the pre-write HEAD instead."""
+
+    def test_verify_catches_a_committed_escape(self, tmp_path):
+        repo = _repo(tmp_path)
+        applied = apply_content_candidate(repo, _cc(content="new\n"))
+        # ALSO escape to the grader, then COMMIT everything (as the loop does).
+        (repo / "pxx" / "review_gate.py").write_text("# TAMPERED\n")
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-q", "-m", "loop round", "--no-verify")
+        violations = verify_only_touched_target(repo, _cc(), applied.base_sha)
+        assert any("protected path" in v and "review_gate" in v for v in violations)
+
+    def test_verify_clean_for_a_committed_legit_write(self, tmp_path):
+        repo = _repo(tmp_path)
+        applied = apply_content_candidate(repo, _cc(content="new\n"))
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-q", "-m", "loop round", "--no-verify")
+        assert verify_only_touched_target(repo, _cc(), applied.base_sha) == []
+
+    def test_verify_requires_base_sha(self):
+        # The pair can't be mismatched: no None default to fall through on.
+        import inspect
+
+        sig = inspect.signature(verify_only_touched_target)
+        assert sig.parameters["base_sha"].default is inspect.Parameter.empty
+
+
+class TestP2SymlinkWriteThrough:
+    """[P2] fail-open in the write window: write_text follows symlinks, so a
+    planted link in the allowlisted dir could land the write on the grader."""
+
+    def test_apply_refuses_to_write_through_a_symlink(self, tmp_path):
+        import pytest
+
+        repo = _repo(tmp_path)
+        link = repo / "pxx" / "prompts" / "x.md"
+        link.symlink_to("../review_gate.py")  # planted redirect to the grader
+        with pytest.raises(ValueError):
+            apply_content_candidate(
+                repo, _cc(target="pxx/prompts/x.md", content="pwn\n")
+            )
+        # the grader is untouched — caught BEFORE the write, not post-hoc
+        assert (repo / "pxx/review_gate.py").read_text() == "# the grader\n"
+
+    def test_apply_refuses_a_symlinked_parent(self, tmp_path):
+        import pytest
+
+        repo = _repo(tmp_path)
+        (repo / "evil").mkdir()
+        # pxx/commands is a symlink to a dir outside the allowlist
+        (repo / "pxx" / "commands").symlink_to(repo / "evil")
+        with pytest.raises(ValueError):
+            apply_content_candidate(
+                repo, _cc(target="pxx/commands/x.md", content="pwn\n")
+            )
+        assert not (repo / "evil" / "x.md").exists()
+
+
+class TestP3CasePreservingWritePath:
+    """[P3] casefolded canonical must not be the write path — System.md would
+    write to system.md on a case-sensitive FS (CI is Ubuntu, eval is Linux)."""
+
+    def test_apply_writes_declared_casing(self, tmp_path):
+        repo = _repo(tmp_path)
+        applied = apply_content_candidate(
+            repo, _cc(target="pxx/prompts/System.md", content="x\n")
+        )
+        assert applied.dest.name == "System.md"  # not casefolded to system.md
+
+    def test_canonical_repo_path_preserves_case(self):
+        from pxx.protected_paths import canonical_repo_path
+
+        assert canonical_repo_path("pxx/prompts/System.md") == "pxx/prompts/System.md"
+
+    def test_is_protected_path_still_case_insensitive(self):
+        from pxx.protected_paths import is_protected_path
+
+        # boundary decision still folds — an uppercased grader is protected
+        assert is_protected_path("PXX/REVIEW_GATE.PY")
+
+
+class TestP4PorcelainQuoting:
+    """[P4] fail-closed: git C-quotes paths with spaces/non-ASCII without -z,
+    and the quotes false-flagged as an unexpected path. -z carries raw bytes."""
+
+    def test_verify_clean_for_a_target_with_a_space(self, tmp_path):
+        repo = _repo(tmp_path)
+        c = _cc(target="pxx/prompts/my prompt.md", content="x\n")
+        applied = apply_content_candidate(repo, c)
+        assert verify_only_touched_target(repo, c, applied.base_sha) == []
+
+    def test_verify_clean_for_a_non_ascii_target(self, tmp_path):
+        repo = _repo(tmp_path)
+        c = _cc(target="pxx/prompts/café.md", content="x\n")
+        applied = apply_content_candidate(repo, c)
+        assert verify_only_touched_target(repo, c, applied.base_sha) == []
+
+
 class TestRequirementOneEquivalence:
     """validate-path, write-path, verify-path derive from ONE value."""
 
@@ -130,7 +230,7 @@ class TestRequirementOneEquivalence:
         repo = _repo(tmp_path)
         # A target with a ./ that normalizes to the same canonical path.
         c = _cc(target="./pxx/prompts/system.md", content="v2\n")
-        dest = apply_content_candidate(repo, c)
-        assert dest == repo / "pxx/prompts/system.md"
-        # verify (git --name-only derived) sees exactly that path -> clean
-        assert verify_only_touched_target(repo, c) == []
+        applied = apply_content_candidate(repo, c)
+        assert applied.dest == repo / "pxx/prompts/system.md"
+        # verify (git-derived) sees exactly that path -> clean
+        assert verify_only_touched_target(repo, c, applied.base_sha) == []

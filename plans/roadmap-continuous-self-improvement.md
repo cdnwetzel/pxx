@@ -1063,6 +1063,44 @@ context and tool-registry versioning; verification packets proving
 reproduction and resolution; restart reconciliation and stall recovery;
 continuous entropy detection with golden-principle enforcement.
 
+### Third sweep (2026-07-17 late — after the reviewer-trust + mining build day)
+
+Effort-weighted, weights ∝ relative build size (10.75/13/22 are the heavy
+architectural phases). Method unchanged from the Codex reconciliation above.
+
+| Measurement | Sweep 1 (07-16) | Sweep 2 (07-17) | Sweep 3 (07-17 late) |
+|---|---|---|---|
+| Bounded loop primitive | 85–95% | 90–95% | **95%** (advisory mode, regression gate, evidence packet — complete for its envelope) |
+| Measurement & evidence foundation (0,11,12,13) | 20–25% | ~60% | **~66%** |
+| Cross-run self-improvement capability | 2–5% | ~5–8% | **~12%** (mining + comparison policy exist; candidate *generation* 16 still 0) |
+| Entire roadmap (effort-weighted) | 8–10% | ~20% | **~27%** |
+
+Milestones: **A ~62%** (0 complete, 11/12 solid, 10.5 minimum); **B ~38%**
+(eval lab + evaluators + mining built; Phase 16 candidate generation is the
+0% keystone that gates the rest); **C ~15%**; D 0% (correctly); E ~10%.
+
+What moved it since sweep 2 (all live-proven, same day):
+- Phase 0 → 100% (release scanner gate landed).
+- Advisory review mode (14 → 55%): resolved the calibration dead-end; r5
+  flipped fail→pass live with the same paranoid reviewer.
+- VerificationPacket consumed (12 → 65%): `pxx --verify` reads real evidence.
+- Eval corpus 16 → 30 (13 → 60%): the Phase 13 count exit-criterion met.
+- Experience mining (15 → 35%): `pxx --analyze` independently re-derived the
+  day's manual findings from 50 real runs, with traceable evidence.
+- Reviewer-candidate search closed (2 rejections, both recorded).
+
+The shape of the remaining ~73%: it is now genuinely *construction-heavy*,
+not projection. The cheap schema-and-projection layers (A, most of the
+measurement foundation) are spent. What's left is real building —
+candidate generation (16), the runtime-ownership rebuild (10.75/10.8),
+promotion deployment machinery (18/19/19.5), and the memory/entropy
+systems (20/20.5) — plus the evidence-gated auto-promotion (21) that must
+not start until B and C are mature. Milestone B's completion now hinges on
+a single 0% phase: **16, constrained candidate generation** — everything
+around it (mine weakness → evaluate → compare → promote) exists and is
+live-proven; what's missing is the step that turns a mined weakness into a
+declarative, allowlisted candidate patch.
+
 ### Second sweep (2026-07-17, after the Milestone-A/13 build night)
 
 Four headline numbers (method per the Codex reconciliation above):
@@ -1143,7 +1181,7 @@ section whenever a phase's status line changes.
 
 | Phase | % | Grounding |
 |---|---|---|
-| 0 | 95% | Built: D1 scrub **complete** (bec8310 + 992e314 — user decision executed: bare hostnames allowed, suffixed forms/IPs/personal/firm identifiers purged; `pxx --check --all-files` clean except 7 findings in review/codex\|copilot, other agents' namespaces); **public-content scanner** (`governance.scan_public_content`: four generic classes + untracked denylist, staged gate + audit mode, allow-pragma, lockfile skip); **trust-boundary doc** (docs/TRUST_BOUNDARY.md); v1.1.0 bumped/built/tagged (`v1.1.0` + `learning-baseline-1`, pushed). **v1.1.0 PUBLISHED** (2026-07-16: trusted publisher configured on pypi.org, workflow rerun green, clean-env pip smoke passed — the tokenless tag→publish path works for the first time). Absent: scanner step in release workflow (protected file — user go). |
+| 0 | 100% | Built: D1 scrub **complete** (bec8310 + 992e314 — user decision executed: bare hostnames allowed, suffixed forms/IPs/personal/firm identifiers purged; `pxx --check --all-files` clean except 7 findings in review/codex\|copilot, other agents' namespaces); **public-content scanner** (`governance.scan_public_content`: four generic classes + untracked denylist, staged gate + audit mode, allow-pragma, lockfile skip); **trust-boundary doc** (docs/TRUST_BOUNDARY.md); v1.1.0 bumped/built/tagged (`v1.1.0` + `learning-baseline-1`, pushed). **v1.1.0 PUBLISHED** (2026-07-16: trusted publisher configured on pypi.org, workflow rerun green, clean-env pip smoke passed — the tokenless tag→publish path works for the first time). Release-workflow scanner gate landed (`gate` job runs `pxx --check --shipped`). **Phase 0 COMPLETE.** |
 | 10.5 | 45% | Built (2026-07-17, minimum slice): **AGENTS.md** (map-not-manual, links CI-checked) and **WORKFLOW.md** — machine-readable TOML contract (states, budgets, commands, permissions incl. protected_paths as the TRUST_BOUNDARY projection) with `tests/test_workflow_contract.py` asserting every field against the code it describes: the contract cannot drift silently. The agent manifest hashes WORKFLOW.md (editing policy = new agent_version_id, verified live). Absent: docs/ tree restructure, `pxx context audit`/`docs check` commands, CLAUDE.md slimming into the map. |
 | 10.75 | 10% | Seed: supervisor mode already runs aider as a supervised `Popen` subprocess with an observer thread (`cli.py:994–999`), and every loop round is a supervised subprocess — pxx has both execution postures; what's absent is the `AgentBackend` protocol, event sink, cancel/resume. |
 | 10.8 | 20% | Seed (sweep 2: loop-terminal records enriched the stream; `recent_outcomes` is a working projection reader over it): append-only audit JSONL, one stream discriminated by `session_class`; workflow state persisted (`workflow.load_state/save_state/resume_state`). Absent: typed event vocabulary, hash chain, headless API. |

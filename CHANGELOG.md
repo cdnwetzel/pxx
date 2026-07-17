@@ -2,6 +2,50 @@
 
 All notable changes to pxx and its ecosystem across development phases.
 
+## [1.3.0] — 2026-07-17
+
+**Content change-class candidates.** The self-improvement system gains its
+first *file-mutating* candidate class: proposals that rewrite the behavior
+text steering the agent (prompt & command files), evaluated and human-promoted
+— never auto-applied. Built and hardened end to end through the coder⇄reviewer
+review protocol; every fix below is proven fail-closed by a named test.
+
+### Added
+
+- **Content change-class candidates** (`pxx/content_candidates.py`). A content
+  candidate rewrites behavior text under `pxx/prompts/` or `pxx/commands/`
+  only. It is validated, applied, and verified through ONE path derivation
+  (review requirement #1), and the live-eval envelope evaluates it in an
+  isolated clone: `evaluate_content_candidate` does clean-clone → apply → run
+  → verify → restore. Human-gated by construction — the generator can never
+  apply, commit, or promote its own change.
+
+### Hardened
+
+- **Requirement-#1 single derivation.** Validate-path, write-path, and the
+  post-write verify-path all derive from the same `canonical_repo_path`; the
+  post-write check reads the ACTUAL changed paths from git, not the
+  candidate's claim.
+- **P1 — committed-escape visibility.** Verify diffs against the pre-write
+  HEAD (`apply` returns it), so an escape the live sweep already auto-committed
+  is still caught, not read as a clean tree.
+- **P2 — symlink write rejection.** `apply` refuses a symlinked or redirected
+  destination before writing, so a planted link can't land the write on a
+  protected file.
+- **P3 — case-preserving write path.** `canonical_repo_path` no longer
+  casefolds the path it writes to (`System.md` stayed `System.md` on
+  case-sensitive filesystems); casefolding happens only at comparison.
+- **P4 — robust porcelain parsing.** `git status --porcelain -z` (NUL-split)
+  removes C-quoting and rename-split ambiguity for paths with spaces or
+  non-ASCII bytes.
+- **G1 — positive verification.** Verify requires the declared target to
+  APPEAR in the changed set; an empty or target-absent set is a violation, not
+  a vacuous pass — closing the case where a valid-but-wrong `base_sha` yields
+  an empty diff.
+- **G2/G3 — live-eval envelope.** The envelope threads `apply`'s own
+  `base_sha` into verify (no re-derivation) and asserts the fixture is clean
+  before apply (a dirty tree can mask a real escape), failing loud otherwise.
+
 ## [1.2.2] — 2026-07-17
 
 **More fail-closed hardening (review rounds 3–4) + the candidate/promotion

@@ -240,12 +240,14 @@ class TestRunReviewPass:
         out = tmp_path / "review" / "claude" / "claude-findings.md"
         assert "F-001" in out.read_text(encoding="utf-8")
 
-    def test_local_empty_diff_writes_no_findings(self, tmp_path, monkeypatch):
+    def test_local_empty_diff_fails_closed(self, tmp_path, monkeypatch):
+        # "Nothing changed" must never read as "reviewed and clean" — a no-op
+        # round on a green baseline would launder into terminal APPROVE
+        # (observed live, eval attempt 1, 2026-07-17).
         monkeypatch.setenv("PXX_REVIEW_BACKEND", "local")
         monkeypatch.setattr("pxx.review_gate._git_diff", lambda *a: "   \n")
-        assert run_review_pass(tmp_path) == 0
-        out = tmp_path / "review" / "claude" / "claude-findings.md"
-        assert "no findings" in out.read_text(encoding="utf-8").lower()
+        assert run_review_pass(tmp_path) == 1
+        assert not (tmp_path / "review" / "claude" / "claude-findings.md").exists()
 
     def test_local_endpoint_failure_returns_1(self, tmp_path, monkeypatch):
         monkeypatch.setenv("PXX_REVIEW_BACKEND", "local")

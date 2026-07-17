@@ -67,14 +67,24 @@ def _review_backend() -> str:
     return os.environ.get("PXX_REVIEW_BACKEND", "local").strip().lower()
 
 
-LOCAL_REVIEW_INSTRUCTIONS = """You are a strict code reviewer. Judge the code AS \
-IT EXISTS AFTER the diff below. Lines starting with "-" were REMOVED — ignore \
-them completely, they no longer exist. Lines starting with "+" and the unchanged \
-context are the current code; review THAT.
+# v2 (2026-07-17, calibration-driven): the v1 prompt produced fp_rate=1.00 on
+# Qwen3-Coder — every clean diff flagged. The three measured FP classes were
+# (a) intentional requested changes read as breaking regressions, (b) code
+# absent from the diff reported as "missing implementation", (c) residual
+# pre-fix problems hallucinated onto correct fixes. Hence: task context block,
+# out-of-scope rule, concrete-failing-input bar.
+LOCAL_REVIEW_INSTRUCTIONS = """You are a code reviewer with a high bar for \
+reporting. MOST diffs you review are correct — finding nothing is the normal \
+outcome, not a failure. Judge the code AS IT EXISTS AFTER the diff below. \
+Lines starting with "-" were REMOVED — ignore them completely, they no longer \
+exist.
 
-Report genuine correctness or logic bugs in the current code (wrong return \
-values, off-by-one, wrong branch taken, unhandled inputs). Do NOT report \
-formatting, style, or anything about removed lines.
+Report a finding ONLY if you can name a concrete input, state, or call \
+sequence that produces wrong behavior in the current code. Style, naming, \
+comments, missing tests, hypothetical hardening, and "could be more robust" \
+are NOT findings. Code that does not appear in the diff or its context lines \
+is OUT OF SCOPE — never report missing implementations or callers you cannot \
+see.
 
 Write every finding as a markdown header line in EXACTLY this format, one per line:
 
@@ -85,9 +95,23 @@ Number findings F-001, F-002, and so on. If the current code is correct, output
 EXACTLY this single line and nothing else:
 
 # Review pass: no findings.
-
-Diff under review:
 """
+
+_TASK_CONTEXT_TEMPLATE = """
+The diff was written to satisfy this request; the requested change itself is
+INTENTIONAL and must not be reported as a defect or breaking change:
+
+REQUEST: {task}
+"""
+
+
+def build_review_prompt(diff: str, task: str | None = None) -> str:
+    """The exact prompt the local reviewer sees — single source for both the
+    production review pass and the calibration suite, so they cannot drift."""
+    prompt = LOCAL_REVIEW_INSTRUCTIONS
+    if task:
+        prompt += _TASK_CONTEXT_TEMPLATE.format(task=task.strip())
+    return prompt + "\nDiff under review:\n" + diff
 
 
 def _git_diff(project_root: Path, diff_base: str | None) -> str:
@@ -184,7 +208,12 @@ def preflight_review_backend(timeout: float = 5.0) -> str | None:
     return None
 
 
-def _run_local_review(project_root: Path, timeout: float, diff_base: str | None) -> int:
+def _run_local_review(
+    project_root: Path,
+    timeout: float,
+    diff_base: str | None,
+    task: str | None = None,
+) -> int:
     """Sovereign review: feed the round's diff to a local OpenAI-compatible model
     (PXX_REVIEW_URL + PXX_REVIEW_MODEL) and write its findings to
     review/claude/claude-findings.md in the F-NNN format the parser expects.
@@ -201,12 +230,19 @@ def _run_local_review(project_root: Path, timeout: float, diff_base: str | None)
     diff = _git_diff(project_root, diff_base)
 
     if not diff.strip():
-        out_dir.mkdir(parents=True, exist_ok=True)
-        out_file.write_text("# Review pass: no findings.\n", encoding="utf-8")
-        return 0
+        # An empty session diff means no change landed — "nothing changed"
+        # must never read as "reviewed and clean" (a no-op round on a green
+        # baseline would otherwise launder into a terminal APPROVE; observed
+        # in live eval attempt 1, 2026-07-17).
+        print(
+            "pxx: local review found an empty session diff — nothing to "
+            "review; failing closed",
+            file=sys.stderr,
+        )
+        return 1
 
     try:
-        content = _post_chat(url, model, LOCAL_REVIEW_INSTRUCTIONS + diff, timeout)
+        content = _post_chat(url, model, build_review_prompt(diff, task), timeout)
     except (urllib.error.URLError, TimeoutError, KeyError, ValueError, OSError) as e:
         print(f"pxx: local review failed ({url}): {e}", file=sys.stderr)
         return 1
@@ -254,7 +290,10 @@ def _run_claude_review(project_root: Path, timeout: float) -> int:
 
 
 def run_review_pass(
-    project_root: Path, timeout: float | None = None, diff_base: str | None = None
+    project_root: Path,
+    timeout: float | None = None,
+    diff_base: str | None = None,
+    task: str | None = None,
 ) -> int:
     """Produce review findings at review/claude/, using the selected backend.
 
@@ -268,7 +307,7 @@ def run_review_pass(
         timeout = float(os.environ.get("PXX_REVIEW_TIMEOUT", "900"))
     backend = _review_backend()
     if backend == "local":
-        return _run_local_review(project_root, timeout, diff_base)
+        return _run_local_review(project_root, timeout, diff_base, task)
     if backend == "claude":
         return _run_claude_review(project_root, timeout)
     print(

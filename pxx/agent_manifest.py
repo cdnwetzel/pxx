@@ -109,7 +109,9 @@ def current_manifest(
         reviewer_model=review_gate._review_model(),
         edit_prompt_hash=_edit_prompt_hash(),
         healing_prompt_hash=_sha(inspect.getsource(review_gate.build_healing_prompt)),
-        review_prompt_hash=_sha(review_gate.LOCAL_REVIEW_INSTRUCTIONS),
+        review_prompt_hash=_sha(
+            review_gate.LOCAL_REVIEW_INSTRUCTIONS + review_gate._TASK_CONTEXT_TEMPLATE
+        ),
         max_rounds=max_rounds,
         max_seconds=max_seconds,
         diff_budget=diff_budget,

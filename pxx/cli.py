@@ -511,6 +511,34 @@ def main() -> None:
             )
         )
 
+    if "--calibrate" in sys.argv:
+        # Reviewer calibration (#014.3): the production review path scored
+        # against ground-truth diffs. Threshold breach exits non-zero.
+        from pxx import calibration
+
+        report = calibration.run_calibration()
+        for v in report.verdicts:
+            mark = "ok " if v.correct else "MISS" if v.kind == "defect" else "FP  "
+            if not v.available:
+                mark = "DOWN"
+            print(
+                f"{mark} {v.kind:<7} {v.case_id:<32} findings={v.findings} "
+                f"{'fmt-ok' if v.format_compliant else 'fmt-BAD'}"
+            )
+        print(
+            f"reviewer={report.reviewer_model}  recall={report.recall:.2f} "
+            f"fp_rate={report.false_positive_rate:.2f} "
+            f"format={report.format_compliance:.2f} "
+            f"availability={report.availability:.2f}"
+        )
+        out = calibration.save_report(report)
+        print(f"report: {out}")
+        print(
+            "thresholds: "
+            + ("PASS" if report.within_thresholds else "BREACHED (fail closed)")
+        )
+        sys.exit(0 if report.within_thresholds else 1)
+
     if "--eval-live" in sys.argv:
         # Live-agent arm (#013): the real loop inside a fixture worktree,
         # judged by the same hidden checks as the scripted arms.

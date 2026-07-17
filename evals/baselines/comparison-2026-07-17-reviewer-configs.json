@@ -1,0 +1,32 @@
+{
+  "date": "2026-07-17",
+  "corpus": "evals/ 15 cases, live arm",
+  "arms": [
+    {
+      "config": "baseline: 7b reviewer + v1 prompt",
+      "agent": "agent-e69f7bfcf496",
+      "score": "13/15",
+      "notes": "r2 capability fail; r5 reviewer false-positive fail"
+    },
+    {
+      "config": "candidate 1: Qwen3-Coder reviewer + v2 task-aware prompt",
+      "agent": "agent-46d52695ef57",
+      "score": "4/15",
+      "verdict": "REJECTED",
+      "notes": "calibration passed (recall 1.00 / fp 0.25 on 8 cases) but live fp far higher: 7x NO_TEST_PROGRESS spins + 2x hallucinated-P0 REVIEW_REJECTED. Small-corpus overfit, textbook."
+    },
+    {
+      "config": "candidate 2: 7b reviewer + v2 task-aware prompt",
+      "agent": "see audit (7b/v2)",
+      "score": "14/15",
+      "verdict": "PROMOTED (prompt change only)",
+      "notes": "r5 fixed as predicted; r2 passed this run (live variance at capability boundary); m2 NEW failure exposed a loop policy hole \u2014 APPROVE with an introduced test regression (tracked, not gated)."
+    }
+  ],
+  "decisions": [
+    "Prompt v2 (task context + out-of-scope + concrete-failing-input bar) promoted \u2014 it fixes the r5 FP class under BOTH reviewers and regressed nothing attributable to it.",
+    "Reviewer model swap rejected: never trade eleven passes for one.",
+    "Queued: gate introduced test failures (TEST_REGRESSION) \u2014 m2 showed APPROVE can coexist with a regression the eval's hidden checks caught.",
+    "Queued: grow the calibration corpus \u2014 8 cases materially underestimated live fp."
+  ]
+}

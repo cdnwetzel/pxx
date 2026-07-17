@@ -1,0 +1,80 @@
+{
+  "reviewer_backend": "local",
+  "reviewer_model": "Qwen3-Coder",
+  "date": "2026-07-17",
+  "recall": 1.0,
+  "false_positive_rate": 0.25,
+  "format_compliance": 1.0,
+  "availability": 1.0,
+  "within_thresholds": true,
+  "thresholds": {
+    "min_recall": 0.75,
+    "max_false_positive_rate": 0.25
+  },
+  "verdicts": [
+    {
+      "case": "cal-clean-mutable-default",
+      "kind": "clean",
+      "available": true,
+      "findings": 0,
+      "format_compliant": true,
+      "correct": true
+    },
+    {
+      "case": "cal-clean-noisy-rename",
+      "kind": "clean",
+      "available": true,
+      "findings": 0,
+      "format_compliant": true,
+      "correct": true
+    },
+    {
+      "case": "cal-clean-r5-exit-codes",
+      "kind": "clean",
+      "available": true,
+      "findings": 0,
+      "format_compliant": true,
+      "correct": true
+    },
+    {
+      "case": "cal-clean-test-only",
+      "kind": "clean",
+      "available": true,
+      "findings": 1,
+      "format_compliant": true,
+      "correct": false
+    },
+    {
+      "case": "cal-defect-inverted-condition",
+      "kind": "defect",
+      "available": true,
+      "findings": 1,
+      "format_compliant": true,
+      "correct": true
+    },
+    {
+      "case": "cal-defect-off-by-one",
+      "kind": "defect",
+      "available": true,
+      "findings": 1,
+      "format_compliant": true,
+      "correct": true
+    },
+    {
+      "case": "cal-defect-removed-validation",
+      "kind": "defect",
+      "available": true,
+      "findings": 1,
+      "format_compliant": true,
+      "correct": true
+    },
+    {
+      "case": "cal-defect-swallowed-exception",
+      "kind": "defect",
+      "available": true,
+      "findings": 1,
+      "format_compliant": true,
+      "correct": true
+    }
+  ]
+}

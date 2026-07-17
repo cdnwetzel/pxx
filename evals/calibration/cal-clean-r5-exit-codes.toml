@@ -1,0 +1,16 @@
+schema_version = 1
+id = "cal-clean-r5-exit-codes"
+task = "run_check must return process exit semantics: 0 on success, 1 on failure — not strings."
+kind = "clean"
+description = "THE live false positive (r5, 2026-07-17): a correct bool->exit-code fix drew a REVISE and spun the healing loop. Permanently in the suite."
+diff = """
+diff --git a/src/lib.py b/src/lib.py
+--- a/src/lib.py
++++ b/src/lib.py
+@@ -1,4 +1,2 @@
+ def run_check(ok):
+-    if ok:
+-        return "success"
+-    return "failure"
++    return 0 if ok else 1
+"""

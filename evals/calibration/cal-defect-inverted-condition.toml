@@ -1,0 +1,18 @@
+schema_version = 1
+id = "cal-defect-inverted-condition"
+task = "Simplify the can_write logic."
+kind = "defect"
+expected_severity = "P0"
+description = "Inverts an access-control condition: denied users are now allowed."
+diff = """
+diff --git a/src/access.py b/src/access.py
+--- a/src/access.py
++++ b/src/access.py
+@@ -2,6 +2,6 @@ def can_write(user, resource):
+     if resource.locked:
+         return False
+-    if user.id in resource.allowed_writers:
++    if user.id not in resource.allowed_writers:
+         return True
+     return False
+"""

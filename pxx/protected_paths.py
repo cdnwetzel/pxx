@@ -66,7 +66,7 @@ def canonical_repo_path(path: str) -> str | None:
     Case is **preserved**, not folded: this value is also the write path a
     content candidate uses, and casefolding it would write ``System.md`` to
     ``system.md`` — a different file on a case-sensitive FS (CI is Ubuntu, the
-    eval runs on vllm-host-1/Linux). Casefolding is applied only at *comparison*
+    eval runs on a case-sensitive Linux host). Casefolding is applied only at *comparison*
     time (``is_protected_path`` and the content check), symmetrically to both
     sides — one derivation for I/O, one consistent fold for the boundary
     decision, so the case-insensitive protection still holds."""

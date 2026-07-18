@@ -107,7 +107,7 @@ class TestProbeVllmRetry:
             return self._ctx(b'{"data": [{"id": "m"}]}')
 
         monkeypatch.setattr("urllib.request.urlopen", flaky)
-        assert endpoints._probe_vllm("http://gpu-node-1:8003") is True
+        assert endpoints._probe_vllm("http://gpu-node:8003") is True
         assert calls["n"] == 2  # retried past the first miss
 
     def test_all_attempts_fail_returns_false(self, monkeypatch):
@@ -121,7 +121,7 @@ class TestProbeVllmRetry:
             raise TimeoutError("down")
 
         monkeypatch.setattr("urllib.request.urlopen", always_fail)
-        assert endpoints._probe_vllm("http://gpu-node-1:8003") is False
+        assert endpoints._probe_vllm("http://gpu-node:8003") is False
         assert calls["n"] == endpoints.PROBE_RETRIES  # exhausted retries
 
 

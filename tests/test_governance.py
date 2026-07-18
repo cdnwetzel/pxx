@@ -706,31 +706,30 @@ class TestReleaseGateArmsDenylist:
         assert "--check --shipped --allow-empty-denylist" in self._wf("ci.yml")
 
 
-class TestScannerOwnSourceIsClean:
-    """[P0.1] regression: the P0 arming commit re-leaked two fleet hostnames
-    into pxx/governance.py's docstring, and its own armed gate would have blocked
-    the release. Guard: the shipped pxx/ package must carry no denylist hit.
-    Uses the real untracked denylist when present (a dev with it armed catches a
-    re-leak pre-commit); skips in a bare env (CI), where release.yml's
-    armed-from-secret gate is the guard. Real fleet names are never embedded here."""
+class TestShippedScopeHasNoFleetHostname:
+    """[P0.1]+[P0.3] regression: the P0 arming commit re-leaked fleet hostnames
+    into shipped source (governance.py docstring; then test fixtures), and the
+    armed gate would have blocked the release on them. Guard the ENTIRE shipped
+    scope — pxx/ + tests/ + README + pyproject, exactly what release.yml scans —
+    so a re-leak anywhere in what ships fails here. Uses the real untracked
+    denylist when present (a dev with it armed catches a re-leak pre-commit);
+    skips in a bare env (CI), where release.yml's armed-from-secret gate is the
+    guard. Real fleet names are never embedded in this tracked test."""
 
-    def test_shipped_pxx_package_has_no_fleet_hostname(self):
+    def test_shipped_scope_has_no_fleet_hostname(self):
         from pathlib import Path
 
         import pytest
 
-        from pxx.governance import _scan_content_lines, load_content_denylist
+        from pxx.governance import load_content_denylist, scan_public_content
 
         repo = Path(__file__).resolve().parent.parent
-        denylist = load_content_denylist(repo)
-        if not denylist:
+        if not load_content_denylist(repo):
             pytest.skip("no local denylist; release.yml armed gate covers CI")
 
-        leaks: list[str] = []
-        for py in sorted((repo / "pxx").rglob("*.py")):
-            for v in _scan_content_lines(
-                str(py.relative_to(repo)), py.read_text(encoding="utf-8"), denylist
-            ):
-                if "private denylist entry" in v.detail:
-                    leaks.append(v.detail)
-        assert not leaks, f"shipped pxx/ source names a fleet host: {leaks}"
+        leaks = [
+            v.detail
+            for v in scan_public_content(repo, shipped_only=True)
+            if "private denylist entry" in v.detail
+        ]
+        assert not leaks, f"a shipped file names a fleet host: {leaks}"

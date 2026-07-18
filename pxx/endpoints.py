@@ -15,8 +15,8 @@ Endpoints are configured via environment variables (all optional):
   comma-separated list to pair each URL with its served model id.
 
 The "studio" endpoint name is historical; functionally it is just "primary
-Ollama" (localhost by default, or PXX_STUDIO_LAN_URL). The old "neo" localhost
-candidate was retired — see _ollama_candidates.
+Ollama" (localhost by default, or PXX_STUDIO_LAN_URL). The old hardcoded
+localhost candidate was retired — see _ollama_candidates.
 """
 
 from __future__ import annotations
@@ -108,8 +108,8 @@ _probe = _probe_ollama  # backward-compat alias for test monkeypatches
 
 
 def _ollama_candidates() -> list[Endpoint]:
-    # The legacy hardcoded "neo" localhost:11434 candidate was removed: the Mini
-    # is the box now, and a hardcoded localhost probe hijacked edit detection
+    # The legacy hardcoded localhost:11434 candidate was removed: the local box
+    # is primary now, and a hardcoded localhost probe hijacked edit detection
     # whenever anything unrelated (e.g. the local review model) listened on
     # :11434. Localhost Ollama is still reachable via PXX_STUDIO_LAN_URL's default.
     return [

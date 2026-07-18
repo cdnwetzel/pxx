@@ -130,4 +130,15 @@ def upgrade_main() -> int:
     cmd = upgrade_command(method)
     assert cmd is not None  # EDITABLE returned above; every other method has one
     print(f"pxx: {current} → {latest}   via   {' '.join(cmd)}")
-    return subprocess.run(cmd, check=False).returncode
+    try:
+        return subprocess.run(cmd, check=False).returncode
+    except FileNotFoundError:
+        # The install-method tool (uv/pipx) isn't on PATH — degrade to a
+        # one-line instruction instead of dumping a traceback (the exact UX
+        # 1.3.1 set out to remove).
+        print(
+            f"pxx: upgrade tool {cmd[0]!r} is not on PATH — "
+            f"run `{' '.join(cmd)}` yourself.",
+            file=sys.stderr,
+        )
+        return 2

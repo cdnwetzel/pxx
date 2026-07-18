@@ -261,7 +261,7 @@ def scan_public_content(
     --all-files`). ``shipped_only`` restricts the full-tree scan to files that
     actually ship to PyPI — the release gate (`pxx --check --shipped`).
 
-    Bare fleet hostnames (``vllm-host-1``, ``workstation``) have no structural
+    Bare fleet hostnames (a build host's short name) have no structural
     shape, so they are only caught by the untracked denylist. When an
     audit/release scan runs with ZERO denylist patterns loaded, hostname
     coverage is silently OFF — a green result would be false assurance

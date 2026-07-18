@@ -632,7 +632,9 @@ class TestP0HostnameCoverageArmed:
         monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
         repo = _init_repo(tmp_path)
         (repo / "pxx").mkdir()
-        (repo / "pxx" / "mod.py").write_text("# eval host: vllm-host-1\n")
+        # Placeholder, not a real fleet host — the privacy contract bans real
+        # hostnames even in tracked test fixtures; use gpu-node.
+        (repo / "pxx" / "mod.py").write_text("# eval host: gpu-node\n")
         sp.run(["git", "add", "."], cwd=repo, check=True)
         return repo
 
@@ -663,7 +665,7 @@ class TestP0HostnameCoverageArmed:
     ):
         repo = self._shipped_repo(tmp_path, monkeypatch)
         (repo / "private").mkdir()
-        (repo / "private" / "content-denylist.txt").write_text("vllm-host-1\n")
+        (repo / "private" / "content-denylist.txt").write_text("gpu-node\n")
         vs = scan_public_content(repo, shipped_only=True)
         assert not any("coverage DISABLED" in v.detail for v in vs)
         assert any("private denylist entry" in v.detail for v in vs)
@@ -702,3 +704,33 @@ class TestReleaseGateArmsDenylist:
 
     def test_ci_uses_explicit_opt_out(self):
         assert "--check --shipped --allow-empty-denylist" in self._wf("ci.yml")
+
+
+class TestScannerOwnSourceIsClean:
+    """[P0.1] regression: the P0 arming commit re-leaked two fleet hostnames
+    into pxx/governance.py's docstring, and its own armed gate would have blocked
+    the release. Guard: the shipped pxx/ package must carry no denylist hit.
+    Uses the real untracked denylist when present (a dev with it armed catches a
+    re-leak pre-commit); skips in a bare env (CI), where release.yml's
+    armed-from-secret gate is the guard. Real fleet names are never embedded here."""
+
+    def test_shipped_pxx_package_has_no_fleet_hostname(self):
+        from pathlib import Path
+
+        import pytest
+
+        from pxx.governance import _scan_content_lines, load_content_denylist
+
+        repo = Path(__file__).resolve().parent.parent
+        denylist = load_content_denylist(repo)
+        if not denylist:
+            pytest.skip("no local denylist; release.yml armed gate covers CI")
+
+        leaks: list[str] = []
+        for py in sorted((repo / "pxx").rglob("*.py")):
+            for v in _scan_content_lines(
+                str(py.relative_to(repo)), py.read_text(encoding="utf-8"), denylist
+            ):
+                if "private denylist entry" in v.detail:
+                    leaks.append(v.detail)
+        assert not leaks, f"shipped pxx/ source names a fleet host: {leaks}"

@@ -173,9 +173,14 @@ named both). Document one, alias the other.
 2. Query the latest version (PyPI JSON) and print `current → latest`.
 3. On an editable/source checkout: **refuse** with guidance
    (`git pull` / `uv sync`) — never pip-upgrade over a dev tree.
-4. Otherwise confirm, then exec the correct upgrade command for the detected
-   method. In headless/non-TTY mode follow the existing `--yes`/`--no` consent
-   convention.
+4. Otherwise print `current → latest via <cmd>` and exec the correct upgrade
+   command for the detected method. **Invoking `--upgrade` is itself the
+   consent** — it is a deliberate top-level verb like `--doctor` / `--self-*`,
+   not a flag on an editing session, so it does not add a separate confirm or
+   `--yes`/`--no` step (there is nothing destructive to a user's repo to gate;
+   the editable-checkout case already refuses). *(Amended 2026-07-18 to match
+   the shipped code — the earlier "confirm, then exec" clause was dropped;
+   review order CR-2026-07-18 [P4].)*
 
 **D3. Offline posture:** pxx is offline-capable; `--upgrade` needs the network.
 If PyPI is unreachable, degrade gracefully — say so and exit non-zero, don't

@@ -2,6 +2,39 @@
 
 All notable changes to pxx and its ecosystem across development phases.
 
+## [1.3.2] — 2026-07-18
+
+Privacy-gate hardening + upgrade robustness. No change to orchestration behavior.
+
+### Fixed
+
+- **Release gate now proves it was armed.** The public-content scanner catches
+  bare fleet hostnames only via an untracked denylist; in CI that denylist is
+  absent, so `pxx --check --shipped` silently reported clean while a hostname
+  shipped (it did, in 1.3.0/1.3.1). Now a shipped/audit scan with **0 denylist
+  patterns soft-fails loudly** (`--allow-empty-denylist` is an explicit,
+  still-noisy opt-out). `release.yml` arms the denylist from a secret and runs
+  the gate **without** the opt-out; `ci.yml` opts out (fork-PR-safe) so pushes
+  aren't blocked but still warn.
+- **`pxx --upgrade` no longer tracebacks** when `uv`/`pipx` isn't on PATH — it
+  prints a one-line instruction and exits non-zero.
+- **Fleet hostnames scrubbed from the shipped distribution** — a docstring in
+  `pxx/protected_paths.py`, comments in `pxx/endpoints.py`, and test fixtures
+  named real hosts and shipped in the wheel/sdist. All replaced with
+  placeholders/generic phrasing; a regression test scans the whole shipped scope
+  under the denylist so it can't recur.
+
+### Changed
+
+- Plan D2.4 amended so plan and code agree: invoking `--upgrade` is itself the
+  consent (a deliberate top-level verb like `--doctor`), no separate confirm.
+
+### Tests
+
+- `upgrade_main` exit-code contracts (editable/offline/up-to-date/not-on-PATH),
+  gate coverage-disabled behavior, workflow-parity, and shipped-scope hostname
+  regression. 976 passed / 12 skipped.
+
 ## [1.3.1] — 2026-07-17
 
 Install & upgrade UX, plus a safety-spine hardening. No change to orchestration

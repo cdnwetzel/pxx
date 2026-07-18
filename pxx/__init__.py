@@ -10,7 +10,7 @@ time. Real environment variables always win over the file.
 import os
 from pathlib import Path
 
-__version__ = "1.3.1"
+__version__ = "1.3.2"
 
 _ENV_FILE = Path.home() / ".config" / "pxx" / "env"
 

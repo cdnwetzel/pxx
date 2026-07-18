@@ -23,6 +23,16 @@ jobs:
           fetch-depth: 0 # the scanner uses git ls-files
       - uses: astral-sh/setup-uv@v5
       - run: uv sync
+      - name: Arm hostname coverage from secret
+        # Materialize the untracked content denylist so the release gate can
+        # actually catch bare fleet hostnames in shipped files. If the secret
+        # is unset the file is empty -> 0 patterns -> the gate soft-fails LOUDLY
+        # (governance P0: prove-it-was-armed), so a release can never publish
+        # with hostname coverage silently off. Set the PXX_CONTENT_DENYLIST
+        # repo secret (one identifier per line) to arm it.
+        run: |
+          mkdir -p "$HOME/.config/pxx"
+          printf '%s\n' "${{ secrets.PXX_CONTENT_DENYLIST }}" > "$HOME/.config/pxx/content-denylist"
       - run: uv run pxx --check --shipped
 
   build:

@@ -504,9 +504,12 @@ class TestScanPublicContent:
             return result
 
         monkeypatch.setattr("pxx.governance.subprocess.run", mock_run)
-        violations = scan_public_content(tmp_path, full_tree=True)
-        assert len(violations) == 1
-        assert "internal-hostname-suffix" in violations[0].detail
+        violations = scan_public_content(
+            tmp_path, full_tree=True, allow_empty_denylist=True
+        )
+        structural = [v for v in violations if "coverage DISABLED" not in v.detail]
+        assert len(structural) == 1
+        assert "internal-hostname-suffix" in structural[0].detail
 
     def test_clean_content_passes_both_modes(self, tmp_path, monkeypatch):
         monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "nowhere"))
@@ -522,8 +525,11 @@ class TestScanPublicContent:
             return result
 
         monkeypatch.setattr("pxx.governance.subprocess.run", mock_run)
-        assert scan_public_content(tmp_path) == []
-        assert scan_public_content(tmp_path, full_tree=True) == []
+        assert scan_public_content(tmp_path) == []  # staged mode: no coverage gate
+        fulltree = scan_public_content(
+            tmp_path, full_tree=True, allow_empty_denylist=True
+        )
+        assert [v for v in fulltree if "coverage DISABLED" not in v.detail] == []
 
 
 class TestContentScannerFalsePositives:
@@ -553,7 +559,8 @@ class TestContentScannerFalsePositives:
             return result
 
         monkeypatch.setattr("pxx.governance.subprocess.run", mock_run)
-        assert scan_public_content(tmp_path, full_tree=True) == []
+        vs = scan_public_content(tmp_path, full_tree=True, allow_empty_denylist=True)
+        assert [v for v in vs if "coverage DISABLED" not in v.detail] == []
 
 
 class TestShippedContentScan:
@@ -611,3 +618,87 @@ class TestContentScanFailsClosed:
         assert len(violations) == 1
         assert violations[0].severity == "error"
         assert "could not run" in violations[0].detail
+
+
+class TestP0HostnameCoverageArmed:
+    """[P0] a --shipped/audit scan with 0 denylist patterns must not pass
+    silently — bare hostnames are denylist-only, so 0 patterns == coverage OFF."""
+
+    def _shipped_repo(self, tmp_path, monkeypatch):
+        # Neutralize the user-config denylist path so only repo/private is
+        # consulted (else a real ~/.config/pxx/content-denylist would arm it).
+        import subprocess as sp
+
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+        repo = _init_repo(tmp_path)
+        (repo / "pxx").mkdir()
+        (repo / "pxx" / "mod.py").write_text("# eval host: vllm-host-1\n")
+        sp.run(["git", "add", "."], cwd=repo, check=True)
+        return repo
+
+    def test_zero_denylist_shipped_emits_coverage_disabled_error(
+        self, tmp_path, monkeypatch
+    ):
+        repo = self._shipped_repo(tmp_path, monkeypatch)
+        cov = [
+            v
+            for v in scan_public_content(repo, shipped_only=True)
+            if "coverage DISABLED" in v.detail
+        ]
+        assert cov and cov[0].severity == "error"
+
+    def test_allow_empty_downgrades_to_warning(self, tmp_path, monkeypatch):
+        repo = self._shipped_repo(tmp_path, monkeypatch)
+        cov = [
+            v
+            for v in scan_public_content(
+                repo, shipped_only=True, allow_empty_denylist=True
+            )
+            if "coverage DISABLED" in v.detail
+        ]
+        assert cov and cov[0].severity == "warning"
+
+    def test_armed_denylist_flags_the_hostname_and_clears_coverage_signal(
+        self, tmp_path, monkeypatch
+    ):
+        repo = self._shipped_repo(tmp_path, monkeypatch)
+        (repo / "private").mkdir()
+        (repo / "private" / "content-denylist.txt").write_text("vllm-host-1\n")
+        vs = scan_public_content(repo, shipped_only=True)
+        assert not any("coverage DISABLED" in v.detail for v in vs)
+        assert any("private denylist entry" in v.detail for v in vs)
+
+    def test_run_governance_check_soft_fails_unarmed_passes_with_opt_out(
+        self, tmp_path, monkeypatch
+    ):
+        from pxx.governance import run_governance_check
+
+        repo = self._shipped_repo(tmp_path, monkeypatch)
+        monkeypatch.delenv("PXX_GOVERNANCE_SKIP", raising=False)
+        assert run_governance_check(repo, shipped_content=True) == 1
+        assert (
+            run_governance_check(repo, shipped_content=True, allow_empty_denylist=True)
+            == 0
+        )
+
+
+class TestReleaseGateArmsDenylist:
+    """[P0] pin the workflow parity: release arms from a secret and runs the
+    check WITHOUT the opt-out (so it can fail); CI opts out deliberately."""
+
+    def _wf(self, name):
+        from pathlib import Path
+
+        return (
+            Path(__file__).resolve().parent.parent / ".github" / "workflows" / name
+        ).read_text()
+
+    def test_release_materializes_denylist_from_secret_and_can_fail(self):
+        text = self._wf("release.yml")
+        assert "PXX_CONTENT_DENYLIST" in text
+        assert "content-denylist" in text
+        # the armed gate must NOT carry the opt-out, or it could never fail
+        assert "--allow-empty-denylist" not in text
+
+    def test_ci_uses_explicit_opt_out(self):
+        assert "--check --shipped --allow-empty-denylist" in self._wf("ci.yml")

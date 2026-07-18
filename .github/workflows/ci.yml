@@ -34,4 +34,10 @@ jobs:
       - name: Tests
         run: uv run pytest -q
       - name: Public-content gate (shipped files)
-        run: uv run pxx --check --shipped
+        # --allow-empty-denylist: CI (incl. fork PRs) has no access to the
+        # untracked hostname denylist, so hostname coverage is off here by
+        # design — the scan runs structural patterns (IP/domain/home-path) and
+        # prints a loud coverage-disabled WARNING without failing. The ARMED
+        # gate that soft-fails on missing coverage is release.yml, which
+        # materializes the denylist from a secret. See governance P0.
+        run: uv run pxx --check --shipped --allow-empty-denylist

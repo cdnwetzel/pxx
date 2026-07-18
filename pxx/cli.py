@@ -515,6 +515,7 @@ def main() -> None:
                 root,
                 full_content="--all-files" in sys.argv,
                 shipped_content="--shipped" in sys.argv,
+                allow_empty_denylist="--allow-empty-denylist" in sys.argv,
             )
         )
 

@@ -248,7 +248,10 @@ _SHIPPED_PREFIXES: tuple[str, ...] = ("pxx/", "tests/", "README.md", "pyproject.
 
 
 def scan_public_content(
-    repo_root: Path, full_tree: bool = False, shipped_only: bool = False
+    repo_root: Path,
+    full_tree: bool = False,
+    shipped_only: bool = False,
+    allow_empty_denylist: bool = False,
 ) -> list[GovernanceViolation]:
     """Scan for infrastructure identifiers that must not reach the public repo.
 
@@ -257,9 +260,38 @@ def scan_public_content(
     tracked file's worktree content — the audit mode (`pxx --check
     --all-files`). ``shipped_only`` restricts the full-tree scan to files that
     actually ship to PyPI — the release gate (`pxx --check --shipped`).
+
+    Bare fleet hostnames (``vllm-host-1``, ``workstation``) have no structural
+    shape, so they are only caught by the untracked denylist. When an
+    audit/release scan runs with ZERO denylist patterns loaded, hostname
+    coverage is silently OFF — a green result would be false assurance
+    ("no hostnames shipped") for a check that could not run. The scan makes
+    that non-silent: it emits a coverage-disabled violation (error, so the gate
+    fails) unless ``allow_empty_denylist`` downgrades it to a visible warning
+    (a deliberate opt-out for a bare CI that scans structural patterns only).
     """
     violations: list[GovernanceViolation] = []
     denylist = load_content_denylist(repo_root)
+
+    if (shipped_only or full_tree) and not denylist:
+        violations.append(
+            GovernanceViolation(
+                check="public-content",
+                severity="warning" if allow_empty_denylist else "error",
+                detail=(
+                    "hostname coverage DISABLED — 0 denylist patterns loaded "
+                    "(private/content-denylist.txt or "
+                    "~/.config/pxx/content-denylist); structural patterns "
+                    "(IP/domain/home-path) still ran. "
+                    + (
+                        "allowed via --allow-empty-denylist."
+                        if allow_empty_denylist
+                        else "arm the denylist or pass --allow-empty-denylist "
+                        "to scan structural-only deliberately."
+                    )
+                ),
+            )
+        )
 
     list_cmd = (
         ["git", "ls-files"]
@@ -465,7 +497,10 @@ def check_review_verdict(repo_root: Path) -> list[GovernanceViolation]:
 
 
 def run_governance_check(
-    repo_root: Path, full_content: bool = False, shipped_content: bool = False
+    repo_root: Path,
+    full_content: bool = False,
+    shipped_content: bool = False,
+    allow_empty_denylist: bool = False,
 ) -> int:
     """Run all governance checks and report violations.
 
@@ -495,7 +530,10 @@ def run_governance_check(
     # Public-content scan (always runs; the repo is public)
     violations.extend(
         scan_public_content(
-            repo_root, full_tree=full_content, shipped_only=shipped_content
+            repo_root,
+            full_tree=full_content,
+            shipped_only=shipped_content,
+            allow_empty_denylist=allow_empty_denylist,
         )
     )
 

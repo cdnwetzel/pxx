@@ -38,3 +38,12 @@ def test_requires_python_keeps_the_floor() -> None:
     spec = SpecifierSet(_requires_python())
     assert not spec.contains("3.10")
     assert spec.contains("3.11")
+
+
+def test_version_lockstep_dunder_matches_pyproject() -> None:
+    # Reviewers flagged version drift between pxx.__version__ and pyproject; the
+    # dunder feeds agent_version_id, so the two MUST agree. Cheap regression pin.
+    import pxx
+
+    data = tomllib.loads(_PYPROJECT.read_text())
+    assert pxx.__version__ == data["project"]["version"]

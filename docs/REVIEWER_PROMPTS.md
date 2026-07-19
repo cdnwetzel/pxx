@@ -154,7 +154,7 @@ Context: pxx launched v1.0. It works well for the intended use case
 Task: Produce a PRAGMATISM review examining:
 
 1. Adoption Friction
-   - Install: "pip install pxx[all]" works. How many steps to get memory?
+   - Install: "pip install pxx-orchestrator" works. How many steps to get memory?
    - Onboarding: Do users understand what pxx does? (vs. just aider)
    - First session: Can a user be productive without reading 6 docs files?
    - Community: Will others contribute, or is it a one-person tool?

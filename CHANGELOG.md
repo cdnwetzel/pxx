@@ -2,6 +2,36 @@
 
 All notable changes to pxx and its ecosystem across development phases.
 
+## [1.3.3] — 2026-07-19
+
+Security/privacy re-freeze. No behavioral change to orchestration.
+
+### Security / privacy
+
+- Removed inadvertently-committed personal data (stray session-dump artifacts
+  under `review/` that reached the public repo).
+- De-identified all fleet references across the tracked tree — hostnames,
+  mirror handles, and firm-linked model ids replaced with generic placeholders
+  (`vllm-host-1`, `workstation`, `gpu-node-1`, `inference-node`, `coder-lora`).
+- Extended the public-content gate to run a **full-tree** scan
+  (`pxx --check --all-files`) in CI/release, not just the shipped-wheel subset,
+  so docs/plans/deploy/config are covered and this can't recur.
+
+### Fixed
+
+- `doctor.py`: mirror default is now just `origin` (override via
+  `PXX_MIRROR_REMOTES`); `--doctor` no longer exits non-zero when no mirror is
+  reachable/present (N/A ≠ out-of-sync).
+- `_git.is_dirty()` now fails **closed** — an errored/unknown git status is
+  treated as dirty, so `--edit` never starts an unstashed session on a real
+  dirty tree.
+- `safety.create_tag()` no longer silently returns after stashing on a
+  same-second tag collision — it prints a `git stash list` recovery pointer.
+- `safety._has_unmerged_autonomous_commits()` derives the current branch's
+  upstream (`@{upstream}`) instead of hardcoding `origin/main`.
+- Docs: `pip install pxx[all]` → `pip install pxx-orchestrator` (CHANGELOG,
+  REVIEWER_PROMPTS).
+
 ## [1.3.2] — 2026-07-18
 
 Privacy-gate hardening + upgrade robustness. No change to orchestration behavior.
@@ -487,7 +517,7 @@ litellm metadata warning for unregistered models.*
 
 ## Installation & Support
 
-- **Install:** `pip install pxx[all]` or see `docs/INSTALL.md`
+- **Install:** `pip install pxx-orchestrator` or see `docs/INSTALL.md`
 - **Deploy:** `docs/DEPLOY.md` for production setup
 - **Examples:** `docs/EXAMPLES.md` for real-world workflows
 - **API:** `docs/API.md` for complete endpoint reference

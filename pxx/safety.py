@@ -52,9 +52,12 @@ def _has_unmerged_autonomous_commits() -> bool:
     to avoid wiping out their work.
     """
     try:
-        # Check for commits ahead of origin/<current-branch> that contain [autonomous]
+        # Commits ahead of the CURRENT branch's upstream that contain [autonomous].
+        # Derive the upstream (@{upstream}) instead of hardcoding origin/main, so
+        # this works on release/feature branches too. No upstream -> non-zero rc
+        # -> falls through to the safe default (return False).
         result = subprocess.run(
-            ["git", "log", "--oneline", "origin/main..HEAD"],
+            ["git", "log", "--oneline", "@{upstream}..HEAD"],
             capture_output=True,
             text=True,
             check=False,
@@ -117,6 +120,17 @@ def create_tag() -> str | None:
             timeout=2,
         )
         if result.returncode != 0:
+            # Tag creation failed (e.g. a same-second collision on the ts-based
+            # name). We may have JUST stashed above — never swallow that silently
+            # or the user loses their working state with no pointer to recover it.
+            print(
+                f"pxx: safety tag {tag!r} could not be created "
+                f"({result.stderr.decode(errors='replace').strip() or 'git tag failed'}).\n"
+                "      If a stash was taken this session, recover it with:\n"
+                "        git stash list   # find the 'pxx-pre/<ts>' entry\n"
+                "        git stash pop",
+                file=sys.stderr,
+            )
             return None
         return tag
     except (FileNotFoundError, subprocess.TimeoutExpired):

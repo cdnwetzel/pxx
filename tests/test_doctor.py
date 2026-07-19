@@ -331,3 +331,18 @@ class TestUnconfiguredMirrors:
         stats = d.check_remotes(("origin", "mirror"))
         assert list(stats.remotes) == ["origin"]
         assert stats.not_configured == ("mirror",)
+
+
+class TestNoReachableMirror:
+    """Task C: offline / no mirror present is N/A, never OUT_OF_SYNC (the
+    --doctor exit-1 bug). in_sync must be True when there's nothing to compare."""
+
+    def test_all_unreachable_is_in_sync(self):
+        from pxx.doctor import RemoteStats
+
+        assert RemoteStats(local_sha="a" * 40, remotes={"origin": None}).in_sync is True
+
+    def test_no_remotes_configured_is_in_sync(self):
+        from pxx.doctor import RemoteStats
+
+        assert RemoteStats(local_sha="a" * 40, remotes={}).in_sync is True

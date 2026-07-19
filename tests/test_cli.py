@@ -654,7 +654,9 @@ class TestDoctor:
             called.append("detect_endpoint")
             raise RuntimeError("should not be called")
 
-        sha = "deadbeef" if in_sync else None
+        # Out-of-sync must be a REACHABLE remote at a different SHA — an
+        # unreachable/None remote is now N/A (in_sync), not out-of-sync (Task C).
+        sha = "deadbeef" if in_sync else "0ldc0de0"
         stats = RemoteStats(local_sha="deadbeef", remotes={"origin": sha})
 
         class FakeDoctor:

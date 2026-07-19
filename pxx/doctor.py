@@ -14,9 +14,12 @@ import requests
 
 from pxx import _git
 
-# The two GitHub mirrors `git push origin` fans out to (cdnwetzel + mirror).
-# A healthy fleet keeps both at the same SHA as local HEAD.
-MIRROR_REMOTES: tuple[str, ...] = ("origin", "mirror")
+# The mirror remotes `git push origin` fans out to; a healthy tree keeps each at
+# the same SHA as local HEAD. Override with PXX_MIRROR_REMOTES (comma-separated);
+# default is just `origin`.
+MIRROR_REMOTES: tuple[str, ...] = tuple(
+    r.strip() for r in os.getenv("PXX_MIRROR_REMOTES", "origin").split(",") if r.strip()
+)
 
 
 @dataclass
@@ -98,7 +101,12 @@ class RemoteStats:
         if self.local_sha is None:
             return False
         reachable = [sha for sha in self.remotes.values() if sha is not None]
-        return bool(reachable) and all(sha == self.local_sha for sha in reachable)
+        if not reachable:
+            # No configured mirror reachable/present -> N/A, not a sync failure
+            # (offline, or a machine carrying no mirror). Never OUT_OF_SYNC/exit-1
+            # on "nothing to compare against".
+            return True
+        return all(sha == self.local_sha for sha in reachable)
 
     def __str__(self) -> str:
         """Format mirror-sync status for display."""

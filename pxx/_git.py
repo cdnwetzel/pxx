@@ -38,9 +38,14 @@ def is_dirty() -> bool:
             check=False,
             timeout=2,
         )
+        # returncode != 0 is the legitimate "not a git repo" case (nothing to
+        # stash / no data-loss risk) -> not dirty. Do NOT fail closed here.
         return diff.returncode == 0 and bool(diff.stdout.strip())
     except (FileNotFoundError, subprocess.TimeoutExpired):
-        return False
+        # Fail CLOSED (data-loss guard): git missing or timed out is UNKNOWN,
+        # not clean -> treat as dirty so --edit never starts an unstashed
+        # session on a real dirty tree.
+        return True
 
 
 def has_commits() -> bool:

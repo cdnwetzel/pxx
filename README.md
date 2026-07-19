@@ -21,7 +21,7 @@ Before installing, you need:
 
 | Prerequisite | Why | Notes |
 |---|---|---|
-| **Python 3.11 or 3.12** | runs pxx and aider | 3.12 is tested day-to-day. **Not 3.13+** — the pinned `aider-chat` requires `<3.13` (its `pydub` needs the `audioop` module PEP 594 removed in 3.13). Installers auto-select a supported interpreter. |
+| **Python 3.11 or 3.12** | runs pxx and aider | 3.12 is tested day-to-day. **Not 3.13+** — the pinned `aider-chat` requires `<3.13` (its `pydub` needs the `audioop` module PEP 594 removed in 3.13). `uv tool`/`pipx` auto-select a supported interpreter; a plain `pip install` on 3.13+ does **not** (it falls back to an old broken build — see the install warning). |
 | **[Ollama](https://ollama.com)** installed and running | the LLM backend | `ollama serve`; local `localhost:11434` by default, or any reachable host via `PXX_OLLAMA_BASE` |
 | **At least one pulled model** | aider needs a model that exists | e.g. `ollama pull qwen2.5-coder:7b`, then `export PXX_MODEL=ollama_chat/qwen2.5-coder:7b` |
 | **git** (recommended) | auto-commits, safety tags, scoping | pxx works outside a git repo too (it passes `--no-git` to aider) |
@@ -47,6 +47,19 @@ Assumptions pxx makes:
 ## Quick Start
 
 **Requires:** [Ollama](https://ollama.com) running and reachable (local by default).
+
+> **⚠️ Installing on Python 3.13+**
+> pxx supports **Python 3.11–3.12** (aider's dependencies are not yet 3.13-ready). On Python 3.13 or
+> newer, a plain `pip install pxx-orchestrator` will **silently install an old 1.2.x build** that
+> crashes at startup — the current release is capped at `<3.13`, so pip skips it and falls back.
+> Install against 3.11/3.12 explicitly:
+> ```bash
+> uv tool install --python 3.12 pxx-orchestrator     # recommended
+> # or:  pipx install --python 3.12 pxx-orchestrator
+> # or:  python3.12 -m pip install pxx-orchestrator
+> ```
+> If you already hit `ModuleNotFoundError: ... audioop`, you installed an old build under 3.13 —
+> reinstall with one of the commands above.
 
 ```bash
 # Install the core (the command is `pxx`; the PyPI name differs

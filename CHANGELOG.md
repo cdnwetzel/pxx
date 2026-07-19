@@ -2,6 +2,18 @@
 
 All notable changes to pxx and its ecosystem across development phases.
 
+## [1.3.3.post1] — 2026-07-19
+
+Docs post-release (PEP 440 `.post1` — no code change).
+
+- **Python 3.13 install-fallback warning** surfaced on the PyPI project page
+  (README `long_description`) and in `docs/INSTALL.md`: on 3.13+ a plain
+  `pip install pxx-orchestrator` silently falls back to an old 1.2.x build that
+  crashes at import (`audioop`, PEP 594); install against 3.11/3.12 explicitly.
+  Corrected the earlier "installers auto-select" wording, which held only for
+  `uv tool`/`pipx`, not a plain `pip install` on a 3.13 interpreter. This is a
+  reader-facing mitigation, not a cure for the silent auto-fallback.
+
 ## [1.3.3] — 2026-07-19
 
 Security/privacy re-freeze. No behavioral change to orchestration.

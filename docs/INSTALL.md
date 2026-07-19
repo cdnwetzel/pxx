@@ -8,11 +8,25 @@ unrelated 2023 project); the installed command and import package are both
 
 ## Quick Start
 
+> **⚠️ Installing on Python 3.13+**
+> pxx supports **Python 3.11–3.12** (aider's dependencies are not yet 3.13-ready). On Python 3.13 or
+> newer, a plain `pip install pxx-orchestrator` will **silently install an old 1.2.x build** that
+> crashes at startup — the current release is capped at `<3.13`, so pip skips it and falls back.
+> Install against 3.11/3.12 explicitly:
+> ```bash
+> uv tool install --python 3.12 pxx-orchestrator     # recommended
+> # or:  pipx install --python 3.12 pxx-orchestrator
+> # or:  python3.12 -m pip install pxx-orchestrator
+> ```
+> If you already hit `ModuleNotFoundError: ... audioop`, you installed an old build under 3.13 —
+> reinstall with one of the commands above.
+
 **Prerequisites:**
 - **Python 3.11 or 3.12** (`python --version`). **Not 3.13+** — the pinned
   `aider-chat` requires `<3.13` (its `pydub` imports the `audioop` stdlib module
-  that PEP 594 removed in 3.13). `pip`/`uv` honor this and pick a supported
-  interpreter automatically.
+  that PEP 594 removed in 3.13). `uv tool`/`pipx` pick a supported interpreter
+  automatically; a plain `pip install` on a 3.13+ interpreter does **not** (see
+  the warning above).
 - Ollama running and reachable (default: `http://localhost:11434`)
   - Set `PXX_OLLAMA_BASE` to override
 

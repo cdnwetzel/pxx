@@ -10,7 +10,7 @@
     curl -s http://127.0.0.1:8004/healthz
 
   DOCS_SME_UPSTREAM points at the model server the SME forwards to:
-    - http://127.0.0.1:8003   T5810 vLLM via the SSH tunnel (production intent)
+    - http://127.0.0.1:8003   gpu-node-1 vLLM via the SSH tunnel (production intent)
     - http://127.0.0.1:11434  Studio Ollama (what's live locally today / A-B)
 -->
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

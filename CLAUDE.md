@@ -23,7 +23,7 @@ MacBook):
   `/Volumes/Docking/ollama/models`) **bound to `127.0.0.1` by design** — see
   `~/ai/ollama-migration-runbook.md` on the Studio. It is NOT reachable from
   other machines; off-box use requires an SSH tunnel. Fallback tier only.
-- **T5810** (`gpu-node-1`, 2× RTX A4500 20GB, NVLink) — remote vLLM
+- **gpu-node-1** (`gpu-node-1`, 2× RTX A4500 20GB, NVLink) — remote vLLM
   serving `qwen2.5-coder-14b` (+`coder-prod` LoRA) behind an
   audit-proxy on `:8003`. **SSH-only**: the office router NATs only port 22
   to it, so it is reached through a persistent SSH local-forward
@@ -34,15 +34,13 @@ MacBook):
   LoRAs on `:8000`, Ollama on `:11434`). Not used by pxx today; it already
   runs the systemd twin of the Studio tunnel (`coder-tunnel.service`).
 
-The Asrock RTX 3060Ti is not part of the fleet; pxx never referenced it.
-
 **Hostname note:** on the office LAN use bare DNS names (`vllm-host-1`,
 `workstation` via your office search domain) — mDNS `.local`
 names do not resolve reliably.
 
 Endpoint detection (first reachable wins, 1s timeout per probe):
 `PXX_OLLAMA_BASE` override → vLLM candidates in `PXX_VLLM_URL` order
-(vllm-host-1 first, then T5810 tunnel) → Ollama (`PXX_STUDIO_LAN_URL`, default
+(vllm-host-1 first, then gpu-node-1 tunnel) → Ollama (`PXX_STUDIO_LAN_URL`, default
 localhost). Tier 1 forces local Ollama; tier 2/3 prefer the first reachable
 vLLM. `PXX_VLLM_URL`/`PXX_VLLM_MODEL` accept comma-separated lists, paired
 positionally.
@@ -50,7 +48,7 @@ positionally.
 **Security posture:** nothing on the fleet has request-level auth; the
 network boundary is the auth layer. The Studio's Ollama binds `127.0.0.1`
 only (deliberate — see the migration runbook; SSH is the off-box path).
-vllm-host-1's vLLM `:8001` is open on the trusted office LAN. The T5810
+vllm-host-1's vLLM `:8001` is open on the trusted office LAN. The gpu-node-1
 audit-proxy binds `0.0.0.0:8003` but only port 22 is NATed to it, so the
 SSH tunnel *is* the boundary.
 
@@ -90,8 +88,8 @@ Phase 5 adds three optional services for enhanced orchestration:
 # Install (editable) — uses uv tool
 uv tool install --editable . --python 3.12
 
-# Pre-flight: 9router + agentmemory health and git-mirror sync
-# (cdnwetzel/mirror). Exits non-zero when the mirrors are out of sync.
+# Pre-flight: 9router + agentmemory health and git-mirror sync.
+# Exits non-zero when a configured mirror is out of sync.
 pxx --doctor
 
 # Run pxx in another project directory
@@ -376,5 +374,5 @@ If a task seems to require editing one of these, stop and ask. The
 
 Any of these can also live in `~/.config/pxx/env` (KEY=VALUE lines, loaded at
 import by `pxx/__init__.py`; real env vars win). That's where this machine's
-fleet-specific values (e.g. `PXX_VLLM_MODEL` for the T5810's served model id)
+fleet-specific values (e.g. `PXX_VLLM_MODEL` for the gpu-node-1's served model id)
 belong — never in the repo.

@@ -20,7 +20,7 @@ T0 proves the seam and nothing more: a FastAPI app that relays every request
 response back unchanged. No retrieval yet.
 
 ```
-aider ──► pxx (PXX_VLLM_URL) ──► docs-sme :8004 ──► T5810 audit-proxy :8003 ──► vLLM
+aider ──► pxx (PXX_VLLM_URL) ──► docs-sme :8004 ──► gpu-node-1 audit-proxy :8003 ──► vLLM
                                   │
                                   └─ augment_chat_request()  ← retrieval lands here (T2+), no-op today
 ```
@@ -80,7 +80,7 @@ so ingestion is the *only* network step and it never leaves the allowlist.
 
 | Var | Default | Effect |
 |---|---|---|
-| `DOCS_SME_UPSTREAM` | `http://127.0.0.1:8003` | downstream OpenAI server (T5810 audit-proxy via tunnel) |
+| `DOCS_SME_UPSTREAM` | `http://127.0.0.1:8003` | downstream OpenAI server (gpu-node-1 audit-proxy via tunnel) |
 | `DOCS_SME_HOST`     | `127.0.0.1`            | bind host |
 | `DOCS_SME_PORT`     | `8004`                 | bind port |
 | `DOCS_SME_TIMEOUT`  | `600`                  | per-request upstream read timeout (s); `0`/`none` disables |

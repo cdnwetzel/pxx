@@ -14,9 +14,9 @@
 | 2 | Independent reviewer model | **CLOSED** — local 7b pulled, stock defaults restored, preflight-verified |
 | 3 | 9.4 cross-session capture + privacy check | **CLOSED** — implemented + privacy check done (found D1); plan 004 → `done` |
 | 4 | aider `--no-verify` scope-gate audit | **CLOSED** — exposure confirmed empirically; loop-level scope guard shipped |
-| 5 | docs-sme §6 model A/B | **DECISION D5** — blocked on candidate deployment + T5810 access |
+| 5 | docs-sme §6 model A/B | **DECISION D5** — blocked on candidate deployment + gpu-node-1 access |
 | 6 | PyPI v1.1.0 | **PREPARED** — changelog written; execution is **DECISION D3** |
-| 7 | Fleet hygiene | Ollama models **CLOSED** (via item 2); T5810 + mirror → **DECISION D5** |
+| 7 | Fleet hygiene | Ollama models **CLOSED** (via item 2); gpu-node-1 → **DECISION D5** |
 | 8 | Backlog hygiene 001/002 | **CLOSED** — audited vs code; 001 → `done`, 002 → `planned`; direction is **DECISION D4** |
 
 ## What shipped in this sweep (commits eda8098, 4c8415b, + this one)
@@ -107,9 +107,9 @@ the revival triggers are a second daily-driver machine or a teammate
 needing shared observation memory. Roadmap Phase 20 supersedes the old
 8.5/8.7 intelligence-layer design regardless.
 
-### D5 — T5810 + mirror + A/B scope — RESOLVED 2026-07-17
+### D5 — gpu-node-1 + mirror + A/B scope — RESOLVED 2026-07-17
 
-- **T5810 access from this MacBook: DONE.** SSH alias installed
+- **gpu-node-1 access from this MacBook: DONE.** SSH alias installed
   (machine-local config), persistent tunnel agent loaded
   (`local.pxx.gpu-node-1-vllm-tunnel`), verified: `127.0.0.1:8003` serves
   `qwen2.5-coder-14b-coder-lora` (16k ctx). Tier-2 fallback restored; pxx
@@ -119,8 +119,8 @@ needing shared observation memory. Roadmap Phase 20 supersedes the old
   but switching production would add a tunnel-availability dependency
   to every loop preflight for +0.25 recall; recommendation: keep the
   always-local 7b default, 14b recorded as the measured alternative
-  (`evals/baselines/reviewer-qwen2.5-coder-14b-coder-lora.json`).
-- **mirror mirror: resolved by clarification** — pxx has no standalone
+  (`evals/baselines/reviewer-qwen2.5-coder-14b.json`).
+- **Private mirror: resolved by clarification** — pxx has no standalone
   mirror there (it ships integrated inside another tree); doctor now
   reports expected-but-unconfigured mirrors as informational
   ("not configured on this machine") instead of "unreachable".

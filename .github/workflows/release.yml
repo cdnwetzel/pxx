@@ -34,6 +34,12 @@ jobs:
           mkdir -p "$HOME/.config/pxx"
           printf '%s\n' "${{ secrets.PXX_CONTENT_DENYLIST }}" > "$HOME/.config/pxx/content-denylist"
       - run: uv run pxx --check --shipped
+      - name: Full-tree de-identification gate
+        # Anti-recurrence (1.3.3): the WHOLE public tree — docs/plans/deploy/
+        # config, not just the wheel — must carry no fleet identifier. Armed
+        # from the same secret; --all-files scans every tracked file. This is
+        # the gap that let a hostname survive in 1.3.0/1.3.1.
+        run: uv run pxx --check --all-files
 
   build:
     needs: gate

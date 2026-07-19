@@ -4,8 +4,8 @@
 #
 #   bash scripts/setup-models.sh
 #
-# Qwen3-Coder-Next is the T5810 candidate (ultra-sparse MoE, larger than the
-# Studio comfortably serves) — deploy it on the T5810 vLLM, not here.
+# Qwen3-Coder-Next is the gpu-node-1 candidate (ultra-sparse MoE, larger than the
+# Studio comfortably serves) — deploy it on the gpu-node-1 vLLM, not here.
 set -euo pipefail
 
 MODELS=("${@:-gemma4:26b}")

@@ -7,17 +7,17 @@
 
     <!--
       macOS launchd analog of inference-node's coder-tunnel.service.
-      Persistent SSH local-forward from the Mac Studio to the T5810
+      Persistent SSH local-forward from the Mac Studio to the gpu-node-1
       audit-proxy (port 8003), which fronts the 2x RTX A4500 vLLM serving
-      qwen2.5-coder-14b. The T5810 is SSH-only (office NAT forwards
+      qwen2.5-coder-14b. The gpu-node-1 is SSH-only (office NAT forwards
       only port 22), so this tunnel is BOTH the transport and the security
       boundary -- the audit-proxy relies on SSH for access control.
 
-      Result: http://127.0.0.1:8003 on the Studio -> T5810 vLLM.
+      Result: http://127.0.0.1:8003 on the Studio -> gpu-node-1 vLLM.
       pxx reads DEFAULT_VLLM / PXX_VLLM_URL to find it.
 
       Install: see deploy/README.md. Replace /Users/you with your $HOME
-      and confirm an `ssh T5810` alias exists in ~/.ssh/config.
+      and confirm an `ssh gpu-node-1` alias exists in ~/.ssh/config.
     -->
 
     <key>ProgramArguments</key>
@@ -36,7 +36,7 @@
         <string>StrictHostKeyChecking=accept-new</string>
         <string>-L</string>
         <string>8003:127.0.0.1:8003</string>
-        <string>T5810</string>
+        <string>gpu-node-1</string>
     </array>
 
     <key>RunAtLoad</key>

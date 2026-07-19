@@ -41,3 +41,8 @@ jobs:
         # gate that soft-fails on missing coverage is release.yml, which
         # materializes the denylist from a secret. See governance P0.
         run: uv run pxx --check --shipped --allow-empty-denylist
+      - name: Full-tree de-identification gate (structural)
+        # Full tree (docs/plans/deploy/config), fork-PR-safe: structural
+        # patterns + a loud coverage-disabled warning (no secret on PRs). The
+        # ARMED full-tree gate that catches bare fleet identifiers is release.yml.
+        run: uv run pxx --check --all-files --allow-empty-denylist

@@ -16,7 +16,7 @@
 
 ## Why this order
 
-Phase 9's `--loop` was built and hardened against the T5810's 14B, whose
+Phase 9's `--loop` was built and hardened against the gpu-node-1's 14B, whose
 malformed SEARCH/REPLACE edits forced retry machinery (9ca1a22). The loop
 now inherits vllm-host-1's Qwen3-Coder, which went 4/4 on edit-shaped tasks in
 the 2026-07-15 A/B — the live dogfood that has been Phase 9's blocking
@@ -46,7 +46,7 @@ Steps:
 Acceptance: one loop reaches APPROVE on a genuine task without manual
 intervention. If Qwen3-Coder still produces malformed edits, capture the
 transcript — that decides whether the retry machinery stays load-bearing
-or becomes T5810-legacy.
+or becomes gpu-node-1-legacy.
 
 ## Task 2 — 9.4 cross-session capture (plan 004, ~1 day est.)
 

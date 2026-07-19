@@ -23,7 +23,7 @@ its own commit with its own tests.
 
 **Observed:** a URL with no positionally-paired model silently falls back to
 `VLLM_DEFAULT`. With two candidates serving different model ids
-(vllm-host-1 `Qwen3-Coder` vs T5810 `qwen2.5-coder-14b-coder-lora`), a forgotten
+(vllm-host-1 `Qwen3-Coder` vs gpu-node-1 `qwen2.5-coder-14b-coder-lora`), a forgotten
 model entry routes requests to a server with the *wrong model id* — vLLM
 rejects unknown ids, so the session dies mid-flight instead of at launch.
 (Also the top suggestion from the `--self-improve` dogfood review.)

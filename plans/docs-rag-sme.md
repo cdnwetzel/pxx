@@ -11,7 +11,7 @@
 > deps + PEPs. **Only the model A/B (§6) remains.** Code lives at
 > `services/docs-rag-sme/`.
 >
-> **Depends on:** nothing in-repo. Sits *beside* the existing T5810 vLLM +
+> **Depends on:** nothing in-repo. Sits *beside* the existing gpu-node-1 vLLM +
 > audit-proxy stack; pxx changes are limited to one endpoint override and
 > one model-settings entry.
 >
@@ -24,7 +24,7 @@
 
 ## Problem
 
-Every local model's knowledge is frozen at its training cutoff. The T5810
+Every local model's knowledge is frozen at its training cutoff. The gpu-node-1
 serves a coding model (today `qwen2.5-coder-14b`; candidates under A/B
 are Qwen3-Coder-Next and Gemma 4 26B A4B — see §6) that cannot know yesterday's
 `asyncio` change or a library's just-released API. Aider's manual `/web <url>`
@@ -46,7 +46,7 @@ not *session memory* — orthogonal systems.
 Today's request path (from `pxx/endpoints.py`):
 
 ```
-aider ──► SSH tunnel (127.0.0.1:8003) ──► T5810 audit-proxy :8003 ──► vLLM
+aider ──► SSH tunnel (127.0.0.1:8003) ──► gpu-node-1 audit-proxy :8003 ──► vLLM
 ```
 
 The SME is another OpenAI-compatible shim. The open design decision is
@@ -77,7 +77,7 @@ consistent with how 9router and agentmemory are treated.
 ## Architecture (4 components)
 
 ### 1. Ingestion — the "perpetual" part
-- Python crawler on a **systemd timer** (the T5810/RHEL node already runs
+- Python crawler on a **systemd timer** (the gpu-node-1/RHEL node already runs
   systemd tunnels — natural home), daily or weekly.
 - **Allowlist only:** `docs.python.org` (versioned), `peps.python.org`,
   CPython release notes/changelog, and `pypi.org/pypi/<pkg>/json` for the
@@ -117,7 +117,7 @@ SQL instinct becomes the actual edge over a naive embed-everything RAG.**
 
 Available accelerators:
 - **Mac Studio** — 36 GB unified memory (runs pxx + Ollama).
-- **T5810** — 2× RTX A4500 20 GB, NVLink, **ECC** = 40 GB.
+- **gpu-node-1** — 2× RTX A4500 20 GB, NVLink, **ECC** = 40 GB.
 - **RTX 5080** — 16 GB (consumer, no ECC).
 - **RTX A1000** — 8 GB, **ECC**.
 
@@ -170,10 +170,10 @@ unexpected role/length and that token budget math still fits the model's window
 (the 14b model has a hard 16k in+out; a 26B MoE candidate has 256K headroom,
 which is partly *why* it's the better SME host).
 
-**Decision D — where does the proxy run?** On the T5810 (next to vLLM, lowest
+**Decision D — where does the proxy run?** On the gpu-node-1 (next to vLLM, lowest
 latency, but adds a service to the SSH-only box) or on the Studio (where pxx
 runs, simpler to iterate, but every request crosses the tunnel twice). **Lean:**
-T5810, co-located with vLLM and the existing audit-proxy.
+gpu-node-1, co-located with vLLM and the existing audit-proxy.
 
 ---
 
@@ -184,7 +184,7 @@ T5810, co-located with vLLM and the existing audit-proxy.
 
 | Model | docs-off | docs-on | retrieval lift |
 |---|---|---|---|
-| `qwen2.5-coder-14b-coder-lora` (incumbent, T5810) | 11/12 (92%) | **12/12 (100%)** | **+1** |
+| `qwen2.5-coder-14b-coder-lora` (incumbent, gpu-node-1) | 11/12 (92%) | **12/12 (100%)** | **+1** |
 | `Qwen3-Coder` (priority, vllm-host-1) | 11/12 (92%) | 11/12 (92%) | +0 (one gain, one loss) |
 
 **Findings:**

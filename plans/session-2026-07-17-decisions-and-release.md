@@ -50,8 +50,8 @@ coordination; (c)/(d) skip the scrub and unblock D2 immediately.
 
 1. Optional squash: `b5123f8`/`98c54ca`/`76492c2` → one commit
    (interactive rebase; all local, safe until pushed).
-2. Push main to origin (fans to both remotes; mirror mirror is a D5 item
-   and absent on this machine — doctor's warning is expected).
+2. Push main to origin (fans to configured remotes; the private mirror is a
+   D5 item and absent on this machine — doctor's warning is expected).
 3. `pxx --doctor` after: origin in sync.
 
 ## Task 3 — execute D3: PyPI v1.1.0
@@ -71,15 +71,15 @@ Preconditions: Tasks 1–2 done; `uv run pytest -q` green.
 
 ## Task 4 — D5 infrastructure (needs user inputs)
 
-- T5810 from this MacBook (recommended (i) in 009): user supplies the SSH
+- gpu-node-1 from this MacBook (recommended (i) in 009): user supplies the SSH
   host details → add `~/.ssh/config` alias, install
   `deploy/launchd/local.pxx.gpu-node-1-vllm-tunnel.plist`, verify
   `curl 127.0.0.1:8003/v1/models`, confirm pxx detection order
   vllm-host-1 → tunnel → local.
-- mirror: user supplies mirror URL → `git remote add mirror <url>`,
+- Private mirror: user supplies mirror URL → `git remote add <mirror> <url>`,
   re-run `pxx --doctor` (mirrors in sync).
 - §6 A/B re-scope: record the chosen contender set in plan 006; if
-  T5810 is restored and time remains, run the incumbent-vs-Qwen3-Coder
+  gpu-node-1 is restored and time remains, run the incumbent-vs-Qwen3-Coder
   arms through the SME proxy (2026-07-15 harness: temp 0, warmup
   excluded, TTFT/tok-s, hand-graded). Closing §6 flips 006 → done.
 

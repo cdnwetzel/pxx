@@ -14,7 +14,7 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True, slots=True)
 class Settings:
-    # Downstream OpenAI-compatible server. Default = the T5810 audit-proxy as
+    # Downstream OpenAI-compatible server. Default = the gpu-node-1 audit-proxy as
     # reached through the SSH tunnel (same value as pxx's DEFAULT_VLLM).
     upstream: str
     host: str

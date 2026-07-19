@@ -264,7 +264,7 @@ runtime observer) stores a summary observation for future sessions.
   so `--yes` upstream does not widen the blast radius. (Stated here so a future
   reader doesn't "fix" it.)
 - **Never act on unverified model findings.** Same dogfood session, second run
-  (worked end-to-end: env-file config → tunnel → T5810 14b → ask-mode one-shot):
+  (worked end-to-end: env-file config → tunnel → gpu-node-1 14b → ask-mode one-shot):
   the model returned 3 suggestions; the 2 verifiable ones were both FALSE — one
   proposed error handling that already exists verbatim, one "fixed" os.replace's
   Windows atomicity (os.replace IS atomic there; the proposed shutil.move is
@@ -282,7 +282,7 @@ runtime observer) stores a summary observation for future sessions.
 ## Live dogfood #1 (2026-06-10) — transcript and calibration
 
 **Setup:** seeded task — implement `pxx/duration.py::human_duration` against 3
-failing tests (committed first; non-empty baseline). Fresh review state. T5810
+failing tests (committed first; non-empty baseline). Fresh review state. gpu-node-1
 14B via tunnel. Hooks NOT installed (as found).
 
 **Result:** round 1: the model implemented the function correctly in one shot
@@ -376,8 +376,8 @@ This is the "healing prompt visibly steers round 2" criterion, observed
 live. Wall-clock ≈90s of a 1800s budget; reviews sub-second.
 
 **Hypothesis confirmed:** the 9ca1a22 malformed-edit retry path never
-fired across three edit legs — it is T5810-legacy under Qwen3-Coder.
-Keep it: it costs nothing when idle and the T5810 is still tier 3.
+fired across three edit legs — it is gpu-node-1-legacy under Qwen3-Coder.
+Keep it: it costs nothing when idle and the gpu-node-1 is still tier 3.
 
 **Reviewer calibration:** the vllm-host-1 reviewer was hand-verified against a
 planted-bug diff (two deliberate logic errors) — both flagged as P0 in

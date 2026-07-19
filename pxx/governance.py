@@ -245,6 +245,11 @@ def _scan_content_lines(
 # release time would block publishes on other agents' review notes for no
 # distribution risk. The pre-commit staged scan still guards the whole repo.
 _SHIPPED_PREFIXES: tuple[str, ...] = ("pxx/", "tests/", "README.md", "pyproject.toml")
+# NOTE (1.3.3): the --shipped scope above covers only the wheel/sdist. The whole
+# PUBLIC tree (docs/, plans/, deploy/, config/, CLAUDE.md) is de-identified too;
+# that is enforced by `pxx --check --all-files` (armed) in release.yml + ci.yml.
+# The absence of that full-tree gate is why a fleet hostname survived to PyPI in
+# 1.3.0/1.3.1 despite a green --shipped run.
 
 
 def scan_public_content(

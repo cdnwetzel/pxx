@@ -1,5 +1,9 @@
 # docs-rag-sme
 
+> **Status: experimental, source-only.** This service is not part of the
+> `pxx-orchestrator` PyPI package and is not a shipped feature of the current
+> release; it is developed and tested in this repository.
+
 A version-aware **docs-RAG SME** retrieval proxy that sits in front of the
 local vLLM so Aider/`pxx` sessions can answer from *current, official* docs the
 frozen model weights don't know. See `pxx/plans/docs-rag-sme.md` (Backlog 009)

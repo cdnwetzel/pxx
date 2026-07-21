@@ -6,8 +6,8 @@ build-backend = "setuptools.build_meta"
 # Distribution name. "pxx" on PyPI is owned by an unrelated 2023 project, so we
 # publish as pxx-orchestrator; the console script and import package stay `pxx`.
 name = "pxx-orchestrator"
-version = "1.3.3.post1"
-description = "Offline-capable aider orchestrator with persistent observation memory"
+version = "1.3.4"
+description = "Offline-capable aider orchestrator with explicit consent and scope safety"
 readme = "README.md"
 requires-python = ">=3.11,<3.13"
 license = "MIT"
@@ -42,13 +42,21 @@ Issues = "https://github.com/cdnwetzel/pxx/issues"
 pxx = "pxx.cli:main"
 pxx-scope-check = "pxx.scope:scope_check_main"
 
-[tool.setuptools]
-packages = ["pxx"]
+[tool.setuptools.packages.find]
+# pxx/commands/ and pxx/prompts/ hold markdown assets, not Python modules.
+# Declaring them as (namespace) packages keeps the build warning-free
+# ("Package 'pxx.commands' is absent from the `packages` configuration")
+# while shipping the .md files at the same wheel paths as before.
+include = ["pxx*"]
+exclude = ["*__pycache__*"]
+namespaces = true
 
 [tool.setuptools.package-data]
 # Runtime assets pxx reads from inside the package. system.md is --read into
 # every aider session, so it MUST ship in the wheel.
-pxx = ["prompts/*.md", "commands/*.md"]
+pxx = ["defaults/*.yml"]
+"pxx.commands" = ["*.md"]
+"pxx.prompts" = ["*.md"]
 
 [project.optional-dependencies]
 dev = [

@@ -1,9 +1,10 @@
 name: CI
 
-# Runs the full suite on every push and PR — the safety net that was missing
-# (Phase 0.5 Tier A). Until this existed, the 851 tests ran only through a
-# local pre-commit hook the author could skip, so a regression could reach
-# main or ship in a release caught by nobody.
+# Hermetic matrix (1.3.4): the public green checks must cover the public
+# contract on every supported interpreter — Python 3.11 and 3.12 on Ubuntu,
+# plus a macOS 3.12 leg because macOS is a stated daily platform. Every leg
+# uses the locked environment (uv sync --frozen) with a uv-managed
+# interpreter, never the runner's ambient Python.
 
 on:
   push:
@@ -15,15 +16,24 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12"]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0 # governance scans use git ls-files / diff
-      - uses: astral-sh/setup-uv@v5
-      - run: uv sync --extra dev
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
+      - name: Install (locked, pinned interpreter)
+        run: uv sync --frozen --extra dev --python ${{ matrix.python }}
       - name: Lint
         # Scoped to pxx/ + tests/ — the project's canonical lint surface
         # (matches pxx/self_modes.py::self_lint). The vendored
@@ -32,7 +42,10 @@ jobs:
           uv run ruff check pxx/ tests/
           uv run ruff format --check pxx/ tests/
       - name: Tests
-        run: uv run pytest -q
+        # -rs reports skip reasons so each leg shows its *expected* skips —
+        # an unexpected new skip/xfail is visible in the log instead of
+        # hiding behind a green checkmark.
+        run: uv run pytest -q -rs
       - name: Public-content gate (shipped files)
         # --allow-empty-denylist: CI (incl. fork PRs) has no access to the
         # untracked hostname denylist, so hostname coverage is off here by
@@ -46,3 +59,43 @@ jobs:
         # patterns + a loud coverage-disabled warning (no secret on PRs). The
         # ARMED full-tree gate that catches bare fleet identifiers is release.yml.
         run: uv run pxx --check --all-files --allow-empty-denylist
+
+  macos-smoke:
+    # macOS is a stated daily platform — one full-suite leg on 3.12 catches
+    # platform drift (path handling, TTY behavior) the Ubuntu legs can't.
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
+      - name: Install (locked, pinned interpreter)
+        run: uv sync --frozen --extra dev --python 3.12
+      - name: Tests
+        run: uv run pytest -q -rs
+
+  packaging:
+    # Build must stay warning-free (1.3.4 DoD) and the wheel must work on its
+    # own — installed, away from the repo, with no inference endpoint.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
+      - name: Build sdist + wheel (fail on any build warning)
+        run: |
+          uv build 2>&1 | tee build.log
+          if grep -qi "warning" build.log; then
+            echo "::error::uv build produced warnings — the release DoD requires a warning-free build."
+            exit 1
+          fi
+      - name: Metadata check
+        run: uvx twine check dist/*
+      - name: Install smoke (built wheel only, no repo code)
+        run: |
+          uv venv /tmp/wheel-smoke --python 3.12
+          uv pip install --python /tmp/wheel-smoke/bin/python dist/*.whl
+          cd /tmp
+          /tmp/wheel-smoke/bin/pxx --version
+          /tmp/wheel-smoke/bin/pxx --list-commands

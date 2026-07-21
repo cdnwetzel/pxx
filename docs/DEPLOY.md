@@ -2,6 +2,10 @@
 
 Production setup for pxx and optional services.
 
+> The `agentmemory` and `9router` services are experimental and source-only
+> (not on PyPI). Their pxx integration is partially wired: this guide says
+> explicitly what happens today and what is not yet connected.
+
 ## Architecture
 
 ```
@@ -10,24 +14,28 @@ Production setup for pxx and optional services.
 │  (runs `pxx --edit --with-memory`)                  │
 └──────────┬──────────────────────────────────────────┘
            │
-           ├─────────────────────────────────────────────┐
-           │                                             │
-           ▼                                             ▼
-    ┌─────────────┐                          ┌─────────────────┐
-    │   aider     │                          │  agentmemory    │
-    │  (frontend) │◄─────────────────────────┤  (observation   │
-    │             │  /inject (inject         │   storage &     │
-    └─────────────┘   observations)          │   search)       │
-                                             └─────────────────┘
-           │                                             │
-           └─────────────────────────────────────────────┘
-                    │
-                    ▼
-           ┌──────────────────┐
-           │ Ollama (server)  │
-           │ (LLM inference)  │
-           └──────────────────┘
+           ├──────────────────┬────────────────────────┐
+           │                  │                        │
+           ▼                  ▼                        ▼
+    ┌─────────────┐   ┌─────────────────┐    ┌─────────────────┐
+    │   aider     │   │  agentmemory    │    │ 9router         │
+    │  (frontend) │   │  (observation   │    │ (optional       │
+    └─────────────┘   │   storage &     │    │  single-upstream│
+           │          │   search)       │    │  proxy)         │
+           │          └─────────────────┘    └─────────────────┘
+           │                  ▲                        │
+           │                  │                        │
+           └──────────────────┼────────────────────────┘
+                      │       │ post-session git-diff
+                      ▼       │ summary (pxx → service)
+             ┌──────────────────┐
+             │ Ollama (server)  │
+             │ (LLM inference)  │
+             └──────────────────┘
 ```
+
+Automatic injection of observations *into* the aider session is **not wired**
+in this release; retrieval is explicit via the service API.
 
 ## Single-Machine Deployment (Local)
 
@@ -48,15 +56,16 @@ pxx --edit --with-memory
 
 **What happens automatically:**
 1. pxx detects Ollama endpoint
-2. pxx starts agentmemory service (background)
-3. pxx starts 9router service (background)
-4. pxx launches aider subprocess
-5. aider can inject observations from agentmemory
-6. On aider exit, pxx captures tool calls as observations
+2. pxx starts the agentmemory service (background)
+3. pxx launches aider subprocess
+4. On aider exit, pxx stores a post-session edit summary (git-diff based)
+
+9router starts only with `--with-router`. Automatic injection of observations
+into the aider session is not wired in this release.
 
 **Configuration (optional):**
 ```bash
-# 30-minute observation retention
+# 30-day observation retention
 export AGENTMEMORY_RETENTION_DAYS=30
 
 # Cleanup every 30 minutes
@@ -68,20 +77,14 @@ pxx --edit --with-memory
 
 ## Two-Machine Deployment (LAN)
 
-**Inference host (Ollama + agentmemory)** ← **Orchestrator host (pxx)**
+**Inference host (Ollama)** ← **Orchestrator host (pxx + agentmemory)**
 
 ### Inference host setup
 
+Only Ollama needs to live here:
+
 ```bash
-# 1. Install the agentmemory service from a repo checkout (not on PyPI)
-git clone https://github.com/cdnwetzel/pxx && cd pxx
-pip install -e services/agentmemory
-
-# 2. Start agentmemory service
-agentmemory server --port 3111 &
-
-# 3. Verify it's running
-curl http://127.0.0.1:3111/health
+ollama serve
 ```
 
 ### Orchestrator host setup
@@ -92,17 +95,22 @@ pip install pxx-orchestrator
 
 # 2. Configure the inference-host endpoint
 export PXX_STUDIO_LAN_URL=http://your-ollama-host:11434
-export AGENTMEMORY_URL=http://your-ollama-host:3111
 
-# 3. Run pxx with memory pointing at the inference host
-pxx --edit --with-memory
+# 3. Run pxx
+pxx --edit
 ```
+
+> **Memory is loopback-only in this release.** pxx talks to agentmemory on
+> the fixed address `127.0.0.1:3111` — a remote memory service is not
+> configurable. If you want `--with-memory`, run agentmemory on the
+> orchestrator host (install from a repo checkout: `pip install -e
+> services/agentmemory`, then `agentmemory`).
 
 **What happens:**
 1. pxx detects the inference host's Ollama endpoint (LAN)
-2. pxx queries its agentmemory service for observations
-3. aider runs on the orchestrator host, using the inference host's Ollama
-4. Tool calls captured and sent back to the inference host's agentmemory
+2. aider runs on the orchestrator host, using the inference host's Ollama
+3. With `--with-memory`, a post-session edit summary is stored on the
+   orchestrator host's local agentmemory
 
 ## VPN Deployment (Remote)
 
@@ -113,9 +121,8 @@ Same as two-machine, but use the VPN hostname:
 ```bash
 # On the remote orchestrator host, over VPN
 export PXX_STUDIO_REMOTE_URL=https://workstation-vpn.example.com:11434
-export AGENTMEMORY_URL=https://workstation-vpn.example.com:3111
 
-pxx --edit --with-memory
+pxx --edit
 ```
 
 ## Systemd Integration (Linux/WSL)
@@ -132,7 +139,9 @@ After=network.target
 [Service]
 Type=simple
 User=your-username
-ExecStart=/home/your-username/.local/bin/agentmemory server --port 3111
+Environment=PXX_MEMORY_HOST=127.0.0.1
+Environment=PXX_MEMORY_PORT=3111
+ExecStart=/home/your-username/.local/bin/agentmemory
 Restart=on-failure
 RestartSec=10
 
@@ -167,7 +176,7 @@ RUN pip install /app/agentmemory
 
 EXPOSE 3111
 
-CMD ["agentmemory", "server", "--port", "3111"]
+CMD ["agentmemory"]
 ```
 
 **Build and run:**
@@ -221,29 +230,20 @@ curl -X POST http://127.0.0.1:3111/cleanup \
 
 ### Performance Tuning
 
-**Large datasets (>100k observations):**
+**Larger datasets:**
 ```bash
-# Reduce search limit (faster queries)
-export AGENTMEMORY_SEARCH_LIMIT=5
-
-# Increase cleanup interval (less overhead)
+# Increase cleanup interval if cleanup competes with active requests
 export AGENTMEMORY_CLEANUP_INTERVAL=7200  # Every 2 hours
 
 # Run pxx
 pxx --edit --with-memory
 ```
 
-**Memory-constrained systems:**
-```bash
-# Disable HNSW vector index (use brute-force)
-export AGENTMEMORY_USE_VECTOR_INDEX=false
-
-# Reduce cache size
-export AGENTMEMORY_CACHE_SIZE=32
-
-# Run pxx
-pxx --edit --with-memory
-```
+`AGENTMEMORY_SEARCH_LIMIT`, `AGENTMEMORY_USE_VECTOR_INDEX`, and
+`AGENTMEMORY_CACHE_SIZE` are not implemented runtime settings. The HNSW index
+is currently experimental and is not populated by the production observation
+path. Do not use the service's current tests as evidence for a 100k latency or
+recall guarantee.
 
 ## Troubleshooting
 
@@ -252,9 +252,10 @@ pxx --edit --with-memory
 # Check port availability
 lsof -i :3111
 
-# Try alternate port
-agentmemory server --port 3112
-export AGENTMEMORY_URL=http://127.0.0.1:3112
+# Run the service on a different port
+PXX_MEMORY_PORT=3112 agentmemory
+# Note: pxx always talks to agentmemory on 127.0.0.1:3111 in this release,
+# so a custom port only helps for standalone service use.
 ```
 
 **Connection timeout to the inference host:**
@@ -304,11 +305,11 @@ cp ~/pxx-memory-backup.db ~/.pxx/memory.db
 ⚠️ **Important:** agentmemory does not authenticate requests. Only expose on trusted networks.
 
 ```bash
-# Development (safe — local only)
-agentmemory server --host 127.0.0.1 --port 3111  # ✓
+# Development (safe — local only; this is the default)
+agentmemory                                     # binds 127.0.0.1:3111
 
 # Production on LAN (add firewall rules)
-agentmemory server --host 0.0.0.0 --port 3111    # ⚠️ Needs firewall
+PXX_MEMORY_HOST=0.0.0.0 agentmemory             # ⚠️ Needs firewall
 
 # Never expose to the internet directly — front with an authenticating reverse proxy or VPN
 ```
@@ -331,4 +332,3 @@ sudo ufw allow from <your-lan-cidr> to any port 3111
 
 - **Deployment issues:** https://github.com/cdnwetzel/pxx/issues
 - **Configuration help:** Check environment variables in `INSTALL.md`
-- **Architecture questions:** See `CLAUDE.md` for system design

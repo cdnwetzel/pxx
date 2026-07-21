@@ -899,6 +899,9 @@ class TestReviewVerdictWiring:
         monkeypatch.setattr(sys, "argv", ["pxx", "--review"])
         monkeypatch.setattr(cli_module, "_git_repo_root", lambda: tmp_path)
         monkeypatch.setattr(cli_module.review_gate, "run_review_pass", lambda root: 0)
+        monkeypatch.setattr(
+            cli_module.review_gate, "preflight_review_backend", lambda: None
+        )
 
         with pytest.raises(SystemExit) as exc:
             cli_module.main()
@@ -1016,6 +1019,9 @@ class TestReviewHealWiring:
         monkeypatch.chdir(tmp_path)
         monkeypatch.setattr(cli_module, "_git_repo_root", lambda: tmp_path)
         monkeypatch.setattr(cli_module.review_gate, "run_review_pass", lambda root: 0)
+        monkeypatch.setattr(
+            cli_module.review_gate, "preflight_review_backend", lambda: None
+        )
         return cli_module
 
     def test_heal_requires_scope(self, monkeypatch, tmp_path, capsys):
@@ -1479,6 +1485,42 @@ class TestListCommandsFlag:
             cli_module.main()
         assert exc.value.code == 0
         assert calls == []
+
+
+class TestMetadataFlags:
+    @pytest.mark.parametrize("flag", ["--help", "-h"])
+    def test_help_exits_zero_without_endpoint_probe(self, flag, monkeypatch, capsys):
+        from pxx import cli as cli_module
+
+        def fail_probe():
+            raise RuntimeError("help must not probe an endpoint")
+
+        monkeypatch.setattr(cli_module, "detect_endpoint", fail_probe)
+        monkeypatch.setattr(sys, "argv", ["pxx", flag])
+
+        with pytest.raises(SystemExit) as exc:
+            cli_module.main()
+
+        assert exc.value.code == 0
+        out = capsys.readouterr().out
+        assert "usage: pxx" in out
+        assert "Ask mode is read-only by default" in out
+
+    def test_version_exits_zero_without_endpoint_probe(self, monkeypatch, capsys):
+        from pxx import __version__
+        from pxx import cli as cli_module
+
+        def fail_probe():
+            raise RuntimeError("version must not probe an endpoint")
+
+        monkeypatch.setattr(cli_module, "detect_endpoint", fail_probe)
+        monkeypatch.setattr(sys, "argv", ["pxx", "--version"])
+
+        with pytest.raises(SystemExit) as exc:
+            cli_module.main()
+
+        assert exc.value.code == 0
+        assert capsys.readouterr().out.strip() == f"pxx {__version__}"
 
 
 class TestCommandsContext:

@@ -2,6 +2,36 @@
 
 All notable changes to pxx and its ecosystem across development phases.
 
+## Unreleased
+
+### Corrected
+
+- Corrected Python 3.13 installation guidance: current pip refuses the
+  dependency set rather than silently selecting a 1.2.x release in a clean
+  resolver test. Forced incompatible installs may still fail on `audioop`.
+- Retracted unverified HNSW speedup and recall claims from current-facing
+  documentation. Production index population and reproducible scale/recall
+  benchmarks remain pending; the historical entries below are preserved as
+  the claims made by their releases.
+- Made `pxx --help` and `pxx --version` local metadata operations and excluded
+  `SKILL_TEMPLATE.md` from the slash-command listing.
+- Demoted the optional services to their implemented state. 9router is now
+  documented as an experimental single-upstream proxy: fallback chains,
+  token/cost metrics, and `/v1/status` / `/v1/usage` exist only as unwired
+  modules, not in the running service. The memory documentation now states
+  that runtime capture and automatic session injection are not wired — what
+  `--with-memory` does today is start the service and store a post-session
+  git-diff summary.
+- Removed documentation for settings and commands that do not exist
+  (`AGENTMEMORY_URL`, `agentmemory server --port`, `pxx --list-skills`,
+  `pxx --no-memory`, `scripts/doctor.sh`, router host/port settings).
+
+### Changed
+
+- `pxx --review` now preflights the configured review backend and fails fast
+  with a clear message when it is unusable, instead of failing partway
+  through the review pass.
+
 ## [1.3.3.post1] — 2026-07-19
 
 Docs post-release (PEP 440 `.post1` — no code change).

@@ -1,0 +1,9 @@
+# Packaged default aider config for pip-installed pxx (no repo checkout present).
+# Mirrors config/aider.conf.yml minus chat-mode — pxx controls mode itself via
+# its --chat-mode injection; this file just supplies the diff edit format so a
+# `pip install` user gets scoped SEARCH/REPLACE edits, not whole-file rewrites.
+edit-format: diff
+auto-commits: true
+dirty-commits: true
+auto-test: false
+auto-lint: false

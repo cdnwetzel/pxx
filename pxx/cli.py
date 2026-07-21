@@ -17,7 +17,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from pxx import agent_manifest
+from pxx import __version__, agent_manifest
 from pxx import (
     _git,
     audit,
@@ -57,6 +57,10 @@ REPO_ROOT = PKG_DIR.parent
 SYSTEM_PROMPT = PKG_DIR / "prompts" / "system.md"
 SELF_IMPROVE_PROMPT = PKG_DIR / "prompts" / "self-improve.md"
 AIDER_CONF = REPO_ROOT / "config" / "aider.conf.yml"
+if not AIDER_CONF.exists():
+    # A PyPI wheel has no repo-root config/; fall back to the packaged default
+    # so a `pip install` user still gets diff edits, not whole-file rewrites.
+    AIDER_CONF = PKG_DIR / "defaults" / "aider.conf.yml"
 MODEL_SETTINGS = REPO_ROOT / "config" / "model-settings.yml"
 MODEL_METADATA = REPO_ROOT / "config" / "model-metadata.json"
 
@@ -439,7 +443,54 @@ def _install_precommit_hook() -> None:
     sys.exit(result.returncode)
 
 
+def _print_help() -> None:
+    """Print pxx-owned options without requiring an inference endpoint."""
+    print(
+        """usage: pxx [pxx-options] [aider-options] [files ...]
+
+Offline-capable aider orchestrator. Ask mode is read-only by default;
+pass --edit to authorize file changes. Unrecognized options are forwarded
+to aider.
+
+Core options:
+  --edit                 allow file changes
+  --with-memory          start optional observation-memory service
+  --with-router          start optional request router
+  --with-docs            enable optional documentation service
+  --tier {t1,t2,t3}      select an orchestration tier
+  --doctor               report local service and repository health
+  --check-sync           report configured mirror synchronization
+  --list-commands        list bundled slash-command prompts
+  --upgrade, --update    upgrade a packaged installation
+  --help, -h             show this help and exit
+  --version              show the pxx version and exit
+
+Development options:
+  --self-test            run the pxx test suite
+  --self-lint            run pxx lint and format checks
+  --self-improve         open a suggest-only self-review session
+  --self-fix TASK        run one bounded edit task (requires --scope)
+  --review               run the configured review gate
+  --loop TASK            run the bounded self-improvement loop
+
+Examples:
+  pxx
+  pxx --message "Explain main.py" main.py
+  pxx --edit --message "Add error handling" main.py
+
+Project documentation: https://github.com/cdnwetzel/pxx"""
+    )
+
+
 def main() -> None:
+    if "--help" in sys.argv[1:] or "-h" in sys.argv[1:]:
+        _print_help()
+        sys.exit(0)
+
+    if "--version" in sys.argv[1:]:
+        print(f"pxx {__version__}")
+        sys.exit(0)
+
     if "--list-commands" in sys.argv:
         _print_command_listing()
         sys.exit(0)
@@ -472,6 +523,10 @@ def main() -> None:
         root = _git_repo_root()
         if root is None:
             print("pxx: --review requires a git repo.", file=sys.stderr)
+            sys.exit(1)
+        preflight_err = review_gate.preflight_review_backend()
+        if preflight_err:
+            print(f"pxx: --review backend not usable: {preflight_err}", file=sys.stderr)
             sys.exit(1)
         # Run review pass and compute verdict
         exit_code = review_gate.run_review_pass(root)
@@ -841,7 +896,8 @@ def main() -> None:
         if root is None or root.resolve() != REPO_ROOT.resolve():
             print(
                 "pxx: --loop is experimental and currently runs only inside "
-                "the pxx repo (self-fix rounds operate there).",
+                "the pxx repo (self-fix rounds operate there). For any other "
+                "repo, use `pxx --edit --scope <dir>` instead.",
                 file=sys.stderr,
             )
             sys.exit(1)

@@ -8,11 +8,36 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 HOOK_TEMPLATE = REPO_ROOT / "scripts" / "pre-commit-template"
 INSTALLER = REPO_ROOT / "scripts" / "install-precommit-hook.sh"
+
+# The suite's own bin dir (the venv running pytest) — holds ruff + pytest.
+_SUITE_BIN = str(Path(sys.executable).parent)
+
+
+def _hook_env(extra: dict[str, str] | None = None) -> dict[str, str]:
+    """Deterministic environment for hook subprocesses.
+
+    The installed hook shells out to ``uv run ruff`` / ``uv run pytest``
+    inside the temp repo. Without pins, uv resolves the *ambient* interpreter
+    (which may be an unsupported Python, e.g. a Homebrew 3.14) and the
+    *ambient* PATH (which may not carry ruff/pytest at all), so the gates
+    fail for environment reasons instead of the behavior under test. Pin uv
+    to the interpreter running this suite and put the suite's own bin dir
+    first on PATH, so the hook exercises the same ruff/pytest as the suite.
+    """
+    env = dict(os.environ)
+    env["PATH"] = _SUITE_BIN + os.pathsep + env.get("PATH", "")
+    env["UV_PYTHON"] = sys.executable
+    # Remove PXX_PRECOMMIT_SKIP to test the actual hook (unless overridden).
+    env.pop("PXX_PRECOMMIT_SKIP", None)
+    if extra:
+        env.update(extra)
+    return env
 
 
 def _init_repo(tmp_path: Path) -> Path:
@@ -37,9 +62,11 @@ def _init_repo(tmp_path: Path) -> Path:
     (tmp_path / "README.md").write_text("# Test\n")
     (tmp_path / "test_seed.py").write_text("def test_seed():\n    assert True\n")
     subprocess.run(["git", "add", "."], cwd=tmp_path, check=True)
-    env = {**os.environ, "PXX_PRECOMMIT_SKIP": "1"}
     subprocess.run(
-        ["git", "commit", "-q", "-m", "seed"], cwd=tmp_path, check=True, env=env
+        ["git", "commit", "-q", "-m", "seed"],
+        cwd=tmp_path,
+        check=True,
+        env=_hook_env({"PXX_PRECOMMIT_SKIP": "1"}),
     )
 
     return tmp_path
@@ -59,18 +86,13 @@ def _commit(
     repo: Path, env_extra: dict[str, str] | None = None
 ) -> subprocess.CompletedProcess[str]:
     """Attempt a git commit in the repo with optional env overrides."""
-    env = {**os.environ}
-    # Remove PXX_PRECOMMIT_SKIP to test the actual hook (unless overridden)
-    env.pop("PXX_PRECOMMIT_SKIP", None)
-    if env_extra:
-        env.update(env_extra)
     return subprocess.run(
         ["git", "commit", "-q", "-m", "test"],
         cwd=repo,
         capture_output=True,
         text=True,
         check=False,
-        env=env,
+        env=_hook_env(env_extra),
     )
 
 

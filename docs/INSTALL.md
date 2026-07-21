@@ -10,23 +10,25 @@ unrelated 2023 project); the installed command and import package are both
 
 > **⚠️ Installing on Python 3.13+**
 > pxx supports **Python 3.11–3.12** (aider's dependencies are not yet 3.13-ready). On Python 3.13 or
-> newer, a plain `pip install pxx-orchestrator` will **silently install an old 1.2.x build** that
-> crashes at startup — the current release is capped at `<3.13`, so pip skips it and falls back.
+> newer, current pip refuses the install because no compatible `aider-chat`
+> distribution can satisfy the dependency set. Do not force the package past
+> its `Requires-Python` bound: forced installs can fail at import time because
+> Python 3.13 removed `audioop`.
 > Install against 3.11/3.12 explicitly:
 > ```bash
 > uv tool install --python 3.12 pxx-orchestrator     # recommended
 > # or:  pipx install --python 3.12 pxx-orchestrator
 > # or:  python3.12 -m pip install pxx-orchestrator
 > ```
-> If you already hit `ModuleNotFoundError: ... audioop`, you installed an old build under 3.13 —
-> reinstall with one of the commands above.
+> If you already hit `ModuleNotFoundError: ... audioop`, reinstall under 3.11
+> or 3.12 with one of the commands above.
 
 **Prerequisites:**
 - **Python 3.11 or 3.12** (`python --version`). **Not 3.13+** — the pinned
   `aider-chat` requires `<3.13` (its `pydub` imports the `audioop` stdlib module
   that PEP 594 removed in 3.13). `uv tool`/`pipx` pick a supported interpreter
-  automatically; a plain `pip install` on a 3.13+ interpreter does **not** (see
-  the warning above).
+  automatically when one is available; a plain `pip install` under 3.13+
+  refuses the current dependency set (see the warning above).
 - Ollama running and reachable (default: `http://localhost:11434`)
   - Set `PXX_OLLAMA_BASE` to override
 
@@ -143,7 +145,7 @@ the `<3.13` ceiling only affects *fresh* installs on a too-new interpreter.
 ### Verify Installation
 
 ```bash
-pxx --version           # (execs into aider; the pxx banner prints first)
+pxx --version           # prints the pxx version without probing an endpoint
 pxx --list-commands     # available commands
 pxx                     # read-only ask mode
 ```
@@ -166,11 +168,9 @@ AGENTMEMORY_CLEANUP_INTERVAL=3600  # Cleanup check interval (seconds)
 AGENTMEMORY_CLEANUP_ENABLED=true   # Auto-cleanup on/off
 ```
 
-**9router (if using --with-router):**
-```bash
-PXX_ROUTER_PORT=20128       # Router port
-PXX_ROUTER_HOST=127.0.0.1   # Router host
-```
+**9router (if using --with-router):** the proxy binds a fixed loopback
+address (`127.0.0.1:20128`) and forwards to the Ollama endpoint named by
+`PXX_OLLAMA_BASE`; there are no router host/port settings in this release.
 
 ### Trusted Paths (Safety Gate)
 

@@ -1,0 +1,39 @@
+name: ci
+
+on:
+  push:
+    branches: [main, v2]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1, SHA-pinned
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990  # v8.3.2, SHA-pinned
+      - name: Install
+        run: uv venv && uv pip install -e ".[dev,server]" --python .venv/bin/python
+      - name: Lint
+        run: .venv/bin/ruff check pxx tests
+      - name: Test (no network, no Ollama, no aider required)
+        run: .venv/bin/python -m pytest
+      - name: "Governance scan (secret/PII patterns; fork-safe: unarmed denylist)"
+        run: .venv/bin/pxx check --all-files
+      - name: Legibility gates (workflow contract, context audit, docs check)
+        run: |
+          .venv/bin/pxx workflow validate
+          .venv/bin/pxx context audit
+          .venv/bin/pxx docs check
+          .venv/bin/pxx improve principles
+
+  package-smoke:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1, SHA-pinned
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990  # v8.3.2, SHA-pinned
+      - name: Package smoke (build wheel, install into throwaway venv, assert)
+        run: scripts/smoke-package.sh

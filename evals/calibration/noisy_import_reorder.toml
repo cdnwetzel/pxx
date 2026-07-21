@@ -1,0 +1,21 @@
+id = "noisy-import-reorder"
+kind = "noisy"
+expect = "clean"
+task = "Run the formatter over app/main.py (import order and whitespace only)."
+diff = '''
+--- a/app/main.py
++++ b/app/main.py
+@@ -1,8 +1,7 @@
+-import os
+-import sys
+ import json
++import os
++import sys
+ 
+ 
+ def main() -> int:
+-    config = json.load(open("config.json"))
+-    return 0 if config else 1
++    config = json.load(open("config.json"))
++    return 0 if config else 1
+'''

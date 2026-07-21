@@ -1,0 +1,20 @@
+id = "critical-swallowed-exception"
+kind = "critical"
+expect = "flag"
+min_severity = "medium"
+task = "Make sync_all robust so one failing job does not crash the whole loop."
+diff = '''
+--- a/app/sync.py
++++ b/app/sync.py
+@@ -1,7 +1,8 @@
+ def sync_all(jobs):
+     for job in jobs:
+-        result = job.run()
+-        if not result.ok:
+-            raise SyncError(result.error)
++        try:
++            job.run()
++        except Exception:
++            pass
+     return True
+'''

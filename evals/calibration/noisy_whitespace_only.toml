@@ -1,0 +1,15 @@
+id = "noisy-whitespace-only"
+kind = "noisy"
+expect = "clean"
+task = "Normalize spacing in paths.py; no behavior change intended."
+diff = '''
+--- a/app/paths.py
++++ b/app/paths.py
+@@ -1,5 +1,5 @@
+ def join(base, name):
+-    return base.rstrip("/") + "/" + name
++    return base.rstrip("/")  +  "/"  +  name
+ 
+ 
+ def split(path):
+'''

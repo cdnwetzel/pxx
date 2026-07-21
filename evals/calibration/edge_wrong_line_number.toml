@@ -1,0 +1,17 @@
+id = "edge-wrong-line-number"
+kind = "edge"
+expect = "flag"
+# A subtle defect a reviewer should flag; calibration must tolerate the
+# reviewer citing a wrong line number (scoring never matches line numbers).
+task = "Fetch all URLs and preserve the order and content of the results."
+diff = '''
+--- a/app/retry.py
++++ b/app/retry.py
+@@ -1,7 +1,7 @@
+ def fetch_all(urls):
+     out = []
+     for u in urls:
+         out.append(fetch(u))
+-    return out
++    return out[1:]
+'''

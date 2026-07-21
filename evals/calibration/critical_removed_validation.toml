@@ -1,0 +1,16 @@
+id = "critical-removed-validation"
+kind = "critical"
+expect = "flag"
+min_severity = "medium"
+task = "Simplify create_user(); the surrounding code already guarantees well-formed input."
+diff = '''
+--- a/app/users.py
++++ b/app/users.py
+@@ -1,6 +1,3 @@
+ def create_user(name, age):
+-    if not name:
+-        raise ValueError("name is required")
+-    if age < 0:
+-        raise ValueError("age must be non-negative")
+     return {"name": name, "age": age}
+'''

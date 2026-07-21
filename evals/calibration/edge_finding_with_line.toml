@@ -1,0 +1,19 @@
+id = "edge-finding-with-line"
+kind = "edge"
+expect = "flag"
+# A real defect with one clearly correct anchor: the multiplication by
+# item.qty is dropped at app/billing.py line 4. Scoring never matches line
+# numbers; this case exists so a reviewer that does cite file:line is
+# exercised on a flag case with an unambiguous correct anchor.
+task = "Refactor total_cents to accumulate line totals."
+diff = '''
+--- a/app/billing.py
++++ b/app/billing.py
+@@ -1,5 +1,5 @@
+ def total_cents(items):
+     total = 0
+     for item in items:
+-        total += item.price_cents * item.qty
++        total += item.price_cents
+     return total
+'''

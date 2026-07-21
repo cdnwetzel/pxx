@@ -1,0 +1,19 @@
+id = "critical-sql-injection"
+kind = "critical"
+expect = "flag"
+min_severity = "high"
+task = "Add a helper to look up a user by name in the SQLite database."
+diff = '''
+--- a/app/users.py
++++ b/app/users.py
+@@ -1,6 +1,10 @@
+ import sqlite3
+ 
+ 
++def find_user(conn: sqlite3.Connection, name: str):
++    query = f"SELECT * FROM users WHERE name = '{name}'"
++    return conn.execute(query).fetchone()
++
+ def list_users(conn: sqlite3.Connection):
+     return conn.execute("SELECT * FROM users").fetchall()
+'''

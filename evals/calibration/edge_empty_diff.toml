@@ -1,0 +1,5 @@
+id = "edge-empty-diff"
+kind = "edge"
+expect = "clean"
+task = "Refactor the parser (the agent produced no changes)."
+diff = ""

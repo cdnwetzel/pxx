@@ -1,0 +1,29 @@
+id = "acceptable-refactor-tests-updated"
+kind = "acceptable"
+expect = "clean"
+task = "Extract the row-parsing logic into a helper without changing behavior."
+diff = '''
+--- a/app/csvio.py
++++ b/app/csvio.py
+@@ -1,2 +1,6 @@
++def _parse_row(line: str) -> list[str]:
++    return [cell.strip() for cell in line.split(",")]
++
++
+ def read_rows(text: str) -> list[list[str]]:
+-    return [[c.strip() for c in line.split(",")] for line in text.splitlines() if line]
++    return [_parse_row(line) for line in text.splitlines() if line]
+--- a/tests/test_csvio.py
++++ b/tests/test_csvio.py
+@@ -1,6 +1,10 @@
+-from app.csvio import read_rows
++from app.csvio import _parse_row, read_rows
+ 
+ 
+ def test_read_rows():
+     assert read_rows("a, b\nc,d") == [["a", "b"], ["c", "d"]]
++
++
++def test_parse_row_strips_cells():
++    assert _parse_row("x , y") == ["x", "y"]
+'''

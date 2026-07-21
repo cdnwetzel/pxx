@@ -1,0 +1,16 @@
+id = "acceptable-test-only-change"
+kind = "acceptable"
+expect = "clean"
+task = "Add coverage for the upper clamp bound; production code is untouched."
+diff = '''
+--- a/tests/test_math.py
++++ b/tests/test_math.py
+@@ -4,3 +4,7 @@
+ def test_clamp():
+     assert clamp(5, 0, 10) == 5
+     assert clamp(-1, 0, 10) == 0
++
++
++def test_clamp_upper_bound():
++    assert clamp(11, 0, 10) == 10
+'''

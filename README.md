@@ -40,6 +40,12 @@ pip install "pxx-orchestrator[server]"  # headless HTTP API (pxx serve)
 Prerequisites: Python 3.11+, and a reachable model endpoint —
 [Ollama](https://ollama.com) by default (`ollama pull qwen2.5-coder:7b`).
 
+> **Advisory note:** the default install and `[server]` extra carry no known
+> dependency advisories (pip-audit, at the 2.0.0 release). The `[aider]` extra
+> pins `aider-chat==0.86.2` and inherits aider's own transitive advisory
+> surface — it is opt-in for exactly this reason; the native backend needs
+> none of it.
+
 ## Backends
 
 `pxx` runs tasks on one of two execution backends, selected per run:

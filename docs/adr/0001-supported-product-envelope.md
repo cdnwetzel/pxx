@@ -1,6 +1,6 @@
 # ADR-0001: Supported product envelope
 
-- **Status:** Proposed _(owner flips to Accepted on adoption)_
+- **Status:** Accepted _(owner, 2026-07-21)_
 - **Date:** 2026-07-20
 - **Deciders:** repo owner
 - **Supersedes / relates to:** the 1.3.4 public-readiness work

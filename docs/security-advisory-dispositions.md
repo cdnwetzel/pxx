@@ -3,7 +3,7 @@
 Standing record of how pxx dispositions the two live advisories against its
 pinned dependency `aider-chat==0.86.2`.
 
-**Status: standing recommendation — owner to confirm/override.**
+**Status: confirmed by the owner, 2026-07-21.**
 Revisit trigger for both rows: an aider release that fixes the advisory. The
 aider-upgrade discipline in CLAUDE.md already forces a touch-point review on
 every pin bump; re-running the scanner against the new pin is part of it.

@@ -1,10 +1,10 @@
 # pxx — project status
 
-_Last updated: 2026-06-10_
+_Last updated: 2026-07-19_
 
 ## Released
 
-**`pxx-orchestrator 1.0.0` is live on PyPI** — <https://pypi.org/project/pxx-orchestrator/>
+**`pxx-orchestrator 1.3.4` is live on PyPI** — <https://pypi.org/project/pxx-orchestrator/>
 (`pip install pxx-orchestrator`; the command and import package are `pxx`).
 Verified installable from both PyPI and TestPyPI in clean venvs. Core scope
 (Option B): the orchestrator + ask/edit against any Ollama; the optional
@@ -38,7 +38,7 @@ pxx-repo-only, requires `--scope`, a clean tree, and the pxx git hooks
 
 ## Quality state
 
-- Test suite: **690 passed** (from 357 at the start of 2026-06-10; the
+- Test suite: **982 passed, 12 skipped** (from 357 at the start of 2026-06-10; the
   merge-loss recovery restored 11 lost suites and surfaced real bugs —
   including an index-vs-worktree secrets-scanner bypass — all fixed).
 - Verdict engine fails closed: unknown severities → REVISE, no review
@@ -48,7 +48,7 @@ pxx-repo-only, requires `--scope`, a clean tree, and the pxx git hooks
 
 ## Key conventions
 
-- Dual-remote: every push fans out to both mirrors (`git push origin main`).
+- Remote: `origin` only (the 1.3.3 default; extra mirrors opt in via `PXX_DOCTOR_MIRRORS`).
 - Machine-local config: `~/.config/pxx/env` (KEY=VALUE; never in the repo).
 - `aider-chat` is exact-pinned by design; bump only via the discipline in
   `CLAUDE.md`.

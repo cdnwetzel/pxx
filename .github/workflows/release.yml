@@ -4,12 +4,96 @@ name: Release to PyPI
 # One-time setup on pypi.org → project pxx-orchestrator → Publishing (use 'Add a pending publisher' before the first upload) → Add a publisher:
 #   owner: cdnwetzel   repository: pxx   workflow: release.yml   environment: pypi
 # Then a `vX.Y.Z` tag push releases that version.
+#
+# Fail-closed (1.3.4): publish fires only when the version/tag gate, the armed
+# privacy gates, the full test matrix on both supported Pythons, and the build
+# validation all pass on the exact tag — behind a human-approved `pypi`
+# environment. NOTE (external state): the `pypi` environment only enforces the
+# human gate when it has *required reviewers* configured under repo Settings →
+# Environments; no YAML can set that. Verify it before tagging.
 
 on:
   push:
     tags: ["v*"]
 
+permissions:
+  contents: read
+
+concurrency:
+  # One pipeline per tag — a re-pushed tag can never race a publish.
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
+  version-check:
+    # The pushed tag must equal pyproject version == pxx.__version__, so
+    # `git tag v1.3.4` can never publish a wheel stamped with an older version.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Tag == pyproject == __init__
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          proj=$(grep -m1 '^version' pyproject.toml | sed 's/.*"\(.*\)".*/\1/')
+          init=$(grep -m1 '__version__' pxx/__init__.py | sed 's/.*"\(.*\)".*/\1/')
+          echo "tag=$tag proj=$proj init=$init"
+          test "$tag" = "$proj" && test "$tag" = "$init"
+
+  quality:
+    name: Core quality (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
+      - run: uv sync --frozen --extra dev --python "${{ matrix.python-version }}"
+      - name: Lint and format
+        run: |
+          uv run ruff check pxx/ tests/
+          uv run ruff format --check pxx/ tests/
+      - name: Tests
+        run: uv run pytest -q
+
+  services:
+    name: Optional service tests (${{ matrix.name }})
+    # Envelope A (1.3.4): the services are experimental/source-only and not in
+    # the wheel, so a red experimental leg must NOT block a stable-core
+    # release. continue-on-error keeps the signal visible without gating it.
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: agentmemory
+            directory: services/agentmemory
+          - name: 9router
+            directory: services/9router
+          - name: docs-rag-sme
+            directory: services/docs-rag-sme
+    defaults:
+      run:
+        working-directory: ${{ matrix.directory }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
+      - run: uv sync --frozen --extra dev
+      - run: uv run pytest -q
+
   gate:
     # Public-content scanner over the files that actually ship to PyPI
     # (roadmap Phase 0.1). Blocks the release if a hostname, private IP,
@@ -17,12 +101,13 @@ jobs:
     # Scoped to shipped paths on purpose: dev-only trees (review/, docs/,
     # plans/) never reach PyPI, so they don't gate a publish.
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0 # the scanner uses git ls-files
-      - uses: astral-sh/setup-uv@v5
-      - run: uv sync
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
+      - run: uv sync --frozen
       - name: Arm hostname coverage from secret
         # Materialize the untracked content denylist so the release gate can
         # actually catch bare fleet hostnames in shipped files. If the secret
@@ -42,13 +127,23 @@ jobs:
         run: uv run pxx --check --all-files
 
   build:
-    needs: gate
+    needs: [version-check, gate, quality, services]
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
       - run: uv build
-      - uses: actions/upload-artifact@v4
+      - name: Validate archives
+        run: |
+          for wheel in dist/*.whl; do python -m zipfile -t "$wheel"; done
+          for archive in dist/*.tar.gz; do tar -tzf "$archive" >/dev/null; done
+      - name: Metadata check
+        run: uvx twine check dist/*
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: dist
           path: dist/
@@ -56,12 +151,13 @@ jobs:
   publish:
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     environment: pypi
     permissions:
       id-token: write # OIDC for trusted publishing
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: dist
           path: dist/
-      - uses: pypa/gh-action-pypi-publish@release/v1
+      - uses: pypa/gh-action-pypi-publish@ba38be9e461d3875417946c167d0b5f3d385a247 # release/v1

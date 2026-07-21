@@ -96,10 +96,10 @@ Test that a user can log in and then post a message:
 
 ## Discovery
 
-List all available skills:
+List all available slash commands:
 
 ```bash
-pxx --list-skills
+pxx --list-commands
 ```
 
 Output:

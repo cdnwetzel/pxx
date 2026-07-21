@@ -209,6 +209,11 @@ accidental edits. The startup banner prints the active mode.
 When working on pxx itself: the same rule applies — type `pxx --edit` to make
 changes. No special-casing for the pxx repo.
 
+Architect mode is refused, not forwarded: while aider ≤0.86.2 carries
+PYSEC-2026-2335, pxx exits (code 2) on `--architect`, `--chat-mode architect`,
+or `--edit-format architect` — including unambiguous argparse abbreviations —
+rather than handing them to aider. Residual + expiry: SECURITY.md.
+
 **Headless runs:** when stdin is not a TTY and no consent flag was passed,
 pxx appends `--yes` for aider (with a stderr notice) — aider's interactive
 confirms crash on a non-TTY stdin, and headless callers (`--loop`, cron,

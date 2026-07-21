@@ -2,6 +2,13 @@
 
 Real-world workflows with pxx and its optional services.
 
+> **Memory examples are experimental.** `--with-memory` requires the
+> source-installed `agentmemory` service. In this release it stores a
+> post-session edit summary (git-diff based); it does **not** capture aider
+> activity live and does **not** inject prior observations into the aider
+> session automatically. The examples below show the behavior as implemented,
+> and say so where a workflow depends on manual retrieval.
+
 ## Example 1: Basic Ask-Mode (No Memory)
 
 Read-only exploration of a codebase without AI modification.
@@ -24,9 +31,9 @@ pxx "What does the function parse_config do?"
 
 **Use case:** Code review, analysis, learning codebase structure
 
-## Example 2: Edit Mode with Memory Injection
+## Example 2: Edit Mode with Observation Storage
 
-Make changes with context from previous sessions.
+Make changes and keep a searchable record of what happened.
 
 ```bash
 cd ~/my-python-project
@@ -35,30 +42,27 @@ cd ~/my-python-project
 pxx --edit --with-memory
 # aider> @add_error_handling_to_parsing
 
-# After edit, aider exits
-# pxx automatically captures: "Tool call: edited parser.py (12+ 8-)"
+# After aider exits cleanly, pxx stores a summary derived from the
+# session's git diff, e.g. "Aider edited parser.py (12+ 8-)", in the
+# agentmemory service.
 
 ---
 
-# Session 2 (later): Improve related code
+# Session 2 (later): retrieve prior work explicitly
+curl -X POST http://127.0.0.1:3111/search \
+  -H "Content-Type: application/json" \
+  -d '{"project": "default", "query": "error handling parser", "limit": 5}'
+
+# Then start the next session and paste or describe what you found:
 pxx --edit --with-memory
-
-# aider context now includes:
-# [observation] Tool call: edited parser.py (12+ 8-) [score: 0.92]
-# 
-# aider knows about the previous error handling changes
-# and can build on that work
-
-# aider> @improve_validation
-# aider makes improvements informed by prior context
 ```
 
-**Memory flow:**
-1. Session 1 edits files → tool_capture extracts observation
-2. Observation stored in agentmemory with embedding
-3. Session 2 queries agentmemory: "recent changes"
-4. Returns previous edits as context (via /inject endpoint)
-5. Aider sees context, makes informed decisions
+**Memory flow (as implemented):**
+1. Session 1 edits files → after exit, pxx stores a git-diff summary observation
+2. The observation is searchable via the service's `/search` and `/inject`
+   endpoints (BM25 + vector hybrid scoring)
+3. Automatic injection into session 2's prompt is **not wired** in this
+   release — retrieval is explicit (API, or `/remember` for manual notes)
 
 ## Example 3: Autonomous Self-Fix with Scope Control
 
@@ -86,11 +90,17 @@ git reset --hard <safety-tag>
 - `--scope X` — limit changes to specific path prefix
 - Auto-commit with `[autonomous]` tag for traceability
 - Safety tag allows instant rollback
-- Observation capture for future reference
+- Post-session edit summary stored (with `--with-memory`)
 
-## Example 4: Memory-Enhanced Refactoring
+## Example 4: Memory-Enhanced Refactoring (intended workflow)
 
 Large refactoring with full context history.
+
+> This is the workflow the memory system is being built toward. Steps 1–2
+> work today (summaries are stored and searchable); step 3 — prior context
+> appearing in the session automatically — is **not wired** in this release.
+> Until it is, retrieve observations via `/search` and bring them into the
+> session yourself.
 
 ```bash
 cd ~/large-project
@@ -101,31 +111,22 @@ cd ~/large-project
 pxx --edit --with-memory
 # aider> @refactor_database_layer_to_use_sqlalchemy
 # Edits: database.py, migrations/, models/
-# Observation: "Refactored database layer to use SQLAlchemy (45+ 32-)"
+# Stored summary: "Aider edited database.py (45+ 32-) ..."
 
 ---
 
 # Session 2: Update tests for module A
 pxx --edit --with-memory
-# Memory shows: previous refactoring changes
 # aider> @update_tests_for_sqlalchemy
-# Edits: tests/test_database.py
-# Observation: "Updated database tests for SQLAlchemy (20+ 15-)"
 
 ---
 
 # Session 3: Refactor dependent code in module B
 pxx --edit --with-memory
-# Memory shows: both previous refactorings
 # aider> @refactor_models_for_new_database
-# Edits: models/ (uses SQLAlchemy knowledge from session 1)
-# Observation: "Refactored models for SQLAlchemy (30+ 25-)"
-
-# Result: Each session builds on previous context
-# No need to explain SQLAlchemy refactoring twice
 ```
 
-**Benefits:**
+**Benefits (once injection is wired):**
 - Implicit context from previous sessions
 - Fewer explanations needed
 - Consistent approach across multiple changes
@@ -133,7 +134,7 @@ pxx --edit --with-memory
 
 ## Example 5: Managing Observation Archival
 
-Compliance and audit trail.
+Housekeeping for the observation store.
 
 ```bash
 # Check what will be cleaned up
@@ -166,41 +167,31 @@ ls -la ~/.pxx/memory-archive/2026-06/
 # Lists all June 2026 archive files
 
 # Long-term storage: backup archives
-tar -czf ~/compliance-backup-2026-06.tar.gz \
+tar -czf ~/memory-backup-2026-06.tar.gz \
   ~/.pxx/memory-archive/2026-06/
 ```
 
 **Use cases:**
-- Compliance: prove what was done and when
-- Audit trail: trace decisions and changes
+- Audit trail: trace what changed and when
 - Recovery: find deleted observations
 - Analysis: what changes happened when
 
-## Example 6: Vector Search Performance
+## Example 6: Hybrid Memory Search
 
-Demonstrating fast semantic search on large datasets.
+Using keyword and semantic signals with the optional memory service.
 
 ```bash
-# Scenario: 100k+ observations accumulated over time
-
-# Without vector index (brute-force):
-# - Query time: 500ms (scan all observations)
-# - Memory: checks every single observation
-
-# With HNSW vector index:
-# - Query time: 5ms (100x faster)
-# - Memory: approximate nearest neighbor graph
-# - Trade-off: ~10% recall loss (acceptable)
-
-# In practice:
-pxx --edit --with-memory
-# aider> "Find observations about database changes"
-# aider queries: /inject with "database changes"
-# agentmemory uses HNSW to find relevant observations
-# Returns top 5 most relevant in <10ms
-
-# Result: snappier context injection, faster sessions
+# Query the service directly (or via /inject for prompt-sized results)
+curl -X POST http://127.0.0.1:3111/search \
+  -H "Content-Type: application/json" \
+  -d '{"project": "default", "query": "database changes", "limit": 5}'
+# agentmemory combines BM25 and vector similarity to rank observations
 ```
+
+The HNSW implementation is experimental: the production observation path does
+not yet populate it, and the repository has no reproducible 100k/recall
+benchmark. Until both gaps close, use this example to validate relevance, not
+to infer a latency guarantee.
 
 ## Example 7: Multi-Project Isolation
 
@@ -270,39 +261,31 @@ rm ~/.config/pxx/trusted-paths
 pxx --edit  # ✓ Works anywhere (default)
 ```
 
-## Example 9: Tool Call Capture and Context
+## Example 9: Post-Session Edit Summaries
 
-Automatic learning from tool calls.
+What `--with-memory` captures today.
 
 ```bash
 # Session 1: Add retry logic
 pxx --edit --with-memory
 # aider> "Add exponential backoff to service startup"
-# 
-# aider executes:
-# - tool_call: read pxx/cli.py
-# - tool_call: edit pxx/cli.py (add retry logic)
-# - tool_call: read tests/test_cli.py
-# - tool_call: edit tests/test_cli.py (add test for retries)
 #
-# After session:
-# Observation: "Aider edited pxx/cli.py (15+ 5-)"
-# Observation: "Aider edited tests/test_cli.py (10+ 2-)"
+# aider edits pxx/cli.py and tests/test_cli.py, then exits.
+# pxx derives a summary from the session's git diff and stores it:
+#   "Aider edited pxx/cli.py (15+ 5-)"
+#   "Aider edited tests/test_cli.py (10+ 2-)"
 
 ---
 
-# Session 2: Later, improve the same service
-pxx --edit --with-memory
-# Memory context includes: previous retry logic work
-# aider> "Improve error handling in service startup"
-# 
-# aider knows about:
-# - Existing retry logic (from session 1)
-# - Test coverage patterns (from session 1)
-# - Can build on existing implementation
-
-# Result: aider makes informed decisions, not starting from scratch
+# Later: find that work again
+curl -X POST http://127.0.0.1:3111/search \
+  -H "Content-Type: application/json" \
+  -d '{"project": "default", "query": "retry logic", "limit": 5}'
 ```
+
+Note what this is not: live capture of individual aider tool calls (read /
+edit events as they happen) is not wired in this release, and stored
+summaries are not injected into later sessions automatically.
 
 ## Workflow Recommendations
 
@@ -312,16 +295,15 @@ pxx --edit --with-memory
 for i in {1..5}; do
   pxx --edit --with-memory "Improve $feature iteration $i"
 done
-# Each iteration benefits from previous ones
+# Each iteration is stored as a searchable summary
 ```
 
 **For large refactors:**
 ```bash
-# Break into phases with memory context
+# Break into phases; use /search between phases to recall earlier ones
 pxx --edit --with-memory "Phase 1: Extract interface"
 pxx --edit --with-memory "Phase 2: Update implementations"
 pxx --edit --with-memory "Phase 3: Clean up transitional code"
-# Each phase knows about previous phases
 ```
 
 **For learning new code:**
@@ -330,7 +312,6 @@ pxx --edit --with-memory "Phase 3: Clean up transitional code"
 pxx "Explain the authentication flow"
 pxx "How is caching implemented?"
 pxx --edit --with-memory "Improve error handling in cache"
-# edits informed by previous understanding
 ```
 
 ## Common Patterns
@@ -339,7 +320,6 @@ pxx --edit --with-memory "Improve error handling in cache"
 |---|---|---|---|
 | Review code | `pxx "...question..."` | ❌ | aider only |
 | Make edits | `pxx --edit` | ❌ | aider only |
-| **Learn & improve** | `pxx --edit --with-memory` | ✅ | aider + memory |
-| **Refactor series** | `pxx --self-fix "..." --scope X` | ✅ | aider + safety |
+| **Learn & improve** | `pxx --edit --with-memory` | ⚠️ summaries stored; no auto-injection | aider + memory service |
+| **Refactor series** | `pxx --self-fix "..." --scope X` | ❌ | aider + safety |
 | Improve pxx itself | `pxx --self-test` / `--self-lint` | ❌ | tests/lint |
-

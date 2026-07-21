@@ -1,11 +1,19 @@
 # agentmemory
 
-Persistent observation storage service for pxx aider sessions. Supports per-project scoping, BM25 search, and slash commands for memory management.
+> **Status: experimental, source-only.** Not published on PyPI; install from
+> this repository. The storage/search API below works and is tested; the
+> automatic pxx integration (live capture, session injection) is **not
+> wired** in this release — see "Integration with pxx".
+
+Observation storage service for pxx aider sessions. Supports per-project
+scoping, hybrid BM25+vector search, and a `/command` endpoint for memory
+management.
 
 ## Installation
 
 ```bash
-pip install agentmemory
+# From the repository root (not on PyPI):
+pip install -e services/agentmemory
 ```
 
 ## Usage
@@ -16,7 +24,7 @@ pip install agentmemory
 agentmemory
 ```
 
-Or with custom port:
+Or with a custom port:
 
 ```bash
 PXX_MEMORY_PORT=3111 agentmemory
@@ -26,6 +34,9 @@ PXX_MEMORY_PORT=3111 agentmemory
 
 - `PXX_MEMORY_HOST`: Bind host (default: 127.0.0.1)
 - `PXX_MEMORY_PORT`: Bind port (default: 3111)
+- `AGENTMEMORY_RETENTION_DAYS`: Observation TTL (default: 90)
+- `AGENTMEMORY_CLEANUP_INTERVAL`: Cleanup check interval in seconds (default: 3600)
+- `AGENTMEMORY_CLEANUP_ENABLED`: Auto-cleanup on/off (default: true)
 
 ### API Endpoints
 
@@ -103,6 +114,8 @@ POST /inject
 ```
 
 Get observations for context injection. Respects token/character limits.
+(This endpoint works; note that pxx does not call it automatically during
+sessions in this release.)
 
 Request:
 ```json
@@ -158,7 +171,7 @@ Response:
 }
 ```
 
-#### Execute Slash Command
+#### Execute Command
 ```
 POST /command
 ```
@@ -189,34 +202,6 @@ Response (varies by command):
 }
 ```
 
-## Slash Commands
-
-### /recall <query>
-
-Search saved observations.
-
-```
-/recall "Python tips"
-```
-
-Returns up to 5 most relevant observations ranked by BM25 score.
-
-### /remember "title" "content"
-
-Manually save an observation.
-
-```
-/remember "Design pattern" "Use factory pattern for creating instances"
-```
-
-### /forget <id>
-
-Delete an observation.
-
-```
-/forget obs-abc123
-```
-
 ## Per-Project Scoping
 
 All observations are scoped to a project path. This prevents cross-project leakage:
@@ -232,16 +217,29 @@ Observations are stored in SQLite at `~/.pxx/memory.db`. Storage is persistent a
 ## Integration with pxx
 
 When `pxx --with-memory` is enabled:
-1. pxx checks for agentmemory health at startup
-2. aider subprocess activities are captured as observations
-3. Observations are injected into the system prompt
-4. `/recall`, `/remember`, `/forget` commands are available
+1. pxx starts and health-checks the agentmemory service
+2. After the aider session exits cleanly, pxx stores a post-session edit
+   summary derived from the session's git diff
+
+Not wired in this release:
+- **Live capture** — the runtime observer is disabled (TTY/output-format
+  constraints), so individual aider tool calls are not recorded as they
+  happen
+- **Automatic injection** — pxx does not query `/inject` or place prior
+  observations into the aider prompt; retrieval is explicit (this API, or
+  `remember`/`recall` via `/command`)
 
 ## Search & Ranking
 
-Observations are ranked using BM25 (Okapi Best Matching) relevance scoring:
+Observations are ranked using hybrid BM25 + vector similarity (nominally
+40% keyword / 60% semantic):
+
 - Term frequency within document
 - Inverse document frequency across project
 - Document length normalization
+- Embedding similarity
 
-Higher scores indicate higher relevance to the query.
+Higher scores indicate higher relevance to the query. The HNSW vector index
+is experimental: the production path does not populate it yet, and no public
+latency/recall benchmark exists — see the repository README for the current
+claim policy.

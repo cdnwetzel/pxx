@@ -2,6 +2,10 @@
 
 Complete API documentation for pxx and its services.
 
+> The services below (`agentmemory`, `9router`) are experimental and
+> source-only — they are not part of the `pxx-orchestrator` PyPI package and
+> require a repository checkout to run.
+
 ## agentmemory Service
 
 RESTful API for observation storage, search, and management. Default: `http://127.0.0.1:3111`
@@ -86,7 +90,7 @@ curl -X POST http://127.0.0.1:3111/inject \
 #   "query": "recent changes",
 #   "observations": [
 #     "[obs-xxx] Aider edited pxx/cli.py (5+ 3-) (score: 0.95)",
-#     "[obs-yyy] Tool call capture implemented (score: 0.88)"
+#     "[obs-yyy] Post-session summary capture implemented (score: 0.88)"
 #   ],
 #   "count": 2,
 #   "size_chars": 120
@@ -266,19 +270,20 @@ curl http://127.0.0.1:3111/metrics
 
 ## pxx CLI
 
-Command-line interface for orchestrating aider sessions with memory.
+Command-line interface for orchestrating aider sessions.
 
 **Basic usage:**
 ```bash
-pxx                    # Ask mode (read-only), memory disabled
-pxx --edit             # Edit mode, memory disabled
-pxx --edit --with-memory  # Edit mode, memory injection enabled
+pxx                    # Ask mode (read-only)
+pxx --edit             # Edit mode
+pxx --edit --with-memory  # Edit mode with the memory service (experimental)
 ```
 
 **Options:**
 - `--edit` — Allow file modifications (safety gate)
-- `--with-memory` — Enable observation injection and capture
-- `--with-router` — Enable request routing through 9router
+- `--with-memory` — Start the agentmemory service and store post-session edit
+  summaries (experimental; no automatic session injection in this release)
+- `--with-router` — Route requests through the 9router proxy (experimental)
 - `--big` — Bypass diff cap for large changes
 - `--self-test` — Run pxx's own test suite
 - `--self-lint` — Lint pxx codebase
@@ -286,19 +291,28 @@ pxx --edit --with-memory  # Edit mode, memory injection enabled
 - `--self-fix "<task>"` — Autonomous edit with scope control
 - `--list-commands` — Show available slash commands
 
-## 9router (Optional)
+## 9router (optional, experimental)
 
-OpenAI-compatible proxy with token tracking and provider fallback. Default: `http://127.0.0.1:20128/v1`
+OpenAI-compatible **single-upstream** proxy. Binds a fixed loopback address
+(`127.0.0.1:20128`) and forwards to the Ollama endpoint named by
+`PXX_OLLAMA_BASE`. Used by pxx when `--with-router` is enabled; compatible
+with any OpenAI-compatible client.
 
-Used internally by pxx when `--with-router` is enabled. Compatible with any OpenAI-compatible client.
+Implemented endpoints:
 
 ```bash
 curl http://127.0.0.1:20128/health
-# {"status": "healthy"}
+# {"status": "healthy", "endpoint": "http://localhost:11434"}
 
-curl http://127.0.0.1:20128/v1/usage
-# {"total_tokens": 50000, "total_cost": 1.25}
+curl http://127.0.0.1:20128/v1/models
+# Proxies the upstream's model list, OpenAI format
 
-curl http://127.0.0.1:20128/v1/status
-# {"active_provider": "ollama", "fallback_chain": [...]}
+# POST /v1/chat/completions — proxies chat requests to the upstream
 ```
+
+Not wired in this release (modules exist, but the running service does not
+use them): `EndpointRouter` fallback chains, `RouterMetrics` token/cost
+tracking, and the `/v1/status` and `/v1/usage` endpoints that
+`pxx/router.py` references. A memory middleware (`PXX_MEMORY_ENABLED=0` to
+disable) is experimental and only partially wired — do not rely on it to
+store or inject observations.

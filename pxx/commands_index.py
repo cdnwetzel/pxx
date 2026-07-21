@@ -1,8 +1,9 @@
 """Discover and describe the slash-command prompt fragments shipped with pxx.
 
-Filesystem-driven: any `pxx/commands/*.md` file is picked up automatically by
-:func:`list_commands`. The first markdown H1 heading in each file is used to
-derive a one-line description. The canonical heading format is::
+Filesystem-driven: any `pxx/commands/*.md` file except the authoring template
+is picked up automatically by :func:`list_commands`. The first markdown H1
+heading in each file is used to derive a one-line description. The canonical
+heading format is::
 
     # /<name> — <description>
 
@@ -21,6 +22,7 @@ COMMANDS_DIR = Path(__file__).parent / "commands"
 """Default location of slash-command files — `pxx/commands/`."""
 
 NO_DESCRIPTION = "(no description)"
+EXCLUDED_FILENAMES = frozenset({"SKILL_TEMPLATE.md"})
 
 # Match the first H1 heading anywhere in the document.
 # `^# ` requires a single `#` followed by a space at the start of a line,
@@ -77,6 +79,8 @@ def list_commands(commands_dir: Path = COMMANDS_DIR) -> list[CommandInfo]:
 
     out: list[CommandInfo] = []
     for path in sorted(commands_dir.glob("*.md")):
+        if path.name in EXCLUDED_FILENAMES:
+            continue
         try:
             text = path.read_text(encoding="utf-8")
         except OSError:

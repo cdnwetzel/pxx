@@ -8,6 +8,7 @@ import pytest
 
 from pxx.commands_index import (
     COMMANDS_DIR,
+    EXCLUDED_FILENAMES,
     NO_DESCRIPTION,
     CommandInfo,
     _extract_description,
@@ -62,7 +63,11 @@ class TestListCommands:
         # Smoke test against the real `pxx/commands/` directory. Derive the
         # expected set from the filesystem so this stays correct as commands
         # are added or removed (no hardcoded list to drift).
-        expected = {p.stem for p in COMMANDS_DIR.glob("*.md")}
+        expected = {
+            p.stem
+            for p in COMMANDS_DIR.glob("*.md")
+            if p.name not in EXCLUDED_FILENAMES
+        }
         names = {c.name for c in list_commands()}
         assert names == expected
         assert names, "pxx/commands/ should contain at least one command"
@@ -108,6 +113,16 @@ class TestListCommands:
         assert result[0].name == "foo"
         assert result[0].description == "bar baz"
         assert result[0].path == (d / "foo.md").resolve()
+
+    def test_authoring_template_is_not_a_command(self, tmp_path):
+        d = tmp_path / "cmds"
+        d.mkdir()
+        (d / "SKILL_TEMPLATE.md").write_text("# template\n")
+        (d / "real.md").write_text("# /real — command\n")
+
+        result = list_commands(d)
+
+        assert [command.name for command in result] == ["real"]
 
     def test_custom_directory_with_multiple_files_sorted(self, tmp_path):
         d = tmp_path / "cmds"

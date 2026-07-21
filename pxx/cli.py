@@ -17,7 +17,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from pxx import agent_manifest
+from pxx import __version__, agent_manifest
 from pxx import (
     _git,
     audit,
@@ -57,6 +57,10 @@ REPO_ROOT = PKG_DIR.parent
 SYSTEM_PROMPT = PKG_DIR / "prompts" / "system.md"
 SELF_IMPROVE_PROMPT = PKG_DIR / "prompts" / "self-improve.md"
 AIDER_CONF = REPO_ROOT / "config" / "aider.conf.yml"
+if not AIDER_CONF.exists():
+    # A PyPI wheel has no repo-root config/; fall back to the packaged default
+    # so a `pip install` user still gets diff edits, not whole-file rewrites.
+    AIDER_CONF = PKG_DIR / "defaults" / "aider.conf.yml"
 MODEL_SETTINGS = REPO_ROOT / "config" / "model-settings.yml"
 MODEL_METADATA = REPO_ROOT / "config" / "model-metadata.json"
 
@@ -218,6 +222,52 @@ def _headless_consent_args(isatty: bool, user_args: list[str]) -> list[str]:
     if any(a in consent or a.split("=", 1)[0] in consent for a in user_args):
         return []
     return ["--yes"]
+
+
+# aider's argparse leaves allow_abbrev on, so any *unambiguous* prefix of a
+# long flag resolves to it. Floors verified against the pinned 0.86.2 parser
+# (122 long flags): --ar → --architect, --chat-m → --chat-mode,
+# --edit- → --edit-format. Shorter prefixes are ambiguous — aider rejects
+# them itself — so pxx's gate starts at the floors.
+_FLAG_FLOORS = {
+    "--architect": "--ar",
+    "--chat-mode": "--chat-m",
+    "--edit-format": "--edit-",
+}
+
+
+def _resolves_to(flag: str, target: str) -> bool:
+    return len(flag) >= len(_FLAG_FLOORS[target]) and target.startswith(flag)
+
+
+def _architect_mode_refusal(args: list[str]) -> str | None:
+    """Refusal message if args engage aider's architect mode, else None.
+
+    PYSEC-2026-2335 (CVE-2026-10175): aider <=0.86.2's architect mode
+    auto-applies its editor stage, so prompt-influenced content can become
+    committed code. pxx never engages architect itself (ask/diff only), so
+    the only pxx-created path is flag forwarding — refuse it until a fixed
+    aider release ships. Residual + revisit trigger: SECURITY.md.
+    """
+    for i, a in enumerate(args):
+        flag, sep, value = a.partition("=")
+        engaged = _resolves_to(flag, "--architect")
+        if not engaged:
+            for mode_flag in ("--chat-mode", "--edit-format"):
+                if _resolves_to(flag, mode_flag):
+                    v = value if sep else (args[i + 1] if i + 1 < len(args) else "")
+                    engaged = v.lower() == "architect"
+                    break
+        if engaged:
+            return (
+                "pxx: refusing to run aider's architect mode "
+                "(--architect / --chat-mode architect / --edit-format architect).\n"
+                "  aider 0.86.2 is affected by PYSEC-2026-2335 (CVE-2026-10175):\n"
+                "  architect mode auto-applies its editor stage, so injected\n"
+                "  content can become committed code. pxx runs ask/diff only.\n"
+                "  This refusal lifts when a fixed aider ships — see SECURITY.md."
+            )
+    return None
 
 
 def _build_aider_args(
@@ -439,7 +489,54 @@ def _install_precommit_hook() -> None:
     sys.exit(result.returncode)
 
 
+def _print_help() -> None:
+    """Print pxx-owned options without requiring an inference endpoint."""
+    print(
+        """usage: pxx [pxx-options] [aider-options] [files ...]
+
+Offline-capable aider orchestrator. Ask mode is read-only by default;
+pass --edit to authorize file changes. Unrecognized options are forwarded
+to aider.
+
+Core options:
+  --edit                 allow file changes
+  --with-memory          start optional observation-memory service
+  --with-router          start optional request router
+  --with-docs            enable optional documentation service
+  --tier {t1,t2,t3}      select an orchestration tier
+  --doctor               report local service and repository health
+  --check-sync           report configured mirror synchronization
+  --list-commands        list bundled slash-command prompts
+  --upgrade, --update    upgrade a packaged installation
+  --help, -h             show this help and exit
+  --version              show the pxx version and exit
+
+Development options:
+  --self-test            run the pxx test suite
+  --self-lint            run pxx lint and format checks
+  --self-improve         open a suggest-only self-review session
+  --self-fix TASK        run one bounded edit task (requires --scope)
+  --review               run the configured review gate
+  --loop TASK            run the bounded self-improvement loop
+
+Examples:
+  pxx
+  pxx --message "Explain main.py" main.py
+  pxx --edit --message "Add error handling" main.py
+
+Project documentation: https://github.com/cdnwetzel/pxx"""
+    )
+
+
 def main() -> None:
+    if "--help" in sys.argv[1:] or "-h" in sys.argv[1:]:
+        _print_help()
+        sys.exit(0)
+
+    if "--version" in sys.argv[1:]:
+        print(f"pxx {__version__}")
+        sys.exit(0)
+
     if "--list-commands" in sys.argv:
         _print_command_listing()
         sys.exit(0)
@@ -472,6 +569,10 @@ def main() -> None:
         root = _git_repo_root()
         if root is None:
             print("pxx: --review requires a git repo.", file=sys.stderr)
+            sys.exit(1)
+        preflight_err = review_gate.preflight_review_backend()
+        if preflight_err:
+            print(f"pxx: --review backend not usable: {preflight_err}", file=sys.stderr)
             sys.exit(1)
         # Run review pass and compute verdict
         exit_code = review_gate.run_review_pass(root)
@@ -841,7 +942,8 @@ def main() -> None:
         if root is None or root.resolve() != REPO_ROOT.resolve():
             print(
                 "pxx: --loop is experimental and currently runs only inside "
-                "the pxx repo (self-fix rounds operate there).",
+                "the pxx repo (self-fix rounds operate there). For any other "
+                "repo, use `pxx --edit --scope <dir>` instead.",
                 file=sys.stderr,
             )
             sys.exit(1)
@@ -974,6 +1076,9 @@ def main() -> None:
             ),
             file=sys.stderr,
         )
+        sys.exit(2)
+    if refusal := _architect_mode_refusal(sys.argv[1:]):
+        print(refusal, file=sys.stderr)
         sys.exit(2)
 
     self_fix_task: str | None = None

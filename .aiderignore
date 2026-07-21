@@ -1,0 +1,50 @@
+# Files aider MUST NOT modify when editing pxx itself. Mirrors the
+# "Hard guardrails" list in CLAUDE.md — wrong values OOM the Studio, break
+# installs, or alter agent behavior subtly. Edit these by hand only.
+
+# Ollama context windows / call parameters — wrong values can OOM the Studio
+config/model-settings.yml
+
+# Aider's own defaults — change behavior in subtle ways
+config/aider.conf.yml
+.aider.conf.yml
+
+# Package metadata + dependencies — break installs
+pyproject.toml
+
+# Meta — the guardrails themselves
+.aiderignore
+CONVENTIONS.md
+
+# Optimizer-protected: the candidate generator must never edit its own gates,
+# evaluator, or hidden checks (docs/TRUST_BOUNDARY.md). The loop's scope gate
+# is the primary boundary; this is the editor-level backstop the trust
+# boundary claims. Precise per-file (not blanket tests/) so the loop can still
+# do legitimate test work elsewhere.
+pxx/safety.py
+pxx/scope.py
+pxx/governance.py
+pxx/review_gate.py
+pxx/loop.py
+pxx/evaluation.py
+pxx/calibration.py
+pxx/promotion.py
+pxx/candidates.py
+pxx/candidate_eval.py
+pxx/content_candidates.py
+pxx/improvement.py
+pxx/protected_paths.py
+evals/
+.github/workflows/
+tests/test_safety.py
+tests/test_scope.py
+tests/test_governance.py
+tests/test_review_gate.py
+tests/test_loop.py
+tests/test_evaluation.py
+tests/test_calibration.py
+tests/test_promotion.py
+tests/test_candidates.py
+tests/test_outcomes.py
+tests/test_improvement.py
+tests/test_workflow_contract.py

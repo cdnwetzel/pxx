@@ -1,0 +1,63 @@
+# aider --model-settings-file (passed by pxx/cli.py).
+#
+# FORMAT (verified against aider 0.86.2 aider/models.py:register_models):
+#   a YAML *list*; each item becomes ModelSettings(**item). The only valid
+#   keys are ModelSettings fields (name, edit_format, extra_params, ...).
+#   A name-keyed dict is NOT accepted -- that mismatch is why a prior
+#   model-settings.yml was deleted in d2c5c69.
+#
+# IMPORTANT: ModelSettings has NO context/token-limit fields. aider learns a
+#   model's context window from litellm metadata, not from this file. To cap
+#   *Ollama* context (the OOM-sensitive knob on the Studio) use extra_params
+#   num_ctx, which aider forwards to Ollama. To inform aider of the gpu-node-1
+#   vLLM's hard 16k window, use a model-metadata file (see docs / pxx).
+#
+# num_ctx values are conservative for the Studio's 36GB unified memory; raise
+# only after watching `scripts`/Activity Monitor for memory pressure.
+
+# --- vllm-host-1 vLLM (:8001, direct LAN) — priority endpoint since 2026-07-15 ---
+- name: openai/Qwen3-Coder
+  edit_format: diff
+  use_repo_map: true
+  streaming: true
+  use_temperature: true
+  extra_params:
+    # vLLM max-model-len is 32768 (in+out). Cap output so a long session
+    # leaves ~28k for context before hitting the server's hard limit.
+    max_tokens: 4096
+
+# --- gpu-node-1 vLLM (2x A4500), reached via the SSH tunnel (:8003) ---
+- name: openai/qwen2.5-coder-14b
+  edit_format: diff
+  use_repo_map: true
+  streaming: true
+  use_temperature: true
+  extra_params:
+    # vLLM max-model-len is 16384 (in+out). Cap output so a long session
+    # leaves ~12k for context before hitting the server's hard limit.
+    max_tokens: 4096
+
+# --- Studio Ollama (local) ---
+- name: ollama_chat/devstral:24b
+  edit_format: diff
+  use_repo_map: true
+  extra_params:
+    num_ctx: 8192
+
+- name: ollama_chat/qwen2.5:32b-instruct-q4_K_M
+  edit_format: diff
+  use_repo_map: true
+  extra_params:
+    num_ctx: 8192
+
+- name: ollama_chat/qwen2.5-coder:7b
+  edit_format: diff
+  use_repo_map: true
+  extra_params:
+    num_ctx: 8192
+
+# NEO_DEFAULT fallback; small + weak, so whole-file edits and a small window.
+- name: ollama_chat/qwen3:4b
+  edit_format: whole
+  extra_params:
+    num_ctx: 4096

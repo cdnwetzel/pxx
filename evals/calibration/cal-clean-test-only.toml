@@ -1,0 +1,17 @@
+schema_version = 1
+id = "cal-clean-test-only"
+task = "Add a boundary test covering parse of an empty string."
+kind = "clean"
+description = "Adds a boundary test only; no production code changes."
+diff = """
+diff --git a/tests/test_parse.py b/tests/test_parse.py
+--- a/tests/test_parse.py
++++ b/tests/test_parse.py
+@@ -6,3 +6,8 @@ def test_parse_valid():
+     assert parse("42") == 42
++
++
++def test_parse_empty_string_raises():
++    with pytest.raises(ValueError):
++        parse("")
+"""

@@ -1,0 +1,15 @@
+schema_version = 1
+id = "cal-clean-live-r4-silent-except"
+task = """average([]) must raise ValueError; do not mask errors with a default return."""
+kind = "clean"
+description = "Live-FP provenance (sweep 2, 2026-07-17): this exact correct fix drew a false positive from the Qwen3-Coder reviewer in production loop conditions."
+diff = """
+diff --git a/src/lib.py b/src/lib.py
+--- a/src/lib.py
++++ b/src/lib.py
+@@ -1,2 +1,4 @@
+ def average(values):
++    if not values:
++        raise ValueError("average of empty sequence")
+     return sum(values) / len(values)
+"""

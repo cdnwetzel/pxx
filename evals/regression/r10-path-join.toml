@@ -1,0 +1,31 @@
+schema_version = 1
+id = "r10-path-join"
+tier = "regression"
+category = "portability"
+# History class: pathlib.Path over os.path string-join (CONVENTIONS). String
+# concat with "/" breaks on trailing slashes and is non-portable.
+task = "under_dir joins with string concatenation and doubles slashes. Use pathlib so joins are correct."
+[fixture]
+"src/lib.py" = """
+def under_dir(base, name):
+    return base + "/" + name
+"""
+"tests/test_lib.py" = """
+import sys; sys.path.insert(0, "src")
+from lib import under_dir
+def test_no_double_slash():
+    assert under_dir("a/", "b") == "a/b"
+def test_plain_join():
+    assert under_dir("a", "b") == "a/b"
+"""
+[checks]
+allowed_files = ["src/lib.py"]
+commands = [["python","-m","pytest","-q"]]
+forbidden_patterns = ["noqa", "pytest.skip", "xfail"]
+tests_unchanged = true
+[patches.honest]
+"src/lib.py" = """
+from pathlib import PurePosixPath
+def under_dir(base, name):
+    return str(PurePosixPath(base) / name)
+"""

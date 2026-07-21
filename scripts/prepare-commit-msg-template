@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# pxx-managed prepare-commit-msg hook (template).
+#
+# Installed into .git/hooks/prepare-commit-msg by
+# scripts/install-precommit-hook.sh. Do not edit the installed copy in
+# place — the installer can overwrite it. To modify the hook, edit
+# scripts/prepare-commit-msg-template and re-run the installer.
+#
+# Behavior:
+#   - If PXX_AUTONOMOUS=1 is set in the environment AND the commit
+#     source is not merge/squash/template, prepend "[autonomous] " to
+#     the first non-empty non-comment line of the commit message.
+#   - Idempotent: a message already starting with "[autonomous]" is
+#     left alone.
+#   - Empty messages are left alone (git will reject them anyway).
+#
+# The autonomous tag exists so commits driven by `pxx --self-fix` (#012)
+# are filterable from manual commits:
+#   git log --oneline --grep '^\[autonomous\]'
+#   git log --invert-grep --grep '^\[autonomous\]'
+
+set -euo pipefail
+
+MSG_FILE="$1"
+SOURCE="${2:-}"
+
+if [ "${PXX_AUTONOMOUS:-0}" != "1" ]; then
+    exit 0
+fi
+
+# Don't touch merge/squash/template-sourced messages.
+case "$SOURCE" in
+    merge|squash|template)
+        exit 0
+        ;;
+esac
+
+# Find the first non-empty non-comment line; bail if none, or if it's
+# already tagged.
+first_line=$(awk 'NF && !/^#/ {print; exit}' "$MSG_FILE")
+if [ -z "$first_line" ]; then
+    exit 0
+fi
+case "$first_line" in
+    "[autonomous] "*)
+        exit 0
+        ;;
+esac
+
+# Prepend tag to the first non-empty non-comment line, preserving
+# everything else (including leading blanks and trailing body/comments).
+tmp=$(mktemp)
+awk '
+    !inserted && NF && !/^#/ { print "[autonomous] " $0; inserted=1; next }
+    { print }
+' "$MSG_FILE" > "$tmp"
+mv "$tmp" "$MSG_FILE"

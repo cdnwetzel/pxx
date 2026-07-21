@@ -1,0 +1,17 @@
+schema_version = 1
+id = "cal-clean-live-m5-serialization"
+task = """to_json must produce valid JSON (json.dumps), not Python repr text."""
+kind = "clean"
+description = "Live-FP provenance (sweep 2, 2026-07-17): this exact correct fix drew a false positive from the Qwen3-Coder reviewer in production loop conditions."
+diff = """
+diff --git a/src/lib.py b/src/lib.py
+--- a/src/lib.py
++++ b/src/lib.py
+@@ -1,2 +1,5 @@
++import json
++
++
+ def to_json(record):
+-    return str(record)
++    return json.dumps(record)
+"""

@@ -1,0 +1,6 @@
+chat-mode: ask
+edit-format: diff
+auto-commits: true
+dirty-commits: true
+auto-test: false
+auto-lint: false

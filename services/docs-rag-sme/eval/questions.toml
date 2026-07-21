@@ -1,0 +1,45 @@
+# A/B eval questions (plan §6). Real stdlib-API questions whose correct answers
+# hinge on tokens base models often miss or get stale on. Each `expect` token is
+# an objective "did the answer contain the right thing" signal. The matching
+# doc page is in the store (see sources.toml), so docs-on should lift the score.
+python_version = "3.12"
+
+[[question]]
+id = "taskgroup_create_task"
+q = "In Python 3.12 asyncio, give the exact signature of TaskGroup.create_task including every keyword parameter."
+expect = ["context", "name"]
+
+[[question]]
+id = "itertools_batched"
+q = "In Python 3.12, which itertools function batches an iterable into tuples of length n, and what is it called?"
+expect = ["batched"]
+
+[[question]]
+id = "dataclasses_field"
+q = "List the keyword parameters accepted by dataclasses.field() in Python 3.12."
+expect = ["default_factory", "kw_only"]
+
+[[question]]
+id = "functools_cache"
+q = "In Python 3.12 functools, what is the simplest unbounded memoizing decorator and how does it relate to lru_cache?"
+expect = ["cache", "lru_cache"]
+
+[[question]]
+id = "contextlib_async_cm"
+q = "Which contextlib decorator turns a generator into an asynchronous context manager?"
+expect = ["asynccontextmanager"]
+
+[[question]]
+id = "pathlib_read"
+q = "What single pathlib.Path method reads a file's entire contents as a string?"
+expect = ["read_text"]
+
+[[question]]
+id = "sqlite3_row"
+q = "In Python's sqlite3, what attribute do you set on a Connection to get rows you can index by column name, and what helper class is used?"
+expect = ["row_factory", "Row"]
+
+[[question]]
+id = "subprocess_capture"
+q = "With subprocess.run in Python 3.12, what single keyword argument captures both stdout and stderr?"
+expect = ["capture_output"]

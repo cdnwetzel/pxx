@@ -1,0 +1,25 @@
+schema_version = 1
+id = "cal-defect-swapped-args"
+task = "Route uploads through the new save helper."
+kind = "defect"
+expected_severity = "P1"
+description = "The migration to the helper is requested; the swapped (path, data) arguments are not."
+diff = """
+diff --git a/src/uploads.py b/src/uploads.py
+--- a/src/uploads.py
++++ b/src/uploads.py
+@@ -3,5 +3,4 @@ def handle_upload(data, path):
+-    with open(path, "wb") as fh:
+-        fh.write(data)
+-    return len(data)
++    save_blob(data, path)
++    return len(data)
+
+diff --git a/src/blob.py b/src/blob.py
+--- a/src/blob.py
++++ b/src/blob.py
+@@ -1,3 +1,3 @@
+ def save_blob(path, data):
+     with open(path, "wb") as fh:
+         fh.write(data)
+"""

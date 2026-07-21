@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Daily docs-rag-sme delta-refresh on the Mac Studio.
+  Install:
+    cp deploy/launchd/local.docs-sme-refresh.plist ~/Library/LaunchAgents/
+    # edit the two ABSOLUTE paths below to match this checkout, then:
+    launchctl load ~/Library/LaunchAgents/local.docs-sme-refresh.plist
+  Runs daily at 03:30; if the Studio was asleep, launchd runs it on next wake.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>local.docs-sme-refresh</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <!-- ABSOLUTE path to scripts/refresh.sh in this checkout -->
+        <string>/Users/you/ai/pxx/services/docs-rag-sme/scripts/refresh.sh</string>
+    </array>
+
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>3</integer>
+        <key>Minute</key>
+        <integer>30</integer>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <false/>
+
+    <!-- launchd captures the wrapper's own stderr here; the JSONL run log is
+         written by refresh.sh to .setup/refresh-<date>.jsonl -->
+    <key>StandardErrorPath</key>
+    <string>/Users/you/ai/pxx/services/docs-rag-sme/.setup/launchd.err</string>
+    <key>StandardOutPath</key>
+    <string>/Users/you/ai/pxx/services/docs-rag-sme/.setup/launchd.out</string>
+</dict>
+</plist>

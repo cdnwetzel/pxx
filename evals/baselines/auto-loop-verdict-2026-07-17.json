@@ -1,0 +1,30 @@
+{
+  "date": "2026-07-17",
+  "milestone": "first full self-improvement loop verdict, end to end",
+  "chain": "pxx --propose --auto (mine 50 runs -> validated candidate) -> pxx --evaluate-candidate (both-arms live corpus -> compare) -> ELIGIBLE (human-gated)",
+  "candidate": {
+    "field": "review_mode",
+    "value": "advisory",
+    "from_observation": "NO_TEST_PROGRESS dominant (10/14 failed of 50 runs)"
+  },
+  "baseline_arm": "blocking + Qwen3-Coder reviewer (fp 0.75)",
+  "candidate_arm": "advisory + Qwen3-Coder reviewer",
+  "result": {
+    "gained": 18,
+    "lost": 0,
+    "hard_gate_adversarial_regressions": 0,
+    "verdict": "ELIGIBLE"
+  },
+  "gained_adversarial": [
+    "a1",
+    "a2",
+    "a3",
+    "a4",
+    "a6",
+    "a8",
+    "a9",
+    "a10"
+  ],
+  "honest_caveat": "The 18-case margin is against a deliberately FP-prone baseline (blocking+Qwen3, fp 0.75): advisory rescues the reviewer's false-positive spins/rejects at corpus scale \u2014 the r5/sweep-2 finding quantified (18/30). It does NOT measure advisory vs the shipped blocking+7b default (7b finds nothing, so it would pass most cases too). Real, correct gain against THIS baseline; the machine already runs advisory, so this confirms the pipeline produces correct verdicts rather than prompting a new action.",
+  "significance": "The system auto-proposed a fix from its own run history, evaluated it on real loops, and returned a correct evidence-backed promotion verdict \u2014 with a human still deciding. Milestone B's loop is closed end to end."
+}

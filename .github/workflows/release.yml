@@ -1,0 +1,67 @@
+name: Release to PyPI
+
+# Publishes via PyPI "trusted publishing" (OIDC) — no API token stored anywhere.
+# One-time setup on pypi.org → project pxx-orchestrator → Publishing (use 'Add a pending publisher' before the first upload) → Add a publisher:
+#   owner: cdnwetzel   repository: pxx   workflow: release.yml   environment: pypi
+# Then a `vX.Y.Z` tag push releases that version.
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  gate:
+    # Public-content scanner over the files that actually ship to PyPI
+    # (roadmap Phase 0.1). Blocks the release if a hostname, private IP,
+    # home path, or unprotected-service statement reaches shipped code.
+    # Scoped to shipped paths on purpose: dev-only trees (review/, docs/,
+    # plans/) never reach PyPI, so they don't gate a publish.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the scanner uses git ls-files
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync
+      - name: Arm hostname coverage from secret
+        # Materialize the untracked content denylist so the release gate can
+        # actually catch bare fleet hostnames in shipped files. If the secret
+        # is unset the file is empty -> 0 patterns -> the gate soft-fails LOUDLY
+        # (governance P0: prove-it-was-armed), so a release can never publish
+        # with hostname coverage silently off. Set the PXX_CONTENT_DENYLIST
+        # repo secret (one identifier per line) to arm it.
+        run: |
+          mkdir -p "$HOME/.config/pxx"
+          printf '%s\n' "${{ secrets.PXX_CONTENT_DENYLIST }}" > "$HOME/.config/pxx/content-denylist"
+      - run: uv run pxx --check --shipped
+      - name: Full-tree de-identification gate
+        # Anti-recurrence (1.3.3): the WHOLE public tree — docs/plans/deploy/
+        # config, not just the wheel — must carry no fleet identifier. Armed
+        # from the same secret; --all-files scans every tracked file. This is
+        # the gap that let a hostname survive in 1.3.0/1.3.1.
+        run: uv run pxx --check --all-files
+
+  build:
+    needs: gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write # OIDC for trusted publishing
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1

@@ -1,0 +1,17 @@
+schema_version = 1
+id = "cal-defect-removed-validation"
+task = "Simplify parse_port."
+kind = "defect"
+expected_severity = "P1"
+description = "Deletes the range check — out-of-range ports now pass through silently."
+diff = """
+diff --git a/src/net.py b/src/net.py
+--- a/src/net.py
++++ b/src/net.py
+@@ -1,7 +1,4 @@
+ def parse_port(text):
+     value = int(text)
+-    if not 1 <= value <= 65535:
+-        raise ValueError(f"port out of range: {value}")
+     return value
+"""

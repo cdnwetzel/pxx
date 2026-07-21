@@ -1,0 +1,40 @@
+[project]
+name = "docs-rag-sme"
+version = "0.0.1"
+description = "Version-aware docs-RAG SME proxy for local Aider/pxx. T0 = transparent OpenAI-API forwarder."
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115",
+    "httpx>=0.27",
+    "uvicorn[standard]>=0.30",
+    "lxml>=5.0",
+    "psycopg[binary]>=3.2",
+    "pgvector>=0.3",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.6",
+]
+# Optional cross-encoder reranker (T2b). Heavy (torch); install only on the
+# box that will run it: `uv sync --extra rerank`.
+rerank = [
+    "sentence-transformers>=3.0",
+]
+
+[project.scripts]
+docs-sme = "docs_rag_sme.app:run"
+docs-sme-ingest = "docs_rag_sme.ingest.cli:main"
+docs-sme-refresh = "docs_rag_sme.ingest.refresh:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.ruff]
+target-version = "py311"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"

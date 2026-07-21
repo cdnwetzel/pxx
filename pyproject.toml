@@ -1,0 +1,74 @@
+[build-system]
+requires = ["setuptools>=77.0.3", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+# Distribution name. "pxx" on PyPI is owned by an unrelated 2023 project, so we
+# publish as pxx-orchestrator; the console script and import package stay `pxx`.
+name = "pxx-orchestrator"
+version = "1.3.3.post1"
+description = "Offline-capable aider orchestrator with persistent observation memory"
+readme = "README.md"
+requires-python = ">=3.11,<3.13"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{name = "Chris Wetzel", email = "chris@cwetzel.com"}]
+keywords = ["aider", "ai", "coding", "offline", "memory", "llm"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Application Frameworks",
+    "Topic :: System :: Shells",
+]
+dependencies = [
+    # Exact pin by design — aider releases weekly and can change behavior pxx
+    # depends on (chat modes, --read, --config, edit format, exit codes). Bump
+    # only via the upgrade discipline in CLAUDE.md. (Already the resolved/
+    # installed/latest version; this only re-tightens the constraint string.)
+    "aider-chat==0.86.2",
+    "requests>=2.31.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/cdnwetzel/pxx"
+Documentation = "https://github.com/cdnwetzel/pxx#documentation"
+Repository = "https://github.com/cdnwetzel/pxx"
+Issues = "https://github.com/cdnwetzel/pxx/issues"
+
+[project.scripts]
+pxx = "pxx.cli:main"
+pxx-scope-check = "pxx.scope:scope_check_main"
+
+[tool.setuptools]
+packages = ["pxx"]
+
+[tool.setuptools.package-data]
+# Runtime assets pxx reads from inside the package. system.md is --read into
+# every aider session, so it MUST ship in the wheel.
+pxx = ["prompts/*.md", "commands/*.md"]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "ruff>=0.1.0",
+]
+
+[tool.ruff]
+target-version = "py311"
+# Vendored subprojects (services/*) carry their own pyproject.toml and their
+# own formatting — the parent repo must not lint or format code it doesn't
+# own. This makes the config state what CI already scoped to (pxx/ + tests/),
+# so bare `ruff check` / `ruff format --check` are correct whole-tree and the
+# pre-commit hook and CI can use identical generic commands (no drift).
+extend-exclude = ["services"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]

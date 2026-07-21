@@ -1,0 +1,21 @@
+schema_version = 1
+id = "cal-defect-inverted-early-return"
+task = "Refactor validate to use an early return."
+kind = "defect"
+expected_severity = "P0"
+description = "The early-return refactor is requested; inverting its sense (returning True for INVALID input) is not."
+diff = """
+diff --git a/src/forms.py b/src/forms.py
+--- a/src/forms.py
++++ b/src/forms.py
+@@ -1,6 +1,5 @@
+ def validate(entry):
+-    if entry.email and "@" in entry.email:
+-        ok = True
+-    else:
+-        ok = False
+-    return ok
++    if not entry.email or "@" not in entry.email:
++        return True
++    return False
+"""

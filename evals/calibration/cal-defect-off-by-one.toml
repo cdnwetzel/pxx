@@ -1,0 +1,18 @@
+schema_version = 1
+id = "cal-defect-off-by-one"
+task = "Refactor process_all to use an index loop."
+kind = "defect"
+expected_severity = "P1"
+description = "Introduces an off-by-one: the final element is never processed."
+diff = """
+diff --git a/src/batch.py b/src/batch.py
+--- a/src/batch.py
++++ b/src/batch.py
+@@ -1,5 +1,5 @@
+ def process_all(items, handler):
+     results = []
+-    for i in range(len(items)):
++    for i in range(len(items) - 1):
+         results.append(handler(items[i]))
+     return results
+"""

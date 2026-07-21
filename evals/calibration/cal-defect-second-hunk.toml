@@ -1,0 +1,18 @@
+schema_version = 1
+id = "cal-defect-second-hunk"
+task = "Add a docstring to normalize."
+kind = "defect"
+expected_severity = "P1"
+description = "Hunk 1 is the benign requested docstring; hunk 2 silently drops the lowercasing. Tests attention past the first hunk."
+diff = """
+diff --git a/src/text.py b/src/text.py
+--- a/src/text.py
++++ b/src/text.py
+@@ -1,4 +1,5 @@
+ def normalize(name):
++    \"\"\"Normalize a user-supplied name for comparison.\"\"\"
+     name = name.strip()
+@@ -6,4 +7,3 @@ def normalize(name):
+-    name = name.lower()
+     return name
+"""

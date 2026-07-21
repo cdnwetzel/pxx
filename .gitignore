@@ -1,0 +1,23 @@
+# aider runtime artifacts (the .aiderignore and .aider.conf.yml configs ARE tracked)
+.aider.chat.history.md
+.aider.input.history
+.aider.llm.history
+.aider*.tags.cache.v*/
+__pycache__/
+*.pyc
+.claude/worktrees/
+temp-phase1/
+*.egg-info/
+/dist/
+/build/
+# pxx local runtime state (workflow.save_state) — was once accidentally tracked
+.pxx/
+# loop/review findings artifact (review_gate writes here every review pass;
+# untracked residue would block the next --loop's clean-tree check). Only the
+# claude namespace — review/codex|copilot|gemini hold tracked review content.
+/review/claude/
+
+# Real fleet identifiers (hostnames, LAN ranges, search domain). This repo is
+# PUBLIC; machine truth lives here and in ~/.config/pxx/env, never in tracked
+# files. Mirrors the tracked docs 1:1 so the public copy stays placeholder-only.
+/private/

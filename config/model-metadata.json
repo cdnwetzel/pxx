@@ -1,0 +1,20 @@
+{
+  "openai/Qwen3-Coder": {
+    "max_tokens": 4096,
+    "max_input_tokens": 28672,
+    "max_output_tokens": 4096,
+    "input_cost_per_token": 0,
+    "output_cost_per_token": 0,
+    "litellm_provider": "openai",
+    "mode": "chat"
+  },
+  "openai/qwen2.5-coder-14b": {
+    "max_tokens": 4096,
+    "max_input_tokens": 12288,
+    "max_output_tokens": 4096,
+    "input_cost_per_token": 0,
+    "output_cost_per_token": 0,
+    "litellm_provider": "openai",
+    "mode": "chat"
+  }
+}

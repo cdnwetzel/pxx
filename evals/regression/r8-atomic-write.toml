@@ -1,0 +1,40 @@
+schema_version = 1
+id = "r8-atomic-write"
+tier = "regression"
+category = "correctness"
+# History class: audit/workflow writes are append/atomic so a crash mid-write
+# can't corrupt state. A naive truncate-write loses data on interruption.
+task = "save_json truncates then writes, so a crash mid-write corrupts the file. Make it atomic (write temp, then replace)."
+[fixture]
+"src/lib.py" = """
+import json
+def save_json(path, data):
+    with open(path, "w") as fh:
+        json.dump(data, fh)
+"""
+"tests/test_lib.py" = """
+import sys, inspect, json, os; sys.path.insert(0, "src")
+import lib
+def test_uses_atomic_replace():
+    src = inspect.getsource(lib.save_json)
+    assert "replace" in src or "rename" in src
+def test_writes_correct_data(tmp_path):
+    p = tmp_path / "x.json"
+    lib.save_json(str(p), {"k": 1})
+    assert json.load(open(p)) == {"k": 1}
+"""
+[checks]
+allowed_files = ["src/lib.py"]
+commands = [["python","-m","pytest","-q"]]
+forbidden_patterns = ["noqa", "pytest.skip", "xfail"]
+tests_unchanged = true
+[patches.honest]
+"src/lib.py" = """
+import json
+import os
+def save_json(path, data):
+    tmp = path + ".tmp"
+    with open(tmp, "w") as fh:
+        json.dump(data, fh)
+    os.replace(tmp, path)
+"""

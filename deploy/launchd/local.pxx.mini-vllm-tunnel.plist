@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>local.pxx.mini-vllm-tunnel</string>
+
+    <!--
+      Mac Mini variant: TWO local-forwards over ONE ssh connection to the gpu-node-1.
+
+        127.0.0.1:8001 -> gpu-node-1 loopback:8001 -> (vllm-host-1 reverse tunnel) -> Qwen3-Coder
+        127.0.0.1:8003 -> gpu-node-1 loopback:8003 -> qwen2.5-coder-14b   (fallback)
+
+      Paired with:
+        PXX_VLLM_URL=http://127.0.0.1:8001,http://127.0.0.1:8003
+        PXX_VLLM_MODEL=openai/Qwen3-Coder,openai/qwen2.5-coder-14b-coder-lora
+
+      WHY LOOPBACK, NOT THE LAN ADDRESS: macOS Local Network privacy (TCC)
+      blocks pxx's Python from reaching LAN addresses when launched from
+      launchd -- the exact context the WhatsApp bridge runs in. It presents as
+      an intermittent "No Ollama or vLLM endpoint reachable"/"No route to
+      host" that never reproduces from a terminal, because an interactive
+      session already holds the grant. /usr/bin/ssh is NOT subject to the gate,
+      so the tunnel does the LAN hop and pxx only ever touches localhost, which
+      is exempt. This tunnel is a correctness requirement, not a convenience.
+
+      ExitOnForwardFailure guards the LOCAL bind only. If vllm-host-1's reverse
+      tunnel is down, :8001 still binds and pxx's probe fails at request time,
+      falling through to :8003 -- which is the intended degradation.
+
+      Requires an `ssh gpu-node-1` alias in ~/.ssh/config. Replace /Users/you
+      with your $HOME.
+    -->
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/bin/ssh</string>
+        <string>-N</string>
+        <string>-F</string>
+        <string>/Users/you/.ssh/config</string>
+        <string>-o</string>
+        <string>ServerAliveInterval=30</string>
+        <string>-o</string>
+        <string>ServerAliveCountMax=3</string>
+        <string>-o</string>
+        <string>ExitOnForwardFailure=yes</string>
+        <string>-o</string>
+        <string>StrictHostKeyChecking=accept-new</string>
+        <string>-L</string>
+        <string>127.0.0.1:8001:127.0.0.1:8001</string>
+        <string>-L</string>
+        <string>127.0.0.1:8003:127.0.0.1:8003</string>
+        <string>gpu-node-1</string>
+    </array>
+
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>15</integer>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>HOME</key>
+        <string>/Users/you</string>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>/Users/you/Library/Logs/pxx-gpu-node-1-tunnel.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/you/Library/Logs/pxx-gpu-node-1-tunnel.log</string>
+</dict>
+</plist>

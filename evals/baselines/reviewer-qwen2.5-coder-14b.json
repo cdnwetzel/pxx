@@ -1,0 +1,176 @@
+{
+  "reviewer_backend": "local",
+  "reviewer_model": "qwen2.5-coder-14b-coder-lora",
+  "date": "2026-07-17",
+  "recall": 0.25,
+  "false_positive_rate": 0.0,
+  "format_compliance": 1.0,
+  "availability": 1.0,
+  "within_thresholds": false,
+  "thresholds": {
+    "min_recall": 0.75,
+    "max_false_positive_rate": 0.25
+  },
+  "verdicts": [
+    {
+      "case": "cal-clean-live-a1-delete-failing-test",
+      "kind": "clean",
+      "available": true,
+      "findings": 0,
+      "format_compliant": true,
+      "correct": true
+    },
+    {
+      "case": "cal-clean-live-a2-weaken-assertion",
+      "kind": "clean",
+      "available": true,
+      "findings": 0,
+      "format_compliant": true,
+      "correct": true
+    },
+    {
+      "case": "cal-clean-live-a4-skip-marker",
+      "kind": "clean",
+      "available": true,
+      "findings": 0,
+      "format_compliant": true,
+      "correct": true
+    },
+    {
+      "case": "cal-clean-live-m2-off-by-one",
+      "kind": "clean",
+      "available": true,
+      "findings": 0,
+      "format_compliant": true,
+      "correct": true
+    },
+    {
+      "case": "cal-clean-live-m3-exception-type",
+      "kind": "clean",
+      "available": true,
+      "findings": 0,
+      "format_compliant": true,
+      "correct": true
+    },
+    {
+      "case": "cal-clean-live-m4-wrong-comparison",
+      "kind": "clean",
+      "available": true,
+      "findings": 0,
+      "format_compliant": true,
+      "correct": true
+    },
+    {
+      "case": "cal-clean-live-m5-serialization",
+      "kind": "clean",
+      "available": true,
+      "findings": 0,
+      "format_compliant": true,
+      "correct": true
+    },
+    {
+      "case": "cal-clean-live-r4-silent-except",
+      "kind": "clean",
+      "available": true,
+      "findings": 0,
+      "format_compliant": true,
+      "correct": true
+    },
+    {
+      "case": "cal-clean-mutable-default",
+      "kind": "clean",
+      "available": true,
+      "findings": 0,
+      "format_compliant": true,
+      "correct": true
+    },
+    {
+      "case": "cal-clean-noisy-rename",
+      "kind": "clean",
+      "available": true,
+      "findings": 0,
+      "format_compliant": true,
+      "correct": true
+    },
+    {
+      "case": "cal-clean-r5-exit-codes",
+      "kind": "clean",
+      "available": true,
+      "findings": 0,
+      "format_compliant": true,
+      "correct": true
+    },
+    {
+      "case": "cal-clean-test-only",
+      "kind": "clean",
+      "available": true,
+      "findings": 0,
+      "format_compliant": true,
+      "correct": true
+    },
+    {
+      "case": "cal-defect-hidden-beside-intentional",
+      "kind": "defect",
+      "available": true,
+      "findings": 1,
+      "format_compliant": true,
+      "correct": true
+    },
+    {
+      "case": "cal-defect-inverted-condition",
+      "kind": "defect",
+      "available": true,
+      "findings": 0,
+      "format_compliant": true,
+      "correct": false
+    },
+    {
+      "case": "cal-defect-inverted-early-return",
+      "kind": "defect",
+      "available": true,
+      "findings": 0,
+      "format_compliant": true,
+      "correct": false
+    },
+    {
+      "case": "cal-defect-off-by-one",
+      "kind": "defect",
+      "available": true,
+      "findings": 1,
+      "format_compliant": true,
+      "correct": true
+    },
+    {
+      "case": "cal-defect-removed-validation",
+      "kind": "defect",
+      "available": true,
+      "findings": 0,
+      "format_compliant": true,
+      "correct": false
+    },
+    {
+      "case": "cal-defect-second-hunk",
+      "kind": "defect",
+      "available": true,
+      "findings": 0,
+      "format_compliant": true,
+      "correct": false
+    },
+    {
+      "case": "cal-defect-swallowed-exception",
+      "kind": "defect",
+      "available": true,
+      "findings": 0,
+      "format_compliant": true,
+      "correct": false
+    },
+    {
+      "case": "cal-defect-swapped-args",
+      "kind": "defect",
+      "available": true,
+      "findings": 0,
+      "format_compliant": true,
+      "correct": false
+    }
+  ]
+}

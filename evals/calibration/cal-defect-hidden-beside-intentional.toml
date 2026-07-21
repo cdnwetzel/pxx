@@ -1,0 +1,19 @@
+schema_version = 1
+id = "cal-defect-hidden-beside-intentional"
+task = "Rename the helper to compute_total for clarity."
+kind = "defect"
+expected_severity = "P1"
+description = "The requested rename is real — but an off-by-one rides along in the same hunk. Tests discrimination: intentional change forgiven, smuggled defect flagged."
+diff = """
+diff --git a/src/billing.py b/src/billing.py
+--- a/src/billing.py
++++ b/src/billing.py
+@@ -1,6 +1,6 @@
+-def total_up(items):
++def compute_total(items):
+     result = 0
+-    for i in range(len(items)):
++    for i in range(len(items) - 1):
+         result += items[i].price
+     return result
+"""

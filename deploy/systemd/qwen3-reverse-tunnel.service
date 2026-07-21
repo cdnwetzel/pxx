@@ -1,0 +1,42 @@
+[Unit]
+# Reverse SSH tunnel: vllm-host-1's vLLM (Qwen3-Coder) -> gpu-node-1 loopback:8001.
+#
+# Direction is the whole point. vllm-host-1 sits on the office LAN, which NATs no
+# inbound ports; the gpu-node-1 is publicly reachable on :22. So the office dials
+# OUT and the endpoint lands on the gpu-node-1's loopback, where home-LAN consumers
+# (the Mac Mini) pick it up with a second local-forward. No inbound port is
+# opened at the office, and the vLLM is never exposed beyond loopback.
+#
+# Installed as a *user* unit under <tunnel-user> on vllm-host-1. Requires:
+#   sudo loginctl enable-linger <tunnel-user>
+# without which systemd tears the unit down at logout and it never returns
+# after a reboot.
+Description=Reverse SSH tunnel: vllm-host-1 vLLM (Qwen3-Coder) -> gpu-node-1 loopback:8001
+Documentation=See deploy/README.md — "Qwen3-Coder reverse tunnel chain"
+After=network.target
+
+[Service]
+Type=simple
+# The gpu-node-1's authorized_keys entry for this key is:
+#   restrict,port-forwarding,permitlisten="127.0.0.1:8001" ssh-ed25519 ...
+# `restrict` alone REJECTS the forward -- permitlisten only constrains a
+# forward that is already permitted, it does not grant one. port-forwarding
+# must be re-enabled explicitly. This key can do nothing else on the gpu-node-1:
+# no pty, no exec, no agent forwarding.
+ExecStart=/usr/bin/ssh -N \
+  -o ExitOnForwardFailure=yes \
+  -o ServerAliveInterval=30 \
+  -o ServerAliveCountMax=3 \
+  -o StrictHostKeyChecking=accept-new \
+  -o BatchMode=yes \
+  -i %h/.ssh/id_ed25519_qwen3tunnel \
+  -R 127.0.0.1:8001:localhost:8001 \
+  gpu-node-1
+# RestartSec rides out the window where the far-side sshd still holds a stale
+# forward bound after an unclean drop. Pair with ClientAliveInterval on the
+# gpu-node-1 so that window is ~90s rather than the TCP-keepalive default (~2h).
+Restart=always
+RestartSec=15
+
+[Install]
+WantedBy=default.target

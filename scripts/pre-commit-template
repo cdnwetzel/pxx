@@ -1,0 +1,112 @@
+#!/usr/bin/env bash
+# pxx-managed pre-commit hook (template).
+#
+# Installed into .git/hooks/pre-commit by scripts/install-precommit-hook.sh.
+# Do not edit the installed copy in place — the installer can overwrite it.
+# To modify the hook, edit scripts/pre-commit-template and re-run the
+# installer.
+#
+# Behavior, in order:
+#   1. PXX_PRECOMMIT_SKIP=1            → exit 0 (emergency bypass)
+#   2. uv run ruff check              → must pass
+#   3. uv run pytest -q               → must pass
+#   4. Diff cap: refuse if (added + removed) > PXX_DIFF_CAP (default 100)
+#      unless PXX_ALLOW_BIG_DIFF=1 is set (via `pxx --edit --big`).
+#   5. Scope gate (#003): if PXX_SCOPE is set, refuse if any staged file
+#      is outside the colon-separated scope prefixes.
+#
+# Assumes the target repo uses uv + pyproject.toml + pytest + ruff. Opinionated.
+# Run `bash scripts/install-precommit-hook.sh --uninstall` (or remove the file
+# manually) if it's the wrong fit for your project.
+
+set -euo pipefail
+exec >&2
+
+# 1. Emergency bypass.
+if [ "${PXX_PRECOMMIT_SKIP:-0}" = "1" ]; then
+    echo "pxx pre-commit: PXX_PRECOMMIT_SKIP=1 — bypassing all checks (use sparingly)."
+    exit 0
+fi
+
+# Sanity: uv must be on PATH.
+if ! command -v uv >/dev/null 2>&1; then
+    echo "pxx pre-commit: 'uv' not found on PATH."
+    echo "  Install Homebrew + 'brew install uv', or remove this hook"
+    echo "  with: rm $(git rev-parse --git-dir)/hooks/pre-commit"
+    exit 1
+fi
+
+# 2. Lint gate — check AND format, matching CI exactly (a format-only diff
+# that passes `ruff check` but fails `ruff format --check` slipped past the
+# hook and was caught only by CI once; the two must agree).
+echo "pxx pre-commit: running ruff check..."
+if ! uv run ruff check; then
+    echo
+    echo "pxx pre-commit: ruff check FAILED — commit aborted."
+    echo "  Fix the lint errors above, or:"
+    echo "    PXX_PRECOMMIT_SKIP=1 git commit ...   (emergency bypass)"
+    exit 1
+fi
+echo "pxx pre-commit: running ruff format --check..."
+if ! uv run ruff format --check; then
+    echo
+    echo "pxx pre-commit: ruff format --check FAILED — commit aborted."
+    echo "  Run: uv run ruff format   (then re-stage), or:"
+    echo "    PXX_PRECOMMIT_SKIP=1 git commit ...   (emergency bypass)"
+    exit 1
+fi
+
+# 3. Test gate.
+echo "pxx pre-commit: running pytest..."
+if ! uv run pytest -q; then
+    echo
+    echo "pxx pre-commit: pytest FAILED — commit aborted."
+    echo "  Fix the failures above, or:"
+    echo "    PXX_PRECOMMIT_SKIP=1 git commit ...   (emergency bypass)"
+    exit 1
+fi
+
+# 4. Diff cap.
+cap="${PXX_DIFF_CAP:-100}"
+allow_big="${PXX_ALLOW_BIG_DIFF:-0}"
+if [ "$allow_big" != "1" ]; then
+    # Sum of added + removed lines across all staged files.
+    lines=$(git diff --cached --numstat 2>/dev/null \
+        | awk 'NF >= 2 && $1 ~ /^[0-9]+$/ && $2 ~ /^[0-9]+$/ {a += $1; r += $2} END {print a + r + 0}')
+    if [ -n "$lines" ] && [ "$lines" -gt "$cap" ]; then
+        echo
+        echo "pxx pre-commit: staged diff is $lines lines (cap $cap) — commit aborted."
+        echo "  To override for this session, re-launch pxx with --big:"
+        echo "    pxx --edit --big"
+        echo "  Or raise the cap once: PXX_DIFF_CAP=$((lines + 50)) git commit ..."
+        exit 1
+    fi
+fi
+
+# 5. Scope gate (#003).
+# When pxx is launched with --scope, it exports PXX_SCOPE=<colon-paths> into
+# the environment that aider — and any git invocation aider makes — inherits.
+# This step calls `pxx-scope-check` (installed alongside pxx by uv tool) to
+# print any staged files outside the declared scope, and rejects the commit
+# if there are any.
+if [ -n "${PXX_SCOPE:-}" ]; then
+    if ! command -v pxx-scope-check >/dev/null 2>&1; then
+        echo
+        echo "pxx pre-commit: PXX_SCOPE=$PXX_SCOPE is set but 'pxx-scope-check' is not on PATH."
+        echo "  This usually means pxx isn't installed (or its bin dir isn't on PATH)."
+        echo "  Either install pxx ('uv tool install --editable <pxx-repo>'),"
+        echo "  unset PXX_SCOPE, or remove this hook. Commit aborted."
+        exit 1
+    fi
+    out_of_scope=$(git diff --cached --name-only | pxx-scope-check check)
+    if [ -n "$out_of_scope" ]; then
+        echo
+        echo "pxx pre-commit: staged files outside PXX_SCOPE=$PXX_SCOPE — commit aborted."
+        echo "  Out-of-scope files:"
+        echo "$out_of_scope" | sed 's/^/    /'
+        echo "  Either unstage them, or re-launch pxx with a wider --scope."
+        exit 1
+    fi
+fi
+
+echo "pxx pre-commit: ✓ ruff, pytest, diff-cap, scope all passed."

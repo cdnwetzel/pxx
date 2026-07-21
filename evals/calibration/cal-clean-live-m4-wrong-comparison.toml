@@ -1,0 +1,14 @@
+schema_version = 1
+id = "cal-clean-live-m4-wrong-comparison"
+task = """is_expired treats items expiring exactly now as still valid. The contract: an item whose expiry equals now IS expired."""
+kind = "clean"
+description = "Live-FP provenance (sweep 2, 2026-07-17): this exact correct fix drew a false positive from the Qwen3-Coder reviewer in production loop conditions."
+diff = """
+diff --git a/src/lib.py b/src/lib.py
+--- a/src/lib.py
++++ b/src/lib.py
+@@ -1,2 +1,2 @@
+ def is_expired(expiry, now):
+-    return expiry < now
++    return expiry <= now
+"""

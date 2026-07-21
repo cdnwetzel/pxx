@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# Pre-push hook: gate `[autonomous]` commits behind PXX_PUSH_AUTONOMOUS env var.
+# Part of plan #015. Installed by scripts/install-precommit-hook.sh.
+
+set -euo pipefail
+
+# Determine the remote and branch being pushed.
+# read format: <local-ref> <local-sha> <remote-ref> <remote-sha>
+while IFS=' ' read -r local_ref local_sha remote_ref remote_sha; do
+    if [[ "$remote_sha" == "0000000000000000000000000000000000000000" ]]; then
+        # Branch deletion — allow it
+        continue
+    fi
+
+    # Find commits between local and remote: HEAD..<remote>/<branch>
+    # Extract branch name from remote_ref (refs/heads/main -> main)
+    branch_name="${remote_ref#refs/heads/}"
+    remote_tracking="origin/$branch_name"
+
+    # Get all commits in HEAD..<remote>/<branch>
+    autonomous_commits=$(
+        git log \
+            --oneline \
+            "$remote_sha..$local_sha" 2>/dev/null \
+            | grep ' \[autonomous\]' \
+            || true
+    )
+
+    if [[ -n "$autonomous_commits" ]]; then
+        echo "[autonomous] commits detected:" >&2
+        echo "$autonomous_commits" >&2
+        echo "" >&2
+
+        if [[ "${PXX_PUSH_AUTONOMOUS:-}" != "1" ]]; then
+            echo "pxx: refusing to push [autonomous] commits without explicit approval." >&2
+            echo "Set PXX_PUSH_AUTONOMOUS=1 to override:" >&2
+            echo "  PXX_PUSH_AUTONOMOUS=1 git push" >&2
+            exit 1
+        fi
+    fi
+done
+
+exit 0

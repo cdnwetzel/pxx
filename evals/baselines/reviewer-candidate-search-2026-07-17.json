@@ -1,0 +1,50 @@
+{
+  "date": "2026-07-17",
+  "suite": "evals/calibration (20 cases)",
+  "candidates": [
+    {
+      "id": "prompt-v2",
+      "config": "task-aware v2 prompt",
+      "reviewer": "Qwen3-Coder",
+      "recall": 1.0,
+      "fp": 0.75,
+      "verdict": "already production; recall gain real, fp still high"
+    },
+    {
+      "id": "two-stage-self-audit",
+      "config": "Qwen3 flags -> Qwen3 skeptic must name a failing input or drop",
+      "recall": 0.88,
+      "fp": 0.58,
+      "verdict": "REJECTED",
+      "finding": "the skeptic upholds the flagger's own FPs \u2014 confident hallucination survives self-interrogation; every surviving FP is on a live-mined case (real loop diffs), so this is exactly the production failure mode, not a corpus artifact. Also cost one true defect (recall 1.00->0.88)."
+    },
+    {
+      "id": "cross-model-skeptic",
+      "config": "Qwen3 flags -> 14b (different family, fp 0.0) audits each finding",
+      "recall": 0.0,
+      "fp": 0.08,
+      "verdict": "REJECTED",
+      "finding": "The 14b's fp 0.00 comes from never flagging; as a skeptic that same conservatism drops EVERY finding, including all 8 real defects. Mirror image of self-audit (which keeps its own hallucinations). Confirms the recall/precision tradeoff is fundamental to fleet-local models."
+    }
+  ],
+  "reviewer_scores_20case": {
+    "qwen2.5:7b-instruct": {
+      "recall": 0.0,
+      "fp": 0.0
+    },
+    "Qwen3-Coder": {
+      "recall": 1.0,
+      "fp": 0.75
+    },
+    "qwen2.5-coder-14b-coder-lora": {
+      "recall": 0.25,
+      "fp": 0.0
+    }
+  },
+  "design_conclusion": "No fleet model, under any single-prompt or self-audit config tested, both catches defects and stays quiet on correct code (threshold recall>=0.75 AND fp<=0.25). The reviewer layer should therefore be ADVISORY (non-blocking) rather than gating until either (a) a cross-model skeptic is tried (different family auditing Qwen3's findings) or (b) a frontier reviewer is used for supervised runs (PXX_REVIEW_BACKEND=claude already exists). The deterministic gates + hidden eval checks remain the load-bearing independent layer regardless. CONFIRMED by the cross-model skeptic (2026-07-17): neither self-audit nor cross-audit rescues a gating reviewer \u2014 the quiet models drop truths, the sharp model hallucinates. For ADVISORY use the optimal config is the high-recall flagger SOLO (Qwen3-Coder, recall 1.0) \u2014 both skeptic layers reduce advisory value by trading away recall. Skeptic thread CLOSED; deterministic gates remain the only trustworthy enforcement.",
+  "next_experiments": [
+    "cross-model skeptic (14b audits Qwen3 findings)",
+    "advisory review mode: findings surfaced, never blocking",
+    "frontier reviewer on the same suite for an upper-bound reference"
+  ]
+}

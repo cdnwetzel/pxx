@@ -1,0 +1,21 @@
+schema_version = 1
+id = "cal-defect-swallowed-exception"
+task = "Refactor persist for readability."
+kind = "defect"
+expected_severity = "P1"
+description = "Wraps the save call in a bare swallow — data loss becomes silent."
+diff = """
+diff --git a/src/store.py b/src/store.py
+--- a/src/store.py
++++ b/src/store.py
+@@ -4,5 +4,8 @@ def persist(record, path):
+-    payload = encode(record)
+-    write_atomic(path, payload)
+-    return True
++    try:
++        payload = encode(record)
++        write_atomic(path, payload)
++        return True
++    except Exception:
++        return True
+"""

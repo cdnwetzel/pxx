@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Keep-alive service for the docs-rag-sme proxy on the Mac Studio. pxx
+  --with-docs expects this running on 127.0.0.1:8004.
+
+  Install:
+    cp deploy/launchd/local.docs-sme.plist ~/Library/LaunchAgents/
+    # fix the absolute path below + pick DOCS_SME_UPSTREAM, then:
+    launchctl load ~/Library/LaunchAgents/local.docs-sme.plist
+    curl -s http://127.0.0.1:8004/healthz
+
+  DOCS_SME_UPSTREAM points at the model server the SME forwards to:
+    - http://127.0.0.1:8003   gpu-node-1 vLLM via the SSH tunnel (production intent)
+    - http://127.0.0.1:11434  Studio Ollama (what's live locally today / A-B)
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>local.docs-sme</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/you/ai/pxx/services/docs-rag-sme/scripts/serve.sh</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>DOCS_SME_UPSTREAM</key>
+        <string>http://127.0.0.1:11434</string>
+        <key>DOCS_SME_PORT</key>
+        <string>8004</string>
+        <key>DOCS_SME_RETRIEVAL</key>
+        <string>on</string>
+    </dict>
+
+    <key>KeepAlive</key>
+    <true/>
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>StandardErrorPath</key>
+    <string>/Users/you/ai/pxx/services/docs-rag-sme/.setup/docs-sme.err</string>
+    <key>StandardOutPath</key>
+    <string>/Users/you/ai/pxx/services/docs-rag-sme/.setup/docs-sme.out</string>
+</dict>
+</plist>

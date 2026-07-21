@@ -1,0 +1,62 @@
+# docs-rag-sme refresh sources. Edit freely; the crawler is allowlist-enforced
+# regardless of what's listed here (docs.python.org / peps / pypi only).
+#
+# Curated for this codebase today + a best guess at where the local-RAG / agentic
+# tooling grows. Override the whole file with DOCS_SME_SOURCES=<path>.
+
+python_version = "3.12"
+
+# docs.python.org/<version>/<slug> — stdlib pages this project (and likely
+# successors) actually reach for. Explicit slugs, no module->URL guessing.
+stdlib = [
+    "library/asyncio-task.html",
+    "library/asyncio-stream.html",
+    "library/typing.html",
+    "library/dataclasses.html",
+    "library/functools.html",
+    "library/collections.html",
+    "library/itertools.html",
+    "library/contextlib.html",
+    "library/pathlib.html",
+    "library/re.html",
+    "library/json.html",
+    "library/os.html",
+    "library/subprocess.html",
+    "library/logging.html",
+    "library/sqlite3.html",
+    "library/urllib.request.html",
+    "library/concurrent.futures.html",
+    "library/argparse.html",
+    "library/enum.html",
+    "library/abc.html",
+    "library/tomllib.html",
+    "library/http.client.html",
+]
+
+# pypi.org/pypi/<pkg>/json — deps in use now, plus near-term RAG/serving tools.
+pypi = [
+    # in use today (pxx + docs-rag-sme)
+    "httpx",
+    "fastapi",
+    "uvicorn",
+    "starlette",
+    "pydantic",
+    "lxml",
+    "psycopg",
+    "pgvector",
+    "numpy",
+    "sentence-transformers",
+    "transformers",
+    "torch",
+    "aider-chat",
+    "pytest",
+    "ruff",
+    # likely-next for this direction (ingestion parsers, rerankers, serving)
+    "trafilatura",
+    "docling",
+    "FlagEmbedding",
+    "vllm",
+]
+
+# peps.python.org/pep-XXXX/ — the modern-Python conventions this repo follows.
+peps = [8, 257, 484, 526, 585, 604, 612, 695]

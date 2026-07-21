@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+/dist/
+/build/
+.venv/
+
+# pxx runtime state
+.pxx/
+*.db
+*.db-wal
+*.db-shm
+
+# OS / editors
+.DS_Store

@@ -23,6 +23,7 @@ from pxx.cli import (
     SAFETY_TAG_PREFIX,
     STUDIO_DEFAULT,
     VLLM_DEFAULT,
+    _architect_mode_refusal,
     _build_aider_args,
     _headless_consent_args,
     _create_safety_tag,
@@ -221,6 +222,69 @@ class TestHeadlessConsentArgs:
             assert _headless_consent_args(False, [flag]) == []
 
 
+class TestArchitectModeRefusal:
+    """PYSEC-2026-2335: pxx refuses to forward aider's architect mode.
+
+    aider's argparse allows unambiguous abbreviations, so the gate matches
+    prefixes down to the pinned 0.86.2 floors (--ar / --chat-m / --edit-),
+    not just exact strings.
+    """
+
+    def test_architect_flag_and_abbreviations_refused(self):
+        for flag in ("--architect", "--architec", "--archi", "--arch", "--ar"):
+            assert _architect_mode_refusal([flag]) is not None, flag
+
+    def test_chat_mode_architect_refused_both_forms(self):
+        assert _architect_mode_refusal(["--chat-mode", "architect"]) is not None
+        assert _architect_mode_refusal(["--chat-mode=architect"]) is not None
+
+    def test_chat_mode_abbreviations_refused(self):
+        assert _architect_mode_refusal(["--chat-m", "architect"]) is not None
+        assert _architect_mode_refusal(["--chat-mod", "architect"]) is not None
+        assert _architect_mode_refusal(["--chat-mo=architect"]) is not None
+
+    def test_edit_format_alias_and_abbreviations_refused(self):
+        # --edit-format is a --chat-mode alias writing the same dest.
+        assert _architect_mode_refusal(["--edit-format", "architect"]) is not None
+        assert _architect_mode_refusal(["--edit-f", "architect"]) is not None
+        assert _architect_mode_refusal(["--edit-=architect"]) is not None
+
+    def test_value_match_is_case_insensitive(self):
+        assert _architect_mode_refusal(["--chat-mode=Architect"]) is not None
+        assert _architect_mode_refusal(["--chat-mode", "ARCHITECT"]) is not None
+
+    def test_refusal_anywhere_in_argv(self):
+        assert _architect_mode_refusal(["--message", "hi", "--architect"]) is not None
+
+    def test_other_modes_and_args_allowed(self):
+        assert _architect_mode_refusal([]) is None
+        assert _architect_mode_refusal(["--chat-mode", "ask"]) is None
+        assert _architect_mode_refusal(["--chat-m", "help"]) is None
+        assert _architect_mode_refusal(["--chat-mode=help"]) is None
+        assert _architect_mode_refusal(["--edit-format", "diff"]) is None
+        assert _architect_mode_refusal(["--edit-f", "udiff"]) is None
+        assert _architect_mode_refusal(["--edit", "--message", "hi"]) is None
+
+    def test_ambiguous_prefixes_left_to_aider(self):
+        # Below the unambiguous floor aider itself errors (ambiguous option),
+        # so pxx stays out of the way of legitimate flags like --config.
+        assert _architect_mode_refusal(["--a"]) is None
+        assert _architect_mode_refusal(["--chat"]) is None
+        assert _architect_mode_refusal(["--edit"]) is None
+        # A different flag entirely — inert without architect mode engaged.
+        assert _architect_mode_refusal(["--auto-accept-architect"]) is None
+
+    def test_dangling_mode_flag_not_refused(self):
+        # aider itself errors on the missing value; not pxx's gate to keep.
+        assert _architect_mode_refusal(["--chat-mode"]) is None
+        assert _architect_mode_refusal(["--edit-format"]) is None
+
+    def test_message_names_advisory_and_rationale(self):
+        msg = _architect_mode_refusal(["--architect"])
+        assert "PYSEC-2026-2335" in msg
+        assert "architect" in msg
+
+
 class TestBuildAiderArgs:
     def test_default_mode_injects_chat_mode_ask(self):
         args = _build_aider_args("/x/aider", "m", [], in_git_repo=True, edit_mode=False)
@@ -236,16 +300,18 @@ class TestBuildAiderArgs:
         assert "--chat-mode" not in args
 
     def test_explicit_chat_mode_passes_through(self):
-        # User passing --chat-mode architect should not be overridden by pxx.
+        # A user-supplied --chat-mode suppresses pxx's injection and passes
+        # through. architect specifically never reaches this layer — main()
+        # refuses it first (see TestArchitectModeRefusal).
         args = _build_aider_args(
             "/x/aider",
             "m",
-            ["--chat-mode", "architect"],
+            ["--chat-mode", "help"],
             in_git_repo=True,
             edit_mode=False,
         )
         assert args.count("--chat-mode") == 1
-        assert args[args.index("--chat-mode") + 1] == "architect"
+        assert args[args.index("--chat-mode") + 1] == "help"
 
     def test_explicit_chat_mode_equals_form_also_respected(self):
         args = _build_aider_args(

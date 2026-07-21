@@ -4,6 +4,20 @@ All notable changes to pxx and its ecosystem across development phases.
 
 ## Unreleased
 
+### Security
+
+- pxx now refuses to launch aider's architect mode (`--architect`,
+  `--chat-mode architect`, `--edit-format architect` — and aider's
+  unambiguous argparse abbreviations of them, down to `--ar` / `--chat-m` /
+  `--edit-`) — aider ≤0.86.2 is affected by PYSEC-2026-2335
+  (CVE-2026-10175): architect mode auto-applies its editor stage, so
+  prompt-injected content can become committed code. pxx sessions run
+  ask/diff only; the refusal lifts when a fixed aider release ships.
+- Dispositioned both live advisories against the pinned aider 0.86.2
+  (2335: denied + documented; 2336 `/web` SSRF: accepted with a documented
+  egress compensating control, fix-cherry-pick path for credential-bearing
+  deploys) — see SECURITY.md and docs/security-advisory-dispositions.md.
+
 ### Corrected
 
 - Corrected Python 3.13 installation guidance: current pip refuses the

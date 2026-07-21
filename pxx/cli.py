@@ -224,6 +224,52 @@ def _headless_consent_args(isatty: bool, user_args: list[str]) -> list[str]:
     return ["--yes"]
 
 
+# aider's argparse leaves allow_abbrev on, so any *unambiguous* prefix of a
+# long flag resolves to it. Floors verified against the pinned 0.86.2 parser
+# (122 long flags): --ar → --architect, --chat-m → --chat-mode,
+# --edit- → --edit-format. Shorter prefixes are ambiguous — aider rejects
+# them itself — so pxx's gate starts at the floors.
+_FLAG_FLOORS = {
+    "--architect": "--ar",
+    "--chat-mode": "--chat-m",
+    "--edit-format": "--edit-",
+}
+
+
+def _resolves_to(flag: str, target: str) -> bool:
+    return len(flag) >= len(_FLAG_FLOORS[target]) and target.startswith(flag)
+
+
+def _architect_mode_refusal(args: list[str]) -> str | None:
+    """Refusal message if args engage aider's architect mode, else None.
+
+    PYSEC-2026-2335 (CVE-2026-10175): aider <=0.86.2's architect mode
+    auto-applies its editor stage, so prompt-influenced content can become
+    committed code. pxx never engages architect itself (ask/diff only), so
+    the only pxx-created path is flag forwarding — refuse it until a fixed
+    aider release ships. Residual + revisit trigger: SECURITY.md.
+    """
+    for i, a in enumerate(args):
+        flag, sep, value = a.partition("=")
+        engaged = _resolves_to(flag, "--architect")
+        if not engaged:
+            for mode_flag in ("--chat-mode", "--edit-format"):
+                if _resolves_to(flag, mode_flag):
+                    v = value if sep else (args[i + 1] if i + 1 < len(args) else "")
+                    engaged = v.lower() == "architect"
+                    break
+        if engaged:
+            return (
+                "pxx: refusing to run aider's architect mode "
+                "(--architect / --chat-mode architect / --edit-format architect).\n"
+                "  aider 0.86.2 is affected by PYSEC-2026-2335 (CVE-2026-10175):\n"
+                "  architect mode auto-applies its editor stage, so injected\n"
+                "  content can become committed code. pxx runs ask/diff only.\n"
+                "  This refusal lifts when a fixed aider ships — see SECURITY.md."
+            )
+    return None
+
+
 def _build_aider_args(
     aider_bin: str,
     model: str,
@@ -1030,6 +1076,9 @@ def main() -> None:
             ),
             file=sys.stderr,
         )
+        sys.exit(2)
+    if refusal := _architect_mode_refusal(sys.argv[1:]):
+        print(refusal, file=sys.stderr)
         sys.exit(2)
 
     self_fix_task: str | None = None

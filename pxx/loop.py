@@ -104,22 +104,22 @@ async def _changed_paths(root: Path, pre_sha: str | None = None) -> list[str]:
     """
     paths: set[str] = set()
     if pre_sha:
-        out = await _git(root, "diff", "--name-only", "--no-renames", pre_sha)
+        # -z: NUL-separated, path quoting fully disabled (spaces/non-ASCII exact)
+        out = await _git(root, "diff", "--name-only", "--no-renames", "-z", pre_sha)
         if out:
-            paths.update(n for n in out.splitlines() if n.strip())
-    out = await _git(root, "status", "--porcelain", "--no-renames", "--untracked-files=all")
+            paths.update(n for n in out.split("\0") if n.strip())
+    out = await _git(root, "status", "--porcelain", "--no-renames", "--untracked-files=all", "-z")
     if not out:
         return sorted(paths)
-    for line in out.splitlines():
-        if not line.strip():
-            continue
-        path = line[3:] if len(line) > 3 else line.strip()
-        if " -> " in path:  # rename: keep source AND destination
-            src, _, dst = path.partition(" -> ")
-            paths.add(src.strip('"'))
-            paths.add(dst.strip('"'))
-            continue
-        paths.add(path.strip('"'))
+    for entry in out.split("\0"):
+        if len(entry) >= 4:
+            path = entry[3:]
+            if " -> " in path:  # rename: keep source AND destination
+                src, _, dst = path.partition(" -> ")
+                paths.add(src)
+                paths.add(dst)
+                continue
+            paths.add(path)
     return sorted(paths)
 
 
@@ -260,6 +260,47 @@ async def run_loop(
     if net is not None:
         net_suffix = f" [net: {net.tag or 'no-tag'}{'+stash' if net.stash_message else ''}]"
 
+    # Baseline for the end-of-loop commit delta — taken AFTER the net ties,
+    # so it is correct in all three cases: stash succeeded (clean tree),
+    # stash failed (dirt recorded in baseline and excluded), safety_net=false
+    # (same). Uses pxx.worktree — the same delta implementation as Session.
+    worktree_start = None
+    if settings.auto_commit and in_repo:
+        from .worktree import worktree_snapshot
+
+        worktree_start = await worktree_snapshot(root)
+
+    # Per-round sessions never commit mid-loop: auto_commit fires ONCE at the
+    # end of a completed loop (B1.4), not per round.
+    round_settings = replace(settings, auto_commit=False)
+
+    async def _complete(outcome: RunOutcome) -> RunOutcome:
+        """End-of-loop commit when --commit is on (once per completed loop)."""
+        if settings.auto_commit and outcome.code is TerminalCode.COMPLETED:
+            from .safety_net import commit_session_work
+            from .worktree import worktree_delta
+
+            sha = None
+            if worktree_start is None:
+                # Fail CLOSED: the delta is unknown; add -A would sweep
+                # baseline dirt. Skip the commit instead.
+                log.warning(
+                    "auto-commit skipped: worktree snapshot unavailable "
+                    "(git failed) — nothing committed"
+                )
+            else:
+                changed, _ = await worktree_delta(root, worktree_start)
+                sha = await commit_session_work(
+                    root,
+                    task_preview=task,
+                    net_tag=net.tag if net else None,
+                    only=set(changed),  # the loop's own delta, never baseline dirt
+                )
+            if sha:
+                await parent_bus.emit("observation", {"source": "auto_commit", "sha": sha})
+                outcome = replace(outcome, summary=f"{outcome.summary} [committed {sha[:8]}]")
+        return outcome
+
     baseline_failures: set[str] | None = None
     previous_failing: set[str] = set()
     findings: tuple[Finding, ...] = ()
@@ -355,9 +396,9 @@ async def run_loop(
         session_bus = EventBus()
         session_bus.subscribe(_forward)
         edit_start = time.monotonic()
-        outcome = await Session(settings, backend, cwd=root, bus=session_bus, safety_net=False).run(
-            prompt, check_clarity=round_no == 1
-        )
+        outcome = await Session(
+            round_settings, backend, cwd=root, bus=session_bus, safety_net=False
+        ).run(prompt, check_clarity=round_no == 1)
         legs["edit_seconds"] += time.monotonic() - edit_start
         tokens += outcome.tokens
         if outcome.code is not TerminalCode.COMPLETED:
@@ -495,12 +536,14 @@ async def run_loop(
 
         # Guard 4: review gate (only when tests pass or no tests configured).
         if reviewer is None:
-            return _outcome(
-                TerminalCode.COMPLETED,
-                f"completed in {round_no} round(s); "
-                + ("tests passed" if command else "no test command"),
-                round_no,
-                findings,
+            return await _complete(
+                _outcome(
+                    TerminalCode.COMPLETED,
+                    f"completed in {round_no} round(s); "
+                    + ("tests passed" if command else "no test command"),
+                    round_no,
+                    findings,
+                )
             )
         head_at_diff = None
         if in_repo:
@@ -598,11 +641,13 @@ async def run_loop(
                     "unparseable": "REVIEW_UNPARSEABLE",
                 }[result.review_error]
             )
-        return _outcome(
-            TerminalCode.COMPLETED,
-            f"completed in {round_no} round(s) (verdict {result.verdict})",
-            round_no,
-            findings,
+        return await _complete(
+            _outcome(
+                TerminalCode.COMPLETED,
+                f"completed in {round_no} round(s) (verdict {result.verdict})",
+                round_no,
+                findings,
+            )
         )
 
     if last_review_verdict is Verdict.REVISE:

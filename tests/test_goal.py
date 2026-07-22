@@ -538,6 +538,11 @@ GIT = shutil.which("git")
 needs_git = pytest.mark.skipif(GIT is None, reason="git not available")
 
 
+def _git(path: Path, *args: str) -> str:
+    proc = subprocess.run([GIT, *args], cwd=path, check=True, capture_output=True, text=True)
+    return proc.stdout.strip()
+
+
 def _init_repo(path: Path, files: dict[str, str] | None = None) -> None:
     path.mkdir(parents=True, exist_ok=True)
     subprocess.run([GIT, "init", "-q"], cwd=path, check=True, capture_output=True)
@@ -739,3 +744,74 @@ def test_goal_net_disabled_by_knob(tmp_path: Path) -> None:
     )
     assert tags.stdout == ""
     assert (repo / "wip.txt").read_text() == "user work\n"  # untouched
+
+
+@needs_git
+def test_goal_auto_commit_flag_still_merges_node_work(tmp_path: Path) -> None:
+    """P0-2 regression: --commit on goal must NOT let nodes commit inside
+    their worktrees — node settings force auto_commit=False, and the merge
+    still carries every node's work back to the root."""
+    from dataclasses import replace as _replace
+
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    dag = _dag(_task("a"), _task("b"))
+    factory = Factory(
+        [
+            ScriptedBackend(edits={"alpha.py": "A = 1\n"}),
+            ScriptedBackend(edits={"beta.py": "B = 2\n"}),
+        ]
+    )
+    outcome = asyncio.run(
+        run_goal(
+            "goal",
+            _replace(_settings(tmp_path), auto_commit=True),
+            cwd=repo,
+            planner=_planner(dag),
+            backend_factory=factory,
+        )
+    )
+    assert outcome.code is TerminalCode.COMPLETED
+    assert (repo / "alpha.py").read_text() == "A = 1\n"
+    assert (repo / "beta.py").read_text() == "B = 2\n"
+
+
+@needs_git
+def test_committed_worktree_still_merges_back(tmp_path: Path) -> None:
+    """P0-2 hardening: a node whose backend COMMITS inside its worktree
+    (aider auto-commit style) must still merge back — the merge diffs
+    against the merge base, not the worktree's HEAD."""
+
+    class CommittingBackend(ScriptedBackend):
+        async def run(self, task, ctx):
+            outcome = await super().run(task, ctx)
+            root = Path(ctx.cwd)
+            _git(root, "add", "-A")
+            _git(
+                root,
+                "-c",
+                "user.name=test",
+                "-c",
+                "user.email=test@example.com",
+                "commit",
+                "-q",
+                "-m",
+                "node auto-commit",
+            )
+            return outcome
+
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    dag = _dag(_task("a"))
+    factory = Factory([CommittingBackend(edits={"alpha.py": "A = 1\n"})])
+    outcome = asyncio.run(
+        run_goal(
+            "goal",
+            _settings(tmp_path),
+            cwd=repo,
+            planner=_planner(dag),
+            backend_factory=factory,
+        )
+    )
+    assert outcome.code is TerminalCode.COMPLETED
+    assert (repo / "alpha.py").read_text() == "A = 1\n"

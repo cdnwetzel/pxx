@@ -80,4 +80,58 @@ async def tie_safety_net(cwd: Path, run_id: str) -> SafetyNet | None:
     return SafetyNet(tag=tag, stash_message=stash_message)
 
 
-__all__ = ["SafetyNet", "tie_safety_net"]
+async def commit_session_work(
+    cwd: Path,
+    *,
+    task_preview: str,
+    net_tag: str | None,
+    only: set[str] | None = None,
+) -> str | None:
+    """Commit the session's work after a COMPLETED outcome; return the sha.
+
+    Opt-in only (``settings.auto_commit`` / ``--commit``). Fail-soft by
+    contract: nothing-to-commit or any git failure returns None — the
+    session is never crashed by a commit that can't happen (hard rule 1).
+    The ``pxx-pre/<ts>`` tag already points at pre-session HEAD, so the undo
+    story is unchanged: ``git reset --hard <tag>``.
+
+    ``only`` (when given) restricts the commit to exactly those repo-relative
+    paths — the session's own work — so pre-existing dirt (.env, WIP notes)
+    is never swept in when the tree wasn't stashed first (``safety_net=false``
+    or the stash fail-soft path). ``only=None`` stages everything (direct
+    callers/tests only).
+    """
+    if only is not None and not only:
+        return None  # the session changed nothing
+    if only is not None:
+        staged_any = False
+        for rel in sorted(only):
+            if await _git(cwd, "add", "--", rel) is not None:
+                staged_any = True
+        if not staged_any:
+            log.warning("auto-commit: nothing stageable in the session's delta")
+            return None
+    else:
+        status = await _git(cwd, "status", "--porcelain=v1", "--untracked-files=all")
+        if not status:
+            return None  # nothing to commit
+        if await _git(cwd, "add", "-A") is None:
+            log.warning("auto-commit: git add failed; leaving work uncommitted")
+            return None
+    preview = " ".join(task_preview.split())[:72] or "session work"
+    message = f"pxx: {preview}" + (f" [net: {net_tag}]" if net_tag else "")
+    # CI runners (and some sandboxes) have no git identity configured; use
+    # the repo's when present, else an explicit pxx fallback — a commit must
+    # never fail for want of an identity.
+    identity: list[str] = []
+    if await _git(cwd, "config", "user.name") is None:
+        identity = ["-c", "user.name=pxx[bot]"]
+    if await _git(cwd, "config", "user.email") is None:
+        identity += ["-c", "user.email=pxx[bot]@localhost"]
+    if await _git(cwd, *identity, "commit", "-q", "-m", message) is None:
+        log.warning("auto-commit: git commit failed; leaving work uncommitted")
+        return None
+    return await _git(cwd, "rev-parse", "HEAD")
+
+
+__all__ = ["SafetyNet", "commit_session_work", "tie_safety_net"]

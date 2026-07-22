@@ -1584,3 +1584,204 @@ def test_check_require_denylist_passes_when_armed(harness, monkeypatch, capsys, 
     )
     assert cli.main(["check", "--denylist", str(denylist), "--require-denylist"]) == 2
     assert "spark2.example.internal" in capsys.readouterr().out
+
+
+# --- 2.0.1-A: pxx review verb (read-only diff review) ------------------------------
+
+
+def _init_review_repo(tmp_path: Path, files: dict[str, str] | None = None) -> Path:
+    import subprocess
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True, capture_output=True)
+    for rel, content in (files or {}).items():
+        (repo / rel).write_text(content)
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-c", "user.name=t", "-c", "user.email=t@e.c", "commit", "-q", "-m", "i"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+    return repo
+
+
+def _stub_reviewer(monkeypatch, text: str) -> None:
+    """Stub with the REAL constructor signature (ModelRef), so a settings-vs-
+    model drift like the P0-1 crash can't hide in tests."""
+
+    class StubReviewer:
+        def __init__(self, model) -> None:
+            from pxx.config import ModelRef
+
+            assert isinstance(model, ModelRef), "NativeReviewer takes a ModelRef"
+
+        async def review(self, diff: str, task: str) -> str:
+            return text
+
+    monkeypatch.setattr("pxx.review.NativeReviewer", StubReviewer)
+
+
+@needs_git
+def test_review_approve_exit_0(harness, monkeypatch, capsys, tmp_path):
+    repo = _init_review_repo(tmp_path, {"a.py": "x = 1\n"})
+    (repo / "a.py").write_text("x = 2\n")
+    monkeypatch.chdir(repo)
+    _stub_reviewer(monkeypatch, "VERDICT: APPROVE")
+    assert cli.main(["review"]) == 0
+    assert "verdict: APPROVE" in capsys.readouterr().out
+
+
+@needs_git
+def test_review_revise_exit_2_with_anchored_findings(harness, monkeypatch, capsys, tmp_path):
+    repo = _init_review_repo(tmp_path, {"a.py": "x = 1\n"})
+    (repo / "a.py").write_text("x = 2\n")
+    monkeypatch.chdir(repo)
+    _stub_reviewer(monkeypatch, "VERDICT: REVISE\nF-001 [high] a.py:1 unchecked write")
+    assert cli.main(["review"]) == 2
+    out = capsys.readouterr().out
+    assert "verdict: REVISE" in out and "F-001 [high] a.py:1" in out
+
+
+@needs_git
+def test_review_empty_diff_exit_64(harness, monkeypatch, capsys, tmp_path):
+    repo = _init_review_repo(tmp_path, {"a.py": "x = 1\n"})
+    monkeypatch.chdir(repo)
+    assert cli.main(["review"]) == 64
+    assert "no diff to review" in capsys.readouterr().err
+
+
+def test_review_not_a_repo_fails_closed(harness, monkeypatch, capsys, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    assert cli.main(["review"]) == 1
+    assert "cannot read git diff" in capsys.readouterr().err
+
+
+@needs_git
+def test_review_is_read_only(harness, monkeypatch, tmp_path):
+    repo = _init_review_repo(tmp_path, {"a.py": "x = 1\n"})
+    (repo / "a.py").write_text("x = 2\n")
+    monkeypatch.chdir(repo)
+
+    def _no_session(*a, **kw):
+        raise AssertionError("review must not open a session")
+
+    monkeypatch.setattr(cli, "Session", _no_session)
+    monkeypatch.setattr("pxx.tools.default_registry", _no_session)
+    _stub_reviewer(monkeypatch, "VERDICT: APPROVE")
+    assert cli.main(["review"]) == 0
+
+
+@needs_git
+def test_review_staged_and_since_flags(harness, monkeypatch, tmp_path):
+    import subprocess
+
+    repo = _init_review_repo(tmp_path, {"a.py": "x = 1\n"})
+    (repo / "a.py").write_text("x = 2\n")
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True, capture_output=True)
+    monkeypatch.chdir(repo)
+    collected: dict = {}
+    from pxx.review import collect_review_diff as real_collect
+
+    def spy(root, *, staged=False, since=""):
+        collected["staged"] = staged
+        collected["since"] = since
+        return real_collect(root, staged=staged, since=since)
+
+    monkeypatch.setattr("pxx.review.collect_review_diff", spy)
+    _stub_reviewer(monkeypatch, "VERDICT: APPROVE")
+    assert cli.main(["review", "--staged"]) == 0
+    assert collected["staged"] is True
+    sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True
+    ).stdout.strip()
+    (repo / "a.py").write_text("x = 3\n")
+    assert cli.main(["review", "--since", sha]) == 0
+    assert collected["since"] == sha
+
+
+@needs_git
+def test_legacy_review_flag_maps_to_verb(harness, monkeypatch, capsys, tmp_path):
+    repo = _init_review_repo(tmp_path, {"a.py": "x = 1\n"})
+    (repo / "a.py").write_text("x = 2\n")
+    monkeypatch.chdir(repo)
+    _stub_reviewer(monkeypatch, "VERDICT: APPROVE")
+    assert cli.main(["--review"]) == 0
+    assert "verdict: APPROVE" in capsys.readouterr().out
+
+
+@needs_git
+def test_review_includes_untracked_files(harness, monkeypatch, capsys, tmp_path):
+    """Secondary A: a new-files-only change must NOT report 'nothing to review'."""
+    repo = _init_review_repo(tmp_path, {"a.py": "x = 1\n"})
+    (repo / "new_module.py").write_text("def helper():\n    return 42\n")
+    monkeypatch.chdir(repo)
+    _stub_reviewer(monkeypatch, "VERDICT: APPROVE")
+    assert cli.main(["review"]) == 0
+    assert "verdict: APPROVE" in capsys.readouterr().out
+
+
+@needs_git
+def test_review_drops_secret_bearing_untracked_files(harness, monkeypatch, capsys, tmp_path):
+    """Item 1: an untracked secret-bearing file is DROPPED by the governance
+    scan — its content never reaches the reviewer endpoint."""
+    repo = _init_review_repo(tmp_path, {"a.py": "x = 1\n"})
+    (repo / "a.py").write_text("x = 2\n")
+    env_key = "sk-test" + "-FAKE0000FAKE0000FAKE0000"
+    (repo / ".env").write_text(f'API_KEY = "{env_key}"\n')
+    monkeypatch.chdir(repo)
+    payloads: list[str] = []
+
+    class SpyReviewer:
+        def __init__(self, model) -> None:
+            pass
+
+        async def review(self, diff: str, task: str) -> str:
+            payloads.append(diff)
+            return "VERDICT: APPROVE"
+
+    monkeypatch.setattr("pxx.review.NativeReviewer", SpyReviewer)
+    assert cli.main(["review"]) == 0
+    err = capsys.readouterr().err
+    assert "excluded .env" in err
+    assert payloads, "reviewer was never called"
+    assert env_key not in payloads[0]  # never uploaded
+    assert "x = 2" in payloads[0]  # the legit diff still reviewed
+
+
+@needs_git
+def test_review_untracked_nonascii_filename_included(harness, monkeypatch, capsys, tmp_path):
+    """Item 4: a non-ASCII (C-quoted) filename is included, not silently dropped."""
+    repo = _init_review_repo(tmp_path, {"a.py": "x = 1\n"})
+    (repo / "café.py").write_text("def cafe():\n    return 1\n")
+    monkeypatch.chdir(repo)
+    _stub_reviewer(monkeypatch, "VERDICT: APPROVE")
+    assert cli.main(["review"]) == 0
+    out = capsys.readouterr().out
+    assert "verdict: APPROVE" in out
+
+
+@needs_git
+@pytest.mark.parametrize("name", ["plain.py", "two words.py", "café.py"])
+def test_review_includes_all_filename_shapes(harness, monkeypatch, capsys, tmp_path, name):
+    """Item 1 round 3: NUL-parsed untracked paths — every filename shape is
+    included in the review diff (spaces, non-ASCII), header path exact."""
+    repo = _init_review_repo(tmp_path, {"a.py": "x = 1\n"})
+    (repo / "a.py").write_text("x = 2\n")
+    (repo / name).write_text("def f():\n    return 1\n")
+    monkeypatch.chdir(repo)
+    payloads: list[str] = []
+
+    class SpyReviewer:
+        def __init__(self, model) -> None:
+            pass
+
+        async def review(self, diff: str, task: str) -> str:
+            payloads.append(diff)
+            return "VERDICT: APPROVE"
+
+    monkeypatch.setattr("pxx.review.NativeReviewer", SpyReviewer)
+    assert cli.main(["review"]) == 0
+    assert payloads
+    assert name in payloads[0], f"{name!r} missing from the review payload"

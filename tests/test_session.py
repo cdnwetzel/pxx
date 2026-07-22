@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import shutil
+import subprocess
 import time
+
+import pytest
 
 from pxx.backends.mock import MockBackend
 from pxx.config import ModelRef, Settings
@@ -12,6 +16,14 @@ from pxx.memory.store import MemoryStore
 from pxx.outcome import TerminalCode
 from pxx.safety import PermissionMode
 from pxx.session import Session
+
+GIT = shutil.which("git")
+needs_git = pytest.mark.skipif(GIT is None, reason="git not available")
+
+
+def _git(root, *args: str) -> str:
+    proc = subprocess.run([GIT, *args], cwd=root, check=True, capture_output=True, text=True)
+    return proc.stdout.strip()
 
 
 def run(coro):
@@ -447,3 +459,247 @@ def test_safety_net_disabled_by_config(tmp_path):
     )
     assert tags.stdout == ""
     assert (repo / "a.txt").read_text() == "dirty\n"  # untouched
+
+
+# --- 2.0.1-B: opt-in --commit at session end ----------------------------------------
+
+
+@needs_git
+def test_session_auto_commit_creates_commit(tmp_path):
+    from dataclasses import replace as _replace
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    (repo / "a.py").write_text("x = 1\n")
+    _git(repo, "add", "-A")
+    _git(repo, "-c", "user.name=t", "-c", "user.email=t@e.c", "commit", "-q", "-m", "init")
+
+    settings = _replace(_settings(tmp_path), auto_commit=True)
+    backend = MockBackend(
+        [
+            {"tool": "write_file", "args": {"path": "a.py", "content": "x = 2\n"}},
+            {"done": "edited"},
+        ]
+    )
+    session = Session(settings, backend, cwd=repo)
+    outcome = run(session.run("update a.py"))
+    assert outcome.code is TerminalCode.COMPLETED
+    assert "[committed " in outcome.summary
+    log = subprocess.run(
+        [GIT, "log", "-1", "--format=%s"], cwd=repo, capture_output=True, text=True
+    ).stdout.strip()
+    assert log.startswith("pxx: update a.py")
+    assert "[net:" in log
+    # undo still works: the net tag points at pre-session HEAD
+    tag = (
+        subprocess.run(
+            [GIT, "tag", "--list", "pxx-pre/*"], cwd=repo, capture_output=True, text=True
+        )
+        .stdout.strip()
+        .splitlines()[0]
+    )
+    head_pre = subprocess.run(
+        [GIT, "rev-list", "-n", "1", tag], cwd=repo, capture_output=True, text=True
+    ).stdout.strip()
+    head_parent = subprocess.run(
+        [GIT, "rev-parse", "HEAD~1"], cwd=repo, capture_output=True, text=True
+    ).stdout.strip()
+    assert head_pre == head_parent
+
+
+@needs_git
+def test_session_no_commit_on_failure(tmp_path):
+    from dataclasses import replace as _replace
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    (repo / "a.py").write_text("x = 1\n")
+    _git(repo, "add", "-A")
+    _git(repo, "-c", "user.name=t", "-c", "user.email=t@e.c", "commit", "-q", "-m", "init")
+
+    from pxx.errors import BackendError
+
+    class FailingBackend:
+        name = "failing"
+        capabilities = None
+
+        async def run(self, task, ctx):
+            raise BackendError("boom")
+
+        async def cancel(self):
+            pass
+
+    settings = _replace(_settings(tmp_path), auto_commit=True)
+    session = Session(settings, FailingBackend(), cwd=repo)
+    outcome = run(session.run("do it"))
+    assert outcome.code is not TerminalCode.COMPLETED
+    log = subprocess.run(
+        [GIT, "log", "--format=%s"], cwd=repo, capture_output=True, text=True
+    ).stdout
+    assert log.count("init") == 1 and "pxx:" not in log
+
+
+def test_commit_flag_threads_to_settings():
+    from pxx import cli
+
+    args = cli._build_parser().parse_args(["edit", "--commit", "-m", "x"])
+    overrides = cli._cli_overrides(args, PermissionMode.EDIT)
+    assert overrides.get("auto_commit") is True
+
+
+@needs_git
+def test_consecutive_edits_strand_regression_documented(tmp_path):
+    """STRAND REGRESSION (documents current default): two consecutive edit runs
+    without an intermediate commit — run 2's net stashes run 1's uncommitted
+    work. The stash exists and recovery is one command away. --commit (above)
+    is the opt-in fix; auto-restore is deferred (plan B3)."""
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    (repo / "a.py").write_text("x = 1\n")
+    _git(repo, "add", "-A")
+    _git(repo, "-c", "user.name=t", "-c", "user.email=t@e.c", "commit", "-q", "-m", "init")
+
+    settings = _settings(tmp_path)  # auto_commit OFF (default)
+    first = Session(
+        settings,
+        MockBackend(
+            [
+                {"tool": "write_file", "args": {"path": "a.py", "content": "x = 2\n"}},
+                {"done": "one"},
+            ]
+        ),
+        cwd=repo,
+    )
+    run(first.run("first edit"))
+    assert (repo / "a.py").read_text() == "x = 2\n"
+
+    second = Session(
+        settings,
+        MockBackend(
+            [
+                {"tool": "write_file", "args": {"path": "b.py", "content": "y = 1\n"}},
+                {"done": "two"},
+            ]
+        ),
+        cwd=repo,
+    )
+    outcome = run(second.run("second edit"))
+    assert outcome.code is TerminalCode.COMPLETED
+    # run 1's work was stashed by run 2's net (the documented default)
+    stashes = subprocess.run(
+        [GIT, "stash", "list"], cwd=repo, capture_output=True, text=True
+    ).stdout
+    assert "pxx safety net" in stashes
+    assert "+stash" in outcome.summary
+
+
+@needs_git
+def test_auto_commit_never_sweeps_preexisting_dirt(tmp_path):
+    """Secondary B: with safety_net=False and pre-existing dirt (.env, WIP
+    notes), the auto-commit stages ONLY the session's own delta."""
+    from dataclasses import replace as _replace
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    (repo / "a.py").write_text("x = 1\n")
+    _git(repo, "add", "-A")
+    _git(repo, "-c", "user.name=t", "-c", "user.email=t@e.c", "commit", "-q", "-m", "init")
+    # pre-existing dirt the agent must NOT sweep in
+    (repo / ".env").write_text("SECRET=hunter2\n")
+    (repo / "wip_notes.txt").write_text("my scratch work\n")
+
+    settings = _replace(_settings(tmp_path), auto_commit=True, safety_net=False)
+    backend = MockBackend(
+        [
+            {"tool": "write_file", "args": {"path": "a.py", "content": "x = 2\n"}},
+            {"done": "edited"},
+        ]
+    )
+    session = Session(settings, backend, cwd=repo)
+    outcome = run(session.run("update a.py"))
+    assert outcome.code is TerminalCode.COMPLETED
+    committed = subprocess.run(
+        [GIT, "show", "--format=", "--name-only", "HEAD"],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+    ).stdout.split()
+    assert committed == ["a.py"]
+    assert ".env" not in committed and "wip_notes.txt" not in committed
+    # the dirt is still there, untouched
+    assert (repo / ".env").read_text() == "SECRET=hunter2\n"
+    assert (repo / "wip_notes.txt").read_text() == "my scratch work\n"
+
+
+@needs_git
+@pytest.mark.parametrize("name", ["plain.py", "two words.py", "café.py"])
+def test_auto_commit_includes_all_filename_shapes(tmp_path, name):
+    """Item 1 round 3: the commit path (worktree delta) commits every
+    filename shape — NUL-parsed, never silently skipped."""
+    from dataclasses import replace as _replace
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    (repo / "a.py").write_text("x = 1\n")
+    _git(repo, "add", "-A")
+    _git(repo, "-c", "user.name=t", "-c", "user.email=t@e.c", "commit", "-q", "-m", "init")
+
+    settings = _replace(_settings(tmp_path), auto_commit=True)
+    backend = MockBackend(
+        [
+            {"tool": "write_file", "args": {"path": name, "content": "def f():\n    return 1\n"}},
+            {"done": "created"},
+        ]
+    )
+    session = Session(settings, backend, cwd=repo)
+    outcome = run(session.run(f"create {name}"))
+    assert outcome.code is TerminalCode.COMPLETED
+    committed = subprocess.run(
+        [GIT, "show", "--format=", "--name-only", "-z", "HEAD"],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+    ).stdout.split("\0")
+    assert name in committed
+
+
+@needs_git
+def test_auto_commit_fails_closed_when_snapshot_unavailable(tmp_path, monkeypatch, caplog):
+    """Item 2: when the worktree snapshot cannot be computed, the commit is
+    SKIPPED with a warning — never a fall-through to git add -A."""
+    from dataclasses import replace as _replace
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    (repo / "a.py").write_text("x = 1\n")
+    _git(repo, "add", "-A")
+    _git(repo, "-c", "user.name=t", "-c", "user.email=t@e.c", "commit", "-q", "-m", "init")
+    (repo / ".env").write_text("SECRET=hunter2\n")
+
+    async def _no_snapshot(cwd):
+        return None
+
+    monkeypatch.setattr("pxx.worktree.worktree_snapshot", _no_snapshot)
+    settings = _replace(_settings(tmp_path), auto_commit=True, safety_net=False)
+    backend = MockBackend(
+        [
+            {"tool": "write_file", "args": {"path": "a.py", "content": "x = 2\n"}},
+            {"done": "edited"},
+        ]
+    )
+    session = Session(settings, backend, cwd=repo)
+    outcome = run(session.run("update a.py"))
+    assert outcome.code is TerminalCode.COMPLETED
+    assert "[committed" not in outcome.summary
+    head = subprocess.run(
+        [GIT, "log", "--format=%s"], cwd=repo, capture_output=True, text=True
+    ).stdout
+    assert "pxx:" not in head  # nothing committed
+    assert (repo / ".env").read_text() == "SECRET=hunter2\n"  # dirt unswept

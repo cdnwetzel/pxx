@@ -215,17 +215,20 @@ async def _git(cwd: Path, *args: str, stdin_text: str | None = None) -> tuple[in
     return proc.returncode or 0, out.decode(errors="replace")
 
 
-async def _merge_node(root: Path, worktree: Path, node_id: str) -> tuple[bool, str]:
+async def _merge_node(root: Path, worktree: Path, node_id: str, base_sha: str) -> tuple[bool, str]:
     """Apply one node's worktree changes to the main tree.
 
-    Collects the FULL change set vs HEAD (committed + staged + new files)
-    with rename detection off, then ``git apply``s it to the root. A failed
-    apply is a CONFLICT — caught here, never silently clobbered.
+    Diffs against the MERGE BASE (the root's HEAD when the worktree was
+    created), not the worktree's HEAD — so work the node COMMITTED inside
+    its worktree (aider auto-commit, a settings propagation bug) is still
+    carried back. A node commit can no longer empty the patch (P0-2).
+    Rename detection off; a failed apply is a CONFLICT, never silently
+    clobbered.
     """
     rc, out = await _git(worktree, "add", "-A")
     if rc != 0:
         return False, f"git add failed in {node_id}: {out[:200]}"
-    rc, patch = await _git(worktree, "diff", "--cached", "--no-renames", "HEAD")
+    rc, patch = await _git(worktree, "diff", "--cached", "--no-renames", base_sha)
     if rc != 0:
         return False, f"git diff failed in {node_id}: {patch[:200]}"
     if not patch.strip():
@@ -279,6 +282,10 @@ async def run_goal(
     # fast-path guard only when no git isolation exists.
     isolated = (root / ".git").exists()
     worktrees: dict[str, Path] = {}
+    base_sha = ""
+    if isolated:
+        rc, out = await _git(root, "rev-parse", "HEAD")
+        base_sha = out.strip() if rc == 0 else ""
     if isolated:
         from .improve.scheduler import candidate_worktree
 
@@ -307,10 +314,14 @@ async def run_goal(
     async def _run_node(node: GoalTask) -> RunOutcome:
         # The node verifier is the node's own test_command only; the
         # settings-level command is reserved for the final integration run.
+        # auto_commit is forced OFF (mirror run_loop's round_settings): a
+        # node committing inside its detached worktree leaves nothing for the
+        # integration merge to carry back — silent total work loss (P0-2).
         node_settings = replace(
             settings,
             scope=(node.scope,) if node.scope else (),
             test_command=node.test_command,
+            auto_commit=False,
         )
         node_cwd = root
         if isolated:
@@ -375,7 +386,7 @@ async def run_goal(
         for t in tasks:
             if t.id not in worktrees:
                 continue
-            ok, detail = await _merge_node(root, worktrees[t.id], t.id)
+            ok, detail = await _merge_node(root, worktrees[t.id], t.id, base_sha)
             if not ok:
                 merge_conflict = detail
                 await _emit(bus, "goal_node", {"task": t.id, "status": "merge_conflict"})

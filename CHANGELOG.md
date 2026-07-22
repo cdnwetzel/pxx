@@ -3,7 +3,22 @@
 All notable changes to pxx are documented here. The 1.x series history is
 preserved in git (tag `v1.3.3` and earlier).
 
-## [Unreleased]
+## [2.0.1] — 2026-07-22
+
+### Added
+
+- **`pxx review [--staged|--since SHA]`**: read-only review of the current
+  diff (working tree, staged, or since a commit) through the production
+  review machinery — evidence-linked findings, advisory mode, exit 0 on
+  APPROVE/NO_REVIEW and 2 on REVISE. No session, no tools, no writes.
+  The legacy `pxx --review` flag maps to it (deprecated, with a notice).
+- **`--commit` (edit/run/loop; intentionally inert on `goal` nodes —
+  their work merges back first)**: opt-in auto-commit of a COMPLETED run's
+  work (`pxx: <task preview> [net: <tag>]`). The default stays
+  review-before-commit; the `pxx-pre/<ts>` safety tag still points at the
+  pre-session HEAD, so undo is unchanged. Loops commit once at the end of a
+  completed loop, never per round. Also configurable via `auto_commit` /
+  `PXX_AUTO_COMMIT`.
 
 B10 — orchestration & event fidelity (roadmap phases 22 + 10.8):
 

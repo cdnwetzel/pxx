@@ -327,3 +327,97 @@ def build_healing_prompt(
         "Do not refactor unrelated code. All findings must be resolved.",
     ]
     return "\n".join(lines)
+
+
+def collect_review_diff(
+    root: Path, *, staged: bool = False, since: str = ""
+) -> tuple[str, list[str]]:
+    """Collect the diff to review, with rename detection OFF (M0 F3).
+
+    Default: working tree vs HEAD (INCLUDING untracked files as new-file
+    diffs — a session that only created files still has reviewable work).
+    ``staged``: the index vs HEAD. ``since``: working tree vs ``<sha>``
+    (committed AND uncommitted work since that commit). Fail-closed: not a
+    git repo or any git error raises PxxError — never silently review an
+    empty/incorrect diff.
+
+    Returns ``(diff, dropped)``: the diff text and the list of untracked
+    files DROPPED by the governance scan (their contents never reach the
+    reviewer endpoint).
+    """
+    import subprocess
+
+    def _run(args: list[str]) -> subprocess.CompletedProcess[str]:
+        try:
+            return subprocess.run(
+                args, cwd=root, capture_output=True, text=True, timeout=30, check=False
+            )
+        except OSError as exc:
+            raise PxxError(f"review: cannot read git diff in {root}: {exc}") from exc
+
+    args = ["git", "diff", "--no-renames"]
+    if staged:
+        args.append("--cached")
+    elif since:
+        args.append(since)
+    else:
+        args.append("HEAD")
+    proc = _run(args)
+    if proc.returncode != 0:
+        detail = (proc.stderr or "").strip().splitlines()
+        reason = detail[0] if detail else f"git exited {proc.returncode}"
+        raise PxxError(f"review: cannot read git diff in {root}: {reason}")
+    diff = proc.stdout
+
+    # Untracked files: git diff ignores them, so a new-files-only change
+    # would otherwise report "nothing to review" (the common post-session
+    # shape). Append each as a proper new-file diff via --no-index — but run
+    # the governance scan first: a tripped file (secret/PII/denylist) is
+    # DROPPED, never uploaded to the reviewer endpoint.
+    dropped: list[str] = []
+    if not staged:
+        from .governance import load_denylist, scan_text
+
+        paths = untracked_paths_sync(root)
+        denylist = load_denylist()
+        for rel in paths:
+            try:
+                content = (root / rel).read_text(errors="replace")
+            except OSError:
+                dropped.append(rel)  # unreadable: exclude, but VISIBLY
+                continue
+            if scan_text(content, path=rel, denylist=denylist):
+                dropped.append(rel)  # tripped the gate: never uploaded
+                continue
+            new_file = _run(
+                [
+                    "git",
+                    "-c",
+                    "core.quotePath=false",
+                    "diff",
+                    "--no-index",
+                    "--no-renames",
+                    "/dev/null",
+                    rel,
+                ]
+            )
+            if new_file.returncode in (0, 1):  # 1 = differences (expected)
+                diff += new_file.stdout
+    return diff, dropped
+
+
+def untracked_paths_sync(root: Path) -> list[str]:
+    """Synchronous wrapper for the async worktree.untracked_paths helper
+    (collect_review_diff is sync). Returns [] on failure (fail soft: the
+    tracked diff still reviews).
+
+    WARNING: uses asyncio.run internally — only call from SYNC contexts
+    (raises RuntimeError inside a running event loop). Today the only
+    caller is _cmd_review (sync); async callers must await
+    worktree.untracked_paths directly.
+    """
+    import asyncio
+
+    from .worktree import untracked_paths
+
+    return asyncio.run(untracked_paths(root)) or []

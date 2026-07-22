@@ -74,10 +74,16 @@ pxx doctor                          # check your setup
 
 pxx ask -m "Explain main.py"        # read-only (default): no writes, no shell
 pxx edit -m "Add error handling to main.py"   # writes allowed, in scope
+pxx edit --commit -m "…"            # + commit the change on COMPLETED (opt-in)
 pxx run  -m "Add tests for utils.py"          # unattended, budget-capped
 pxx loop -m "Fix the failing tests" --scope src  # bounded edit→test→review loop
 pxx chat                            # interactive session
 ```
+
+Edits land **uncommitted** by default so you can review them first — pass
+`--commit` (or `PXX_AUTO_COMMIT=1` / `auto_commit = true`) to have a COMPLETED
+run commit its work. The `pxx-pre/<ts>` safety tag always points at the
+pre-session HEAD, so undo is `git reset --hard <tag>` either way.
 
 Permission modes: **ask** (read-only) → **plan** (plan only) → **edit** (writes in
 scope, shell via hooks) → **auto** (unattended, budgets enforced). Every run is
@@ -157,6 +163,7 @@ Beyond the everyday verbs (`ask`/`edit`/`plan`/`run`/`loop`/`chat`):
 ```sh
 pxx check [--all-files]   # secret/PII scan — staged files, or all tracked files
 pxx upgrade               # upgrade the pxx install in place
+pxx review [--staged|--since SHA]  # read-only review of the current diff (exit 2 on REVISE)
 pxx doctor                # diagnose setup (endpoints, backend, memory, config)
 pxx audit verify <path>   # verify a hash-chained audit log
 ```

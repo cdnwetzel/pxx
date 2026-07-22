@@ -345,7 +345,7 @@ Self-improvement verbs (see DESIGN-ROADMAP.md "### CLI additions"):
 `metrics {summary,failures,memory-impact,export}`, `eval {run,self-check,report}`,
 `calibrate`, `improve {analyze,clusters,proposals,cycle}`, `propose`,
 `compare`, `agent {activate,rollback,history,channels}`, `promote`,
-`check [--all-files]`, `goal`, `workflow {validate}`, `context {audit}`,
+`check [--all-files]`, `goal`, `review [--staged|--since]`, `workflow {validate}`, `context {audit}`,
 `docs {check}`. Fail-closed verdicts exit 2; usage errors
 (unknown command, empty task, invalid candidate, missing evidence/approver,
 empty corpus) exit 64 — CI keying "2 = a gate fired" can rely on the split.

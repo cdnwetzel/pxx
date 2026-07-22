@@ -61,6 +61,7 @@ SUBCOMMANDS = (
     "promote",
     "check",
     "goal",
+    "review",
     "workflow",
     "context",
     "docs",
@@ -142,6 +143,9 @@ def _compat_rewrite(argv: list[str]) -> list[str]:
             continue  # memory is default-on in 2.0; no service needed
         elif token == "--doctor":
             return ["doctor"]
+        elif token == "--review":
+            print("pxx: --review is deprecated; mapping to `pxx review`", file=sys.stderr)
+            return ["review"]
         elif token == "--self-test":
             print("pxx: --self-test is deprecated; mapping to `pxx run`", file=sys.stderr)
             return ["run", "-m", _SELF_TEST_TASK]
@@ -172,6 +176,11 @@ def _add_run_options(parser: argparse.ArgumentParser, *, files: bool = True) -> 
     parser.add_argument("--budget-diff-lines", type=int, help="max diff lines")
     parser.add_argument("--no-memory", action="store_true", help="disable memory")
     parser.add_argument("--sandbox", action="store_true", help="sandbox shell commands")
+    parser.add_argument(
+        "--commit",
+        action="store_true",
+        help="commit the session's work on COMPLETED (undo still: git reset --hard <net tag>)",
+    )
     parser.add_argument(
         "--with-mcp",
         action="append",
@@ -401,6 +410,17 @@ def _build_parser() -> argparse.ArgumentParser:
     goal = sub.add_parser("goal", help="decompose a goal into a task DAG and run it")
     _add_run_options(goal, files=False)
 
+    review = sub.add_parser(
+        "review", help="read-only review of the current diff (exit 2 on REVISE)"
+    )
+    review_source = review.add_mutually_exclusive_group()
+    review_source.add_argument(
+        "--staged", action="store_true", help="review the staged diff instead of the working tree"
+    )
+    review_source.add_argument(
+        "--since", metavar="SHA", help="review the working tree against this commit"
+    )
+
     workflow = sub.add_parser("workflow", help="inspect the WORKFLOW.md contract")
     wf_sub = workflow.add_subparsers(dest="workflow_command", required=True)
     wf_sub.add_parser("validate", help="validate WORKFLOW.md (exit 2 on failure)")
@@ -469,6 +489,8 @@ def _cli_overrides(args: argparse.Namespace, permission: PermissionMode) -> dict
         overrides["memory_enabled"] = False
     if args.sandbox:
         overrides["sandbox_shell"] = True
+    if getattr(args, "commit", False):
+        overrides["auto_commit"] = True
     if args.with_mcp:
         specs = []
         for item in args.with_mcp:
@@ -1678,6 +1700,39 @@ def _cmd_check(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_review(args: argparse.Namespace) -> int:
+    """Read-only review of the current diff — no Session, no tools, no writes."""
+    from .review import NativeReviewer, ReviewMode, Verdict, collect_review_diff, review_changes
+
+    diff, dropped = collect_review_diff(
+        Path.cwd(), staged=bool(args.staged), since=args.since or ""
+    )
+    for rel in dropped:
+        print(
+            f"pxx review: excluded {rel} (governance scan tripped; not uploaded)",
+            file=sys.stderr,
+        )
+    if not diff.strip():
+        print("pxx: usage: no diff to review (tree is clean)", file=sys.stderr)
+        return EXIT_USAGE
+    settings = load_settings(Path.cwd())
+    result = asyncio.run(
+        review_changes(
+            diff,
+            "Review the current diff for correctness, risks, and missing tests.",
+            NativeReviewer(settings.model),
+            ReviewMode.ADVISORY,
+        )
+    )
+    print(f"verdict: {result.verdict}")
+    for finding in result.findings:
+        loc = finding.file + (f":{finding.line}" if finding.line is not None else "")
+        print(f"{finding.id} [{finding.severity}] {loc} — {finding.message}")
+    if result.review_error:
+        print(f"pxx: review degraded: {result.review_error} (advisory)", file=sys.stderr)
+    return 2 if result.verdict is Verdict.REVISE else 0
+
+
 def _cmd_workflow(args: argparse.Namespace) -> int:
     from .errors import ConfigError
     from .workflow import load_workflow
@@ -1894,6 +1949,8 @@ def main(argv: list[str] | None = None) -> int:
             return _cmd_check(args)
         if command == "goal":
             return _cmd_goal(args, unknown)
+        if command == "review":
+            return _cmd_review(args)
         if command == "workflow":
             return _cmd_workflow(args)
         if command == "context":

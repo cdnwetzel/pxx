@@ -324,6 +324,36 @@ class Session:
                     net_suffix += "+stash"
                 outcome = replace(outcome, summary=f"{outcome.summary} [net: {net_suffix}]")
 
+            # Opt-in: commit the session's work after a COMPLETED outcome.
+            # The net tag still points at pre-session HEAD — undo unchanged.
+            if settings.auto_commit and outcome.code is TerminalCode.COMPLETED:
+                from .safety_net import commit_session_work
+
+                sha = None
+                if worktree_start is None:
+                    # Fail CLOSED: the delta is unknown, so add -A would sweep
+                    # pre-existing dirt (.env, WIP notes). Skip the commit;
+                    # the tree is recoverable, a bad commit is not.
+                    log.warning(
+                        "auto-commit skipped: worktree snapshot unavailable "
+                        "(not a git repo or git failed) — nothing committed"
+                    )
+                else:
+                    changed, _ = await self._worktree_delta(worktree_start)
+                    sha = await commit_session_work(
+                        self.cwd,
+                        task_preview=task,
+                        net_tag=self._net.tag if self._net else None,
+                        only=set(changed),
+                    )
+                if sha:
+                    await self.bus.emit(
+                        "observation",
+                        {"source": "auto_commit", "sha": sha},
+                        session_id=self.session_id,
+                    )
+                    outcome = replace(outcome, summary=f"{outcome.summary} [committed {sha[:8]}]")
+
             await self.bus.emit(
                 "session_end",
                 {
@@ -618,54 +648,19 @@ class Session:
         return stdout.decode(errors="replace")
 
     async def _worktree_snapshot(self) -> dict | None:
-        """Worktree state for mutation reporting; None without git.
+        """Worktree state for mutation reporting (delegates to pxx.worktree —
+        the single implementation of "what did this run change", shared with
+        run_loop)."""
+        from .worktree import worktree_snapshot
 
-        Tracks two channels: tracked-vs-HEAD diff volume (``--numstat``)
-        and untracked-file content fingerprints. A session's mutations are
-        the delta between two snapshots — pre-existing dirt is excluded.
-        """
-        status = await self._git_text("status", "--porcelain=v1", "--untracked-files=all")
-        if status is None:
-            return None
-        untracked: dict[str, str | None] = {}
-        for line in status.splitlines():
-            if line[:2] == "??":
-                rel = line[3:]
-                untracked[rel] = _sha256_file(self.cwd / rel)
-        numstat: dict[str, int] = {}
-        diff = await self._git_text("diff", "HEAD", "--numstat")
-        for line in (diff or "").splitlines():
-            parts = line.split("\t")
-            if len(parts) == 3:
-                adds, dels, rel = parts
-                numstat[rel] = (int(adds) if adds.isdigit() else 0) + (
-                    int(dels) if dels.isdigit() else 0
-                )
-        return {"untracked": untracked, "numstat": numstat}
+        return await worktree_snapshot(self.cwd)
 
     async def _worktree_delta(self, start: dict) -> tuple[list[str], int]:
-        """(paths changed since ``start``, diff lines) — uncommitted included."""
-        now = await self._worktree_snapshot()
-        if now is None:
-            return [], 0
-        changed: list[str] = []
-        diff_lines = 0
-        for rel, lines in now["numstat"].items():
-            base = start["numstat"].get(rel)
-            if base is None:
-                changed.append(rel)
-                diff_lines += lines
-            elif lines != base:
-                changed.append(rel)
-                diff_lines += max(0, lines - base)
-        for rel, fingerprint in now["untracked"].items():
-            if start["untracked"].get(rel) != fingerprint:
-                changed.append(rel)
-                try:
-                    diff_lines += len((self.cwd / rel).read_bytes().splitlines())
-                except OSError:
-                    pass
-        return changed, diff_lines
+        """(paths changed since ``start``, diff lines) — uncommitted included.
+        Delegates to pxx.worktree."""
+        from .worktree import worktree_delta
+
+        return await worktree_delta(self.cwd, start)
 
     async def _report_worktree_mutations(
         self, start: dict | None, outcome: RunOutcome

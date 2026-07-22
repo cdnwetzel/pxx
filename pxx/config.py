@@ -68,6 +68,7 @@ class Settings:
     sandbox_shell: bool = False
     mcp_servers: tuple[McpServerSpec, ...] = ()
     safety_net: bool = True  # K5: stash + pxx-pre/<ts> tag on edit-capable starts
+    auto_commit: bool = False  # opt-in: commit session work on COMPLETED (the undo tag still points at pre-session HEAD)
 
 
 _USER_CONFIG = Path("~/.config/pxx/config.toml").expanduser()
@@ -90,6 +91,7 @@ _KNOWN_KEYS = {
     "test_command",
     "sandbox_shell",
     "safety_net",
+    "auto_commit",
     "budgets",
     "hooks",
     "mcp_servers",
@@ -176,6 +178,8 @@ def _settings_from_dict(data: dict[str, Any], base: Settings, source: str) -> Se
         kwargs["sandbox_shell"] = bool(data["sandbox_shell"])
     if "safety_net" in data:
         kwargs["safety_net"] = bool(data["safety_net"])
+    if "auto_commit" in data:
+        kwargs["auto_commit"] = bool(data["auto_commit"])
     if "budgets" in data:
         b = data["budgets"]
         unknown = set(b) - _KNOWN_BUDGET_KEYS
@@ -225,6 +229,7 @@ _ENV_MAP = {
     "PXX_PERMISSION": "permission",
     "PXX_TEST_COMMAND": "test_command",
     "PXX_SANDBOX_SHELL": "sandbox_shell",
+    "PXX_AUTO_COMMIT": "auto_commit",
     # 1.x compat
     "PXX_OLLAMA_BASE": "base_url",
     "PXX_OLLAMA_MODEL": "model",
@@ -237,6 +242,8 @@ def _settings_from_env(base: Settings) -> Settings:
         value = os.environ.get(env_key)
         if value:
             if cfg_key == "sandbox_shell":
+                data[cfg_key] = value.lower() in ("1", "true", "yes")
+            elif cfg_key == "auto_commit":
                 data[cfg_key] = value.lower() in ("1", "true", "yes")
             else:
                 data[cfg_key] = value

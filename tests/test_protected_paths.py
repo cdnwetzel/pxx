@@ -153,3 +153,24 @@ def test_root_escape_fails_closed():
 def test_nul_and_bare_dot_fail_closed():
     assert is_protected_path("pxx/\x00loop.py")
     assert is_protected_path(".")
+
+
+# --- A2: case-insensitive volumes must not bypass the deny predicate ------------------
+
+
+def test_protected_paths_match_case_insensitively() -> None:
+    """A2: on macOS/Windows, PXX/safety.py IS pxx/safety.py — the deny
+    predicate must fire for every spelling."""
+    for protected in (
+        "pxx/safety.py",
+        "pxx/eval/harness.py",
+        "evals/micro/x.toml",
+        "pxx/improve/promotion.py",
+    ):
+        for variant in {protected, protected.upper(), protected.title()}:
+            assert is_protected_path(variant), variant
+
+
+def test_casefold_still_allows_normal_paths() -> None:
+    assert not is_protected_path("src/main.py")
+    assert not is_protected_path("SRC/MAIN.PY")

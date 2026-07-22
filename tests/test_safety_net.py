@@ -251,3 +251,34 @@ def test_loop_commit_excludes_baseline_dirt_and_keeps_trap_file(tmp_path: Path) 
     assert ".env" not in committed and "wip.txt" not in committed
     assert (repo / ".env").read_text() == "SECRET=hunter2\n"
     assert (repo / "wip.txt").read_text() == "scratch\n"
+
+
+@needs_git
+def test_commit_uses_repo_identity_when_configured(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    _init_repo(repo, files={"a.py": "x = 1\n"})
+    _git(repo, "config", "user.name", "Repo Owner")
+    _git(repo, "config", "user.email", "owner@example.com")
+    (repo / "a.py").write_text("x = 2\n")
+    sha = run(commit_session_work(repo, task_preview="x", net_tag=None))
+    assert sha
+    assert _git(repo, "log", "-1", "--format=%an") == "Repo Owner"
+
+
+@needs_git
+def test_commit_falls_back_to_pxx_identity_when_unconfigured(tmp_path: Path, monkeypatch) -> None:
+    """07321d6: identity-less runners (CI, the 7960) must still get a commit —
+    with an explicit pxx[bot] author, not a failure."""
+    repo = tmp_path / "repo"
+    _init_repo(repo, files={"a.py": "x = 1\n"})
+    # no local config; strip global config + env identity
+    empty_home = tmp_path / "home"
+    empty_home.mkdir()
+    monkeypatch.setenv("HOME", str(empty_home))
+    for var in ("GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL"):
+        monkeypatch.delenv(var, raising=False)
+    (repo / "a.py").write_text("x = 2\n")
+    sha = run(commit_session_work(repo, task_preview="x", net_tag=None))
+    assert sha
+    assert _git(repo, "log", "-1", "--format=%an") == "pxx[bot]"
+    assert _git(repo, "log", "-1", "--format=%ae") == "pxx[bot]@localhost"

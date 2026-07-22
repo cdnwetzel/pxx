@@ -214,3 +214,69 @@ def test_resolve_profile_reads_workflow(tmp_path: Path) -> None:
     )
     profile = resolve_profile(tmp_path)
     assert profile.allowed(PermissionMode.ASK) == frozenset({"read", "network"})
+
+
+# --- A0: protected paths are human-only — write denied in every mode --------------
+
+
+def test_protected_write_denied_in_all_permission_modes(tmp_path: Path) -> None:
+    """A0: the trusted control plane is human-only. A label is not a gate."""
+    from pxx.broker import ActionClass, RiskTier, ToolAction
+
+    broker = ActionBroker(PermissionProfile.defaults())
+    action = ToolAction(
+        tool_name="write_file",
+        args={"path": "pxx/safety.py", "content": "x"},
+        targets=("pxx/safety.py",),
+        action_class=ActionClass.WRITE,
+        mutating=True,
+        risk_tier=RiskTier.HIGH,
+    )
+    for mode in (PermissionMode.ASK, PermissionMode.PLAN):
+        # read-only modes: the write-class denial fires before the protected
+        # check — also ScopeViolation, different reason
+        with pytest.raises(ScopeViolation, match="not permitted"):
+            run(broker.authorize(action, make_ctx(tmp_path, mode)))
+    for mode in (PermissionMode.EDIT, PermissionMode.AUTO):
+        # write-capable modes: the PROTECTED-PATH gate is what stops it
+        bus = EventBus()
+        with pytest.raises(ScopeViolation, match="protected path"):
+            run(broker.authorize(action, make_ctx(tmp_path, mode, bus=bus)))
+        denial = bus.history[-1]
+        assert denial.kind == "policy_decision"
+        assert denial.data["allowed"] is False
+
+
+def test_evidence_plane_write_denied(tmp_path: Path) -> None:
+    """The .pxx evidence plane (promotion records, config) is protected too."""
+    from pxx.broker import ActionClass, RiskTier, ToolAction
+
+    broker = ActionBroker(PermissionProfile.defaults())
+    for target in ("pxx.toml", ".pxx/config.toml", ".pxx/promotions/x.json"):
+        action = ToolAction(
+            tool_name="write_file",
+            args={"path": target, "content": "x"},
+            targets=(target,),
+            action_class=ActionClass.WRITE,
+            mutating=True,
+            risk_tier=RiskTier.HIGH,
+        )
+        with pytest.raises(ScopeViolation, match="protected path"):
+            run(broker.authorize(action, make_ctx(tmp_path, PermissionMode.AUTO)))
+
+
+def test_optimizer_work_products_stay_writable(tmp_path: Path) -> None:
+    """Candidate content and skills are the optimizer's own plane — allowed."""
+    from pxx.broker import ActionClass, RiskTier, ToolAction
+
+    broker = ActionBroker(PermissionProfile.defaults())
+    action = ToolAction(
+        tool_name="write_file",
+        args={"path": ".pxx/skills/notes.md", "content": "x"},
+        targets=(".pxx/skills/notes.md",),
+        action_class=ActionClass.WRITE,
+        mutating=True,
+        risk_tier=RiskTier.MEDIUM,
+    )
+    decision = run(broker.authorize(action, make_ctx(tmp_path, PermissionMode.AUTO)))
+    assert decision.allowed

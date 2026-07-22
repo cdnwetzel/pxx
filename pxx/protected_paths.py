@@ -32,6 +32,30 @@ PROTECTED_PREFIXES: tuple[str, ...] = (
     "pxx/protected_paths.py",
     # The repository-owned workflow contract itself.
     "WORKFLOW.md",
+    # pxx's OWN project config. These keys reach an exec path with no broker
+    # and no PreToolUse hook: `test_command` -> loop.py _run_tests
+    # (create_subprocess_shell), `hooks` -> safety.py HookRunner
+    # (create_subprocess_exec -- i.e. the gate command itself), and
+    # `mcp_servers` -> a spawned stdio subprocess. Unprotected, a model edit in
+    # run N wrote the command run N+1 executed. Same primitive as .vscode/
+    # tasks.json or direnv: a file in the tree that becomes execution later.
+    # Scoped to the two _PROJECT_CONFIGS paths ONLY -- a blanket ".pxx/" would
+    # also protect .pxx/skills/**, which the optimizer plane must be able to
+    # write (candidate content is not an exec surface).
+    "pxx.toml",
+    ".pxx/config.toml",
+    # The .pxx EVIDENCE plane — records the machinery trusts (promotion/activation
+    # gates read these): forgeable only by the machinery, never by the model.
+    ".pxx/promotions/",
+    ".pxx/candidates/",
+    ".pxx/channels.json",
+    ".pxx/cycle-state.json",
+    ".pxx/cycle.lock",
+    ".pxx/cycle-report.json",
+    ".pxx/daemon-control.json",
+    ".pxx/daemon-status.json",
+    ".pxx/tasks.json",
+    ".pxx/inbox/",
     # Evaluation plane: evaluators, cases, hidden checks.
     "pxx/eval/",
     # Improvement plane policy: candidate validation, promotion, autopromote.
@@ -75,10 +99,16 @@ def is_protected_path(path: str | Path) -> bool:
     norm = posixpath.normpath(norm)
     if norm in ("", ".", "..") or norm.startswith(("../", "/")):
         return True
+    # Case-insensitive comparison: on macOS/Windows volumes PXX/safety.py IS
+    # pxx/safety.py — a deny predicate that compares case-sensitively fails
+    # open there. Over-protecting a genuinely distinct PXX/ dir on Linux is
+    # the safe direction for a deny predicate.
+    folded = norm.casefold()
     for prefix in PROTECTED_PREFIXES:
+        folded_prefix = prefix.casefold()
         if prefix.endswith("/"):
-            if norm == prefix[:-1] or norm.startswith(prefix):
+            if folded == folded_prefix[:-1] or folded.startswith(folded_prefix):
                 return True
-        elif norm == prefix:
+        elif folded == folded_prefix:
             return True
     return False

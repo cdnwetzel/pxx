@@ -12,6 +12,7 @@ Nothing here runs at import time.
 
 from __future__ import annotations
 
+import logging
 import os
 import tomllib
 from dataclasses import dataclass, field, replace
@@ -20,6 +21,8 @@ from typing import Any
 
 from .errors import ConfigError
 from .safety import Budgets, Hook, PermissionMode
+
+log = logging.getLogger("pxx.config")
 
 
 @dataclass(frozen=True)
@@ -130,7 +133,27 @@ def _read_toml(path: Path) -> dict[str, Any]:
     return data
 
 
-def _settings_from_dict(data: dict[str, Any], base: Settings, source: str) -> Settings:
+def _settings_from_dict(
+    data: dict[str, Any],
+    base: Settings,
+    source: str,
+    *,
+    allow_exec_surfaces: bool = True,
+) -> Settings:
+    """Merge one config source. ``allow_exec_surfaces=False`` (repo-local
+    project configs) means hook commands and MCP server definitions are
+    IGNORED with a loud warning: a file inside the edit surface must not be
+    able to define the gate that guards the edit surface (A0b)."""
+    for key in ("hooks", "mcp_servers"):
+        if key in data and not allow_exec_surfaces:
+            log.warning(
+                "ignoring %s in repo-local config %s (exec surfaces are honored "
+                "only from user config, env, or CLI — a repo must not define "
+                "the gate that guards it)",
+                key,
+                source,
+            )
+            data = {k: v for k, v in data.items() if k != key}
     kwargs: dict[str, Any] = {}
     model = base.model
     if "model" in data:
@@ -269,7 +292,9 @@ def load_settings(
     for name in _PROJECT_CONFIGS:
         path = root / name
         if path.is_file():
-            settings = _settings_from_dict(_read_toml(path), settings, str(path))
+            settings = _settings_from_dict(
+                _read_toml(path), settings, str(path), allow_exec_surfaces=False
+            )
     settings = _settings_from_env(settings)
     if cli_overrides:
         settings = _settings_from_dict(

@@ -220,6 +220,32 @@ class ActionBroker:
             else:
                 ctx.scope.check(target)
 
+        # Protected-path enforcement (A0): the trusted control plane is
+        # HUMAN-ONLY — a write-class action against a protected path is
+        # denied in EVERY permission mode, no matter what the profile allows.
+        # A risk-tier label is not a gate; this is the gate.
+        if action.mutating:
+            from .protected_paths import is_protected_path
+            from .safety import canonicalize
+
+            for target in action.targets:
+                canon = canonicalize(target, cwd=ctx.cwd)
+                try:
+                    rel = canon.relative_to(ctx.cwd)
+                except ValueError:
+                    continue  # outside the root: the scope gate owns that case
+                if is_protected_path(rel.as_posix()):
+                    decision = Decision(
+                        allowed=False,
+                        reason=(
+                            f"protected path (human-only control plane, "
+                            f"denied in every permission mode): {rel.as_posix()}"
+                        ),
+                        review_tier=RiskTier.HIGH,
+                    )
+                    await self._emit_decision(ctx, action, decision)
+                    raise ScopeViolation(decision.reason)
+
         # PreToolUse hooks are the deny substrate (HookDenied propagates).
         await ctx.hooks.run_pre(action.tool_name, action.args)
 

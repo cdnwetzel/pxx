@@ -81,19 +81,47 @@ def test_legacy_env_vars_compat(tmp_path, monkeypatch):
 
 
 def test_hooks_and_mcp_from_toml(tmp_path):
+    """A0b: repo-local pxx.toml hook commands and MCP server definitions are
+    IGNORED (loudly) — a file in the edit surface must not define the gate."""
     (tmp_path / "pxx.toml").write_text(
         '[[hooks]]\nevent = "PreToolUse"\ncommand = "/bin/true"\n'
         '[[mcp_servers]]\nname = "fs"\ncommand = ["npx", "-y", "@mcp/fs"]\n'
     )
     settings = load_settings(cwd=tmp_path)
+    assert settings.hooks == ()
+    assert settings.mcp_servers == ()
+
+
+def test_hooks_and_mcp_honored_from_user_config(tmp_path, monkeypatch):
+    """User-level config (~/.config/pxx) DOES define exec surfaces."""
+    user_config = tmp_path / "user.toml"
+    user_config.write_text(
+        '[[hooks]]\nevent = "PreToolUse"\ncommand = "/bin/true"\n'
+        '[[mcp_servers]]\nname = "fs"\ncommand = ["npx", "-y", "@mcp/fs"]\n'
+    )
+    monkeypatch.setattr("pxx.config._USER_CONFIG", user_config)
+    settings = load_settings(cwd=tmp_path / "proj")
     assert settings.hooks[0].event == "PreToolUse"
     assert settings.mcp_servers[0].command == ("npx", "-y", "@mcp/fs")
 
 
 def test_bad_hook_rejected(tmp_path):
+    """A malformed hook in a REPO config is ignored (section not honored);
+    the same hook in USER config still fails closed."""
     (tmp_path / "pxx.toml").write_text('[[hooks]]\nevent = "Sometimes"\ncommand = "x"\n')
-    with pytest.raises(ConfigError):
-        load_settings(cwd=tmp_path)
+    settings = load_settings(cwd=tmp_path)
+    assert settings.hooks == ()  # ignored, not validated — not honored at all
+
+    bad_user = tmp_path / "bad-user.toml"
+    bad_user.write_text('[[hooks]]\nevent = "Sometimes"\ncommand = "x"\n')
+    import pxx.config
+
+    pxx.config._USER_CONFIG = bad_user
+    try:
+        with pytest.raises(ConfigError):
+            load_settings(cwd=tmp_path / "proj")
+    finally:
+        pxx.config._USER_CONFIG = tmp_path / "nope-user.toml"
 
 
 def test_fallback_models(tmp_path):

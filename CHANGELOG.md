@@ -3,9 +3,27 @@
 All notable changes to pxx are documented here. The 1.x series history is
 preserved in git (tag `v1.3.3` and earlier).
 
-## [2.0.1] — 2026-07-22
+## [2.0.2] — 2026-07-22
 
-### Added
+### Added (security hardening)
+
+- **Protected paths are now enforced, not labeled**: the action broker
+  hard-denies write-class actions against `PROTECTED_PREFIXES` in every
+  permission mode (the trust plane is human-only; a risk-tier label was
+  never a gate). The protected set now includes `pxx.toml`,
+  `.pxx/config.toml`, and the `.pxx` evidence plane (promotions, candidates,
+  channels, cycle/daemon/task state, inbox) — while optimizer work products
+  (`.pxx/skills|fewshot|playbooks|demonstrations|worktrees`) stay writable.
+- **Repo-local hook commands and MCP server definitions are no longer
+  honored** from `pxx.toml` / `.pxx/config.toml` (ignored with a loud
+  warning): a file inside the edit surface cannot define the gate that
+  guards it. User-level config, env, and CLI still define them.
+- **`is_protected_path` is case-insensitive** (casefold comparison): on
+  macOS/Windows, `PXX/safety.py` no longer bypasses protection.
+- **End-to-end proof** of the repo-config exec hole (model writes pxx.toml
+  in run N, run N+1 executes its `test_command` with no broker/policy gate)
+  with a positive-control denial test pinning the fix.
+
 
 - **`pxx review [--staged|--since SHA]`**: read-only review of the current
   diff (working tree, staged, or since a commit) through the production

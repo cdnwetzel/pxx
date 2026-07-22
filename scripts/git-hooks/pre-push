@@ -1,0 +1,32 @@
+#!/bin/sh
+# pxx_ng pre-push hook: block the push when format or lint would fail CI.
+# The release pipeline runs these exact lines; the hook makes the local
+# push fail BEFORE the red run, not after. Install: scripts/install-git-hooks.sh
+set -eu
+cd "$(git rev-parse --show-toplevel)"
+
+echo "pre-push: ruff check + format --check …"
+if [ -x .venv/bin/ruff ]; then
+    RUFF=.venv/bin/ruff
+elif command -v uv >/dev/null 2>&1; then
+    RUFF="uv run ruff"
+else
+    # Fail CLOSED (this is a gate, not telemetry): a silently passing hook in a
+    # no-ruff environment is exactly the state that produces an unformatted push.
+    # NOTE: this branch is REVIEWED, NOT PROVEN — every machine in the current
+    # loop has uv on PATH, so it has never fired in a live push (2026-07-22).
+    echo "pre-push: no ruff found (.venv/bin/ruff or uv) — refusing to push blind."
+    echo "  set up the venv: uv venv && uv pip install -e '.[dev,server]'"
+    echo "  or bypass once, deliberately: git push --no-verify"
+    exit 1
+fi
+
+$RUFF check pxx tests >/dev/null || {
+    echo "pre-push: ruff check failed — fix before pushing (run: $RUFF check pxx tests)"
+    exit 1
+}
+$RUFF format --check pxx tests >/dev/null || {
+    echo "pre-push: ruff format --check failed — run: $RUFF format pxx tests"
+    exit 1
+}
+echo "pre-push: lint + format clean"

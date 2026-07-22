@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pxx-orchestrator"
-version = "2.0.1"
+version = "2.0.2"
 description = "Local-first AI coding agent runtime: async backends (native + aider), persistent memory, MCP, fail-closed safety gates."
 readme = "README.md"
 license = { text = "MIT" }

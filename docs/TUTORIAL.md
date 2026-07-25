@@ -22,7 +22,7 @@ your control.
 > ⚠️ **Safety** (read these).
 
 > ### ⏩ Fast track (comfortable with agents + the terminal?)
-> `bash setup-pxx-quickstart.sh` → `uv tool install --python 3.12 pxx-orchestrator` →
+> `bash setup-pxx-quickstart.sh` → `uv tool install -U --python 3.12 pxx-orchestrator` →
 > `uv tool install pytest` → `pxx edit --commit -m "fix celsius_to_fahrenheit"` →
 > `pxx edit --commit --scope . -m "implement fahrenheit_to_celsius"` → `pxx review` →
 > `pxx edit --commit --scope . -m "implement convert() and a CLI in main()"`.
@@ -61,7 +61,7 @@ the net (**F** — your work is stashed and the start is tagged). You'll feel bo
 Install pxx, then scaffold the throwaway project:
 
 ```sh
-uv tool install --python 3.12 pxx-orchestrator   # the command is `pxx` (2.x)
+uv tool install -U --python 3.12 pxx-orchestrator   # the command is `pxx` (2.x)
 uv tool install pytest                           # the tutorial scores you with pytest
 curl -fsSLO https://raw.githubusercontent.com/cdnwetzel/pxx/v2/scripts/setup-pxx-quickstart.sh
 bash setup-pxx-quickstart.sh && cd pxx-quickstart
@@ -268,8 +268,13 @@ When running 'python converter.py 100 C F', it will:
 > 🟣 **Go deeper** `pxx loop -m "make the failing tests pass" --scope .` runs bounded autonomous
 > rounds (edit → test → review) — in 2.x it works in **any** repo, and it verifies each round with
 > your test command (set `PXX_TEST_COMMAND="pytest -q"` or `test_command` in config). It's the
-> hands-off version of what you just did by hand; budget-capped so it can't run away. For everyday
-> work, `edit` + `review` is the bread and butter.
+> hands-off version of what you just did by hand; budget-capped so it can't run away. Real output
+> from handing this exact sandbox's last red test to `pxx loop` (same model and machine as Level 3):
+> ```
+> [COMPLETED] completed in 1 round(s); tests passed [net: pxx-pre/20260725T201331Z]
+> ```
+> One round, self-verified against pytest. For everyday work, `edit` + `review` is still the bread
+> and butter.
 > ✅ **Checkpoint** All tests green and `python converter.py 100 C F` → `212.0`. **You built it.**
 
 ---

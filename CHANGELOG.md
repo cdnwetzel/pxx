@@ -3,6 +3,22 @@
 All notable changes to pxx are documented here. The 1.x series history is
 preserved in git (tag `v1.3.3` and earlier).
 
+## [2.1.0] — 2026-07-25
+
+### Added
+
+- **`PXX_NATIVE_TIMEOUT`**: the native backend's per-round HTTP timeout is
+  now configurable via env var (default unchanged: 300s). Rounds against
+  local models on memory-constrained hardware can legitimately exceed 300s,
+  and the resulting `ReadTimeout` surfaced as a misleading
+  `MODEL_UNAVAILABLE`. Unset, malformed, and non-positive/NaN values fall
+  back to the default; an explicit constructor argument wins over the env.
+- **Hands-on tutorial** (`docs/TUTORIAL.md`) + quickstart scaffold
+  (`scripts/setup-pxx-quickstart.sh`): build a tested temperature-converter
+  CLI with the v2 verb CLI in ~25 minutes — clean-room validated at 6/6
+  against a real local Ollama on 8GB hardware, with tiered model guidance
+  and a troubleshooting section distilled from live failure modes.
+
 ## [2.0.2] — 2026-07-22
 
 ### Added (security hardening)

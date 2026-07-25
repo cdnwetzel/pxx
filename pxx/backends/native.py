@@ -98,7 +98,9 @@ class NativeBackend:
         streaming=False, tools=True, interactive=False, headless=True
     )
 
-    def __init__(self, *, client: httpx.AsyncClient | None = None, timeout: float | None = None) -> None:
+    def __init__(
+        self, *, client: httpx.AsyncClient | None = None, timeout: float | None = None
+    ) -> None:
         # ``client`` is injectable for tests (httpx.MockTransport).
         # PXX_NATIVE_TIMEOUT: per-round HTTP timeout in seconds. Local models on
         # memory-constrained hardware can legitimately need >300s for a round;

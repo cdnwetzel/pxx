@@ -59,7 +59,8 @@ PXX="$VENV/bin/pxx"
 
 # --- (a) pxx --version -----------------------------------------------------
 VERSION_OUT="$("$PXX" --version)" || fail "'pxx --version' failed"
-grep -q "2\.0\.0" <<<"$VERSION_OUT" || fail "unexpected version output: $VERSION_OUT"
+EXPECTED_VERSION="$("$PY" -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")"
+grep -qF "$EXPECTED_VERSION" <<<"$VERSION_OUT" || fail "unexpected version output: $VERSION_OUT (expected $EXPECTED_VERSION)"
 note "pxx --version: $VERSION_OUT"
 
 # --- (b) pxx doctor --------------------------------------------------------

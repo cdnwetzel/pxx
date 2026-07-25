@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from importlib.resources import files
 from typing import Any, ClassVar
 
@@ -97,8 +98,18 @@ class NativeBackend:
         streaming=False, tools=True, interactive=False, headless=True
     )
 
-    def __init__(self, *, client: httpx.AsyncClient | None = None, timeout: float = 300.0) -> None:
+    def __init__(self, *, client: httpx.AsyncClient | None = None, timeout: float | None = None) -> None:
         # ``client`` is injectable for tests (httpx.MockTransport).
+        # PXX_NATIVE_TIMEOUT: per-round HTTP timeout in seconds. Local models on
+        # memory-constrained hardware can legitimately need >300s for a round;
+        # a too-low value surfaces as a misleading MODEL_UNAVAILABLE.
+        if timeout is None:
+            try:
+                timeout = float(os.environ.get("PXX_NATIVE_TIMEOUT", "300"))
+            except ValueError:
+                timeout = 300.0
+            if not timeout > 0:  # rejects 0, negatives, and NaN
+                timeout = 300.0
         self._client = client
         self._timeout = timeout
         self._cancelled = False

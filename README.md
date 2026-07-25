@@ -6,6 +6,8 @@ no telemetry, no API keys required. It pairs a native tool-calling agent loop wi
 persistent cross-session memory, deterministic safety gates, and MCP interop, and
 can delegate to [aider](https://github.com/Aider-AI/aider) as an optional edit engine.
 
+> **New here? → [Hands-on tutorial](docs/TUTORIAL.md)**
+
 > pxx 2.0 is a ground-up rewrite of pxx 1.x. The 1.x control-plane semantics
 > (fail-closed gates, scope limits, bounded loops, audit) are preserved; the
 > execution layer (`os.execv` into aider, argv scanning, sidecar services) is
@@ -82,6 +84,10 @@ pre-session HEAD, so undo is `git reset --hard <tag>` either way.
 Permission modes: **ask** (read-only) → **plan** (plan only) → **edit** (writes in
 scope, shell via hooks) → **auto** (unattended, budgets enforced). Every run is
 bounded: max rounds/tokens/cost/wall-clock/diff-lines, all configurable.
+
+> **New to pxx?** The [**hands-on tutorial**](docs/TUTORIAL.md) takes you from install to building
+> (and safely undoing) a small tool in ~25 minutes — the fastest way to get the mental model:
+> read-only by default, scoped edits, and the safety tag that nets your work.
 
 ## Memory
 

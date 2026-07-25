@@ -243,3 +243,22 @@ def test_prompt_rendered_emitted(tmp_path):
     events = [e for e in ctx.bus.history if e.kind == "prompt_rendered"]
     assert len(events) == 1
     assert events[0].data["system_chars"] > 0
+
+
+# --- PXX_NATIVE_TIMEOUT: per-round HTTP timeout is env-configurable ------------------
+
+
+def test_native_timeout_env_override(monkeypatch):
+    monkeypatch.setenv("PXX_NATIVE_TIMEOUT", "900")
+    assert NativeBackend()._timeout == 900.0
+
+    monkeypatch.setenv("PXX_NATIVE_TIMEOUT", "not-a-number")
+    assert NativeBackend()._timeout == 300.0  # malformed -> safe default
+
+    for bogus in ("0", "-5", "nan"):
+        monkeypatch.setenv("PXX_NATIVE_TIMEOUT", bogus)
+        assert NativeBackend()._timeout == 300.0  # non-positive/NaN -> safe default
+
+    monkeypatch.delenv("PXX_NATIVE_TIMEOUT")
+    assert NativeBackend()._timeout == 300.0  # unset -> default
+    assert NativeBackend(timeout=17.0)._timeout == 17.0  # explicit arg wins

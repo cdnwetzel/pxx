@@ -329,8 +329,8 @@ runs its own tool-calling agent loop — read-only until you opt in.*
 3. **Your green tests "mysteriously" regressed after a pxx run** → your previous level was
    uncommitted and the safety net stashed it: `git stash pop`, commit, carry on (and use `--commit`).
 4. **Slow hardware timing out** → first fix the memory pressure (items 1 and Level 0's sizing);
-   pxx releases newer than 2.0.2 can also raise the per-round ceiling with
-   `PXX_NATIVE_TIMEOUT=540 pxx edit …` (check `pxx --version`-era release notes).
+   pxx 2.1.0+ can also raise the per-round ceiling with `PXX_NATIVE_TIMEOUT=540 pxx edit …`
+   (values ≤ 0 or malformed fall back to the 300s default).
 
 ---
 

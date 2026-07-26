@@ -6,14 +6,14 @@ no telemetry, no API keys required. It pairs a native tool-calling agent loop wi
 persistent cross-session memory, deterministic safety gates, and MCP interop, and
 can delegate to [aider](https://github.com/Aider-AI/aider) as an optional edit engine.
 
-> **New here? → [Hands-on tutorial](docs/TUTORIAL.md)**
+> **New here? → [Hands-on tutorial](https://github.com/cdnwetzel/pxx/blob/v2/docs/TUTORIAL.md)**
 
 > pxx 2.0 is a ground-up rewrite of pxx 1.x. The 1.x control-plane semantics
 > (fail-closed gates, scope limits, bounded loops, audit) are preserved; the
 > execution layer (`os.execv` into aider, argv scanning, sidecar services) is
 > replaced by an async runtime where **pxx owns the agent loop**. See
 > [DESIGN.md](DESIGN.md) for the architecture contract and
-> [docs/MIGRATION.md](docs/MIGRATION.md) for 1.x → 2.0 changes.
+> [docs/MIGRATION.md](https://github.com/cdnwetzel/pxx/blob/v2/docs/MIGRATION.md) for 1.x → 2.0 changes.
 
 ## Why pxx
 
@@ -85,7 +85,7 @@ Permission modes: **ask** (read-only) → **plan** (plan only) → **edit** (wri
 scope, shell via hooks) → **auto** (unattended, budgets enforced). Every run is
 bounded: max rounds/tokens/cost/wall-clock/diff-lines, all configurable.
 
-> **New to pxx?** The [**hands-on tutorial**](docs/TUTORIAL.md) takes you from install to building
+> **New to pxx?** The [**hands-on tutorial**](https://github.com/cdnwetzel/pxx/blob/v2/docs/TUTORIAL.md) takes you from install to building
 > (and safely undoing) a small tool in ~25 minutes — the fastest way to get the mental model:
 > read-only by default, scoped edits, and the safety tag that nets your work.
 
@@ -233,7 +233,7 @@ With 2.0 on PyPI:
   pipx / pip automatically)
 
 Settings, memory, and audit state carry forward — 2.0 migrates them on first
-run (see [docs/MIGRATION.md](docs/MIGRATION.md)).
+run (see [docs/MIGRATION.md](https://github.com/cdnwetzel/pxx/blob/v2/docs/MIGRATION.md)).
 
 ## Development
 

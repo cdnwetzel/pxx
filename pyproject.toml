@@ -36,9 +36,10 @@ pxx-mcp = "pxx.mcp.server:main"
 
 [project.urls]
 Homepage = "https://github.com/cdnwetzel/pxx"
-Documentation = "https://github.com/cdnwetzel/pxx/tree/main/docs"
+Documentation = "https://github.com/cdnwetzel/pxx/tree/v2/docs"
+Tutorial = "https://github.com/cdnwetzel/pxx/blob/v2/docs/TUTORIAL.md"
 Issues = "https://github.com/cdnwetzel/pxx/issues"
-Changelog = "https://github.com/cdnwetzel/pxx/blob/main/CHANGELOG.md"
+Changelog = "https://github.com/cdnwetzel/pxx/blob/v2/CHANGELOG.md"
 
 [tool.setuptools]
 packages = ["pxx", "pxx.memory", "pxx.tools", "pxx.backends", "pxx.mcp", "pxx.eval", "pxx.improve"]

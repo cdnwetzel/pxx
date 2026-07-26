@@ -301,3 +301,25 @@ def load_settings(
             {k: v for k, v in cli_overrides.items() if v is not None}, settings, "CLI"
         )
     return settings
+
+
+def review_timeout(default: float = 120.0) -> float:
+    """Reviewer HTTP timeout in seconds (2.1.2). ``PXX_REVIEW_TIMEOUT`` wins,
+    falling back to ``PXX_NATIVE_TIMEOUT`` — hardware slow enough to need a
+    longer agent round is slow on review prefill too. Unset, malformed, and
+    non-positive/NaN values fall back to ``default``. Lives here because
+    config.py is the sanctioned environment boundary (golden principle
+    no-os-environ-outside-config).
+
+    Real-world calibration: a ~930-line review diff on 8 GB hardware died at
+    exactly the old fixed 120 s ceiling (2026-07-26, first usage-found defect
+    after 2.1.1).
+    """
+    raw = os.environ.get("PXX_REVIEW_TIMEOUT") or os.environ.get("PXX_NATIVE_TIMEOUT")
+    if raw is None:
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        return default
+    return value if value > 0 else default

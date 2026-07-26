@@ -3,6 +3,26 @@
 All notable changes to pxx are documented here. The 1.x series history is
 preserved in git (tag `v1.3.3` and earlier).
 
+## [2.1.2] — 2026-07-26
+
+### Fixed
+
+- **Reviewer timeout is configurable** (`PXX_REVIEW_TIMEOUT`, falling back
+  to `PXX_NATIVE_TIMEOUT`, then the 120 s default; malformed/non-positive
+  → default; explicit constructor argument wins): the first usage-found
+  defect after 2.1.1 — a ~930-line `pxx review --since` diff on 8 GB
+  hardware died at exactly the fixed 120 s ceiling. Hardware slow enough
+  to need a longer agent round is slow on review prefill too, so the
+  native timeout doubles as the fallback.
+- **Review failure reasons are never blank**: `httpx.ReadTimeout`
+  stringifies to an empty string, producing the observed
+  `reviewer request failed: ` — the exception type name now appears when
+  the message is empty.
+- **Reviewer context overflow is actionable**: the reviewer path gets the
+  same Ollama `exceed_context_size` special-case the native backend got
+  in 2.1.1 (raise `num_ctx`, use a larger-context model, or narrow the
+  diff with `--staged` / a closer `--since`).
+
 ## [2.1.1] — 2026-07-26
 
 ### Fixed (security/correctness)

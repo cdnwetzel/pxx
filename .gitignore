@@ -14,3 +14,10 @@ __pycache__/
 
 # OS / editors
 .DS_Store
+
+# Never-tracked local planes (public repo — real identifiers, local review
+# workspace, co-located service trees, aider session histories)
+/private/
+/review/
+/services/
+.aider.*

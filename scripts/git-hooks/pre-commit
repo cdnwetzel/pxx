@@ -1,0 +1,24 @@
+#!/bin/sh
+# pxx repo pre-commit hook: hard-deny committing local-only planes.
+# The public repo must never carry private/ (real fleet identifiers),
+# review/ (local review workspace), services/ (co-located service trees),
+# or .aider.* session histories. .gitignore hides them from `git add .`;
+# this gate also stops explicit/forced adds. Install: scripts/install-git-hooks.sh
+# (the installer replaces any existing .git/hooks/pre-commit — if you run a
+# richer local pre-commit, merge this block into it instead).
+set -eu
+
+if [ "${PXX_PRECOMMIT_SKIP:-0}" = "1" ]; then
+    echo "pre-commit: PXX_PRECOMMIT_SKIP=1 — bypassing privacy gate (use sparingly)." >&2
+    exit 0
+fi
+
+bad=$(git diff --cached --name-only -z | tr '\0' '\n' \
+    | grep -E '^(private/|review/|services/|\.aider\.)' || true)
+if [ -n "$bad" ]; then
+    echo "pre-commit: REFUSING — staged paths are local-only and must never be tracked:" >&2
+    echo "$bad" | sed 's/^/    /' >&2
+    echo "  Unstage them (git restore --staged <path>)." >&2
+    echo "  Deliberate override: PXX_PRECOMMIT_SKIP=1 git commit ..." >&2
+    exit 1
+fi

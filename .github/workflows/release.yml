@@ -123,3 +123,35 @@ jobs:
       - name: Publish to PyPI (OIDC)
         if: github.event_name == 'push'  # prod is tag-push-only, never dispatch
         uses: pypa/gh-action-pypi-publish@ba38be9e461d3875417946c167d0b5f3d385a247  # v1.14.1, SHA-pinned
+
+  github-release:
+    # Publish the tag's CHANGELOG section as a GitHub Release — the public
+    # release record next to the code. Runs only after PyPI publish succeeds
+    # so the Releases page never announces something PyPI doesn't have.
+    needs: publish
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # create the Release object on the tag
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1, SHA-pinned
+      - name: Create GitHub Release from CHANGELOG
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          # exact-match the "## [X.Y.Z]" heading; print until the next "## ["
+          awk -v ver="$VERSION" '
+            index($0, "## [" ver "]") == 1 {on=1; next}
+            on && index($0, "## [") == 1 {exit}
+            on {print}
+          ' CHANGELOG.md > /tmp/notes.md
+          if ! [ -s /tmp/notes.md ]; then
+            echo "::error::no CHANGELOG section found for $VERSION — release notes are not optional"
+            exit 1
+          fi
+          gh release create "$GITHUB_REF_NAME" \
+            --title "pxx $VERSION" \
+            --notes-file /tmp/notes.md \
+            --verify-tag

@@ -19,6 +19,7 @@ import argparse
 import asyncio
 import shlex
 import shutil
+import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -27,6 +28,7 @@ from . import __version__
 from .config import load_settings
 from .errors import PxxError
 from .events import AuditLog, Event
+from .gitenv import git_env
 from .outcome import RunOutcome, TerminalCode
 from .safety import PermissionMode
 from .session import Session
@@ -440,13 +442,32 @@ def _build_parser() -> argparse.ArgumentParser:
 # Run-ish commands (ask/edit/plan/run/loop/chat)
 
 
+def _aider_health(aider_path: str) -> bool:
+    """A found aider binary may still be broken (e.g. a Python 3.13 install
+    crashing on a missing stdlib shim at import). Probe before trusting it."""
+    try:
+        proc = subprocess.run([aider_path, "--version"], capture_output=True, text=True, timeout=20)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return proc.returncode == 0
+
+
 def _resolve_backend_name(command: str, requested: str | None) -> str:
     if requested in ("native", "aider"):
         return requested
     if command in ("run", "loop"):
         return "native"
-    # auto: aider when available, else pxx's native loop
-    return "aider" if shutil.which("aider") else "native"
+    # auto: aider when available AND working, else pxx's native loop
+    aider = shutil.which("aider")
+    if aider:
+        if _aider_health(aider):
+            return "aider"
+        print(
+            "pxx: aider is installed but broken (--version fails); "
+            "using the native backend (pass --backend aider to force)",
+            file=sys.stderr,
+        )
+    return "native"
 
 
 def _make_backend(name: str, settings):
@@ -1652,8 +1673,6 @@ def _cmd_promote(args: argparse.Namespace) -> int:
 
 
 def _cmd_check(args: argparse.Namespace) -> int:
-    import subprocess
-
     from .governance import load_denylist, scan_content, scan_staged
 
     denylist = load_denylist(Path(args.denylist) if args.denylist else None)
@@ -1680,6 +1699,7 @@ def _cmd_check(args: argparse.Namespace) -> int:
                 text=True,
                 timeout=30,
                 check=False,
+                env=git_env(),
             )
         except (OSError, subprocess.SubprocessError) as exc:
             print(f"pxx: git ls-files failed: {exc}", file=sys.stderr)

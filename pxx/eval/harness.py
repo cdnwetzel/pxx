@@ -36,6 +36,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from ..gitenv import git_env
 from .cases import Case, EvalError
 
 log = logging.getLogger("pxx.eval.harness")
@@ -107,6 +108,7 @@ def _git(repo: Path, *args: str) -> str:
         text=True,
         timeout=30,
         check=False,
+        env=git_env(),
     )
     if proc.returncode != 0:
         raise EvalError(f"git {' '.join(args[:1])} failed: exit {proc.returncode}")

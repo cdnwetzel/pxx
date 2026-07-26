@@ -140,7 +140,11 @@ class EditFile:
         text = path.read_text()
         count = text.count(old)
         if count == 0:
-            return _err(f"old_string not found in {path}")
+            return _err(
+                f"old_string not found in {path} — the file's current content "
+                "differs from what you expected. Call read_file on it and retry "
+                "with an exact substring (match whitespace exactly)."
+            )
         if count > 1:
             return _err(
                 f"old_string matches {count} locations in {path}; "

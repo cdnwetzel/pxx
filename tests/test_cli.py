@@ -1785,3 +1785,27 @@ def test_review_includes_all_filename_shapes(harness, monkeypatch, capsys, tmp_p
     assert cli.main(["review"]) == 0
     assert payloads
     assert name in payloads[0], f"{name!r} missing from the review payload"
+
+
+# --- auto backend selection probes aider health -----------------------------
+
+
+def test_auto_backend_falls_back_when_aider_broken(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(cli.shutil, "which", lambda name: "/fake/aider")
+    monkeypatch.setattr(cli, "_aider_health", lambda path: False)
+    assert cli._resolve_backend_name("edit", None) == "native"
+    assert "broken" in capsys.readouterr().err
+
+
+def test_auto_backend_uses_healthy_aider(monkeypatch) -> None:
+    monkeypatch.setattr(cli.shutil, "which", lambda name: "/fake/aider")
+    monkeypatch.setattr(cli, "_aider_health", lambda path: True)
+    assert cli._resolve_backend_name("edit", None) == "aider"
+
+
+def test_explicit_aider_request_skips_probe(monkeypatch) -> None:
+    # forcing --backend aider must not be second-guessed by the probe
+    monkeypatch.setattr(
+        cli, "_aider_health", lambda path: (_ for _ in ()).throw(AssertionError("probed"))
+    )
+    assert cli._resolve_backend_name("edit", "aider") == "aider"

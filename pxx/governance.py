@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .errors import PxxError
+from .gitenv import git_env
 
 log = logging.getLogger("pxx.governance")
 
@@ -189,6 +190,7 @@ def scan_staged(*, cwd: Path | None = None, denylist: tuple[str, ...] = ()) -> l
             capture_output=True,
             text=True,
             timeout=15,
+            env=git_env(),
         )
     except (OSError, subprocess.SubprocessError) as exc:
         raise PxxError(f"governance: cannot scan staged files: {exc}") from exc

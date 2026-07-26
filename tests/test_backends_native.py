@@ -196,6 +196,22 @@ def test_http_error_raises_backend_error(tmp_path):
         asyncio.run(make_backend(handler).run("task", make_ctx(tmp_path)))
 
 
+def test_context_overflow_400_gets_actionable_message(tmp_path):
+    # Ollama >= 0.32 fails loud on num_ctx overflow; the raw JSON is useless
+    # to a user — the error must say how to fix it.
+    body = (
+        '{"error":{"message":"{\\"error\\":{\\"code\\":400,\\"message\\":\\"request '
+        "(10190 tokens) exceeds the available context size (8192 tokens), try increasing "
+        'it\\",\\"type\\":\\"exceed_context_size_error\\"}}"}}'
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(400, text=body)
+
+    with pytest.raises(BackendError, match="num_ctx"):
+        asyncio.run(make_backend(handler).run("task", make_ctx(tmp_path)))
+
+
 def test_round_budget_trips(tmp_path):
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json=tool_call_round("c1", "read_file", "{}"))

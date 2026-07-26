@@ -33,6 +33,8 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
+from ..gitenv import git_env
+
 log = logging.getLogger("pxx.improve.channels")
 
 
@@ -342,6 +344,7 @@ def _isolate_worktree(worktree: Path, sandbox: Path) -> Path:
                 check=True,
                 capture_output=True,
                 text=True,
+                env=git_env(),
             )
             return dest
         except (OSError, subprocess.CalledProcessError):

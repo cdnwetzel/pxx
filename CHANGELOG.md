@@ -3,6 +3,59 @@
 All notable changes to pxx are documented here. The 1.x series history is
 preserved in git (tag `v1.3.3` and earlier).
 
+## [2.1.1] — 2026-07-26
+
+### Fixed (security/correctness)
+
+- **Git subprocesses no longer inherit hook-exported `GIT_*` variables**
+  (new `pxx/gitenv.py`, threaded through every git spawn site and the
+  aider process env): running pxx (or its test suite) from inside a git
+  hook or CI step previously re-targeted git calls at the *caller's*
+  repository — a leaked `GIT_DIR` was proven to stage deletion of every
+  tracked file in the invoking repo. pxx now always targets the repo it
+  was pointed at, with that repo's configured identity. Covers every git
+  spawn site including the eval harness (an independently-reviewed miss,
+  proven exploitable before the fix) and the agent's `run_shell` tool
+  (an agent-issued `git add -A` had the same hazard one layer down).
+  The test suite scrubs the same set via an autouse fixture, with
+  poisoned-environment regression tests pinning the incident shapes.
+- **A findings-less `REVISE` degrades to `NO_REVIEW`** instead of
+  blocking: a reviewer that emits a verdict with zero usable findings is
+  a generic block the loop would "heal" against forever (burning rounds
+  on a MUST-address list with no bullets). Classified as
+  `review_error="empty"` when the verdict line parsed.
+
+### Fixed (first-run experience)
+
+- **Broken aider no longer breaks bare commands**: auto backend selection
+  health-probes `aider --version` and falls back to the native backend
+  with a warning (a Python 3.13 aider that crashes on import previously
+  turned every `pxx ask`/`edit` into `EDIT_FAILED`). Explicit
+  `--backend aider` is honored unprobed. (The probe costs ~1–2 s per
+  auto-resolved invocation on aider-installed machines; pin `--backend`
+  or set `backend` in config to skip it.)
+- **`pxx doctor` now checks what it appears to check**: a reachable
+  endpoint is also verified to *serve the configured model* (single-model
+  endpoints note the session auto-correct; multi-model without yours
+  fails the check), and a found aider binary is verified to actually run.
+- **Context overflow is actionable**: Ollama ≥ 0.32's loud
+  `exceed_context_size_error` now surfaces as "raise num_ctx / use a
+  larger-context model" instead of raw HTTP 400 JSON.
+- **`edit_file` misses teach the model**: the old_string-not-found error
+  now tells the agent to re-read the file and retry with an exact
+  substring (small local models previously blamed "the environment" and
+  gave up).
+- **PyPI page links**: `[project.urls]` pointed at a nonexistent `main`
+  branch and the README used repo-relative links — both 404'd on
+  pypi.org. All pinned to `v2` absolute URLs, plus a Tutorial sidebar
+  link. (Takes effect on the PyPI page with this release.)
+
+### Docs
+
+- Tutorial troubleshooting: new entry for the small-model "environment
+  blocks editing" bluff (re-run), and the silent-truncation warning
+  updated for loud-failing Ollama ≥ 0.32.
+
 ## [2.1.0] — 2026-07-25
 
 ### Added

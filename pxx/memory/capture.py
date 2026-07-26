@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from ..gitenv import git_env
 from ..outcome import TerminalCode
 from .store import EVIDENCE_RANK, KnowledgeLayer
 
@@ -154,6 +155,7 @@ async def _git(root: Path, *args: str) -> str | None:
             cwd=str(root),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            env=git_env(),
         )
         stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=15.0)
     except (OSError, TimeoutError):

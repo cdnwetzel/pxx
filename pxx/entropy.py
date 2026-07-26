@@ -61,6 +61,7 @@ GOLDEN_PRINCIPLES: tuple[GoldenPrinciple, ...] = (
             "pxx/doctor.py",
             "pxx/config.py",
             "pxx/entropy.py",
+            "pxx/gitenv.py",  # THE env boundary for git subprocesses (2.1.1)
             "pxx/server.py",
         ),
     ),

@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any
 
 from ..errors import PxxError
+from ..gitenv import git_env
 from .cycle import run_cycle
 
 log = logging.getLogger("pxx.improve.scheduler")
@@ -89,6 +90,7 @@ def candidate_worktree(root: Path | str, name: str) -> Path:
                 check=True,
                 capture_output=True,
                 text=True,
+                env=git_env(),
             )
             return dest
         except (OSError, subprocess.CalledProcessError):

@@ -37,6 +37,7 @@ from .errors import (
     ScopeViolation,
 )
 from .events import AuditLog, Event, EventBus
+from .gitenv import git_env
 from .manifest import RunDirWriter, build_manifest
 from .outcome import RunOutcome, TerminalCode
 from .safety import BudgetGuard, HookRunner, ScopeGate
@@ -456,6 +457,7 @@ class Session:
                 text=True,
                 timeout=5,
                 check=False,
+                env=git_env(),
             )
             if head.returncode != 0:
                 return "", ""
@@ -467,6 +469,7 @@ class Session:
                 text=True,
                 timeout=5,
                 check=False,
+                env=git_env(),
             )
             files = subprocess.run(
                 ["git", "ls-files"],
@@ -475,6 +478,7 @@ class Session:
                 text=True,
                 timeout=5,
                 check=False,
+                env=git_env(),
             )
             dirty = bool(status.stdout.strip())
             tracked = len([ln for ln in files.stdout.splitlines() if ln.strip()])
@@ -619,6 +623,7 @@ class Session:
                 cwd=str(self.cwd),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                env=git_env(),
             )
             stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=15.0)
         except (OSError, TimeoutError):
@@ -639,6 +644,7 @@ class Session:
                 cwd=str(self.cwd),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                env=git_env(),
             )
             stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=15.0)
         except (OSError, TimeoutError):

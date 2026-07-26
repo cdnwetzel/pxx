@@ -20,6 +20,7 @@ import httpx
 
 from .config import ModelRef
 from .errors import PxxError
+from .gitenv import git_env
 
 log = logging.getLogger("pxx.review")
 
@@ -189,7 +190,10 @@ def parse_review_full(text: str) -> ParsedReview:
         else:
             dropped += 1
             log.info("dropping evidence-less finding %s (no concrete anchor)", finding.id)
-    if raw_count and not findings and verdict is Verdict.REVISE:
+    if not findings and verdict is Verdict.REVISE:
+        # No usable findings — whether none were emitted or all were
+        # evidence-filtered, a REVISE with zero bullets is a generic block
+        # the loop would "heal" against forever. Degrade, never block.
         verdict = Verdict.NO_REVIEW
     return ParsedReview(
         verdict=verdict,
@@ -293,7 +297,10 @@ async def review_changes(
     verdict, findings = full.verdict, full.findings
     review_error = ""
     if verdict is Verdict.NO_REVIEW:
-        review_error = "empty" if full.raw_findings else "unparseable"
+        # "empty": the reviewer said something parseable (a verdict line or
+        # finding-shaped lines) but produced no usable findings.
+        # "unparseable": nothing recognizable came back at all.
+        review_error = "empty" if (full.raw_findings or full.had_verdict_line) else "unparseable"
     blocked = mode is ReviewMode.BLOCKING and verdict is not Verdict.APPROVE
     return ReviewResult(
         verdict=verdict,
@@ -350,7 +357,13 @@ def collect_review_diff(
     def _run(args: list[str]) -> subprocess.CompletedProcess[str]:
         try:
             return subprocess.run(
-                args, cwd=root, capture_output=True, text=True, timeout=30, check=False
+                args,
+                cwd=root,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+                env=git_env(),
             )
         except OSError as exc:
             raise PxxError(f"review: cannot read git diff in {root}: {exc}") from exc

@@ -87,6 +87,25 @@ def test_parse_empty_text() -> None:
     assert parse_review("") == (Verdict.NO_REVIEW, [])
 
 
+def test_parse_findings_less_revise_degrades_to_no_review() -> None:
+    # A bare REVISE with zero finding-shaped lines is a generic block —
+    # the documented contract ("never a generic block") maps it to NO_REVIEW.
+    verdict, findings = parse_review("verdict: REVISE")
+    assert verdict is Verdict.NO_REVIEW
+    assert findings == []
+
+
+def test_review_changes_findings_less_revise_is_empty_not_unparseable() -> None:
+    # The verdict line parsed fine, so the degraded classification is
+    # "empty" (reviewer said nothing usable), not "unparseable".
+    reviewer = ScriptedReviewer(["Looks wrong somehow.\nVERDICT: REVISE\n"])
+    result = asyncio.run(review_changes("diff", "task", reviewer, ReviewMode.ADVISORY))
+    assert result.verdict is Verdict.NO_REVIEW
+    assert result.findings == ()
+    assert result.review_error == "empty"
+    assert not result.blocked
+
+
 # --- review_changes policy --------------------------------------------------
 
 

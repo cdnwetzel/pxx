@@ -15,6 +15,8 @@ import asyncio
 import hashlib
 from pathlib import Path
 
+from .gitenv import git_env
+
 
 def _sha256_file(path: Path) -> str | None:
     try:
@@ -33,6 +35,7 @@ async def _git(cwd: Path, *args: str) -> str | None:
             *args,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
+            env=git_env(),
         )
         out, _ = await asyncio.wait_for(proc.communicate(), 15.0)
     except (OSError, TimeoutError):
@@ -60,6 +63,7 @@ async def _git_status_entries(cwd: Path) -> list[tuple[str, str]] | None:
             "--untracked-files=all",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
+            env=git_env(),
         )
         out, _ = await asyncio.wait_for(proc.communicate(), 15.0)
     except (OSError, TimeoutError):

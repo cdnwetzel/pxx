@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..errors import CandidateInvalid, PxxError
+from ..gitenv import git_env
 from .candidates import Candidate, content_path, validate_candidate
 
 log = logging.getLogger("pxx.improve.apply")
@@ -48,6 +49,7 @@ def _git(root: Path, *args: str) -> str:
         text=True,
         timeout=30,
         check=False,
+        env=git_env(),
     )
     if proc.returncode != 0:
         raise PxxError(f"git {' '.join(args)} failed in {root}: {proc.stderr.strip()[:200]}")
@@ -117,6 +119,7 @@ def restore_target(root: Path | str, rel: str) -> None:
         text=True,
         timeout=30,
         check=False,
+        env=git_env(),
     )
     if proc.returncode != 0:
         # path may be untracked (created by the candidate) — remove it
@@ -130,6 +133,7 @@ def restore_target(root: Path | str, rel: str) -> None:
                 text=True,
                 timeout=30,
                 check=False,
+                env=git_env(),
             )
 
 

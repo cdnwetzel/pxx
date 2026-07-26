@@ -122,8 +122,9 @@ proof). Run it on any repo, anywhere, with zero risk.
 > ✅ **Checkpoint** pxx explained the code and changed *nothing* (`git status` is clean — the sandbox
 > ships a `.gitignore` for agent cache files). Scoreboard still 0 / 6 — on purpose.
 > 🔵 **From aider** This is the big flip: `aider` can edit the moment it starts; pxx makes you opt
-> in with the `edit` verb. If you have aider installed, pxx will use it as the engine by default —
-> pass `--backend native` to use pxx's own built-in agent loop instead (what this tutorial assumes).
+> in with the `edit` verb. If you have a *working* aider installed, pxx uses it as the engine by
+> default (2.1.1+ health-probes it first and falls back to pxx's own native loop if aider is
+> broken) — pass `--backend native` to force the built-in agent loop (what this tutorial assumes).
 
 ---
 
@@ -331,9 +332,15 @@ runs its own tool-calling agent loop — read-only until you opt in.*
    tool calls as prose. Causes, in order of likelihood: context truncation (raise `num_ctx` — see
    Level 0), a model too small for structured tool calls (use the Level 0 recommendations), or
    temperature flakiness (set `PARAMETER temperature 0.2` in your Modelfile).
-3. **Your green tests "mysteriously" regressed after a pxx run** → your previous level was
+   (On Ollama 0.32+ an oversized request no longer truncates silently — pxx reports "request
+   exceeds the model's context window" with the `num_ctx` fix instead.)
+3. **The agent claims "the environment blocks file editing" / "check permissions" with
+   `diff_lines=0`** → small models occasionally fumble the edit tool's exact-match string, then
+   blame the environment and give up. Nothing is wrong with your setup — just re-run the same
+   command; it almost always lands on the second try.
+4. **Your green tests "mysteriously" regressed after a pxx run** → your previous level was
    uncommitted and the safety net stashed it: `git stash pop`, commit, carry on (and use `--commit`).
-4. **Slow hardware timing out** → first fix the memory pressure (items 1 and Level 0's sizing);
+5. **Slow hardware timing out** → first fix the memory pressure (items 1 and Level 0's sizing);
    pxx 2.1.0+ can also raise the per-round ceiling with `PXX_NATIVE_TIMEOUT=540 pxx edit …`
    (values ≤ 0 or malformed fall back to the 300s default).
 

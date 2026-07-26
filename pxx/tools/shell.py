@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from ..errors import HooksMissing, ScopeViolation
+from ..gitenv import git_env
 from ..safety import PermissionMode
 from . import ToolContext, ToolSpec, tool_schema
 
@@ -129,6 +130,9 @@ class RunShell:
                 cwd=str(ctx.scope.root),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
+                # agent-issued `git …` here has the same wrong-repo hazard as
+                # pxx's own git calls when pxx runs inside a git hook
+                env=git_env(),
             )
             timed_out = False
             try:

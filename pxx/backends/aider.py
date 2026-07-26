@@ -23,6 +23,7 @@ from typing import ClassVar
 
 from ..config import ModelRef
 from ..errors import BackendError, BackendUnavailable
+from ..gitenv import git_env
 from ..outcome import RunOutcome, TerminalCode
 from ..safety import PermissionMode
 from .base import BackendCapabilities, SessionContext
@@ -65,7 +66,7 @@ class AiderBackend:
         """Run a git command; return stdout or None when unavailable/failed."""
         try:
             proc = await asyncio.create_subprocess_exec(
-                "git", *args, cwd=cwd, stdout=PIPE, stderr=PIPE
+                "git", *args, cwd=cwd, stdout=PIPE, stderr=PIPE, env=git_env()
             )
             out, _ = await proc.communicate()
         except OSError:
@@ -86,7 +87,7 @@ class AiderBackend:
 
     @staticmethod
     def _env(model: ModelRef) -> dict[str, str]:
-        env = dict(os.environ)
+        env = git_env()  # aider commits via its own git calls — same wrong-repo risk
         if model.provider == "ollama":
             env["OLLAMA_API_BASE"] = model.endpoint
         elif model.provider == "openai":

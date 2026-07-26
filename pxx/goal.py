@@ -30,6 +30,7 @@ from .backends.base import AgentBackend
 from .config import Settings
 from .errors import BackendUnavailable, ConfigError, ScopeViolation
 from .events import EventBus
+from .gitenv import git_env
 from .loop import run_loop
 from .outcome import RunOutcome, TerminalCode
 from .safety import canonicalize
@@ -210,6 +211,7 @@ async def _git(cwd: Path, *args: str, stdin_text: str | None = None) -> tuple[in
         stdin=asyncio.subprocess.PIPE if stdin_text is not None else None,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.STDOUT,
+        env=git_env(),
     )
     out, _ = await proc.communicate(stdin_text.encode() if stdin_text is not None else None)
     return proc.returncode or 0, out.decode(errors="replace")

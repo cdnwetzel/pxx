@@ -103,3 +103,84 @@ def test_hook_coverage_ok_with_matching_hook_and_other_modes():
     # HOOKS_MISSING only applies to edit mode
     assert _hook_coverage_check(Settings(permission=PermissionMode.ASK)).ok
     assert _hook_coverage_check(Settings(permission=PermissionMode.AUTO)).ok
+
+
+# --- model presence on reachable endpoints ----------------------------------
+
+
+def _fake_probe(endpoints):
+    async def probe(specs, timeout=1.0):  # noqa: ASYNC109 - mirrors probe_endpoints
+        return endpoints
+
+    return probe
+
+
+def _endpoint_checks_with(monkeypatch, spec, endpoint):
+    import pxx.router
+    from pxx.config import Settings
+    from pxx.doctor import _endpoint_checks
+
+    monkeypatch.setattr(pxx.router, "probe_endpoints", _fake_probe([endpoint]))
+    settings = Settings(model=spec)
+    return asyncio.run(_endpoint_checks(settings))
+
+
+def test_model_absent_on_multi_model_endpoint_is_flagged(monkeypatch):
+    from pxx.router import Endpoint
+
+    spec = ModelRef(provider="ollama", model="qwen2.5-coder:7b")  # ollama: no tool probe
+    ep = Endpoint(provider="ollama", base_url="http://x", models=("a", "b"), reachable=True)
+    checks = _endpoint_checks_with(monkeypatch, spec, ep)
+    model_checks = [c for c in checks if c.name == "model:qwen2.5-coder:7b"]
+    assert model_checks and not model_checks[0].ok
+    assert "not served" in model_checks[0].detail
+
+
+def test_model_absent_on_single_model_endpoint_notes_autocorrect(monkeypatch):
+    from pxx.router import Endpoint
+
+    spec = ModelRef(provider="ollama", model="missing")
+    ep = Endpoint(provider="ollama", base_url="http://x", models=("only",), reachable=True)
+    checks = _endpoint_checks_with(monkeypatch, spec, ep)
+    model_checks = [c for c in checks if c.name == "model:missing"]
+    assert model_checks and model_checks[0].ok
+    assert "auto-correct" in model_checks[0].detail
+
+
+def test_model_present_adds_no_extra_check(monkeypatch):
+    from pxx.router import Endpoint
+
+    spec = ModelRef(provider="ollama", model="served")
+    ep = Endpoint(provider="ollama", base_url="http://x", models=("served",), reachable=True)
+    checks = _endpoint_checks_with(monkeypatch, spec, ep)
+    assert not [c for c in checks if c.name.startswith("model:")]
+
+
+def test_ollama_endpoint_with_no_models_is_flagged(monkeypatch):
+    from pxx.router import Endpoint
+
+    spec = ModelRef(provider="ollama", model="qwen2.5-coder:7b")
+    ep = Endpoint(provider="ollama", base_url="http://x", models=(), reachable=True)
+    checks = _endpoint_checks_with(monkeypatch, spec, ep)
+    model_checks = [c for c in checks if c.name.startswith("model:")]
+    assert model_checks and not model_checks[0].ok
+    assert "ollama pull" in model_checks[0].detail
+
+
+def test_run_doctor_flags_broken_aider(monkeypatch, tmp_path):
+    import pxx.doctor as doctor_mod
+    from pxx.config import Settings
+    from pxx.doctor import run_doctor
+
+    monkeypatch.setattr(doctor_mod.shutil, "which", lambda tool: f"/fake/{tool}")
+    monkeypatch.setattr("pxx.cli._aider_health", lambda path: False)
+
+    async def no_endpoints(settings):
+        return []
+
+    monkeypatch.setattr(doctor_mod, "_endpoint_checks", no_endpoints)
+    settings = Settings(memory_dir=tmp_path / "m", state_dir=tmp_path / "s")
+    checks = asyncio.run(run_doctor(settings, cwd=tmp_path))
+    aider_checks = [c for c in checks if c.name == "binary:aider"]
+    assert aider_checks and not aider_checks[0].ok
+    assert "broken" in aider_checks[0].detail

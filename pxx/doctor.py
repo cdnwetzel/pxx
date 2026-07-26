@@ -9,6 +9,7 @@ Nothing here crashes: every probe is best-effort and reported, never raised.
 
 from __future__ import annotations
 
+import asyncio
 import shutil
 import sys
 from dataclasses import dataclass
@@ -144,6 +145,33 @@ async def _endpoint_checks(settings: Settings) -> list[Check]:
             )
         )
         if ok:
+            # reachable != usable: the endpoint may not serve the configured
+            # model at all. Mirror resolve_model's semantics: a single-model
+            # endpoint auto-corrects at session start, so that's a pass with
+            # a note; multi-model without ours is a failure.
+            served = tuple(getattr(endpoint, "models", ()) or ())
+            if not served and spec.provider == "ollama":
+                # Ollama reliably lists models; empty means nothing pulled —
+                # sessions will fail with BackendUnavailable despite the
+                # green "reachable" line above. (Other providers may simply
+                # not expose a list; stay quiet there.)
+                checks.append(
+                    Check(
+                        f"model:{spec.model}",
+                        False,
+                        f"endpoint serves no models — ollama pull {spec.model}",
+                        hard=False,
+                    )
+                )
+            elif served and spec.model not in served:
+                if len(served) == 1:
+                    detail = f"not served; sessions auto-correct to {served[0]!r}"
+                    model_ok = True
+                else:
+                    shown = ", ".join(served[:3]) + ("…" if len(served) > 3 else "")
+                    detail = f"not served by {url} (has: {shown}) — pull or reconfigure"
+                    model_ok = False
+                checks.append(Check(f"model:{spec.model}", model_ok, detail, hard=False))
             tool_check = await _tool_calling_check(spec)
             if tool_check is not None:
                 checks.append(tool_check)
@@ -198,6 +226,21 @@ async def run_doctor(settings: Settings, cwd: Path | None = None) -> list[Check]
         ("rg", "optional: fast search"),
     ):
         path = shutil.which(tool)
+        if tool == "aider" and path:
+            # present != working: a py3.13 aider install can crash on import.
+            from .cli import _aider_health
+
+            if not await asyncio.to_thread(_aider_health, path):
+                checks.append(
+                    Check(
+                        "binary:aider",
+                        False,
+                        f"{path} is broken (--version fails) — auto backend "
+                        "selection falls back to native",
+                        hard=False,
+                    )
+                )
+                continue
         checks.append(
             Check(f"binary:{tool}", bool(path), path or f"not found ({hint})", hard=False)
         )

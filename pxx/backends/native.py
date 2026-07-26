@@ -210,9 +210,18 @@ class NativeBackend:
                     f"all endpoints unreachable (last: {model.endpoint}): {exc}"
                 ) from exc
             if resp.status_code != 200:
-                raise BackendError(
-                    f"{model.endpoint} returned HTTP {resp.status_code}: {resp.text[:300]}"
-                )
+                body = resp.text[:300]
+                if resp.status_code == 400 and "exceed_context_size" in resp.text:
+                    # Ollama >= 0.32 fails loud when the request overflows
+                    # num_ctx (older versions silently truncated). Surface
+                    # the fix, not the raw JSON.
+                    raise BackendError(
+                        f"request exceeds the model's context window on {model.endpoint}. "
+                        f"Raise the model's num_ctx (Modelfile: PARAMETER num_ctx 12288+) "
+                        f"or use a larger-context model — see docs/TUTORIAL.md "
+                        f"troubleshooting. [{body}]"
+                    )
+                raise BackendError(f"{model.endpoint} returned HTTP {resp.status_code}: {body}")
             try:
                 data = resp.json()
                 choice = data["choices"][0]

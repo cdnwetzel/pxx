@@ -95,6 +95,9 @@ deliberately inherit the caller's environment — users may legitimately
 depend on variables they set themselves. Only pxx-owned git calls and
 the model-controlled `run_shell` are scrubbed.
 
+**Write-up.** Full incident narrative:
+[postmortems/2026-07-26-git-env-leak.md](postmortems/2026-07-26-git-env-leak.md).
+
 ---
 
 ## R-003 — Review contract: exit codes and no vacuous verdicts

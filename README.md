@@ -7,6 +7,9 @@ persistent cross-session memory, deterministic safety gates, and MCP interop, an
 can delegate to [aider](https://github.com/Aider-AI/aider) as an optional edit engine.
 
 > **New here? → [Hands-on tutorial](https://github.com/cdnwetzel/pxx/blob/v2/docs/TUTORIAL.md)**
+> Every claim this project makes is evidence-gated — dated records, reproducible
+> procedures, and explicit non-claims live in
+> [docs/RECEIPTS.md](https://github.com/cdnwetzel/pxx/blob/v2/docs/RECEIPTS.md).
 
 > pxx 2.0 is a ground-up rewrite of pxx 1.x. The 1.x control-plane semantics
 > (fail-closed gates, scope limits, bounded loops, audit) are preserved; the

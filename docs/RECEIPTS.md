@@ -125,11 +125,17 @@ the contract around the verdict, not the verdict itself.
 ## R-004 — Self-improvement is report-and-refuse until earned (visible non-claim)
 
 **Claim.** Auto-promotion of self-improvement candidates is **disabled
-by the platform's own readiness bars** and currently refuses: as of
-2026-07-26, `pxx improve readiness` reports all ten preconditions ok and
-**NOT-READY** on the bars — eval_cases 44/50, real_runs 47/100,
-human_approved_promotions 0/3, unresolved_critical_defects untracked
-(fails on absence of tracking, which is itself the honest state).
+by the platform's own readiness bars** and currently refuses:
+~~as of 2026-07-26, all four bars unmet — eval_cases 44/50, real_runs
+47/100, human_approved_promotions 0/3, unresolved_critical_defects
+untracked~~ **updated 2026-07-27**: `pxx improve readiness` reports all
+ten preconditions ok, **eval_cases green (50/50)** and
+**unresolved_critical_defects green** (ledger established via
+`pxx improve defects`; D-001 and D-002 recorded and resolved with
+receipt pointers — see R-002, R-006), while **real_runs (~48/100)** and
+**human_approved_promotions (0/3)** remain unmet — overall **NOT-READY**.
+The two green bars were the last desk-completable ones; the remaining
+two fill only through recorded real usage and human promotion decisions.
 
 **Grade.** Reproducible (`pxx improve readiness` on any install; your
 counts will reflect your own evidence plane).

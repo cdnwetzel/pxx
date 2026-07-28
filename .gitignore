@@ -21,3 +21,8 @@ __pycache__/
 /review/
 /services/
 .aider.*
+
+# Agent skills (local tooling, not part of the shipped repo)
+.agents/
+.claude/
+skills-lock.json

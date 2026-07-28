@@ -1234,32 +1234,31 @@ def _cmd_improve(args: argparse.Namespace) -> int:
     if command == "defects":
         from .improve.autopromote import add_defect, load_defects, resolve_defect
 
-        if args.defects_command == "add":
-            try:
+        # every path reads the ledger, so a corrupt one (ValueError) or an
+        # unknown/missing key (KeyError) must exit 2, never traceback
+        try:
+            if args.defects_command == "add":
                 entry = add_defect(state_dir, args.summary, args.defect_id)
-            except ValueError as exc:
-                print(f"pxx improve defects: {exc}", file=sys.stderr)
-                return 2
-            print(f"added {entry['id']}: {entry['summary']}")
-            return 0
-        if args.defects_command == "resolve":
-            try:
+                print(f"added {entry['id']}: {entry['summary']}")
+                return 0
+            if args.defects_command == "resolve":
                 entry = resolve_defect(state_dir, args.defect_id, args.note)
-            except KeyError as exc:
-                print(f"pxx improve defects: {exc.args[0]}", file=sys.stderr)
-                return 2
-            print(f"resolved {entry['id']}: {entry['summary']}")
+                print(f"resolved {entry['id']}: {entry['summary']}")
+                return 0
+            data = load_defects(state_dir)
+            for entry in data["unresolved_critical"]:
+                print(f"UNRESOLVED {entry['id']} (opened {entry['opened']}): {entry['summary']}")
+            for entry in data["resolved"]:
+                print(f"resolved   {entry['id']} ({entry['resolved']}): {entry['summary']}")
+            print(
+                f"unresolved critical: {len(data['unresolved_critical'])} / "
+                f"resolved: {len(data['resolved'])}"
+            )
             return 0
-        data = load_defects(state_dir)
-        for entry in data["unresolved_critical"]:
-            print(f"UNRESOLVED {entry['id']} (opened {entry['opened']}): {entry['summary']}")
-        for entry in data["resolved"]:
-            print(f"resolved   {entry['id']} ({entry['resolved']}): {entry['summary']}")
-        print(
-            f"unresolved critical: {len(data['unresolved_critical'])} / "
-            f"resolved: {len(data['resolved'])}"
-        )
-        return 0
+        except (KeyError, ValueError) as exc:
+            reason = exc.args[0] if exc.args else exc
+            print(f"pxx improve defects: {reason}", file=sys.stderr)
+            return 2
     if command == "auto-promote":
         from .errors import CandidateInvalid
         from .improve.autopromote import (

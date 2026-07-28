@@ -158,7 +158,9 @@ def test_readiness_from_disk(tmp_path):
     (state_dir / "promotions" / "auto-x.json").write_text(
         json.dumps({"approver": "auto-promote"})  # does not count as human
     )
-    (state_dir / "evaluator-defects.json").write_text(json.dumps({"unresolved_critical": []}))
+    (state_dir / "evaluator-defects.json").write_text(
+        json.dumps({"unresolved_critical": [], "resolved": []})
+    )
 
     report = readiness(state_dir, evals_dir=evals_dir)
     assert report.green
@@ -405,7 +407,19 @@ def test_defects_ledger_malformed_raises_but_bar_fails_closed(tmp_path):
 
     state_dir = tmp_path / ".pxx"
     state_dir.mkdir()
-    (state_dir / "evaluator-defects.json").write_text("[not an object]")
-    with pytest.raises(ValueError):
-        load_defects(state_dir)
-    assert gather_counts(state_dir).unresolved_critical_defects is None
+    ledger = state_dir / "evaluator-defects.json"
+
+    # wrong-shaped ledgers must raise, never default: an object-shaped or
+    # missing section would count as zero defects and turn the bar green
+    for payload in (
+        "[not an object]",  # not valid JSON at all
+        "[]",  # decodes, but not an object
+        "{}",  # object with both sections missing
+        '{"unresolved_critical": {}, "resolved": []}',  # object-shaped section
+        '{"unresolved_critical": [{"summary": "no id"}], "resolved": []}',  # entry lacks id
+        '{"unresolved_critical": [{"id": ""}], "resolved": []}',  # blank id
+    ):
+        ledger.write_text(payload)
+        with pytest.raises(ValueError):
+            load_defects(state_dir)
+        assert gather_counts(state_dir).unresolved_critical_defects is None

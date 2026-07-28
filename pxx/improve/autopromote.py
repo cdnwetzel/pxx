@@ -24,9 +24,11 @@ what it WOULD do; refuse — the bars are the point.
 
 from __future__ import annotations
 
+import fcntl
 import json
 import logging
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -125,13 +127,11 @@ def gather_counts(state_dir: Path | str, *, evals_dir: Path | str | None = None)
                 human_approved += 1
 
     defects: int | None = None
-    defects_path = state_dir / _DEFECTS_FILENAME
-    try:
-        data = json.loads(defects_path.read_text())
-        unresolved = data["unresolved_critical"]
-        defects = len(unresolved)
-    except Exception:
-        defects = None  # fail closed: cannot prove zero unresolved defects
+    if (state_dir / _DEFECTS_FILENAME).is_file():
+        try:
+            defects = len(load_defects(state_dir)["unresolved_critical"])
+        except Exception:
+            defects = None  # fail closed: cannot prove zero unresolved defects
 
     return ReadinessCounts(
         eval_cases=eval_cases,
@@ -166,52 +166,85 @@ def load_defects(state_dir: Path | str) -> dict[str, list[dict[str, Any]]]:
     """The ledger, or an empty one when the file is absent.
 
     Malformed content raises (a corrupt ledger needs a human, never a
-    silent reset) — gather_counts independently fails closed to None.
+    silent reset or default) — gather_counts fails closed to None. Both
+    sections must be lists and every entry must carry a usable id: a
+    ledger that decodes but has the wrong shape would otherwise count as
+    zero defects and turn the readiness bar green.
     """
     path = _defects_path(state_dir)
     if not path.is_file():
         return {"unresolved_critical": [], "resolved": []}
-    data = json.loads(path.read_text())
+    try:
+        data = json.loads(path.read_text())
+    except ValueError as exc:
+        raise ValueError(f"{path}: defects ledger is not valid JSON: {exc}") from exc
     if not isinstance(data, dict):
         raise ValueError(f"{path}: defects ledger is not a JSON object")
-    data.setdefault("unresolved_critical", [])
-    data.setdefault("resolved", [])
+    for section in ("unresolved_critical", "resolved"):
+        entries = data.get(section)
+        if not isinstance(entries, list):
+            raise ValueError(f"{path}: defects ledger {section!r} is missing or not a list")
+        for entry in entries:
+            ident = entry.get("id") if isinstance(entry, dict) else None
+            if not isinstance(ident, str) or not ident:
+                raise ValueError(f"{path}: defects ledger {section!r} entry lacks a usable id")
     return data
+
+
+@contextmanager
+def _defects_lock(state_dir: Path | str) -> Iterator[None]:
+    """Hold an exclusive flock across a ledger read-modify-write, so the
+    CLI and the improve daemon can never interleave (lost entries,
+    colliding D-nnn ids)."""
+    path = _defects_path(state_dir)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path.with_suffix(".lock"), "w") as fh:
+        fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
 
 
 def _write_defects(state_dir: Path | str, data: dict[str, list[dict[str, Any]]]) -> None:
     path = _defects_path(state_dir)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2) + "\n")
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data, indent=2) + "\n")
+    tmp.replace(path)
 
 
 def add_defect(state_dir: Path | str, summary: str, defect_id: str | None = None) -> dict[str, Any]:
     """Record an unresolved critical defect; returns the entry."""
-    data = load_defects(state_dir)
-    existing = {e["id"] for e in data["unresolved_critical"]} | {e["id"] for e in data["resolved"]}
-    if defect_id is None:
-        n = 1
-        while f"D-{n:03d}" in existing:
-            n += 1
-        defect_id = f"D-{n:03d}"
-    elif defect_id in existing:
-        raise ValueError(f"defect id already exists: {defect_id}")
-    entry: dict[str, Any] = {"id": defect_id, "summary": summary, "opened": _utc_stamp()}
-    data["unresolved_critical"].append(entry)
-    _write_defects(state_dir, data)
+    with _defects_lock(state_dir):
+        data = load_defects(state_dir)
+        existing = {e["id"] for e in data["unresolved_critical"]} | {
+            e["id"] for e in data["resolved"]
+        }
+        if defect_id is None:
+            n = 1
+            while f"D-{n:03d}" in existing:
+                n += 1
+            defect_id = f"D-{n:03d}"
+        elif defect_id in existing:
+            raise ValueError(f"defect id already exists: {defect_id}")
+        entry: dict[str, Any] = {"id": defect_id, "summary": summary, "opened": _utc_stamp()}
+        data["unresolved_critical"].append(entry)
+        _write_defects(state_dir, data)
     return entry
 
 
 def resolve_defect(state_dir: Path | str, defect_id: str, note: str = "") -> dict[str, Any]:
     """Move a defect to the resolved list; raises KeyError when unknown."""
-    data = load_defects(state_dir)
-    for i, entry in enumerate(data["unresolved_critical"]):
-        if entry["id"] == defect_id:
-            resolved = {**entry, "resolved": _utc_stamp(), "note": note}
-            del data["unresolved_critical"][i]
-            data["resolved"].append(resolved)
-            _write_defects(state_dir, data)
-            return resolved
+    with _defects_lock(state_dir):
+        data = load_defects(state_dir)
+        for i, entry in enumerate(data["unresolved_critical"]):
+            if entry["id"] == defect_id:
+                resolved = {**entry, "resolved": _utc_stamp(), "note": note}
+                del data["unresolved_critical"][i]
+                data["resolved"].append(resolved)
+                _write_defects(state_dir, data)
+                return resolved
     raise KeyError(f"no unresolved defect with id {defect_id!r}")
 
 

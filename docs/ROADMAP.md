@@ -79,9 +79,16 @@ CHANGELOG.md; highlights:
 
 - `services/` tree fate: own repo vs. deliberately tracked after a
   privacy scan (ignored, not tracked, today — human decision).
-- Wire up the `unresolved_critical_defects` readiness count (the bar
-  currently fails on *None* — a tracking gap, not a defect count) and add
-  6 eval cases to reach the 50-case bar.
+- ~~Wire up the `unresolved_critical_defects` readiness count and add
+  6 eval cases to reach the 50-case bar~~ **shipped** (2026-07-28): the
+  defects ledger CLI + 6 real-shape eval cases landed in `4ae0371`
+  (R-004: both bars green), then **2.1.3** hardened the ledger after the
+  first external-tool review pass (CodeRabbit CLI, 5 confirmed findings):
+  fail-closed shape validation (an object-shaped section previously
+  counted as zero and could green the bar), flock + tmp-then-replace
+  writes, CLI exit-2 on corrupt ledgers — see CHANGELOG. Automatic
+  CodeRabbit review now runs on every PR (`.coderabbit.yaml`, verified
+  live on #4).
 - Warn on set-but-unconsumed `PXX_*` env vars (deferred from 2.1.1).
 - A quickstart subcommand (proposed, does not exist yet): scaffold the
   tutorial sandbox from packaged resources (today the wheel ships neither

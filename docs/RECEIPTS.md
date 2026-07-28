@@ -204,5 +204,58 @@ deliberately: that is the hardware class the tutorial targets.
 
 ---
 
+## R-007 — The 8 GB standalone coding workstation, and the pxx ⇄ Camelid lane map
+
+**Primary claim.** An 8 GB unified-memory Apple-silicon laptop is a
+self-sufficient pxx coding workstation **today** with the verified
+configuration: pxx 2.1.2 + Ollama + a qwen3-4B-class model at 8–12k
+context — full tutorial 6/6 (R-001), edits and asks end-to-end, reviews
+via `PXX_REVIEW_TIMEOUT` on narrowed diffs (R-006). Nothing below
+changes that; this entry maps a *second* inference lane explored on the
+same hardware class.
+
+**Secondary record — pxx over Camelid v0.4.4** (2026-07-27/28;
+Camelid is an independent Rust-native GGUF engine with an
+OpenAI-compatible serve; row `qwen3_4b_q4_k_m`, the one its
+compatibility ledger marks `tool_capable`; tarball SHA-verified from the
+v0.4.4 release). Tested on two machines: the 8 GB laptop (macOS 25.x)
+and a 16 GB M4 Mac mini (macOS 26.4.1). Three findings, each isolated:
+
+1. **Default serve panics on macOS ARM64 for this row** —
+   `src/inference/metal_resident.rs:27:41: called Option::unwrap() on a
+   None value` on the first completion request; deterministic; **identical
+   on 8 GB and 16 GB machines** (so not memory-conditioned); the engine
+   worker does not recover (subsequent requests 503 in milliseconds).
+   Camelid's ledger claims no Metal-resident lane for this row — the
+   panic is the "auto-select the safest validated execution plan" path
+   routing into an unvalidated lane and unwrapping instead of refusing
+   with a typed error.
+2. **The deterministic CPU lane works end-to-end with pxx**: a read-only
+   pxx session completed the full round trip on both machines
+   (~1.2 tok/s on the 8 GB laptop; ~8.7 tok/s on the M4 — parity-lane
+   speeds, per Camelid's own docs not a performance lane).
+3. **The OpenAI `tools` surface does not execute tools in v0.4.4**:
+   the parameter is accepted, the model emits a correct Qwen-native
+   `<tool_call>{"name": …}</tool_call>` block — and the serve layer
+   returns it verbatim as `content`, with `tool_calls` always null
+   (isolated with a direct curl carrying an explicit tools array).
+   Agent loops driving `/v1/chat/completions` therefore cannot execute
+   tools against this build. **This does not contradict Camelid's
+   `tool_capable` receipt**, which was earned through its own agent
+   lane and parser; the OpenAI tool surface is simply an unclaimed lane,
+   now mapped.
+
+**Boundary — explicitly not claimed.** No Camelid parity or quality
+claims (its ledger owns those); pxx tutorial 6/6 *over Camelid* was not
+achieved — blocked at finding 3, not at the model or the hardware; the
+8 GB standalone claim is exactly the R-001 configuration, nothing
+broader. Findings 1 and 3 are reported upstream; this entry updates
+when the lanes change.
+
+**Grade.** Attested (two role-described machines); every probe command
+is reproducible against the public Camelid v0.4.4 release.
+
+---
+
 *Convention: entries are append-only and dated; superseded claims are
 struck through with a pointer to the superseding entry, never deleted.*

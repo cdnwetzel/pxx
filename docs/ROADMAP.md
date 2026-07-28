@@ -88,6 +88,12 @@ CHANGELOG.md; highlights:
   the tutorial nor the setup script).
 - Auto-backend probe latency (~1–2 s per invocation with a healthy aider
   installed): cache or probe-on-failure redesign (deferred, documented).
+- **Detect tool-call-shaped prose** (from the R-007 Camelid lane map): when
+  a completion's `content` contains a well-formed `<tool_call>` block but
+  `tool_calls` is empty, the serving layer dropped the call — pxx should
+  warn (or parse) instead of treating it as a final answer. Gives the
+  tutorial's "describes edits instead of making them" symptom a
+  machine-detectable signature.
 - ~~Reviewer timeout on real-repo diffs~~ **shipped in 2.1.2**
   (2026-07-27, ~24 h find-to-ship): `PXX_REVIEW_TIMEOUT` with
   `PXX_NATIVE_TIMEOUT` fallback, never-blank failure reasons, and the

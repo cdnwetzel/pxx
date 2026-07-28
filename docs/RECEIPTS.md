@@ -160,5 +160,43 @@ release was cut.
 
 ---
 
+## R-006 — 2.1.2 fixes verified against the original failing sequence
+
+**Claim.** The 2.1.2 reviewer fixes (configurable timeout, never-blank
+failure reasons, actionable context-overflow message) resolve the defect
+they were cut for — verified 2026-07-27 by re-running the *exact*
+sequence that failed on 2.1.1: `pxx review --since <sha>` over a
+~930-line security diff on a real multi-tenant FastAPI repository,
+8 GB Apple-silicon hardware, local Ollama, qwen3-4B models, pxx
+installed from the published PyPI wheel.
+
+**Grade.** Attested (the target repository is private); the procedure
+reproduces on any comparable repo and hardware.
+
+**Record — full matrix, same diff and machine as the original failure:**
+
+| Scenario | 2.1.1 behavior | 2.1.2 observed |
+|---|---|---|
+| default timeout, ~930-line diff | died at 120.36 s, reason **blank** | dies at ~120 s, reason **`ReadTimeout`** |
+| 8k-context model, same diff | raw failure | *"review diff exceeds the model's context window — raise num_ctx …"* |
+| `PXX_REVIEW_TIMEOUT=900`, same diff | impossible (fixed ceiling) | request **completes at 175.28 s**; 4B model's output unparseable → honest advisory degrade |
+| `PXX_REVIEW_TIMEOUT=900`, 47-line diff | would die at 120 s | **`verdict: APPROVE` at 124.15 s** |
+
+The last row is the decisive one twice over: a real usable verdict on
+the real repo, from a run that itself exceeded the old ceiling — on this
+hardware class even the small-diff happy path needs more than 120 s
+(model cold-load + prefill), so the fixed ceiling made `pxx review`
+effectively unusable here, and the env override restores it end-to-end.
+
+**Boundary — explicitly not claimed.** A 4B reviewer model does not
+produce a parseable verdict on ~930-line diffs (row 3); that is the
+reviewer-model-quality boundary already declared in R-003, handled by
+the honest degrade, and remediated by narrowing the diff — exactly what
+the new overflow/timeout messages advise. Warm-model latencies are
+lower; the numbers above include cold loads under memory pressure,
+deliberately: that is the hardware class the tutorial targets.
+
+---
+
 *Convention: entries are append-only and dated; superseded claims are
 struck through with a pointer to the superseding entry, never deleted.*

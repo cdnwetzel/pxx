@@ -285,6 +285,7 @@ def load_settings(
 ) -> Settings:
     """Resolve the effective settings for a run in ``cwd``."""
     _load_env_file()
+    warn_unconsumed_env()  # after the env file loads, so its typos warn too
     settings = Settings()
     if _USER_CONFIG.is_file():
         settings = _settings_from_dict(_read_toml(_USER_CONFIG), settings, str(_USER_CONFIG))
@@ -303,23 +304,92 @@ def load_settings(
     return settings
 
 
+def _timeout_from_env(names: tuple[str, ...], default: float) -> float:
+    """First *present* name in ``names`` wins — presence, not truthiness.
+
+    A variable that is set but empty/malformed/non-positive is a
+    configuration mistake: warn and use ``default``, never fall through to
+    the next variable (a silently different timeout on the wrong knob is
+    worse than the default). Semantics pinned by the
+    ``micro-timeout-env-chain`` eval case.
+    """
+    for name in names:
+        if name not in os.environ:
+            continue
+        raw = os.environ[name]
+        try:
+            value = float(raw)
+        except ValueError:
+            value = None
+        if value is not None and value > 0:  # rejects 0, negatives, NaN
+            return value
+        log.warning(
+            "%s=%r is not a positive number of seconds — using the %.0fs default",
+            name,
+            raw,
+            default,
+        )
+        return default
+    return default
+
+
 def review_timeout(default: float = 120.0) -> float:
-    """Reviewer HTTP timeout in seconds (2.1.2). ``PXX_REVIEW_TIMEOUT`` wins,
-    falling back to ``PXX_NATIVE_TIMEOUT`` — hardware slow enough to need a
-    longer agent round is slow on review prefill too. Unset, malformed, and
-    non-positive/NaN values fall back to ``default``. Lives here because
-    config.py is the sanctioned environment boundary (golden principle
-    no-os-environ-outside-config).
+    """Reviewer HTTP timeout in seconds (2.1.2). ``PXX_REVIEW_TIMEOUT`` wins
+    whenever it is set, falling back to ``PXX_NATIVE_TIMEOUT`` only when
+    unset — hardware slow enough to need a longer agent round is slow on
+    review prefill too. Malformed and non-positive/NaN values warn and use
+    ``default`` (2.1.4: previously they fell back silently, and an empty
+    ``PXX_REVIEW_TIMEOUT`` fell through to the native knob). Lives here
+    because config.py is the sanctioned environment boundary (golden
+    principle no-os-environ-outside-config).
 
     Real-world calibration: a ~930-line review diff on 8 GB hardware died at
     exactly the old fixed 120 s ceiling (2026-07-26, first usage-found defect
     after 2.1.1).
     """
-    raw = os.environ.get("PXX_REVIEW_TIMEOUT") or os.environ.get("PXX_NATIVE_TIMEOUT")
-    if raw is None:
-        return default
-    try:
-        value = float(raw)
-    except ValueError:
-        return default
-    return value if value > 0 else default
+    return _timeout_from_env(("PXX_REVIEW_TIMEOUT", "PXX_NATIVE_TIMEOUT"), default)
+
+
+def native_timeout(default: float = 300.0) -> float:
+    """Native per-round HTTP timeout in seconds (``PXX_NATIVE_TIMEOUT``).
+
+    Local models on memory-constrained hardware can legitimately need
+    >300 s for a round; a too-low value surfaces as a misleading
+    MODEL_UNAVAILABLE. Moved here from backends/native.py (2.1.4) so the
+    env read lives at the sanctioned boundary and malformed values warn
+    instead of falling back silently.
+    """
+    return _timeout_from_env(("PXX_NATIVE_TIMEOUT",), default)
+
+
+# Every PXX_* variable some part of the ecosystem consumes. Python readers
+# stay in this module plus the server-token check; the second set is read by
+# the git hooks and the release workflow, not this process.
+_CONSUMED_ENV = frozenset(_ENV_MAP) | {
+    "PXX_MEMORY_ENABLED",
+    "PXX_MEMORY_DIR",
+    "PXX_SCOPE",
+    "PXX_REVIEW_TIMEOUT",
+    "PXX_NATIVE_TIMEOUT",
+    "PXX_SERVER_TOKEN",
+}
+_ECOSYSTEM_ENV = frozenset({"PXX_DIFF_CAP", "PXX_PRECOMMIT_SKIP", "PXX_CONTENT_DENYLIST"})
+_warned_unconsumed = False
+
+
+def warn_unconsumed_env() -> None:
+    """Warn once per process about set-but-never-consumed ``PXX_*`` vars.
+
+    Typo insurance (deferred from 2.1.1): ``PXX_TIMEOUT`` or
+    ``PXX_REVEIW_TIMEOUT`` silently does nothing today. Warn-only — an
+    unknown variable must never fail a run (users legitimately export
+    experimental or future-version knobs).
+    """
+    global _warned_unconsumed
+    if _warned_unconsumed:
+        return
+    _warned_unconsumed = True
+    known = _CONSUMED_ENV | _ECOSYSTEM_ENV
+    for key in sorted(os.environ):
+        if key.startswith("PXX_") and key not in known:
+            log.warning("%s is set but nothing in pxx consumes it — possible typo", key)

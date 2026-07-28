@@ -278,3 +278,91 @@ def test_native_timeout_env_override(monkeypatch):
     monkeypatch.delenv("PXX_NATIVE_TIMEOUT")
     assert NativeBackend()._timeout == 300.0  # unset -> default
     assert NativeBackend(timeout=17.0)._timeout == 17.0  # explicit arg wins
+
+
+# --- tool-call-shaped prose: the serving layer dropped the call (R-007) --------------
+
+
+def prose_call(content_suffix: str = "") -> str:
+    return '<tool_call>{"name": "read_file", "arguments": {"path": "x.py"}}</tool_call>' + (
+        content_suffix
+    )
+
+
+def test_prose_tool_call_nudges_then_recovers(tmp_path):
+    requests: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(json.loads(request.content))
+        if len(requests) == 1:
+            return httpx.Response(200, json=completion(prose_call()))
+        return httpx.Response(200, json=completion("actual answer"))
+
+    ctx = make_ctx(tmp_path)
+    outcome = asyncio.run(make_backend(handler).run("do it", ctx))
+    assert outcome.code is TerminalCode.COMPLETED
+    assert outcome.summary == "actual answer"
+    assert outcome.rounds == 2
+    # the model was told its call was not executed
+    nudges = [
+        m for m in requests[1]["messages"] if m["role"] == "user" and "NOT executed" in m["content"]
+    ]
+    assert len(nudges) == 1
+    # and the anomaly is on the bus for run evidence
+    events = [e for e in ctx.bus.history if e.kind == "tool_call_prose"]
+    assert len(events) == 1 and events[0].data["nudges"] == 1
+
+
+def test_prose_tool_call_persistent_raises_actionable(tmp_path):
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=completion(prose_call()))
+
+    ctx = make_ctx(tmp_path)
+    with pytest.raises(BackendError, match="tool calls as prose"):
+        asyncio.run(make_backend(handler).run("do it", ctx))
+    events = [e for e in ctx.bus.history if e.kind == "tool_call_prose"]
+    assert len(events) == 3  # two nudges + the terminal detection
+
+
+def test_prose_mention_without_wellformed_block_completes(tmp_path):
+    # Talking ABOUT the tag must not trigger (pxx works on its own codebase):
+    # no JSON object with a name inside the block -> final answer.
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200, json=completion("never print <tool_call> blocks as text — done.")
+        )
+
+    ctx = make_ctx(tmp_path)
+    outcome = asyncio.run(make_backend(handler).run("do it", ctx))
+    assert outcome.code is TerminalCode.COMPLETED
+    assert not [e for e in ctx.bus.history if e.kind == "tool_call_prose"]
+
+
+def test_bare_json_tool_call_answer_detected(tmp_path):
+    # The exact live failure (2026-07-28 dogfood run): the model's final
+    # answer WAS the tool call as raw JSON — no <tool_call> tags at all.
+    bare = '{"name": "edit_file", "arguments": {"path": "docs/TUTORIAL.md", "old_string": "a", "new_string": "b"}}'
+    requests: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(json.loads(request.content))
+        if len(requests) == 1:
+            return httpx.Response(200, json=completion(bare))
+        return httpx.Response(200, json=completion("done properly"))
+
+    ctx = make_ctx(tmp_path)
+    outcome = asyncio.run(make_backend(handler).run("do it", ctx))
+    assert outcome.code is TerminalCode.COMPLETED
+    assert outcome.summary == "done properly"
+    assert [e.data["nudges"] for e in ctx.bus.history if e.kind == "tool_call_prose"] == [1]
+
+
+def test_plain_json_answer_without_tool_shape_completes(tmp_path):
+    # A JSON final answer that is NOT tool-call-shaped stays a final answer.
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=completion('{"result": "ok", "count": 3}'))
+
+    ctx = make_ctx(tmp_path)
+    outcome = asyncio.run(make_backend(handler).run("do it", ctx))
+    assert outcome.code is TerminalCode.COMPLETED
+    assert not [e for e in ctx.bus.history if e.kind == "tool_call_prose"]

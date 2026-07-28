@@ -30,6 +30,7 @@ EVENT_KINDS = frozenset(
         "model_response",
         "prompt_rendered",
         "tool_call",
+        "tool_call_prose",
         "tool_result",
         "tool_action_proposed",
         "policy_decision",

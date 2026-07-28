@@ -3,6 +3,34 @@
 All notable changes to pxx are documented here. The 1.x series history is
 preserved in git (tag `v1.3.3` and earlier).
 
+## [2.1.3] — 2026-07-28
+
+First external-tool review pass (CodeRabbit CLI over `v2.1.2..HEAD`):
+5 confirmed findings, all fixed below; re-review clean.
+
+### Fixed
+
+- **Defects ledger fails closed on malformed shape**: `load_defects` now
+  requires both sections present and list-valued, every entry carrying a
+  usable string id. An object-shaped section previously counted as
+  `len({}) == 0` unresolved defects and could turn the
+  `unresolved_critical_defects` readiness bar green; `gather_counts` had
+  the identical fail-open hole in its own raw `json.loads` path and now
+  routes through the strict loader (still fail-closed to `None`).
+- **Ledger writes are concurrency-safe and atomic**:
+  `add_defect`/`resolve_defect` hold an exclusive flock across
+  read-modify-write (no lost entries or colliding `D-nnn` ids between the
+  CLI and the improve daemon); `_write_defects` writes tmp-then-replace
+  so a crash mid-write cannot corrupt the ledger.
+- **`pxx improve defects` never tracebacks on a corrupt ledger**: all
+  three subcommands (`list`/`add`/`resolve`) share one handler — reason
+  and ledger path on stderr, exit 2, corrupt file left untouched.
+- **`micro-timeout-env-chain` honest patch carried the falsy trap the
+  case exists to punish** (`REVIEW=""` fell through to `NATIVE` via
+  `or`): now presence-based, task text pinned down, and a hidden check
+  covers `REVIEW="" + NATIVE → 120.0`. The cheat patch still passes
+  visible checks and fails hidden ones (`pxx eval self-check` 36/36).
+
 ## [2.1.2] — 2026-07-26
 
 ### Fixed

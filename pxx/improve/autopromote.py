@@ -28,7 +28,7 @@ import json
 import logging
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -144,6 +144,75 @@ def gather_counts(state_dir: Path | str, *, evals_dir: Path | str | None = None)
 def readiness(state_dir: Path | str, *, evals_dir: Path | str | None = None) -> ReadinessReport:
     """Readiness of the platform for auto-promotion."""
     return evaluate_readiness(gather_counts(state_dir, evals_dir=evals_dir))
+
+
+# -- critical-defects ledger ---------------------------------------------------------
+#
+# The unresolved_critical_defects bar reads _DEFECTS_FILENAME; these are its
+# only writers. The ledger is append-through: a resolved defect moves to the
+# "resolved" list with its full history — it is never deleted, so the file is
+# also the public record of what was found and fixed.
+
+
+def _defects_path(state_dir: Path | str) -> Path:
+    return Path(state_dir) / _DEFECTS_FILENAME
+
+
+def _utc_stamp() -> str:
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def load_defects(state_dir: Path | str) -> dict[str, list[dict[str, Any]]]:
+    """The ledger, or an empty one when the file is absent.
+
+    Malformed content raises (a corrupt ledger needs a human, never a
+    silent reset) — gather_counts independently fails closed to None.
+    """
+    path = _defects_path(state_dir)
+    if not path.is_file():
+        return {"unresolved_critical": [], "resolved": []}
+    data = json.loads(path.read_text())
+    if not isinstance(data, dict):
+        raise ValueError(f"{path}: defects ledger is not a JSON object")
+    data.setdefault("unresolved_critical", [])
+    data.setdefault("resolved", [])
+    return data
+
+
+def _write_defects(state_dir: Path | str, data: dict[str, list[dict[str, Any]]]) -> None:
+    path = _defects_path(state_dir)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=2) + "\n")
+
+
+def add_defect(state_dir: Path | str, summary: str, defect_id: str | None = None) -> dict[str, Any]:
+    """Record an unresolved critical defect; returns the entry."""
+    data = load_defects(state_dir)
+    existing = {e["id"] for e in data["unresolved_critical"]} | {e["id"] for e in data["resolved"]}
+    if defect_id is None:
+        n = 1
+        while f"D-{n:03d}" in existing:
+            n += 1
+        defect_id = f"D-{n:03d}"
+    elif defect_id in existing:
+        raise ValueError(f"defect id already exists: {defect_id}")
+    entry: dict[str, Any] = {"id": defect_id, "summary": summary, "opened": _utc_stamp()}
+    data["unresolved_critical"].append(entry)
+    _write_defects(state_dir, data)
+    return entry
+
+
+def resolve_defect(state_dir: Path | str, defect_id: str, note: str = "") -> dict[str, Any]:
+    """Move a defect to the resolved list; raises KeyError when unknown."""
+    data = load_defects(state_dir)
+    for i, entry in enumerate(data["unresolved_critical"]):
+        if entry["id"] == defect_id:
+            resolved = {**entry, "resolved": _utc_stamp(), "note": note}
+            del data["unresolved_critical"][i]
+            data["resolved"].append(resolved)
+            _write_defects(state_dir, data)
+            return resolved
+    raise KeyError(f"no unresolved defect with id {defect_id!r}")
 
 
 # -- auto-promotion ------------------------------------------------------------------

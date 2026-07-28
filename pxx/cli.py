@@ -318,6 +318,18 @@ def _build_parser() -> argparse.ArgumentParser:
     imp_eval.add_argument("--corpus", help="corpus root containing tier dirs (default: ./evals)")
     imp_sub.add_parser("principles", help="run golden-principle lints over the source tree")
     imp_sub.add_parser("readiness", help="report auto-promotion readiness bars")
+    imp_defects = imp_sub.add_parser(
+        "defects",
+        help="maintain the critical-defects ledger the readiness bar reads",
+    )
+    defects_sub = imp_defects.add_subparsers(dest="defects_command", required=True)
+    defects_sub.add_parser("list", help="show unresolved and resolved critical defects")
+    d_add = defects_sub.add_parser("add", help="record an unresolved critical defect")
+    d_add.add_argument("summary")
+    d_add.add_argument("--id", dest="defect_id", default=None, help="stable id (default: D-<n>)")
+    d_resolve = defects_sub.add_parser("resolve", help="mark a critical defect resolved")
+    d_resolve.add_argument("defect_id")
+    d_resolve.add_argument("--note", default="", help="how it was resolved (sha, release…)")
     imp_auto = imp_sub.add_parser(
         "auto-promote",
         help="evidence-gated auto-promotion (default: report and refuse)",
@@ -1219,6 +1231,35 @@ def _cmd_improve(args: argparse.Namespace) -> int:
         ready = preconditions_met(preconditions) and report.green
         print(f"readiness: {'READY' if ready else 'NOT-READY'}")
         return 0 if ready else 2
+    if command == "defects":
+        from .improve.autopromote import add_defect, load_defects, resolve_defect
+
+        if args.defects_command == "add":
+            try:
+                entry = add_defect(state_dir, args.summary, args.defect_id)
+            except ValueError as exc:
+                print(f"pxx improve defects: {exc}", file=sys.stderr)
+                return 2
+            print(f"added {entry['id']}: {entry['summary']}")
+            return 0
+        if args.defects_command == "resolve":
+            try:
+                entry = resolve_defect(state_dir, args.defect_id, args.note)
+            except KeyError as exc:
+                print(f"pxx improve defects: {exc.args[0]}", file=sys.stderr)
+                return 2
+            print(f"resolved {entry['id']}: {entry['summary']}")
+            return 0
+        data = load_defects(state_dir)
+        for entry in data["unresolved_critical"]:
+            print(f"UNRESOLVED {entry['id']} (opened {entry['opened']}): {entry['summary']}")
+        for entry in data["resolved"]:
+            print(f"resolved   {entry['id']} ({entry['resolved']}): {entry['summary']}")
+        print(
+            f"unresolved critical: {len(data['unresolved_critical'])} / "
+            f"resolved: {len(data['resolved'])}"
+        )
+        return 0
     if command == "auto-promote":
         from .errors import CandidateInvalid
         from .improve.autopromote import (

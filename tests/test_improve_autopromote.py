@@ -364,3 +364,48 @@ def test_commit_false_reports_would_promote_without_writing(tmp_path):
     assert not verdict.promoted
     assert verdict.would_promote
     assert not (tmp_path / ".pxx" / "promotions").exists()
+
+
+# -- critical-defects ledger (2.1.2 T3 enabler) --------------------------------------
+
+
+def test_defects_ledger_lifecycle(tmp_path):
+    from pxx.improve.autopromote import add_defect, gather_counts, load_defects, resolve_defect
+
+    state_dir = tmp_path / ".pxx"
+    state_dir.mkdir()
+
+    # empty state: ledger absent → bar sees None (fail closed)
+    assert gather_counts(state_dir).unresolved_critical_defects is None
+
+    entry = add_defect(state_dir, "review path times out on real diffs")
+    assert entry["id"] == "D-001" and entry["opened"]
+    assert gather_counts(state_dir).unresolved_critical_defects == 1
+
+    second = add_defect(state_dir, "another", defect_id="D-GIT")
+    assert second["id"] == "D-GIT"
+    with pytest.raises(ValueError, match="already exists"):
+        add_defect(state_dir, "dup", defect_id="D-001")
+
+    resolved = resolve_defect(state_dir, "D-001", note="shipped in 2.1.2")
+    assert resolved["resolved"] and resolved["note"] == "shipped in 2.1.2"
+    assert gather_counts(state_dir).unresolved_critical_defects == 1  # D-GIT remains
+    resolve_defect(state_dir, "D-GIT")
+    # ledger present with zero unresolved: the bar is provable now
+    assert gather_counts(state_dir).unresolved_critical_defects == 0
+
+    data = load_defects(state_dir)
+    assert [e["id"] for e in data["resolved"]] == ["D-001", "D-GIT"]  # never deleted
+    with pytest.raises(KeyError):
+        resolve_defect(state_dir, "D-001")  # already resolved: not unresolved
+
+
+def test_defects_ledger_malformed_raises_but_bar_fails_closed(tmp_path):
+    from pxx.improve.autopromote import gather_counts, load_defects
+
+    state_dir = tmp_path / ".pxx"
+    state_dir.mkdir()
+    (state_dir / "evaluator-defects.json").write_text("[not an object]")
+    with pytest.raises(ValueError):
+        load_defects(state_dir)
+    assert gather_counts(state_dir).unresolved_critical_defects is None

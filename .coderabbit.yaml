@@ -1,0 +1,27 @@
+# CodeRabbit (coderabbit.ai) — automatic AI review on every PR.
+# Requires the GitHub App (github.com/apps/coderabbitai) installed on this repo.
+language: "en-US"
+
+reviews:
+  profile: "assertive"
+  high_level_summary: true
+  poem: false
+  auto_review:
+    enabled: true
+    drafts: false
+  path_filters:
+    - "!uv.lock"
+  path_instructions:
+    - path: "evals/**"
+      instructions: |
+        These TOMLs are eval corpus cases for an agent harness. Invariants:
+        honest_patch must satisfy every visible AND hidden check;
+        cheat_patch must pass visible checks but fail hidden ones.
+        The dev/held-out partition mix is deliberate per tier — do not
+        flag partition values as inconsistent across cases.
+    - path: "pxx/improve/**"
+      instructions: |
+        This subsystem is fail-closed by design: missing or malformed
+        evidence must read as "cannot prove" (None / raise), never as
+        zero or a silent default. Flag any path where bad input could
+        make a readiness bar or gate pass.

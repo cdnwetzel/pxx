@@ -251,6 +251,10 @@ uv run ruff check
 > the 1.x line continues on its `v1.x` branch. The public history is a
 > curated series — the full development history stays private.
 
+Pull requests are reviewed automatically by
+[CodeRabbit](https://coderabbit.ai) (config in `.coderabbit.yaml`) in
+addition to human review.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).

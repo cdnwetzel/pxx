@@ -295,3 +295,53 @@ def test_generic_only_review_blocks_without_vacuous_pass() -> None:
     assert result.verdict is Verdict.NO_REVIEW
     assert result.findings == ()
     assert result.blocked is True
+
+
+# --- 2.1.2: reviewer timeout env, non-blank reasons, overflow message --------
+
+
+def test_reviewer_timeout_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # PXX_REVIEW_TIMEOUT wins; falls back to PXX_NATIVE_TIMEOUT; malformed
+    # and non-positive values fall back to the 120s default; an explicit
+    # constructor argument beats everything.
+    monkeypatch.delenv("PXX_REVIEW_TIMEOUT", raising=False)
+    monkeypatch.delenv("PXX_NATIVE_TIMEOUT", raising=False)
+    assert NativeReviewer(_model(), _missing_prompt(tmp_path))._timeout == 120.0
+
+    monkeypatch.setenv("PXX_NATIVE_TIMEOUT", "540")
+    assert NativeReviewer(_model(), _missing_prompt(tmp_path))._timeout == 540.0
+
+    monkeypatch.setenv("PXX_REVIEW_TIMEOUT", "300")
+    assert NativeReviewer(_model(), _missing_prompt(tmp_path))._timeout == 300.0
+
+    monkeypatch.setenv("PXX_REVIEW_TIMEOUT", "not-a-number")
+    monkeypatch.delenv("PXX_NATIVE_TIMEOUT", raising=False)
+    assert NativeReviewer(_model(), _missing_prompt(tmp_path))._timeout == 120.0
+
+    for bogus in ("0", "-5", "nan"):  # non-positive and NaN all fall back
+        monkeypatch.setenv("PXX_REVIEW_TIMEOUT", bogus)
+        assert NativeReviewer(_model(), _missing_prompt(tmp_path))._timeout == 120.0
+
+    monkeypatch.setenv("PXX_REVIEW_TIMEOUT", "999")
+    assert NativeReviewer(_model(), _missing_prompt(tmp_path), timeout=7.0)._timeout == 7.0
+
+
+def test_reviewer_timeout_reason_is_never_blank(tmp_path: Path) -> None:
+    # httpx.ReadTimeout stringifies to "" — the exact blank-reason failure
+    # observed live on 2026-07-26. The type name must appear instead.
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("")
+
+    reviewer = NativeReviewer(
+        _model(), _missing_prompt(tmp_path), transport=httpx.MockTransport(handler)
+    )
+    with pytest.raises(ReviewUnavailable, match="ReadTimeout"):
+        asyncio.run(reviewer.review("d", "t"))
+
+
+def test_reviewer_context_overflow_gets_actionable_message(tmp_path: Path) -> None:
+    body = '{"error":{"message":"...exceed_context_size_error..."}}'
+    transport = httpx.MockTransport(lambda request: httpx.Response(400, text=body))
+    reviewer = NativeReviewer(_model(), _missing_prompt(tmp_path), transport=transport)
+    with pytest.raises(ReviewUnavailable, match="context window"):
+        asyncio.run(reviewer.review("d", "t"))

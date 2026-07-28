@@ -18,7 +18,7 @@ from typing import Protocol
 
 import httpx
 
-from .config import ModelRef
+from .config import ModelRef, review_timeout
 from .errors import PxxError
 from .gitenv import git_env
 
@@ -226,11 +226,13 @@ class NativeReviewer:
         model: ModelRef,
         prompt_path: Path | None = None,
         *,
-        timeout: float = 120.0,
+        timeout: float | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self._model = model
-        self._timeout = timeout
+        # None → PXX_REVIEW_TIMEOUT / PXX_NATIVE_TIMEOUT / 120 (config.py owns
+        # the env read); an explicit constructor argument always wins.
+        self._timeout = review_timeout() if timeout is None else timeout
         self._transport = transport
         if prompt_path is None:
             prompt_path = Path(__file__).resolve().parent / "prompts" / "review.md"
@@ -259,11 +261,23 @@ class NativeReviewer:
                 timeout=self._timeout, transport=self._transport
             ) as client:
                 resp = await client.post(url, json=payload, headers=headers)
+                if resp.status_code == 400 and "exceed_context_size" in resp.text:
+                    # Ollama >= 0.32 fails loud when the diff overflows
+                    # num_ctx — same special-case the native backend got
+                    # in 2.1.1. Surface the fix, not the raw JSON.
+                    raise ReviewUnavailable(
+                        "review diff exceeds the model's context window — "
+                        "raise num_ctx or use a larger-context model, or "
+                        "narrow the diff (--staged / --since a closer sha)"
+                    )
                 resp.raise_for_status()
                 data = resp.json()
             content = data["choices"][0]["message"]["content"]
         except httpx.HTTPError as exc:
-            raise ReviewUnavailable(f"reviewer request failed: {exc}") from exc
+            # str(exc) can be empty (httpx.ReadTimeout, notably) — a blank
+            # reason is worse than none. Fall back to the exception type.
+            reason = str(exc) or type(exc).__name__
+            raise ReviewUnavailable(f"reviewer request failed: {reason}") from exc
         except (KeyError, IndexError, TypeError, ValueError) as exc:
             raise ReviewUnavailable(f"malformed reviewer response: {exc!r}") from exc
         if not isinstance(content, str):

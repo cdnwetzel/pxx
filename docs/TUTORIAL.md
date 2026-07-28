@@ -332,6 +332,10 @@ runs its own tool-calling agent loop — read-only until you opt in.*
    tool calls as prose. Causes, in order of likelihood: context truncation (raise `num_ctx` — see
    Level 0), a model too small for structured tool calls (use the Level 0 recommendations), or
    temperature flakiness (set `PARAMETER temperature 0.2` in your Modelfile).
+   Since 2.1.4 pxx detects a well-formed tool call arriving as plain text (a `<tool_call>`
+   block or a bare tool-call JSON answer), warns, and re-prompts the model; an endpoint that
+   keeps doing it fails the run with "returns tool calls as prose" instead of completing with
+   nothing changed.
    (On Ollama 0.32+ an oversized request no longer truncates silently — pxx reports "request
    exceeds the model's context window" with the `num_ctx` fix instead.)
 3. **The agent claims "the environment blocks file editing" / "check permissions" with

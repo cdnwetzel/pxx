@@ -88,16 +88,13 @@ CHANGELOG.md; highlights:
   the tutorial nor the setup script).
 - Auto-backend probe latency (~1–2 s per invocation with a healthy aider
   installed): cache or probe-on-failure redesign (deferred, documented).
-- **Reviewer timeout on real-repo diffs** (first usage-found defect set
-  after 2.1.1, 2026-07-26, on the tutorial's own 8 GB hardware class): a
-  ~930-line `--since` review dies at exactly the reviewer's fixed 120 s
-  HTTP timeout — `PXX_NATIVE_TIMEOUT` does not reach `NativeReviewer`,
-  there is no `PXX_REVIEW_TIMEOUT`, and the degraded notice prints an
-  empty reason (`ReadTimeout` stringifies to ""). Three fixes: honor a
-  timeout env in the reviewer, never print a blank failure reason, and
-  give the reviewer path the same context-overflow special-case the
-  native backend got in 2.1.1. (Advisory-mode degrade behaved correctly
-  throughout: NO_REVIEW, exit 0, stderr notice.)
+- ~~Reviewer timeout on real-repo diffs~~ **shipped in 2.1.2**
+  (2026-07-27, ~24 h find-to-ship): `PXX_REVIEW_TIMEOUT` with
+  `PXX_NATIVE_TIMEOUT` fallback, never-blank failure reasons, and the
+  reviewer context-overflow message — see CHANGELOG. Remaining parity
+  note from its review (non-blocking): malformed timeout env values fall
+  back silently in both the reviewer and the native backend; a warning
+  would be cheap insurance.
 
 ## Later
 

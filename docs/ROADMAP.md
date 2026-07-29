@@ -42,10 +42,16 @@ milestone reviewer-verified by execution):
 - Earned enablement: run the daemon in production, accumulate the real-run
   and human-promotion counts the auto-promotion readiness bars require
   (100 real runs, 3 human promotions) — auto-promotion stays report-and-refuse
-  until the platform earns it.
+  until the platform earns it. **IN PROGRESS since 2026-07-29**: the daemon
+  runs under launchd on the primary workstation (hourly ticks); first
+  proposal human-reviewed and rejected same day. real_runs at 50/100.
 - Live (non-scripted) eval arms on real endpoints, with the calibration
   fp-rate tracked against production fp.
-- The `pxx-reviews` triage loop for boundary-review artifacts.
+- The `pxx-reviews` triage loop for boundary-review artifacts. The
+  *proposal-inbox* half **shipped in 2.1.5** (2026-07-29): `pxx improve
+  triage list|qualify|reject` with reviewer identity, and the cycle honors
+  human dispositions instead of re-proposing them every tick (found live
+  on the daemon's first day). Boundary-review artifacts remain open.
 
 ## Shipped in 2.1.1 (2026-07-26)
 

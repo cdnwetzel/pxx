@@ -3,6 +3,40 @@
 All notable changes to pxx are documented here. The 1.x series history is
 preserved in git (tag `v1.3.3` and earlier).
 
+## [2.1.5] — 2026-07-29
+
+The triage loop (PR #6): human verdicts on improvement proposals are now
+recordable and DURABLE. Found on the daemon's first live day — a human
+rejected a proposal and the very next hourly cycle re-surfaced the
+identical signature, because nothing consulted human verdicts.
+
+### Added
+
+- **`pxx improve triage list|qualify|reject <slug> --note --by`**:
+  records the verdict with reviewer identity + timestamp and moves the
+  entry out of `human-review-required/` atomically. Rejections require
+  a note — the rationale is the record's value. Unknown slug, noteless
+  reject, or a corrupt entry exits 2, never a traceback; unreadable
+  inbox entries are surfaced in the listing, not hidden. Slugs are
+  validated to the 12-hex inbox shape (a crafted slug could previously
+  reach filesystem paths).
+- **The cycle honors human dispositions**: signatures with a
+  `disposition` record in `qualified/` or `rejected/` are skipped
+  (`human-dispositioned` in the report) instead of re-proposed every
+  tick. The cycle's own auto-rejections carry no disposition and stay
+  re-routable on purpose — their gates may change between versions.
+  Verified live: post-restart, the previously rejected `switch_model`
+  signature stayed suppressed on a real cycle.
+
+### Fixed
+
+- **Prose tool-call detector catches two more live shapes** (both
+  captured while dogfooding this release): a bare tool-call JSON
+  embedded after conversational prose, and pretty-printed
+  (whitespace-formatted) call objects. The embedded scan only triggers
+  when the JSON names a *registered* tool, so docs and explanations
+  quoting tool-call JSON never false-positive.
+
 ## [2.1.4] — 2026-07-29
 
 Run-integrity sensors (PR #5 — the first PR through the automatic

@@ -92,13 +92,15 @@ _PROSE_TOOL_CALL_RE = re.compile(r"<tool_call>\s*(\{.*?\})\s*</tool_call>", re.D
 _PROSE_NUDGE_LIMIT = 2
 
 
-def _prose_tool_call(content: str) -> bool:
+def _prose_tool_call(content: str, tool_names: frozenset[str] = frozenset()) -> bool:
     """True only for a *well-formed* call — prose that merely mentions the
-    tag must not trigger (pxx edits its own docs). Two shapes count: a
-    <tool_call> block whose body is a JSON object with a name, and a final
-    answer that IS a bare tool-call object (observed live 2026-07-28:
-    qwen2.5-coder:7b answered with the raw edit_file JSON and the run
-    "completed" with diff_lines=0)."""
+    tag must not trigger (pxx edits its own docs). Three shapes count, each
+    observed live: a <tool_call> block whose body is a JSON object with a
+    name; a final answer that IS a bare tool-call object (2026-07-28: raw
+    edit_file JSON, diff_lines=0); and a tool-call object embedded mid-prose
+    (2026-07-29: "please confirm…" followed by the read_file JSON). The
+    embedded shape additionally requires the name to be a *registered* tool
+    — free-floating JSON in prose is otherwise too common to trust."""
     for match in _PROSE_TOOL_CALL_RE.finditer(content):
         try:
             data = json.loads(match.group(1))
@@ -111,8 +113,19 @@ def _prose_tool_call(content: str) -> bool:
         try:
             data = json.loads(stripped)
         except json.JSONDecodeError:
-            return False
-        return isinstance(data, dict) and isinstance(data.get("name"), str) and "arguments" in data
+            data = None
+        if isinstance(data, dict) and isinstance(data.get("name"), str) and "arguments" in data:
+            return True
+    if tool_names:
+        decoder = json.JSONDecoder()
+        # whitespace-tolerant: pretty-printed calls ({\n  "name": …) count too
+        for candidate in re.finditer(r'\{\s*"name"', content):
+            try:
+                data, _ = decoder.raw_decode(content, candidate.start())
+            except json.JSONDecodeError:
+                data = None
+            if isinstance(data, dict) and data.get("name") in tool_names and "arguments" in data:
+                return True
     return False
 
 
@@ -166,6 +179,9 @@ class NativeBackend:
     ) -> RunOutcome:
         tool_ctx = make_tool_context(ctx)
         tools = list(ctx.tools.specs() or [])
+        tool_names = frozenset(str((t.get("function") or {}).get("name") or "") for t in tools) - {
+            ""
+        }
         system_message = _system_message(ctx)
         await ctx.bus.emit(
             "prompt_rendered",
@@ -283,7 +299,7 @@ class NativeBackend:
             messages.append(_assistant_message(message))
             if not tool_calls:
                 summary = (message.get("content") or "").strip()
-                if _prose_tool_call(summary):
+                if _prose_tool_call(summary, tool_names):
                     prose_nudges += 1
                     log.warning(
                         "tool call returned as prose by %s (nudge %d/%d)",

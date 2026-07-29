@@ -378,3 +378,60 @@ def test_block_with_nonstring_name_not_detected(tmp_path):
     outcome = asyncio.run(make_backend(handler).run("do it", ctx))
     assert outcome.code is TerminalCode.COMPLETED
     assert not [e for e in ctx.bus.history if e.kind == "tool_call_prose"]
+
+
+def test_embedded_tool_call_json_in_prose_detected(tmp_path):
+    # The exact live shape (2026-07-29 dogfood run): conversational prose
+    # followed by the bare tool-call JSON — the whole-answer check missed it.
+    live = (
+        "Please read and confirm the content of `README.md` before proceeding "
+        "with any changes. Should you confirm, I will update the file accordingly.\n\n"
+        '{"name": "read_file", "arguments": {"path": "/repo/README.md"}}'
+    )
+    requests: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(json.loads(request.content))
+        if len(requests) == 1:
+            return httpx.Response(200, json=completion(live))
+        return httpx.Response(200, json=completion("done properly"))
+
+    ctx = make_ctx(tmp_path)  # FakeRegistry registers read_file
+    outcome = asyncio.run(make_backend(handler).run("do it", ctx))
+    assert outcome.code is TerminalCode.COMPLETED
+    assert outcome.summary == "done properly"
+    assert [e.data["nudges"] for e in ctx.bus.history if e.kind == "tool_call_prose"] == [1]
+
+
+def test_embedded_json_with_unregistered_name_not_detected(tmp_path):
+    # Prose quoting a tool-call-shaped object whose name is NOT a registered
+    # tool must stay a final answer (docs and explanations do this).
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json=completion(
+                'The config format is {"name": "example", "arguments": {"x": 1}} — done.'
+            ),
+        )
+
+    ctx = make_ctx(tmp_path)
+    outcome = asyncio.run(make_backend(handler).run("do it", ctx))
+    assert outcome.code is TerminalCode.COMPLETED
+    assert not [e for e in ctx.bus.history if e.kind == "tool_call_prose"]
+
+
+def test_pretty_printed_embedded_tool_call_detected(tmp_path):
+    # CodeRabbit PR #6: the {"name" sentinel missed whitespace-formatted JSON.
+    pretty = 'Sure, next step:\n\n{\n  "name": "read_file",\n  "arguments": {"path": "x.py"}\n}'
+    requests: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(json.loads(request.content))
+        if len(requests) == 1:
+            return httpx.Response(200, json=completion(pretty))
+        return httpx.Response(200, json=completion("done properly"))
+
+    ctx = make_ctx(tmp_path)
+    outcome = asyncio.run(make_backend(handler).run("do it", ctx))
+    assert outcome.summary == "done properly"
+    assert [e.data["nudges"] for e in ctx.bus.history if e.kind == "tool_call_prose"] == [1]

@@ -160,7 +160,7 @@ def test_review_timeout_presence_wins_never_falls_through(monkeypatch, caplog):
     monkeypatch.delenv("PXX_REVIEW_TIMEOUT", raising=False)
     assert review_timeout() == 540.0  # absent -> native fallback still works
 
-    for bogus in ("", "not-a-number", "0", "-5", "nan"):
+    for bogus in ("", "not-a-number", "0", "-5", "nan", "inf", "Infinity"):
         monkeypatch.setenv("PXX_REVIEW_TIMEOUT", bogus)
         with caplog.at_level("WARNING", logger="pxx.config"):
             assert review_timeout() == 120.0

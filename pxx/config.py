@@ -13,6 +13,7 @@ Nothing here runs at import time.
 from __future__ import annotations
 
 import logging
+import math
 import os
 import tomllib
 from dataclasses import dataclass, field, replace
@@ -321,7 +322,9 @@ def _timeout_from_env(names: tuple[str, ...], default: float) -> float:
             value = float(raw)
         except ValueError:
             value = None
-        if value is not None and value > 0:  # rejects 0, negatives, NaN
+        if value is not None and math.isfinite(value) and value > 0:
+            # finite and positive: rejects 0, negatives, NaN, and inf —
+            # float("inf") would silently disable the HTTP timeout entirely
             return value
         log.warning(
             "%s=%r is not a positive number of seconds — using the %.0fs default",

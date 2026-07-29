@@ -104,7 +104,7 @@ def _prose_tool_call(content: str) -> bool:
             data = json.loads(match.group(1))
         except json.JSONDecodeError:
             continue
-        if isinstance(data, dict) and data.get("name"):
+        if isinstance(data, dict) and isinstance(data.get("name"), str) and data["name"]:
             return True
     stripped = content.strip()
     if stripped.startswith("{"):

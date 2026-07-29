@@ -271,7 +271,7 @@ def test_native_timeout_env_override(monkeypatch):
     monkeypatch.setenv("PXX_NATIVE_TIMEOUT", "not-a-number")
     assert NativeBackend()._timeout == 300.0  # malformed -> safe default
 
-    for bogus in ("0", "-5", "nan"):
+    for bogus in ("0", "-5", "nan", "inf"):
         monkeypatch.setenv("PXX_NATIVE_TIMEOUT", bogus)
         assert NativeBackend()._timeout == 300.0  # non-positive/NaN -> safe default
 
@@ -361,6 +361,18 @@ def test_plain_json_answer_without_tool_shape_completes(tmp_path):
     # A JSON final answer that is NOT tool-call-shaped stays a final answer.
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json=completion('{"result": "ok", "count": 3}'))
+
+    ctx = make_ctx(tmp_path)
+    outcome = asyncio.run(make_backend(handler).run("do it", ctx))
+    assert outcome.code is TerminalCode.COMPLETED
+    assert not [e for e in ctx.bus.history if e.kind == "tool_call_prose"]
+
+
+def test_block_with_nonstring_name_not_detected(tmp_path):
+    # Consistency with the bare-JSON path: the block must carry a string
+    # name, or it is not a well-formed call (review finding on PR #5).
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=completion('<tool_call>{"name": 5}</tool_call> done'))
 
     ctx = make_ctx(tmp_path)
     outcome = asyncio.run(make_backend(handler).run("do it", ctx))

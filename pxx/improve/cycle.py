@@ -21,8 +21,11 @@ Anti-spam rules (each skips the proposal, routed to ``rejected``):
 
 Only proposals with a deterministically derivable value become candidates
 today (``memory_retrieval_limit`` adjustments); everything else is routed to
-``human-review-required``. Concurrent cycles are serialized by an
-``fcntl.flock`` on ``<state_dir>/cycle.lock``; a second cycle is refused.
+``human-review-required``. Human verdicts recorded by ``pxx improve triage``
+(a ``disposition`` block in ``qualified/`` or ``rejected/``) are DURABLE:
+the cycle skips those signatures instead of re-proposing them every tick.
+Concurrent cycles are serialized by an ``fcntl.flock`` on
+``<state_dir>/cycle.lock``; a second cycle is refused.
 """
 
 from __future__ import annotations
@@ -142,6 +145,36 @@ def _inbox_write(state_dir: Path, box: str, proposal: Proposal, reason: str) -> 
     return path
 
 
+def proposal_slug(signature: str) -> str:
+    """The deterministic inbox filename stem for a proposal signature."""
+    return hashlib.sha256(signature.encode()).hexdigest()[:12]
+
+
+def human_disposition(state_dir: Path | str, slug: str) -> str | None:
+    """The inbox box holding a HUMAN disposition for ``slug``, else None.
+
+    A human disposition is an entry in ``qualified/`` or ``rejected/``
+    carrying a ``disposition`` block (written by ``pxx improve triage``).
+    The cycle consults this before routing so a human verdict is durable:
+    without it, every tick re-mined the same runs and re-surfaced the
+    identical proposal the human had already rejected (observed live
+    2026-07-29, first daemon day). Cycle-written auto-rejections carry no
+    ``disposition`` block and stay re-routable on purpose — their gates
+    may change between versions.
+    """
+    for box in (INBOX_QUALIFIED, INBOX_REJECTED):
+        path = Path(state_dir) / "inbox" / box / f"{slug}.json"
+        if not path.is_file():
+            continue
+        try:
+            entry = json.loads(path.read_text())
+        except ValueError:
+            continue  # unreadable record cannot prove a human decided
+        if isinstance(entry, dict) and "disposition" in entry:
+            return box
+    return None
+
+
 def _candidate_path(state_dir: Path, candidate_id: str) -> Path:
     return state_dir / "candidates" / candidate_id / "candidate.json"
 
@@ -206,6 +239,11 @@ def _validate_and_persist(state_dir: Path, state: dict[str, Any]) -> CycleReport
 
     for proposal in proposals:
         signature = _proposal_signature(proposal)
+        box = human_disposition(state_dir, proposal_slug(signature))
+        if box is not None:
+            # a human already decided this signature: their verdict is durable
+            skipped.append({"signature": signature, "reason": f"human-dispositioned ({box})"})
+            continue
         source_keys = _source_cluster_keys(thick, proposal)
         active_ids = [active[k] for k in source_keys if k in active]
 

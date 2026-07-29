@@ -340,6 +340,19 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="actually promote when every bar is green (default: refuse)",
     )
+    imp_triage = imp_sub.add_parser(
+        "triage", help="review the human-review inbox: list, qualify, or reject"
+    )
+    triage_sub = imp_triage.add_subparsers(dest="triage_command", required=True)
+    triage_sub.add_parser("list", help="show proposals awaiting human review")
+    for verb, blurb in (
+        ("qualify", "approve a pending proposal for pursuit (durable)"),
+        ("reject", "reject a pending proposal with a rationale (durable)"),
+    ):
+        t = triage_sub.add_parser(verb, help=blurb)
+        t.add_argument("slug", help="inbox filename stem (see: triage list)")
+        t.add_argument("--note", default="", help="rationale (required for reject)")
+        t.add_argument("--by", default=None, help="reviewer identity (default: current user)")
     imp_sub.add_parser("status", help="operator view: cycle, queue, inbox, daemon")
     imp_daemon = imp_sub.add_parser("daemon", help="run the improvement daemon")
     imp_daemon.add_argument(
@@ -1231,6 +1244,39 @@ def _cmd_improve(args: argparse.Namespace) -> int:
         ready = preconditions_met(preconditions) and report.green
         print(f"readiness: {'READY' if ready else 'NOT-READY'}")
         return 0 if ready else 2
+    if command == "triage":
+        from .improve.triage import dispose, pending
+
+        # unknown slug (KeyError) or noteless reject / corrupt entry
+        # (ValueError) exit 2 with the reason, never a traceback
+        try:
+            if args.triage_command == "list":
+                entries = pending(state_dir)
+                for entry in entries:
+                    if "error" in entry:
+                        print(f"{entry['slug']}  UNREADABLE: {entry['error']}")
+                        continue
+                    print(
+                        f"{entry['slug']}  {entry.get('operation', '?')}/"
+                        f"{entry.get('target', '?')}  "
+                        f"{(entry.get('hypothesis') or '')[:70]}"
+                    )
+                print(f"{len(entries)} awaiting human review")
+                return 0
+            record = dispose(
+                state_dir,
+                args.slug,
+                qualify=args.triage_command == "qualify",
+                note=args.note,
+                by=args.by,
+            )
+            d = record["disposition"]
+            print(f"{d['verdict']} {args.slug} by {d['decided_by']} ({d['decided']})")
+            return 0
+        except (KeyError, ValueError) as exc:
+            reason = exc.args[0] if exc.args else exc
+            print(f"pxx improve triage: {reason}", file=sys.stderr)
+            return 2
     if command == "defects":
         from .improve.autopromote import add_defect, load_defects, resolve_defect
 

@@ -137,7 +137,7 @@ def _inbox_write(state_dir: Path, box: str, proposal: Proposal, reason: str) -> 
     """Persist one triage entry. Deterministic filename -> idempotent."""
     dest = state_dir / "inbox" / box
     dest.mkdir(parents=True, exist_ok=True)
-    slug = hashlib.sha256(_proposal_signature(proposal).encode()).hexdigest()[:12]
+    slug = proposal_slug(_proposal_signature(proposal))
     path = dest / f"{slug}.json"
     payload = proposal.to_dict()
     payload["reason"] = reason
@@ -168,8 +168,8 @@ def human_disposition(state_dir: Path | str, slug: str) -> str | None:
             continue
         try:
             entry = json.loads(path.read_text())
-        except ValueError:
-            continue  # unreadable record cannot prove a human decided
+        except (OSError, ValueError):
+            continue  # unreadable record cannot prove a human decided; never break the tick
         if isinstance(entry, dict) and "disposition" in entry:
             return box
     return None

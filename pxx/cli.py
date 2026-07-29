@@ -1273,7 +1273,7 @@ def _cmd_improve(args: argparse.Namespace) -> int:
             d = record["disposition"]
             print(f"{d['verdict']} {args.slug} by {d['decided_by']} ({d['decided']})")
             return 0
-        except (KeyError, ValueError) as exc:
+        except (KeyError, OSError, ValueError) as exc:
             reason = exc.args[0] if exc.args else exc
             print(f"pxx improve triage: {reason}", file=sys.stderr)
             return 2

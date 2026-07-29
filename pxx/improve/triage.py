@@ -28,7 +28,7 @@ def _box(state_dir: Path | str, box: str) -> Path:
 
 
 def pending(state_dir: Path | str) -> list[dict[str, Any]]:
-    """Entries awaiting human review, oldest slug first, each with its slug.
+    """Entries awaiting human review in slug order, each with its slug.
 
     An unreadable entry is listed with an ``error`` field, never silently
     dropped — a corrupt inbox record needs a human, and this listing is
@@ -40,7 +40,7 @@ def pending(state_dir: Path | str) -> list[dict[str, Any]]:
             entry = json.loads(path.read_text())
             if not isinstance(entry, dict):
                 raise ValueError("entry is not a JSON object")
-        except ValueError as exc:
+        except (OSError, ValueError) as exc:
             entry = {"error": f"unreadable entry: {exc}"}
         entry["slug"] = path.stem
         out.append(entry)

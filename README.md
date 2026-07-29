@@ -187,6 +187,7 @@ pxx metrics summary|failures|memory-impact|export|compare
 pxx eval run|self-check|report [--partition held-out]
 pxx calibrate                     # reviewer calibration (recall/fp/agreement)
 pxx improve analyze|clusters|proposals|cycle|status|daemon|pause|resume
+pxx improve triage list|qualify|reject   # durable human verdicts on proposals
 pxx improve evaluate-candidate <id>   # held-out, both arms
 pxx improve readiness|auto-promote|principles
 pxx propose                       # create a constrained improvement candidate

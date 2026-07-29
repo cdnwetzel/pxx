@@ -89,25 +89,35 @@ CHANGELOG.md; highlights:
   writes, CLI exit-2 on corrupt ledgers — see CHANGELOG. Automatic
   CodeRabbit review now runs on every PR (`.coderabbit.yaml`, verified
   live on #4).
-- Warn on set-but-unconsumed `PXX_*` env vars (deferred from 2.1.1).
+- ~~Warn on set-but-unconsumed `PXX_*` env vars~~ **shipped in 2.1.4**
+  (2026-07-29, PR #5): warn-once typo insurance; git-hook/CI vars
+  allowlisted; warn-only. First live invocation surfaced 6 real
+  set-but-unconsumed fleet vars from `~/.config/pxx/env` — an allowlist
+  knob for deliberately-shared vars is an open follow-up if the noise
+  proves unwanted.
 - A quickstart subcommand (proposed, does not exist yet): scaffold the
   tutorial sandbox from packaged resources (today the wheel ships neither
   the tutorial nor the setup script).
 - Auto-backend probe latency (~1–2 s per invocation with a healthy aider
   installed): cache or probe-on-failure redesign (deferred, documented).
-- **Detect tool-call-shaped prose** (from the R-007 Camelid lane map): when
-  a completion's `content` contains a well-formed `<tool_call>` block but
-  `tool_calls` is empty, the serving layer dropped the call — pxx should
-  warn (or parse) instead of treating it as a final answer. Gives the
-  tutorial's "describes edits instead of making them" symptom a
-  machine-detectable signature.
+- ~~Detect tool-call-shaped prose~~ (from the R-007 Camelid lane map)
+  **shipped in 2.1.4** (2026-07-29, PR #5): `tool_call_prose` event +
+  warning, model re-prompted, actionable failure after repeated drops —
+  the "describes edits instead of making them" symptom is now
+  machine-detectable AND self-healing. The bare-JSON shape was added
+  from live evidence: a dogfooded run exhibited the exact failure while
+  the detector was being built (qwen2.5-coder:7b answered with raw
+  `edit_file` JSON, `diff_lines=0`).
 - ~~Reviewer timeout on real-repo diffs~~ **shipped in 2.1.2**
   (2026-07-27, ~24 h find-to-ship): `PXX_REVIEW_TIMEOUT` with
   `PXX_NATIVE_TIMEOUT` fallback, never-blank failure reasons, and the
-  reviewer context-overflow message — see CHANGELOG. Remaining parity
+  reviewer context-overflow message — see CHANGELOG. ~~Remaining parity
   note from its review (non-blocking): malformed timeout env values fall
-  back silently in both the reviewer and the native backend; a warning
-  would be cheap insurance.
+  back silently~~ resolved in **2.1.4**: presence-wins semantics (the
+  review knob never silently falls through to the native one — production
+  had the eval corpus's own or-falsy trap), warnings on malformed values,
+  non-finite values rejected, and the env read moved to the config
+  boundary.
 
 ## Later
 

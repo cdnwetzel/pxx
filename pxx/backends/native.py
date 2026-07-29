@@ -17,13 +17,13 @@ from __future__ import annotations
 
 import json
 import logging
-import os
+import re
 from importlib.resources import files
 from typing import Any, ClassVar
 
 import httpx
 
-from ..config import ModelRef
+from ..config import ModelRef, native_timeout
 from ..errors import BackendError, GateError
 from ..outcome import RunOutcome, TerminalCode
 from ..safety import PermissionMode
@@ -83,6 +83,39 @@ def _system_message(ctx: SessionContext) -> str:
     return "\n\n".join(parts)
 
 
+# A structured tool call the serving layer returned as *text*: the model
+# emitted a well-formed <tool_call> block but the response's tool_calls array
+# is empty (R-007: an OpenAI tools surface returning calls as prose). Without
+# detection the run "completes" having described its edits instead of making
+# them.
+_PROSE_TOOL_CALL_RE = re.compile(r"<tool_call>\s*(\{.*?\})\s*</tool_call>", re.DOTALL)
+_PROSE_NUDGE_LIMIT = 2
+
+
+def _prose_tool_call(content: str) -> bool:
+    """True only for a *well-formed* call — prose that merely mentions the
+    tag must not trigger (pxx edits its own docs). Two shapes count: a
+    <tool_call> block whose body is a JSON object with a name, and a final
+    answer that IS a bare tool-call object (observed live 2026-07-28:
+    qwen2.5-coder:7b answered with the raw edit_file JSON and the run
+    "completed" with diff_lines=0)."""
+    for match in _PROSE_TOOL_CALL_RE.finditer(content):
+        try:
+            data = json.loads(match.group(1))
+        except json.JSONDecodeError:
+            continue
+        if isinstance(data, dict) and isinstance(data.get("name"), str) and data["name"]:
+            return True
+    stripped = content.strip()
+    if stripped.startswith("{"):
+        try:
+            data = json.loads(stripped)
+        except json.JSONDecodeError:
+            return False
+        return isinstance(data, dict) and isinstance(data.get("name"), str) and "arguments" in data
+    return False
+
+
 def _assistant_message(choice: dict[str, Any]) -> dict[str, Any]:
     msg: dict[str, Any] = {"role": "assistant", "content": choice.get("content") or ""}
     if choice.get("tool_calls"):
@@ -102,16 +135,8 @@ class NativeBackend:
         self, *, client: httpx.AsyncClient | None = None, timeout: float | None = None
     ) -> None:
         # ``client`` is injectable for tests (httpx.MockTransport).
-        # PXX_NATIVE_TIMEOUT: per-round HTTP timeout in seconds. Local models on
-        # memory-constrained hardware can legitimately need >300s for a round;
-        # a too-low value surfaces as a misleading MODEL_UNAVAILABLE.
         if timeout is None:
-            try:
-                timeout = float(os.environ.get("PXX_NATIVE_TIMEOUT", "300"))
-            except ValueError:
-                timeout = 300.0
-            if not timeout > 0:  # rejects 0, negatives, and NaN
-                timeout = 300.0
+            timeout = native_timeout()  # PXX_NATIVE_TIMEOUT; config.py owns the env read
         self._client = client
         self._timeout = timeout
         self._cancelled = False
@@ -158,6 +183,7 @@ class NativeBackend:
         active = 0  # index into the fallback chain
         rounds = 0
         tokens = 0
+        prose_nudges = 0
         cost: float | None = None  # None until a priced model produces a cost
         while True:
             if self._cancelled or ctx.cancel_event.is_set():
@@ -257,6 +283,44 @@ class NativeBackend:
             messages.append(_assistant_message(message))
             if not tool_calls:
                 summary = (message.get("content") or "").strip()
+                if _prose_tool_call(summary):
+                    prose_nudges += 1
+                    log.warning(
+                        "tool call returned as prose by %s (nudge %d/%d)",
+                        model.endpoint,
+                        prose_nudges,
+                        _PROSE_NUDGE_LIMIT,
+                    )
+                    await ctx.bus.emit(
+                        "tool_call_prose",
+                        {
+                            "backend": "native",
+                            "model": model.model,
+                            "round": rounds,
+                            "nudges": prose_nudges,
+                        },
+                        session_id=ctx.session_id,
+                    )
+                    if prose_nudges > _PROSE_NUDGE_LIMIT:
+                        raise BackendError(
+                            f"{model.endpoint} keeps returning tool calls as prose — the "
+                            f"serving layer is dropping tool_calls. Verify the endpoint's "
+                            f"tool-call support (vLLM: --enable-auto-tool-choice "
+                            f"--tool-call-parser <parser>); see docs/TUTORIAL.md "
+                            f"troubleshooting (“describes edits instead of making them”)."
+                        )
+                    messages.append(
+                        {
+                            "role": "user",
+                            "content": (
+                                "Your tool call arrived as plain text, not as a structured "
+                                "tool call — it was NOT executed. Re-issue it through the "
+                                "tools API; never print <tool_call> blocks or raw tool-call "
+                                "JSON in your answer."
+                            ),
+                        }
+                    )
+                    continue
                 return RunOutcome(
                     code=TerminalCode.COMPLETED,
                     summary=summary or "done",

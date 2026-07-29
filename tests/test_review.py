@@ -318,7 +318,15 @@ def test_reviewer_timeout_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.delenv("PXX_NATIVE_TIMEOUT", raising=False)
     assert NativeReviewer(_model(), _missing_prompt(tmp_path))._timeout == 120.0
 
-    for bogus in ("0", "-5", "nan"):  # non-positive and NaN all fall back
+    # presence wins (2.1.4): a set-but-empty/malformed PXX_REVIEW_TIMEOUT
+    # uses the default — it never falls through to the native knob
+    monkeypatch.setenv("PXX_NATIVE_TIMEOUT", "540")
+    for bogus in ("", "not-a-number"):
+        monkeypatch.setenv("PXX_REVIEW_TIMEOUT", bogus)
+        assert NativeReviewer(_model(), _missing_prompt(tmp_path))._timeout == 120.0
+    monkeypatch.delenv("PXX_NATIVE_TIMEOUT", raising=False)
+
+    for bogus in ("0", "-5", "nan", "inf"):  # non-positive, NaN, inf all fall back
         monkeypatch.setenv("PXX_REVIEW_TIMEOUT", bogus)
         assert NativeReviewer(_model(), _missing_prompt(tmp_path))._timeout == 120.0
 

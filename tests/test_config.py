@@ -145,3 +145,56 @@ def test_dot_pxx_config_dir(tmp_path):
 def test_settings_is_frozen():
     with pytest.raises(AttributeError):
         Settings().permission = PermissionMode.AUTO  # type: ignore[misc]
+
+
+# --- 2.1.4: timeout env presence-wins + warnings; unconsumed PXX_* typo insurance ----
+
+
+def test_review_timeout_presence_wins_never_falls_through(monkeypatch, caplog):
+    # An empty or malformed PXX_REVIEW_TIMEOUT is a mistake on the review
+    # knob: warn and use the default — never silently read the native knob
+    # instead (semantics pinned by the micro-timeout-env-chain eval case).
+    from pxx.config import review_timeout
+
+    monkeypatch.setenv("PXX_NATIVE_TIMEOUT", "540")
+    monkeypatch.delenv("PXX_REVIEW_TIMEOUT", raising=False)
+    assert review_timeout() == 540.0  # absent -> native fallback still works
+
+    for bogus in ("", "not-a-number", "0", "-5", "nan", "inf", "Infinity"):
+        monkeypatch.setenv("PXX_REVIEW_TIMEOUT", bogus)
+        with caplog.at_level("WARNING", logger="pxx.config"):
+            assert review_timeout() == 120.0
+        assert "PXX_REVIEW_TIMEOUT" in caplog.text
+        caplog.clear()
+
+
+def test_native_timeout_warns_on_malformed(monkeypatch, caplog):
+    from pxx.config import native_timeout
+
+    monkeypatch.delenv("PXX_NATIVE_TIMEOUT", raising=False)
+    assert native_timeout() == 300.0
+    monkeypatch.setenv("PXX_NATIVE_TIMEOUT", "601")
+    assert native_timeout() == 601.0
+    monkeypatch.setenv("PXX_NATIVE_TIMEOUT", "ten minutes")
+    with caplog.at_level("WARNING", logger="pxx.config"):
+        assert native_timeout() == 300.0
+    assert "PXX_NATIVE_TIMEOUT" in caplog.text
+
+
+def test_warn_unconsumed_env(monkeypatch, caplog):
+    import pxx.config as config
+
+    monkeypatch.setattr(config, "_warned_unconsumed", False)
+    monkeypatch.setenv("PXX_REVEIW_TIMEOUT", "300")  # the typo this exists for
+    monkeypatch.setenv("PXX_MODEL", "m")  # consumed: silent
+    monkeypatch.setenv("PXX_DIFF_CAP", "228")  # ecosystem (git hook): silent
+    with caplog.at_level("WARNING", logger="pxx.config"):
+        config.warn_unconsumed_env()
+    assert "PXX_REVEIW_TIMEOUT" in caplog.text
+    assert "PXX_MODEL" not in caplog.text
+    assert "PXX_DIFF_CAP" not in caplog.text
+
+    caplog.clear()  # warn-once: a second call stays silent
+    with caplog.at_level("WARNING", logger="pxx.config"):
+        config.warn_unconsumed_env()
+    assert "PXX_REVEIW_TIMEOUT" not in caplog.text

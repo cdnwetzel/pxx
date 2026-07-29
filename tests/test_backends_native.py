@@ -418,3 +418,20 @@ def test_embedded_json_with_unregistered_name_not_detected(tmp_path):
     outcome = asyncio.run(make_backend(handler).run("do it", ctx))
     assert outcome.code is TerminalCode.COMPLETED
     assert not [e for e in ctx.bus.history if e.kind == "tool_call_prose"]
+
+
+def test_pretty_printed_embedded_tool_call_detected(tmp_path):
+    # CodeRabbit PR #6: the {"name" sentinel missed whitespace-formatted JSON.
+    pretty = 'Sure, next step:\n\n{\n  "name": "read_file",\n  "arguments": {"path": "x.py"}\n}'
+    requests: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(json.loads(request.content))
+        if len(requests) == 1:
+            return httpx.Response(200, json=completion(pretty))
+        return httpx.Response(200, json=completion("done properly"))
+
+    ctx = make_ctx(tmp_path)
+    outcome = asyncio.run(make_backend(handler).run("do it", ctx))
+    assert outcome.summary == "done properly"
+    assert [e.data["nudges"] for e in ctx.bus.history if e.kind == "tool_call_prose"] == [1]

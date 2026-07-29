@@ -125,3 +125,11 @@ def test_proposal_slug_matches_inbox_filenames(tmp_path):
     slug = _seed_pending(state_dir)
     (entry,) = pending(state_dir)
     assert proposal_slug(f"{entry['target']}:{entry['operation']}") == slug
+
+
+def test_dispose_rejects_path_traversal_slug(tmp_path):
+    state_dir = tmp_path / ".pxx"
+    (state_dir / "inbox" / "human-review-required").mkdir(parents=True)
+    for evil in ("../../../../tmp/evil", "a/b", "DEADBEEF0000", "deadbeef", ""):
+        with pytest.raises(ValueError, match="invalid slug"):
+            dispose(state_dir, evil, qualify=False, note="x")

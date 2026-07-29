@@ -118,15 +118,14 @@ def _prose_tool_call(content: str, tool_names: frozenset[str] = frozenset()) -> 
             return True
     if tool_names:
         decoder = json.JSONDecoder()
-        idx = content.find('{"name"')
-        while idx != -1:
+        # whitespace-tolerant: pretty-printed calls ({\n  "name": …) count too
+        for candidate in re.finditer(r'\{\s*"name"', content):
             try:
-                data, _ = decoder.raw_decode(content, idx)
+                data, _ = decoder.raw_decode(content, candidate.start())
             except json.JSONDecodeError:
                 data = None
             if isinstance(data, dict) and data.get("name") in tool_names and "arguments" in data:
                 return True
-            idx = content.find('{"name"', idx + 1)
     return False
 
 

@@ -16,11 +16,14 @@ from __future__ import annotations
 
 import getpass
 import json
+import re
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from .cycle import INBOX_HUMAN, INBOX_QUALIFIED, INBOX_REJECTED
+
+_SLUG_RE = re.compile(r"[0-9a-f]{12}")  # sha256[:12] — the only inbox filename shape
 
 
 def _box(state_dir: Path | str, box: str) -> Path:
@@ -62,6 +65,10 @@ def dispose(
     for an unknown slug and ValueError for a noteless rejection or a
     corrupt pending entry.
     """
+    if not _SLUG_RE.fullmatch(slug):
+        # slug becomes a filename in read/write/delete paths — anything but
+        # the 12-hex inbox shape (e.g. ../ traversal) is rejected outright
+        raise ValueError(f"invalid slug {slug!r}: expected 12 hex chars (see: triage list)")
     note = note.strip()
     if not qualify and not note:
         raise ValueError("--note is required to reject: record why, for the next reviewer")

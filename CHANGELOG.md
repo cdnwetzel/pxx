@@ -3,6 +3,38 @@
 All notable changes to pxx are documented here. The 1.x series history is
 preserved in git (tag `v1.3.3` and earlier).
 
+## [2.1.4] — 2026-07-29
+
+Run-integrity sensors (PR #5 — the first PR through the automatic
+CodeRabbit + Copilot review lane; two confirmed findings fixed in-flight).
+
+### Added
+
+- **Tool calls returned as prose are detected** (R-007): a well-formed
+  `<tool_call>` block — or a bare tool-call JSON final answer — arriving
+  with an empty `tool_calls` array means the serving layer dropped the
+  call. pxx now emits a `tool_call_prose` event, warns, and re-prompts
+  the model that the call was NOT executed; an endpoint that keeps doing
+  it fails the run actionably ("returns tool calls as prose", naming the
+  vLLM parser flags) instead of completing with `diff_lines=0`. The
+  bare-JSON shape was captured live while building the feature: a
+  dogfooded qwen2.5-coder:7b run answered with the raw `edit_file` JSON
+  and "completed" having changed nothing.
+- **Set-but-unconsumed `PXX_*` variables warn once per process** (typo
+  insurance, deferred from 2.1.1). Git-hook/CI variables are
+  allowlisted; warn-only — an unknown variable never fails a run.
+
+### Fixed
+
+- **Timeout env semantics: presence wins.** A set-but-empty or malformed
+  `PXX_REVIEW_TIMEOUT` no longer silently falls through to
+  `PXX_NATIVE_TIMEOUT` — production had the exact `or`-falsy trap the
+  `micro-timeout-env-chain` eval case punishes. Malformed, non-positive,
+  and non-finite values (a `inf` value would have disabled the HTTP
+  timeout entirely) now warn and use the default. The native backend's
+  env read moved to config.py (`native_timeout()`), the sanctioned
+  environment boundary. Closes the 2.1.2 review's parity note.
+
 ## [2.1.3] — 2026-07-28
 
 First external-tool review pass (CodeRabbit CLI over `v2.1.2..HEAD`):

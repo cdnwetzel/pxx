@@ -315,7 +315,8 @@ class NativeBackend:
                             "content": (
                                 "Your tool call arrived as plain text, not as a structured "
                                 "tool call — it was NOT executed. Re-issue it through the "
-                                "tools API; never print <tool_call> blocks in your answer."
+                                "tools API; never print <tool_call> blocks or raw tool-call "
+                                "JSON in your answer."
                             ),
                         }
                     )

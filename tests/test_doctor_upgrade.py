@@ -199,6 +199,25 @@ def test_upgrade_runs_command(monkeypatch):
     assert "99.0.0" in result.message
 
 
+def test_upgrade_index_ahead_of_check_is_success(monkeypatch):
+    """The index may serve NEWER than our earlier PyPI JSON check (release
+    published in between): seen > latest is a successful upgrade, not an error."""
+    monkeypatch.setattr(upgrade_mod, "detect_install_method", lambda: "uv")
+    _mock_async_client(monkeypatch, "99.0.0")
+
+    async def fake_run(argv):
+        return 0, "ok"
+
+    async def fake_installed():
+        return "99.1.0"
+
+    monkeypatch.setattr(upgrade_mod, "_run_command", fake_run)
+    monkeypatch.setattr(upgrade_mod, "_installed_version", fake_installed)
+    result = asyncio.run(upgrade_mod.upgrade())
+    assert result.status == "updated"
+    assert "99.1.0" in result.message
+
+
 def test_upgrade_rc0_noop_is_not_success(monkeypatch):
     """uv/pipx exit 0 on 'nothing to upgrade' (stale index): must not claim updated."""
     monkeypatch.setattr(upgrade_mod, "detect_install_method", lambda: "uv")

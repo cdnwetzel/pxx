@@ -143,8 +143,11 @@ async def upgrade() -> UpgradeResult:
     # outcome before claiming it — observed live on the 2.1.6 rollout, where
     # rc==0 masked a no-op and the old claim reported a phantom upgrade.
     seen = await _installed_version()
-    if seen == latest:
-        return UpgradeResult("updated", f"upgraded pxx {__version__} -> {latest}.")
+    if seen is not None and not _is_newer(latest, seen):
+        # seen >= latest: the install reached (at least) the release we saw.
+        # The index can legitimately serve NEWER than our earlier JSON check
+        # (release published in between) — that is success, not a mismatch.
+        return UpgradeResult("updated", f"upgraded pxx {__version__} -> {seen}.")
     if seen is None:
         return UpgradeResult(
             "updated",

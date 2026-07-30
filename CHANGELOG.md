@@ -3,6 +3,29 @@
 All notable changes to pxx are documented here. The 1.x series history is
 preserved in git (tag `v1.3.3` and earlier).
 
+## [2.1.6] — 2026-07-30
+
+### Changed
+
+- **Unknown flags that name a subcommand now hint the right spelling**:
+  `pxx --upgrade` previously printed only `ignoring unknown flag: --upgrade`
+  (the tolerant 1.x compat handler) and went on to demand a task — while the
+  user's intent was unambiguously the `upgrade` subcommand. Dash-prefixed
+  unknown flags whose name matches a subcommand now append
+  `(did you mean 'pxx upgrade'?)` to the existing warning. Native-backend
+  ignore path only; the aider flag-forwarding compat path is unchanged, and
+  the hint never leaks into the task text.
+
+### Notes
+
+- The long-open py3.13/aider work order closed as resolved-by-redesign:
+  the v2 packaging already fences the broken chain (`[aider]` extra is
+  marker-gated `python_version < '3.13'`; core stays uncapped because the
+  native backend runs on 3.13). Verified against the published 2.1.5 wheel
+  on an isolated 3.13 interpreter during this release's review pass.
+- Pre-release review: CodeRabbit CLI and an independent adversarial Claude
+  pass on the release delta — zero findings each.
+
 ## [2.1.5] — 2026-07-29
 
 The triage loop (PR #6): human verdicts on improvement proposals are now

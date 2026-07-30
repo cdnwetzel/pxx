@@ -53,6 +53,26 @@ milestone reviewer-verified by execution):
   human dispositions instead of re-proposing them every tick (found live
   on the daemon's first day). Boundary-review artifacts remain open.
 
+## Shipped in 2.1.6 + 2.1.7 (2026-07-30)
+
+Same-day pair; authoritative detail in CHANGELOG.md.
+
+- **2.1.6 — unknown-flag subcommand hint**: `pxx --upgrade` (and any
+  dash-flag naming a subcommand) now hints the right spelling instead of
+  being silently ignored by the 1.x compat handler. Also closed the
+  long-open py3.13/aider work order as resolved-by-redesign — the
+  marker-gated `[aider]` extra already fences the broken chain, and the
+  v1-era `requires-python` cap would regress working 3.13 native installs
+  (reviewer-verified against the published wheel).
+- **2.1.7 — `pxx upgrade` verifies its own outcome** (PR #7): found by
+  dogfooding the 2.1.6 rollout minutes after publish — uv exits 0 on a
+  stale index and the old code claimed an upgrade that never happened (the
+  pass-on-silence class, reaching the upgrade path itself). Post-upgrade
+  fresh-process probe of the invoking entry point, anchored banner parse,
+  bounded probe with kill-and-reap on cancellation, index-ahead installs
+  count as success. Review: CodeRabbit PR lane (1 actionable, fixed
+  in-flight) + three adversarial Claude rounds, both converged clean.
+
 ## Shipped in 2.1.1 (2026-07-26)
 
 Defects verified against code on 2026-07-26 (live 6/6 tutorial run on local

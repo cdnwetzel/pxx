@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+import shutil
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -68,6 +69,26 @@ async def _run_command(argv: list[str]) -> tuple[int, str]:
     return proc.returncode or 0, out.decode(errors="replace")
 
 
+async def _installed_version() -> str | None:
+    """Version reported by the installed ``pxx`` in a FRESH process, or None.
+
+    The in-process ``__version__`` is the module loaded at startup — after a
+    tool-env replacement (uv/pipx) it describes the OLD install, so the only
+    honest probe is executing the entry point again.
+    """
+    exe = shutil.which("pxx")
+    if exe is None:
+        return None
+    try:
+        rc, out = await _run_command([exe, "--version"])
+    except OSError:
+        return None
+    if rc != 0:
+        return None
+    match = re.search(r"\d+(?:\.\d+)+", out)
+    return match.group(0) if match else None
+
+
 def _upgrade_command(method: str) -> list[str]:
     if method == "uv":
         return ["uv", "tool", "upgrade", PACKAGE]
@@ -93,9 +114,27 @@ async def upgrade() -> UpgradeResult:
         return UpgradeResult("current", f"pxx {__version__} is up to date (latest: {latest}).")
     command = _upgrade_command(method)
     rc, output = await _run_command(command)
-    if rc == 0:
+    if rc != 0:
+        return UpgradeResult(
+            "error",
+            f"upgrade command failed ({' '.join(command)}):\n{output[-500:]}",
+        )
+    # rc==0 is not an upgrade: uv/pipx exit 0 on "nothing to upgrade" (e.g. a
+    # package index that hasn't served the new release yet). Verify the
+    # outcome before claiming it — observed live on the 2.1.6 rollout, where
+    # rc==0 masked a no-op and the old claim reported a phantom upgrade.
+    seen = await _installed_version()
+    if seen == latest:
         return UpgradeResult("updated", f"upgraded pxx {__version__} -> {latest}.")
+    if seen is None:
+        return UpgradeResult(
+            "updated",
+            f"upgrade command succeeded ({' '.join(command)}); could not re-run "
+            f"the installed pxx to confirm it now reports {latest}.",
+        )
     return UpgradeResult(
         "error",
-        f"upgrade command failed ({' '.join(command)}):\n{output[-500:]}",
+        f"upgrade command exited 0 but the installed pxx still reports {seen} "
+        f"(expected {latest}) — the package index may not have the new release "
+        f"yet; retry in a minute. Output tail:\n{output[-300:]}",
     )

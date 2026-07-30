@@ -187,11 +187,67 @@ def test_upgrade_runs_command(monkeypatch):
         ran.append(argv)
         return 0, "ok"
 
+    async def fake_installed():
+        return "99.0.0"
+
     monkeypatch.setattr(upgrade_mod, "_run_command", fake_run)
+    monkeypatch.setattr(upgrade_mod, "_installed_version", fake_installed)
     result = asyncio.run(upgrade_mod.upgrade())
     assert result.status == "updated"
     assert ran == [["pipx", "upgrade", "pxx-orchestrator"]]
     assert "99.0.0" in result.message
+
+
+def test_upgrade_rc0_noop_is_not_success(monkeypatch):
+    """uv/pipx exit 0 on 'nothing to upgrade' (stale index): must not claim updated."""
+    monkeypatch.setattr(upgrade_mod, "detect_install_method", lambda: "uv")
+    _mock_async_client(monkeypatch, "99.0.0")
+
+    async def fake_run(argv):
+        return 0, "Nothing to upgrade"
+
+    async def fake_installed():
+        return upgrade_mod.__version__
+
+    monkeypatch.setattr(upgrade_mod, "_run_command", fake_run)
+    monkeypatch.setattr(upgrade_mod, "_installed_version", fake_installed)
+    result = asyncio.run(upgrade_mod.upgrade())
+    assert result.status == "error"
+    assert "still reports" in result.message
+    assert upgrade_mod.__version__ in result.message
+
+
+def test_upgrade_unverifiable_is_honest(monkeypatch):
+    monkeypatch.setattr(upgrade_mod, "detect_install_method", lambda: "uv")
+    _mock_async_client(monkeypatch, "99.0.0")
+
+    async def fake_run(argv):
+        return 0, "ok"
+
+    async def fake_installed():
+        return None
+
+    monkeypatch.setattr(upgrade_mod, "_run_command", fake_run)
+    monkeypatch.setattr(upgrade_mod, "_installed_version", fake_installed)
+    result = asyncio.run(upgrade_mod.upgrade())
+    assert result.status == "updated"
+    assert "could not re-run" in result.message
+
+
+def test_installed_version_parses_fresh_process(monkeypatch):
+    monkeypatch.setattr(upgrade_mod.shutil, "which", lambda name: "/fake/bin/pxx")
+
+    async def fake_run(argv):
+        assert argv == ["/fake/bin/pxx", "--version"]
+        return 0, "pxx 9.9.9\n"
+
+    monkeypatch.setattr(upgrade_mod, "_run_command", fake_run)
+    assert asyncio.run(upgrade_mod._installed_version()) == "9.9.9"
+
+
+def test_installed_version_absent_binary(monkeypatch):
+    monkeypatch.setattr(upgrade_mod.shutil, "which", lambda name: None)
+    assert asyncio.run(upgrade_mod._installed_version()) is None
 
 
 def test_upgrade_command_failure(monkeypatch):

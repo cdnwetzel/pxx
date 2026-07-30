@@ -234,7 +234,15 @@ def test_task_from_stdin(harness, monkeypatch):
 
 def test_unknown_flag_ignored_on_native(harness, capsys):
     assert cli.main(["-m", "x", "--bogus-flag"]) == 0
-    assert "ignoring unknown flag: --bogus-flag" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "ignoring unknown flag: --bogus-flag" in err
+    assert "did you mean" not in err
+
+
+def test_unknown_flag_matching_subcommand_hints(harness, capsys):
+    assert cli.main(["-m", "x", "--upgrade"]) == 0
+    err = capsys.readouterr().err
+    assert "ignoring unknown flag: --upgrade (did you mean 'pxx upgrade'?)" in err
 
 
 def test_unknown_flag_forwarded_to_aider(harness, monkeypatch, capsys):

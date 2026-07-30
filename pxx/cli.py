@@ -562,7 +562,11 @@ def _handle_unknown_flags(unknown: list[str], backend_name: str) -> str:
         if backend_name == "aider":
             print(f"pxx: unknown flag forwarded: {flag}", file=sys.stderr)
         else:
-            print(f"pxx: ignoring unknown flag: {flag}", file=sys.stderr)
+            name = flag.lstrip("-").partition("=")[0]
+            hint = ""
+            if flag.startswith("-") and name in SUBCOMMANDS:
+                hint = f" (did you mean 'pxx {name}'?)"
+            print(f"pxx: ignoring unknown flag: {flag}{hint}", file=sys.stderr)
     if unknown and backend_name == "aider":
         note = "\n\n[1.x compat] forwarded aider flags: " + " ".join(unknown)
     return note

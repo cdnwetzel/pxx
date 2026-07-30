@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import subprocess
 import sys
 
 import httpx
@@ -187,11 +188,204 @@ def test_upgrade_runs_command(monkeypatch):
         ran.append(argv)
         return 0, "ok"
 
+    async def fake_installed():
+        return "99.0.0"
+
     monkeypatch.setattr(upgrade_mod, "_run_command", fake_run)
+    monkeypatch.setattr(upgrade_mod, "_installed_version", fake_installed)
     result = asyncio.run(upgrade_mod.upgrade())
     assert result.status == "updated"
     assert ran == [["pipx", "upgrade", "pxx-orchestrator"]]
     assert "99.0.0" in result.message
+
+
+def test_upgrade_index_ahead_of_check_is_success(monkeypatch):
+    """The index may serve NEWER than our earlier PyPI JSON check (release
+    published in between): seen > latest is a successful upgrade, not an error."""
+    monkeypatch.setattr(upgrade_mod, "detect_install_method", lambda: "uv")
+    _mock_async_client(monkeypatch, "99.0.0")
+
+    async def fake_run(argv):
+        return 0, "ok"
+
+    async def fake_installed():
+        return "99.1.0"
+
+    monkeypatch.setattr(upgrade_mod, "_run_command", fake_run)
+    monkeypatch.setattr(upgrade_mod, "_installed_version", fake_installed)
+    result = asyncio.run(upgrade_mod.upgrade())
+    assert result.status == "updated"
+    assert "99.1.0" in result.message
+
+
+def test_upgrade_rc0_noop_is_not_success(monkeypatch):
+    """uv/pipx exit 0 on 'nothing to upgrade' (stale index): must not claim updated."""
+    monkeypatch.setattr(upgrade_mod, "detect_install_method", lambda: "uv")
+    _mock_async_client(monkeypatch, "99.0.0")
+
+    async def fake_run(argv):
+        return 0, "Nothing to upgrade"
+
+    async def fake_installed():
+        return upgrade_mod.__version__
+
+    monkeypatch.setattr(upgrade_mod, "_run_command", fake_run)
+    monkeypatch.setattr(upgrade_mod, "_installed_version", fake_installed)
+    result = asyncio.run(upgrade_mod.upgrade())
+    assert result.status == "error"
+    assert "still reports" in result.message
+    assert upgrade_mod.__version__ in result.message
+
+
+def test_upgrade_unverifiable_is_honest(monkeypatch):
+    monkeypatch.setattr(upgrade_mod, "detect_install_method", lambda: "uv")
+    _mock_async_client(monkeypatch, "99.0.0")
+
+    async def fake_run(argv):
+        return 0, "ok"
+
+    async def fake_installed():
+        return None
+
+    monkeypatch.setattr(upgrade_mod, "_run_command", fake_run)
+    monkeypatch.setattr(upgrade_mod, "_installed_version", fake_installed)
+    result = asyncio.run(upgrade_mod.upgrade())
+    assert result.status == "updated"
+    assert "could not re-run" in result.message
+
+
+def test_installed_version_prefers_invoking_entry_point(monkeypatch):
+    """The probe must target the install that ran `pxx upgrade`, not the
+    first `pxx` on PATH (a shadowing second install must not be consulted)."""
+    monkeypatch.setattr(sys, "argv", ["/fake/tool/bin/pxx", "upgrade"])
+    monkeypatch.setattr(
+        upgrade_mod.shutil,
+        "which",
+        lambda name: (_ for _ in ()).throw(AssertionError("PATH consulted")),
+    )
+
+    async def fake_run(argv):
+        assert argv == ["/fake/tool/bin/pxx", "--version"]
+        return 0, "pxx 9.9.9\n"
+
+    monkeypatch.setattr(upgrade_mod, "_run_command", fake_run)
+    assert asyncio.run(upgrade_mod._installed_version()) == "9.9.9"
+
+
+def test_installed_version_falls_back_to_path(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["/usr/bin/python3", "-m", "pxx.cli"])
+    monkeypatch.setattr(upgrade_mod.shutil, "which", lambda name: "/fake/bin/pxx")
+
+    async def fake_run(argv):
+        assert argv == ["/fake/bin/pxx", "--version"]
+        return 0, "pxx 9.9.9\n"
+
+    monkeypatch.setattr(upgrade_mod, "_run_command", fake_run)
+    assert asyncio.run(upgrade_mod._installed_version()) == "9.9.9"
+
+
+def test_installed_version_absent_binary(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["/usr/bin/python3", "-m", "pxx.cli"])
+    monkeypatch.setattr(upgrade_mod.shutil, "which", lambda name: None)
+    assert asyncio.run(upgrade_mod._installed_version()) is None
+
+
+def test_installed_version_ignores_warning_noise(monkeypatch):
+    """stderr merges into stdout: dotted numbers in warnings must not win."""
+    monkeypatch.setattr(sys, "argv", ["/fake/tool/bin/pxx", "upgrade"])
+
+    async def fake_run(argv):
+        return 0, "warning: python 3.9 is EOL, upgrade to 3.12\npxx 2.1.6\n"
+
+    monkeypatch.setattr(upgrade_mod, "_run_command", fake_run)
+    assert asyncio.run(upgrade_mod._installed_version()) == "2.1.6"
+
+
+def test_installed_version_keeps_full_prerelease_token(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["/fake/tool/bin/pxx", "upgrade"])
+
+    async def fake_run(argv):
+        return 0, "pxx 2.2.0rc1\n"
+
+    monkeypatch.setattr(upgrade_mod, "_run_command", fake_run)
+    assert asyncio.run(upgrade_mod._installed_version()) == "2.2.0rc1"
+
+
+def test_installed_version_unrecognized_output(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["/fake/tool/bin/pxx", "upgrade"])
+
+    async def fake_run(argv):
+        return 0, "something entirely unexpected 1.2.3\n"
+
+    monkeypatch.setattr(upgrade_mod, "_run_command", fake_run)
+    assert asyncio.run(upgrade_mod._installed_version()) is None
+
+
+def test_installed_version_hung_probe_times_out(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["/fake/tool/bin/pxx", "upgrade"])
+    monkeypatch.setattr(upgrade_mod, "PROBE_TIMEOUT", 0.05)
+
+    async def hung_run(argv):
+        await asyncio.sleep(5)
+        return 0, "pxx 9.9.9\n"
+
+    monkeypatch.setattr(upgrade_mod, "_run_command", hung_run)
+    assert asyncio.run(upgrade_mod._installed_version()) is None
+
+
+def test_hung_probe_child_is_killed_and_reaped(monkeypatch, tmp_path):
+    """End-to-end through the real probe: a hanging `pxx --version` child is
+    killed on timeout (no leak, no 'Event loop is closed' teardown noise)."""
+    import time
+
+    marker = f"pxx-test-hang-{time.time_ns()}"
+    fake_pxx = tmp_path / "pxx"
+    fake_pxx.write_text(f"#!/bin/sh\n: {marker}\nexec sleep 30\n")
+    fake_pxx.chmod(0o755)
+    monkeypatch.setattr(sys, "argv", [str(fake_pxx), "upgrade"])
+    monkeypatch.setattr(upgrade_mod, "PROBE_TIMEOUT", 0.2)
+
+    assert asyncio.run(upgrade_mod._installed_version()) is None
+
+    deadline = time.monotonic() + 5
+    alive = True
+    while time.monotonic() < deadline:
+        alive = subprocess.run(["pgrep", "-f", marker], capture_output=True).returncode == 0
+        if not alive:
+            break
+        time.sleep(0.1)
+    assert not alive, "timed-out probe child was not killed"
+
+
+def test_installed_version_skips_non_version_banner_lines(monkeypatch):
+    """A merged-stderr line starting 'pxx <word>' must not be read as a version."""
+    monkeypatch.setattr(sys, "argv", ["/fake/tool/bin/pxx", "upgrade"])
+
+    async def fake_run(argv):
+        return 0, "pxx encountered an error\npxx 2.1.6\n"
+
+    monkeypatch.setattr(upgrade_mod, "_run_command", fake_run)
+    assert asyncio.run(upgrade_mod._installed_version()) == "2.1.6"
+
+
+def test_installed_version_bare_pxx_line_is_not_a_version(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["/fake/tool/bin/pxx", "upgrade"])
+
+    async def fake_run(argv):
+        return 0, "pxx\nnextline 9.9\n"
+
+    monkeypatch.setattr(upgrade_mod, "_run_command", fake_run)
+    assert asyncio.run(upgrade_mod._installed_version()) is None
+
+
+def test_installed_version_probe_rc_nonzero(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["/fake/tool/bin/pxx", "upgrade"])
+
+    async def fake_run(argv):
+        return 1, "pxx 9.9.9\n"
+
+    monkeypatch.setattr(upgrade_mod, "_run_command", fake_run)
+    assert asyncio.run(upgrade_mod._installed_version()) is None
 
 
 def test_upgrade_command_failure(monkeypatch):

@@ -3,6 +3,34 @@
 All notable changes to pxx are documented here. The 1.x series history is
 preserved in git (tag `v1.3.3` and earlier).
 
+## [2.1.7] — 2026-07-30
+
+### Fixed
+
+- **`pxx upgrade` no longer claims an upgrade it cannot prove** (PR #7).
+  Found by dogfooding the 2.1.6 rollout minutes after publish: `uv tool
+  upgrade` exits 0 on "Nothing to upgrade" (the index hadn't served the new
+  release yet), and the old code trusted `rc==0` — printing
+  "upgraded 2.1.5 -> 2.1.6" while the install stayed at 2.1.5. After the
+  upgrade command succeeds, pxx now re-runs the installed entry point
+  (preferring the console script that launched the process over a PATH
+  lookup, so a shadowing second install is never consulted) and compares
+  versions: match or newer (an index-ahead release counts as success) →
+  verified success naming the version actually installed; older → an honest
+  error with a stale-index hint; probe unavailable → success with an
+  explicit unverified caveat. The probe is bounded (20s), parses only a
+  digit-led `pxx <version>` banner token (immune to warning noise and
+  pre-release truncation), and a cancelled or timed-out probe child is
+  killed and reaped — no orphan process, no "Event loop is closed" teardown
+  noise. Ten new tests, including a real hung-child kill-and-reap
+  end-to-end.
+
+### Notes
+
+- Pre-release review: CodeRabbit PR review (1 actionable finding, fixed:
+  the index-ahead race above) and a three-round adversarial Claude pass
+  (all findings closed, final verdict APPROVED) — both lanes converged.
+
 ## [2.1.6] — 2026-07-30
 
 ### Changed

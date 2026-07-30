@@ -66,7 +66,16 @@ async def _run_command(argv: list[str]) -> tuple[int, str]:
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.STDOUT,
     )
-    out, _ = await proc.communicate()
+    try:
+        out, _ = await proc.communicate()
+    except asyncio.CancelledError:
+        # Cancellation (e.g. an enclosing asyncio.timeout) must kill AND reap
+        # the child while the loop is still alive — bailing out of
+        # communicate() alone leaves it running, and its abandoned transport
+        # prints "Event loop is closed" noise at interpreter teardown.
+        proc.kill()
+        await proc.communicate()
+        raise
     return proc.returncode or 0, out.decode(errors="replace")
 
 
@@ -84,16 +93,18 @@ async def _installed_version() -> str | None:
     if exe is None:
         return None
     try:
-        rc, out = await asyncio.wait_for(_run_command([exe, "--version"]), timeout=PROBE_TIMEOUT)
+        async with asyncio.timeout(PROBE_TIMEOUT):
+            rc, out = await _run_command([exe, "--version"])
     except (OSError, TimeoutError):
         return None
     if rc != 0:
         return None
-    # Anchor on the banner line and take the whole version token: stderr is
+    # Anchor on the banner line and take a digit-led version token: stderr is
     # merged into stdout, so a bare first-dotted-number scan would latch onto
-    # any warning containing one (e.g. "python 3.9 is EOL"), and it would
-    # truncate pre-release tokens like 2.2.0rc1.
-    match = re.search(r"^pxx\s+(\S+)", out, re.MULTILINE)
+    # any warning containing one (e.g. "python 3.9 is EOL"), truncate
+    # pre-release tokens like 2.2.0rc1, and a non-version word after "pxx "
+    # must not be mistaken for one.
+    match = re.search(r"^pxx\s+(\d\S*)", out, re.MULTILINE)
     return match.group(1) if match else None
 
 

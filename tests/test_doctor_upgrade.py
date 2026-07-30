@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import subprocess
 import sys
 
 import httpx
@@ -310,6 +311,51 @@ def test_installed_version_hung_probe_times_out(monkeypatch):
         return 0, "pxx 9.9.9\n"
 
     monkeypatch.setattr(upgrade_mod, "_run_command", hung_run)
+    assert asyncio.run(upgrade_mod._installed_version()) is None
+
+
+def test_hung_probe_child_is_killed_and_reaped(monkeypatch, tmp_path):
+    """End-to-end through the real probe: a hanging `pxx --version` child is
+    killed on timeout (no leak, no 'Event loop is closed' teardown noise)."""
+    import time
+
+    marker = f"pxx-test-hang-{time.time_ns()}"
+    fake_pxx = tmp_path / "pxx"
+    fake_pxx.write_text(f"#!/bin/sh\n: {marker}\nexec sleep 30\n")
+    fake_pxx.chmod(0o755)
+    monkeypatch.setattr(sys, "argv", [str(fake_pxx), "upgrade"])
+    monkeypatch.setattr(upgrade_mod, "PROBE_TIMEOUT", 0.2)
+
+    assert asyncio.run(upgrade_mod._installed_version()) is None
+
+    deadline = time.monotonic() + 5
+    alive = True
+    while time.monotonic() < deadline:
+        alive = subprocess.run(["pgrep", "-f", marker], capture_output=True).returncode == 0
+        if not alive:
+            break
+        time.sleep(0.1)
+    assert not alive, "timed-out probe child was not killed"
+
+
+def test_installed_version_skips_non_version_banner_lines(monkeypatch):
+    """A merged-stderr line starting 'pxx <word>' must not be read as a version."""
+    monkeypatch.setattr(sys, "argv", ["/fake/tool/bin/pxx", "upgrade"])
+
+    async def fake_run(argv):
+        return 0, "pxx encountered an error\npxx 2.1.6\n"
+
+    monkeypatch.setattr(upgrade_mod, "_run_command", fake_run)
+    assert asyncio.run(upgrade_mod._installed_version()) == "2.1.6"
+
+
+def test_installed_version_bare_pxx_line_is_not_a_version(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["/fake/tool/bin/pxx", "upgrade"])
+
+    async def fake_run(argv):
+        return 0, "pxx\nnextline 9.9\n"
+
+    monkeypatch.setattr(upgrade_mod, "_run_command", fake_run)
     assert asyncio.run(upgrade_mod._installed_version()) is None
 
 

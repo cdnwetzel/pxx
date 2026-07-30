@@ -21,6 +21,7 @@ from . import __version__
 PYPI_URL = "https://pypi.org/pypi/pxx-orchestrator/json"
 PACKAGE = "pxx-orchestrator"
 HTTP_TIMEOUT = 5.0
+PROBE_TIMEOUT = 20.0  # matches the aider --version health-probe bound in cli.py
 
 
 @dataclass(frozen=True)
@@ -83,13 +84,17 @@ async def _installed_version() -> str | None:
     if exe is None:
         return None
     try:
-        rc, out = await _run_command([exe, "--version"])
-    except OSError:
+        rc, out = await asyncio.wait_for(_run_command([exe, "--version"]), timeout=PROBE_TIMEOUT)
+    except (OSError, TimeoutError):
         return None
     if rc != 0:
         return None
-    match = re.search(r"\d+(?:\.\d+)+", out)
-    return match.group(0) if match else None
+    # Anchor on the banner line and take the whole version token: stderr is
+    # merged into stdout, so a bare first-dotted-number scan would latch onto
+    # any warning containing one (e.g. "python 3.9 is EOL"), and it would
+    # truncate pre-release tokens like 2.2.0rc1.
+    match = re.search(r"^pxx\s+(\S+)", out, re.MULTILINE)
+    return match.group(1) if match else None
 
 
 def _upgrade_command(method: str) -> list[str]:

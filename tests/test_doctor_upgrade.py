@@ -270,6 +270,59 @@ def test_installed_version_absent_binary(monkeypatch):
     assert asyncio.run(upgrade_mod._installed_version()) is None
 
 
+def test_installed_version_ignores_warning_noise(monkeypatch):
+    """stderr merges into stdout: dotted numbers in warnings must not win."""
+    monkeypatch.setattr(sys, "argv", ["/fake/tool/bin/pxx", "upgrade"])
+
+    async def fake_run(argv):
+        return 0, "warning: python 3.9 is EOL, upgrade to 3.12\npxx 2.1.6\n"
+
+    monkeypatch.setattr(upgrade_mod, "_run_command", fake_run)
+    assert asyncio.run(upgrade_mod._installed_version()) == "2.1.6"
+
+
+def test_installed_version_keeps_full_prerelease_token(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["/fake/tool/bin/pxx", "upgrade"])
+
+    async def fake_run(argv):
+        return 0, "pxx 2.2.0rc1\n"
+
+    monkeypatch.setattr(upgrade_mod, "_run_command", fake_run)
+    assert asyncio.run(upgrade_mod._installed_version()) == "2.2.0rc1"
+
+
+def test_installed_version_unrecognized_output(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["/fake/tool/bin/pxx", "upgrade"])
+
+    async def fake_run(argv):
+        return 0, "something entirely unexpected 1.2.3\n"
+
+    monkeypatch.setattr(upgrade_mod, "_run_command", fake_run)
+    assert asyncio.run(upgrade_mod._installed_version()) is None
+
+
+def test_installed_version_hung_probe_times_out(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["/fake/tool/bin/pxx", "upgrade"])
+    monkeypatch.setattr(upgrade_mod, "PROBE_TIMEOUT", 0.05)
+
+    async def hung_run(argv):
+        await asyncio.sleep(5)
+        return 0, "pxx 9.9.9\n"
+
+    monkeypatch.setattr(upgrade_mod, "_run_command", hung_run)
+    assert asyncio.run(upgrade_mod._installed_version()) is None
+
+
+def test_installed_version_probe_rc_nonzero(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["/fake/tool/bin/pxx", "upgrade"])
+
+    async def fake_run(argv):
+        return 1, "pxx 9.9.9\n"
+
+    monkeypatch.setattr(upgrade_mod, "_run_command", fake_run)
+    assert asyncio.run(upgrade_mod._installed_version()) is None
+
+
 def test_upgrade_command_failure(monkeypatch):
     monkeypatch.setattr(upgrade_mod, "detect_install_method", lambda: "uv")
     _mock_async_client(monkeypatch, "99.0.0")

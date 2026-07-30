@@ -74,9 +74,12 @@ async def _installed_version() -> str | None:
 
     The in-process ``__version__`` is the module loaded at startup — after a
     tool-env replacement (uv/pipx) it describes the OLD install, so the only
-    honest probe is executing the entry point again.
+    honest probe is executing the entry point again. Prefer the console
+    script that launched THIS process (the installation the upgrade command
+    targeted); a bare PATH lookup could hit a different, shadowing install.
     """
-    exe = shutil.which("pxx")
+    argv0 = Path(sys.argv[0])
+    exe = str(argv0) if argv0.stem == "pxx" else shutil.which("pxx")
     if exe is None:
         return None
     try:

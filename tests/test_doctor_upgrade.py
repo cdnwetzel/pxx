@@ -234,7 +234,26 @@ def test_upgrade_unverifiable_is_honest(monkeypatch):
     assert "could not re-run" in result.message
 
 
-def test_installed_version_parses_fresh_process(monkeypatch):
+def test_installed_version_prefers_invoking_entry_point(monkeypatch):
+    """The probe must target the install that ran `pxx upgrade`, not the
+    first `pxx` on PATH (a shadowing second install must not be consulted)."""
+    monkeypatch.setattr(sys, "argv", ["/fake/tool/bin/pxx", "upgrade"])
+    monkeypatch.setattr(
+        upgrade_mod.shutil,
+        "which",
+        lambda name: (_ for _ in ()).throw(AssertionError("PATH consulted")),
+    )
+
+    async def fake_run(argv):
+        assert argv == ["/fake/tool/bin/pxx", "--version"]
+        return 0, "pxx 9.9.9\n"
+
+    monkeypatch.setattr(upgrade_mod, "_run_command", fake_run)
+    assert asyncio.run(upgrade_mod._installed_version()) == "9.9.9"
+
+
+def test_installed_version_falls_back_to_path(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["/usr/bin/python3", "-m", "pxx.cli"])
     monkeypatch.setattr(upgrade_mod.shutil, "which", lambda name: "/fake/bin/pxx")
 
     async def fake_run(argv):
@@ -246,6 +265,7 @@ def test_installed_version_parses_fresh_process(monkeypatch):
 
 
 def test_installed_version_absent_binary(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["/usr/bin/python3", "-m", "pxx.cli"])
     monkeypatch.setattr(upgrade_mod.shutil, "which", lambda name: None)
     assert asyncio.run(upgrade_mod._installed_version()) is None
 

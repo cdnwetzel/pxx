@@ -690,14 +690,16 @@ Pinned by `tests/test_improve_autopromote.py`
 `test_counts_as_real_run_fail_closed_on_bad_records`); full suite 1030 passed.
 
 **Boundary — explicitly not claimed.** This is the **filter only** — it stops
-junk from inflating the bar. It does NOT make the counter durable: `real_runs`
+junk from inflating the bar. ~~It does NOT make the counter durable: `real_runs`
 is still a live `iterdir()`, so an external run-dir clear still regresses it (the
-~48→17 drop of R-014 would still happen). Self-referential (pxx-repo) genuine
-runs still count. "Genuine work" is proxied by tokens/diff, not a semantic
-judgment of value. Durability (an evidenced ledger) and the fact that the
-accumulation daemon is not currently running are tracked ROADMAP follow-ups, not
-fixed here. No claim that the `real_runs` bar is now trustworthy end-to-end —
-only that mock/crash/zero-work runs no longer inflate it.
+~48→17 drop of R-014 would still happen).~~ **[Superseded by R-020 —
+`real_runs` is now reconciled through a durable append-only ledger, so a
+run-dir clear no longer regresses persisted ids.]** Self-referential (pxx-repo)
+genuine runs still count. "Genuine work" is proxied by tokens/diff, not a
+semantic judgment of value. ~~Durability (an evidenced ledger)~~ **(shipped in
+R-020)** and the fact that the accumulation daemon is not currently running are
+tracked ROADMAP follow-ups. No claim that the `real_runs` bar is now trustworthy
+end-to-end — only that mock/crash/zero-work runs no longer inflate it.
 
 ---
 
@@ -829,6 +831,50 @@ parseability + correct verdict on these small diffs; a reasoning judge's
 *judgement* is only as good as the model. Structured output depends on the
 endpoint supporting `response_format` json_schema (Ollama/vLLM/OpenAI do; others
 fall back to free text — same reliability as before). Exact-config only.
+
+---
+
+## R-020 — `real_runs` is durable: an evidenced ledger survives run-dir clears
+
+**Claim.** `real_runs` is reconciled through a durable, append-only ledger
+(`real-runs.jsonl` in the state dir): every genuine run (R-016 criteria) is
+recorded once by run id (once its ledger append succeeds), and the count is the
+number of DISTINCT recorded ids — which, for successfully-persisted ids,
+**never shrinks when run dirs are rotated or cleared**. This closes the F-1
+durability gap: the count was a live `iterdir()`, so an external state-dir clear
+silently erased earned progress (observed live ~48 → 17, R-014/R-016).
+
+**Grade.** Reproducible (three unit tests + a durability smoke).
+
+**Exact configuration (nothing inherits).** pxx v2 (`fix/f1-durable-ledger`);
+`reconcile_real_runs` / `_ledger_run_ids` / `_genuine_run_meta` in
+`pxx/improve/autopromote.py`; `gather_counts` counts via the ledger. Only the
+`real_runs` bar changes.
+
+**Procedure (reproduction path).**
+
+```sh
+uv run --extra dev python -m pytest tests/test_improve_autopromote.py -q -k ledger
+```
+
+**Observed (2026-08-01).** Smoke: 5 genuine runs (a `mock` run excluded) →
+`real_runs=5`, 5 ledger lines; **`shutil.rmtree(runs/)` then recount →
+`real_runs=5`** (durable); a new genuine run → 6. Tests pin: durability across a
+clear; idempotent reconcile (no double-count); a corrupt ledger line skipped
+while valid entries still count. Full suite 1059 passed.
+
+**Boundary — explicitly not claimed.** A run is captured into the durable ledger
+when `gather_counts`/`reconcile_real_runs` next runs (readiness check or daemon
+tick) — a genuine run whose dir is cleared BEFORE any reconcile is not captured
+(a periodic daemon, once stood up, only *reduces* this window until its next
+tick; a run removed before the next reconcile stays uncaptured — it does not
+close the window). Persistence is best-effort: reconcile can return an id whose
+ledger append failed, and that id can be lost on a later run-dir clear; duplicate
+lines from concurrent writers are deduplicated on read, not prevented on write.
+The ledger records `run_id`/`recorded_at`/`backend`/`code`/work counts, not the
+full run evidence (the run dir holds that while it exists). No change to the
+genuine-run criteria (R-016). A run dir whose canonical path escapes `runs/` (a
+symlink, or a symlinked ancestor) is rejected.
 
 ---
 

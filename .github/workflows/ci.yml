@@ -17,7 +17,9 @@ jobs:
       - name: Install
         run: uv venv && uv pip install -e ".[dev,server]" --python .venv/bin/python
       - name: Lint
-        run: .venv/bin/ruff check pxx tests
+        run: |
+          .venv/bin/ruff check pxx tests
+          .venv/bin/ruff format --check pxx tests
       - name: Test (no network, no Ollama, no aider required)
         run: .venv/bin/python -m pytest
       - name: "Governance scan (secret/PII patterns; fork-safe: unarmed denylist)"

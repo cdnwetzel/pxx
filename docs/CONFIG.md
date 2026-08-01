@@ -64,8 +64,16 @@ base_url = "http://localhost:11434" # judge on the Mac (e.g. via SSH tunnel)
 
 Only `review` is recognised today (an unknown role name is a fail-closed
 error). Precedence follows the normal layering; env `PXX_REVIEW_*` overlays
-the TOML. Consumed by `pxx review`, `pxx calibrate`, and the opt-in
-`pxx loop --review` gate (`--review-mode blocking|advisory`).
+the TOML, and the overlay is resolved against the final coder model (a later
+`PXX_MODEL`/`PXX_API_KEY` still reaches the reviewer). Consumed by `pxx review`,
+`pxx calibrate`, and the opt-in `pxx loop --review` gate (`--review-mode
+blocking|advisory`).
+
+**Trust boundary.** Reviewer routing is a data-egress surface — the diff (and
+any bearer token) is sent to `base_url`. Like `[[hooks]]` and `[[mcp_servers]]`,
+`[roles.review]` is honoured **only from user config, env, or CLI**, never from
+a repo-local `pxx.toml` / `.pxx/config.toml` (a checked-in file trying to set it
+is ignored with a warning).
 
 ## `[[hooks]]`
 

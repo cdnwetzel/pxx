@@ -54,11 +54,18 @@ class McpServerSpec:
 class Settings:
     model: ModelRef = field(default_factory=ModelRef)
     fallback_models: tuple[ModelRef, ...] = ()
-    # Optional per-role model overlay. When None the role reuses ``model``
-    # (single-endpoint default — behaviour is byte-identical to not setting
-    # it). Set it to run the reviewer/judge on a different model or endpoint
-    # than the coder (e.g. a Mac judge + a GPU-box coder). This is the seam
-    # the ROADMAP "model-backed boundary roles" item builds on.
+    # Optional per-role model overlay for the reviewer/judge. ``review_overlay``
+    # holds only the fields explicitly set across ``[roles.review]`` /
+    # ``PXX_REVIEW_*`` layers (a *sparse* overlay); ``review_model`` is that
+    # overlay RESOLVED against the final coder ``model`` at the end of
+    # ``load_settings`` — resolving late so a later ``PXX_MODEL``/``PXX_API_KEY``
+    # override still propagates into the reviewer. When no overlay is set,
+    # ``review_model`` stays ``None`` and the role reuses ``model`` (behaviour is
+    # byte-identical to not setting it). This is the seam the ROADMAP
+    # "model-backed boundary roles" item builds on. Reviewer routing is a
+    # data-egress surface (the diff + bearer token go to ``base_url``), so the
+    # overlay is honoured only from user config, env, or CLI — never repo-local.
+    review_overlay: tuple[tuple[str, str], ...] = ()
     review_model: ModelRef | None = None
     permission: PermissionMode = PermissionMode.ASK
     scope: tuple[str, ...] = ()
@@ -132,26 +139,37 @@ _ROLE_MODEL_KEYS = {"provider", "model", "base_url", "api_key"}
 _PROVIDERS = ("ollama", "openai", "vllm", "openai-compatible")
 
 
-def _merge_model_ref(base: ModelRef, entry: dict[str, Any], source: str) -> ModelRef:
-    """Overlay ``provider``/``model``/``base_url``/``api_key`` from ``entry``
-    onto ``base``. Unspecified fields inherit ``base`` so a partial overlay
-    (e.g. only ``base_url``) reuses the rest. Fail-closed on unknown keys and
-    unknown providers."""
+def _validate_role_overlay(entry: dict[str, Any], source: str) -> dict[str, str]:
+    """Validate a ``[roles.review]`` table and return only its explicitly-set
+    fields as a sparse ``{key: value}`` dict. Fail-closed on unknown keys and
+    unknown providers. Sparse so the reviewer inherits the *final* coder model
+    (resolved once, late — see :func:`_merge_model_ref` at finalize)."""
     unknown = set(entry) - _ROLE_MODEL_KEYS
     if unknown:
         raise ConfigError(f"{source}: unknown model keys {sorted(unknown)}")
+    pairs: dict[str, str] = {}
+    for key in ("provider", "model", "base_url", "api_key"):
+        if key in entry:
+            value = str(entry[key])
+            if key == "provider" and value not in _PROVIDERS:
+                raise ConfigError(f"{source}: unknown provider {value!r}")
+            pairs[key] = value
+    return pairs
+
+
+def _merge_model_ref(base: ModelRef, entry: dict[str, str], source: str) -> ModelRef:
+    """Overlay a validated sparse ``entry`` (see :func:`_validate_role_overlay`)
+    onto ``base``. Unspecified fields inherit ``base`` so a partial overlay
+    (e.g. only ``base_url``) reuses the rest."""
     ref = base
     if "provider" in entry:
-        provider = str(entry["provider"])
-        if provider not in _PROVIDERS:
-            raise ConfigError(f"{source}: unknown provider {provider!r}")
-        ref = replace(ref, provider=provider)
+        ref = replace(ref, provider=entry["provider"])
     if "model" in entry:
-        ref = replace(ref, model=str(entry["model"]))
+        ref = replace(ref, model=entry["model"])
     if "base_url" in entry:
-        ref = replace(ref, base_url=str(entry["base_url"]))
+        ref = replace(ref, base_url=entry["base_url"])
     if "api_key" in entry:
-        ref = replace(ref, api_key=str(entry["api_key"]))
+        ref = replace(ref, api_key=entry["api_key"])
     return ref
 
 
@@ -199,6 +217,18 @@ def _settings_from_dict(
                 source,
             )
             data = {k: v for k, v in data.items() if k != key}
+    if "roles" in data and not allow_exec_surfaces:
+        # Reviewer routing is a data-egress surface: `[roles.review] base_url`
+        # sends the diff (and any inherited api_key bearer token) to that
+        # endpoint. A repo-local file must not be able to redirect the review —
+        # honour the overlay only from user config, env, or CLI (same trust
+        # boundary as hooks/mcp_servers).
+        log.warning(
+            "ignoring roles in repo-local config %s (reviewer endpoint routing "
+            "is a data-egress surface — set it in user config, env, or CLI)",
+            source,
+        )
+        data = {k: v for k, v in data.items() if k != "roles"}
     kwargs: dict[str, Any] = {}
     model = base.model
     if "model" in data:
@@ -238,14 +268,13 @@ def _settings_from_dict(
             entry = roles["review"]
             if not isinstance(entry, dict):
                 raise ConfigError(f"{source}: roles.review must be a table")
-            # Unspecified fields inherit the effective coder model for this
-            # layer, so `[roles.review] base_url = ...` reuses the same model
-            # on a different endpoint. A review overlay from a lower-precedence
-            # layer is carried forward as the base when present.
-            role_base = base.review_model if base.review_model is not None else kwargs["model"]
-            kwargs["review_model"] = _merge_model_ref(
-                role_base, entry, f"{source}: roles.review"
-            )
+            # Accumulate a SPARSE overlay: later layers override earlier for the
+            # same field, but unset fields are NOT filled from the coder model
+            # here — that happens once, at finalize, against the *final* model
+            # (so a later PXX_MODEL/PXX_API_KEY override still propagates).
+            merged = dict(base.review_overlay)
+            merged.update(_validate_role_overlay(entry, f"{source}: roles.review"))
+            kwargs["review_overlay"] = tuple(merged.items())
     if "permission" in data:
         try:
             kwargs["permission"] = PermissionMode(str(data["permission"]))
@@ -381,6 +410,15 @@ def load_settings(
     if cli_overrides:
         settings = _settings_from_dict(
             {k: v for k, v in cli_overrides.items() if v is not None}, settings, "CLI"
+        )
+    # Resolve the reviewer overlay ONCE, now that every layer (and any
+    # PXX_MODEL/PXX_API_KEY override) has landed on the final coder model.
+    if settings.review_overlay:
+        settings = replace(
+            settings,
+            review_model=_merge_model_ref(
+                settings.model, dict(settings.review_overlay), "roles.review"
+            ),
         )
     return settings
 

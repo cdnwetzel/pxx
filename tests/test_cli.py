@@ -1893,3 +1893,14 @@ def test_loop_review_falls_back_to_coder_model_when_no_overlay(monkeypatch, tmp_
     # no [roles.review] overlay → the judge reuses the coder model/endpoint
     assert reviewer._model is settings.model
     assert reviewer._model.endpoint == "http://coder:11434"
+
+
+def test_loop_review_mode_without_review_is_usage_error(monkeypatch, tmp_path, capsys):
+    from pxx.config import Settings
+
+    captured = _patch_loop(monkeypatch, tmp_path, Settings())
+    # --review-mode without --review has no effect → fail loud, never silent.
+    rc = cli.main(["loop", "-m", "do it", "--review-mode", "advisory"])
+    assert rc == cli.EXIT_USAGE
+    assert "--review-mode requires --review" in capsys.readouterr().err
+    assert "kwargs" not in captured  # never reached run_loop

@@ -216,8 +216,8 @@ def _build_parser() -> argparse.ArgumentParser:
     loop_p.add_argument(
         "--review-mode",
         choices=["blocking", "advisory"],
-        default="blocking",
-        help="with --review: blocking (REVISE heals / fails closed) or advisory "
+        default=None,
+        help="requires --review: blocking (REVISE heals / fails closed) or advisory "
         "(findings reported, never blocks). Default: blocking",
     )
 
@@ -620,6 +620,13 @@ def _cmd_loop(args: argparse.Namespace, unknown: list[str]) -> int:
             file=sys.stderr,
         )
         return EXIT_USAGE
+    # --review-mode has no effect without --review; fail loud, never silent.
+    if getattr(args, "review_mode", None) is not None and not getattr(args, "review", False):
+        print(
+            "pxx: usage: --review-mode requires --review",
+            file=sys.stderr,
+        )
+        return EXIT_USAGE
     try:
         from .loop import run_loop
     except ImportError:
@@ -647,9 +654,10 @@ def _cmd_loop(args: argparse.Namespace, unknown: list[str]) -> int:
         from .review import NativeReviewer, ReviewMode
 
         reviewer = NativeReviewer(settings.effective_review_model)
+        # Default (unset) is blocking; only an explicit "advisory" relaxes it.
         review_mode = (
             ReviewMode.ADVISORY
-            if getattr(args, "review_mode", "blocking") == "advisory"
+            if getattr(args, "review_mode", None) == "advisory"
             else ReviewMode.BLOCKING
         )
     loop_kwargs = {"lint_command": lint_command}

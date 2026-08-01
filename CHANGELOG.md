@@ -22,6 +22,13 @@ one autonomous `pxx loop --review`.
   same model on another box. Fail-closed on unknown role names, unknown
   sub-keys, and unknown providers — a typo is an error, never a silent no-op.
   When unset, a run is byte-identical to before the field existed.
+  The overlay is stored *sparse* and resolved against the coder model once, at
+  the end of layering, so a later `PXX_MODEL`/`PXX_API_KEY` override still
+  propagates into the reviewer (no stale early copy). **Reviewer routing is a
+  data-egress surface** (the diff and any bearer token go to `base_url`), so —
+  like hooks and MCP servers — the overlay is honoured only from user config,
+  env, or CLI, and is **ignored (with a warning) from repo-local config**: a
+  checked-in `pxx.toml` cannot redirect a review to an attacker endpoint.
 - **`pxx loop --review` (opt-in model-backed judge)**: the bounded
   edit→test→review loop can now run its review gate each round, driven by
   `Settings.effective_review_model` — so with `[roles.review]` set, the judge

@@ -284,11 +284,12 @@ pinned by nine tests in `tests/test_config.py` (`test_roles_review_*`,
 `test_review_model_defaults_to_none_and_effective_falls_back`,
 `test_unknown_role_rejected`, …); full suite 995 passed / 2 skipped.
 
-**Boundary — explicitly not claimed.** No claim yet of a live two-box run
+**Boundary — explicitly not claimed.** ~~No claim yet of a live two-box run
 with production models over the network (that lane, incl. the SSH-tunnelled
-GPU coder + Mac judge, is future work; the R-007 Camelid lanes are unchanged);
-only the reviewer role is wired through the runtime so far (coder/planner role
-overlays are not yet claimed); no quality/speed claim about any model.
+GPU coder + Mac judge, is future work)~~ — **superseded: the live two-box run
+is recorded in R-011.** The R-007 Camelid lanes are unchanged; only the
+reviewer role is wired through the runtime so far (coder/planner role overlays
+are not yet claimed); no quality/speed claim about any model.
 
 ---
 
@@ -450,9 +451,11 @@ default budget, `--review-mode blocking` → `[COMPLETED] … (verdict APPROVE)`
 one round, `calc.py` +4, no stray files.
 
 **Boundary — explicitly not claimed.** Trivial task; reasoning-judge
-non-compliance is intermittent (not every run) and model/version specific; no
-fix to the `MemoryStore.add` "coroutine never awaited" `RuntimeWarning` observed
-during these runs (a separate pre-existing defect, logged for follow-up).
+non-compliance is intermittent (not every run) and model/version specific. The
+`MemoryStore.add` "coroutine never awaited" `RuntimeWarning` was observed
+during these runs (a separate pre-existing defect) — **since fixed in 2.2.0**
+(the un-awaited `add`/`search` in the memory tools and MCP server; see
+`CHANGELOG.md`).
 
 ---
 

@@ -42,9 +42,16 @@ milestone reviewer-verified by execution):
 - Earned enablement: run the daemon in production, accumulate the real-run
   and human-promotion counts the auto-promotion readiness bars require
   (100 real runs, 3 human promotions) — auto-promotion stays report-and-refuse
-  until the platform earns it. **IN PROGRESS since 2026-07-29**: the daemon
-  runs under launchd on the primary workstation (hourly ticks); first
-  proposal human-reviewed and rejected same day. ~~real_runs at 50/100.~~
+  until the platform earns it. ~~**IN PROGRESS since 2026-07-29**: the daemon
+  runs under launchd on the primary workstation (hourly ticks)~~; first
+  proposal human-reviewed and rejected same day. **Corrected 2026-08-01
+  (dogfood):** the improvement daemon is NOT running — there is no launchd job
+  for it (only SSH tunnels + a watch are under launchd), no live process, and
+  the run-dir timeline shows no hourly cadence, so the automatic accumulation
+  this item depends on was not happening. `daemon: running` reflects a
+  control-file flag, not liveness. Earned enablement therefore accrues only from
+  manual runs today — see the *daemon liveness* follow-up below, which is the
+  prerequisite for this whole item. ~~real_runs at 50/100.~~
   **Corrected 2026-08-01 (R-013/R-014 dogfood):** `real_runs` is a live subdir
   count of `~/.local/state/pxx/runs/`, not a durable counter; the state dir was
   cleared out-of-band since, so the live count was **16/100** at the R-013/R-014
@@ -74,6 +81,17 @@ milestone reviewer-verified by execution):
   SSH-tunnelled two-box lane (R-011) now provide the real endpoints this
   needs; the `ArmRunner` seam (`improve/candidate_eval.py`) is the documented
   injection point.
+- **Clean loop termination (over-work).** On real tasks the loop reproducibly
+  hits `BUDGET_EXCEEDED` — the coder keeps making tool calls past a passing
+  solution instead of signalling done — observed on two independent codebases
+  (R-014, pxx phase-2; R-015, a live SaaS backend). The runs still land correct
+  code, but they waste rounds and never cleanly `COMPLETED`. The improve cycle
+  independently mined `budgets:tighten_budget` from these (R-013), but tightening
+  the budget only cuts it off sooner. The real fix is a done-signal / early-exit:
+  when tests pass (and, in `--review`, the gate approves), the loop should
+  terminate `COMPLETED` rather than burn rounds to the cap. Highest immediate
+  quality lever — it affects every autonomous run — and reproducible on the
+  two-box rig.
 - Reliable reasoning judges for the *blocking* review gate. R-012 found a
   reasoning judge (qwen3.5) intermittently emits no parseable `VERDICT:` line
   (a `REVIEW_UNPARSEABLE` block that is not a `<think>` case the parser

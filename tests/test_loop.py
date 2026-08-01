@@ -1027,3 +1027,39 @@ def test_overwork_salvaged_under_advisory_review(tmp_path: Path) -> None:
         )
     )
     assert outcome.code is TerminalCode.COMPLETED
+
+
+@needs_git
+def test_overwork_not_salvaged_when_diff_out_of_scope(tmp_path: Path) -> None:
+    # A salvage must not wave an out-of-scope edit past the scope gate.
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_repo(repo, files={"evil.py": "x = 1\n", "src/ok.py": "y = 1\n"})
+    settings = _settings(tmp_path, scope=("src",), test_command="true")
+    factory = Factory([_overwork_backend(edits={"evil.py": "x = 2\n"})])
+    outcome = asyncio.run(run_loop("task", settings, cwd=repo, backend_factory=factory))
+    assert outcome.code is not TerminalCode.COMPLETED
+
+
+@needs_git
+def test_overwork_not_salvaged_when_diff_over_budget(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_repo(repo, files={"big.txt": "old\n"})
+    settings = _settings(tmp_path, test_command="true", budgets=Budgets(max_diff_lines=5))
+    factory = Factory([_overwork_backend(edits={"big.txt": "line\n" * 20})])
+    outcome = asyncio.run(run_loop("task", settings, cwd=repo, backend_factory=factory))
+    assert outcome.code is not TerminalCode.COMPLETED
+
+
+@needs_git
+def test_overwork_not_salvaged_when_lint_fails(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_repo(repo, files={"calc.py": "x = 1\n"})
+    settings = _settings(tmp_path, test_command="true")
+    factory = Factory([_overwork_backend()])
+    outcome = asyncio.run(
+        run_loop("task", settings, cwd=repo, backend_factory=factory, lint_command="false")
+    )
+    assert outcome.code is not TerminalCode.COMPLETED

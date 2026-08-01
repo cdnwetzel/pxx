@@ -181,23 +181,44 @@ async def _run_tests(root: Path, command: str) -> tuple[bool, set[str], str]:
     return proc.returncode == 0, failing, text.strip()[-1500:]
 
 
-async def _overwork_verified(
+async def _overwork_salvageable(
+    *,
     root: Path,
-    command: str | None,
+    pre_sha: str | None,
     diff: str,
+    scope: ScopeGate,
+    max_diff_lines: int,
+    command: str | None,
+    lint_command: str | None,
     task: str,
     reviewer: Reviewer | None,
     review_mode: ReviewMode,
 ) -> bool:
-    """Whether an over-worked run's diff is objectively complete, so a session
-    that ran out of its per-turn budget (BUDGET_EXCEEDED) can be reported as
-    COMPLETED instead. Requires an OBJECTIVE signal: a configured test command
-    that PASSES, and — when a reviewer is set — a review gate that does not
-    block. Without a test command there is nothing to confirm the edit is done,
-    so the over-work terminal stands (fail-closed). Never heals; never rescues a
-    run the guards would fail."""
+    """Whether an over-worked run's diff is complete AND passes every mandatory
+    guard, so a session that ran out of its per-turn budget (BUDGET_EXCEEDED) can
+    be reported as COMPLETED instead. Enforces the SAME gates a normal round
+    would before completing — a salvage must never wave a diff past a gate:
+
+    - scope: no changed path outside the declared scope,
+    - diff budget: the diff is within ``max_diff_lines``,
+    - lint: the lint gate (when configured) passes,
+    - tests: a configured test command PASSES — and without a test command there
+      is no objective signal, so the run is NOT salvaged (fail-closed),
+    - review: when a reviewer is set, the gate does not block.
+
+    Never heals; never rescues a run any gate would fail.
+    """
     if not command:
-        return False
+        return False  # no objective signal that the over-worked edit is complete
+    changed = await _changed_paths(root, pre_sha)
+    if any(not scope.in_scope(root / p) for p in changed):
+        return False  # would be OUT_OF_SCOPE
+    if _diff_line_count(diff) > max_diff_lines:
+        return False  # would be DIFF_CAP
+    if lint_command:
+        lint_ok, _ = await _run_lint(root, lint_command)
+        if not lint_ok:
+            return False  # would be LINT_BLOCKED
     passed, _failing, _tail = await _run_tests(root, command)
     if not passed:
         return False
@@ -441,8 +462,17 @@ async def run_loop(
             # heals (the budget is spent) and never rescues a failing run.
             if outcome.code is TerminalCode.BUDGET_EXCEEDED and in_repo:
                 salvage_diff = (await _diff_since(root, pre_sha)).strip()
-                if salvage_diff and await _overwork_verified(
-                    root, command, salvage_diff, task, reviewer, review_mode
+                if salvage_diff and await _overwork_salvageable(
+                    root=root,
+                    pre_sha=pre_sha,
+                    diff=salvage_diff,
+                    scope=scope,
+                    max_diff_lines=settings.budgets.max_diff_lines,
+                    command=command,
+                    lint_command=lint_command,
+                    task=task,
+                    reviewer=reviewer,
+                    review_mode=review_mode,
                 ):
                     await parent_bus.emit(
                         "gate_decision",

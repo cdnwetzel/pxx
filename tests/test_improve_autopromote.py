@@ -187,8 +187,9 @@ def test_real_runs_counts_only_genuine_runs(tmp_path):
     # backends, crashes, and zero-work connection failures all inflated it.
     state_dir = tmp_path / ".pxx"
     runs = state_dir / "runs"
-    _genuine_run(state_dir, "good-tokens")  # real backend + tokens: counts
+    _genuine_run(state_dir, "good-tokens")  # native + tokens: counts
     _genuine_run(state_dir, "good-diff", tokens=0, diff_lines=5)  # diff-only: counts
+    _genuine_run(state_dir, "good-aider", backend="aider")  # real backend: counts
     _genuine_run(state_dir, "mock-run", backend="mock")  # test double: excluded
     _genuine_run(state_dir, "replay-run", backend="replay")  # test double: excluded
     _genuine_run(state_dir, "zero-work", tokens=0, diff_lines=0)  # no work: excluded
@@ -196,7 +197,7 @@ def test_real_runs_counts_only_genuine_runs(tmp_path):
     (runs / "empty").mkdir()  # bare dir: excluded
 
     counts = gather_counts(state_dir)
-    assert counts.real_runs == 2  # only the two genuine runs
+    assert counts.real_runs == 3  # the three genuine runs (native x2 + aider)
 
 
 def test_real_runs_zero_when_no_runs_dir(tmp_path):
@@ -209,6 +210,26 @@ def test_counts_as_real_run_fail_closed_on_bad_records(tmp_path):
     (d / "outcome.json").write_text("{not json")  # unreadable outcome
     (d / "manifest.json").write_text(json.dumps({"backend": "native"}))
     assert counts_as_real_run(d) is False  # fail closed
+
+
+def test_counts_as_real_run_rejects_non_object_and_bool_evidence(tmp_path):
+    # A non-object JSON (null/array) must not crash; bool/float must not count.
+    d = tmp_path / "runs" / "r1"
+    d.mkdir(parents=True)
+    (d / "manifest.json").write_text("null")  # not an object
+    (d / "outcome.json").write_text(json.dumps({"tokens": 5}))
+    assert counts_as_real_run(d) is False
+    (d / "manifest.json").write_text(json.dumps({"backend": "native"}))
+    (d / "outcome.json").write_text(json.dumps({"tokens": True, "diff_lines": 1.5}))
+    assert counts_as_real_run(d) is False  # bool/float are not work evidence
+
+
+def test_real_runs_ignores_symlinked_run_dirs(tmp_path):
+    state_dir = tmp_path / ".pxx"
+    (state_dir / "runs").mkdir(parents=True)
+    outside = _genuine_run(tmp_path / "external", "real")  # genuine, but outside runs/
+    (state_dir / "runs" / "linked").symlink_to(outside, target_is_directory=True)
+    assert gather_counts(state_dir).real_runs == 0  # symlink escape does not count
 
 
 def test_readiness_missing_defects_ledger_fails_closed(tmp_path):

@@ -53,7 +53,7 @@ milestone reviewer-verified by execution):
   (now absent → bar fails closed). Honest current bars: eval_cases 50/50 green;
   real_runs 16/100, human_promotions 0/3, unresolved_critical_defects unmet —
   NOT-READY.
-  - **F-1 filter shipped (2026-08-xx):** `real_runs` now counts a run only if it
+  - **F-1 filter shipped (2026-08-01):** `real_runs` now counts a run only if it
     did genuine work — a real backend (not the `mock`/`replay` test doubles), a
     recorded terminal outcome, and tokens spent or a diff produced. Closes the
     "any subdir counts" gaming (a zero-work `MODEL_UNAVAILABLE` probe no longer

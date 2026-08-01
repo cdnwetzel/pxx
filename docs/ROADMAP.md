@@ -70,9 +70,12 @@ milestone reviewer-verified by execution):
       so an external run-dir clear silently erases earned progress~~ **shipped
       (2026-08-01, R-020):** `real_runs` is now reconciled through a durable
       append-only ledger (`real-runs.jsonl`) — every genuine run is recorded
-      once by id, and the count is the number of distinct recorded ids, which
-      never shrinks when run dirs are rotated/cleared. Corrupt lines tolerated;
-      duplicate lines deduped on read.
+      once by id (once its append succeeds), and the count is the number of
+      distinct recorded ids, which — for successfully-persisted ids — never
+      shrinks when run dirs are rotated/cleared. Persistence is best-effort (an
+      id whose append fails can still be lost on a later clear). Corrupt/
+      undecodable ledger contents tolerated (fail closed); duplicate lines
+      deduped on read.
     - *Daemon liveness*: ~~`daemon: running` reflects a control-file flag, not
       liveness~~ **status fixed (2026-08-01, R-018):** `pxx improve status` now
       reports **running / paused / stopped** from real process liveness — a live
@@ -111,11 +114,13 @@ milestone reviewer-verified by execution):
 - **Dogfood-surfaced hardenings (2026-08-01, R-014), human-gated — the files
   are protected control plane, so these need human review, not autonomous
   edits:**
-  - `real_runs` bar integrity: `gather_counts` (`autopromote.py`) is a guardless
-    live `iterdir()` — mock/replay/crashed/self runs all count, no durability. A
-    failed probe bumped it live this session. Candidate: count only real-backend
-    runs that reached a terminal outcome; persist the count so state-dir clears
-    don't silently regress the bar.
+  - ~~`real_runs` bar integrity: `gather_counts` (`autopromote.py`) is a
+    guardless live `iterdir()` — mock/replay/crashed/self runs all count, no
+    durability. A failed probe bumped it live this session.~~ **Shipped:** the
+    filter (count only real-backend runs that reached a terminal outcome with
+    token/diff work) landed in **R-016**, and durability (an evidenced
+    append-only ledger, so state-dir clears don't regress persisted ids) in
+    **R-020** — see the "Follow-ups" entry above.
   - Clarity-gate false-positive: `ready_to_act` (`clarify.py`) refuses any
     edit-verb task mentioning a `*.ext` token absent under cwd, even when the
     file is a runtime/generated artifact only described. Candidate: distinguish

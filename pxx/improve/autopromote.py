@@ -35,6 +35,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from ..safety import canonicalize
 from .candidates import Candidate
 from .promotion import (
     RiskClass,
@@ -176,7 +177,10 @@ def _ledger_run_ids(state_dir: Path) -> set[str]:
         return ids
     try:
         lines = ledger.read_text().splitlines()
-    except OSError:
+    except (OSError, ValueError):
+        # OSError: unreadable file. ValueError (incl. UnicodeDecodeError from a
+        # partial/corrupt write): undecodable bytes. Fail closed to what is
+        # known rather than crashing the readiness gate.
         return ids
     for line in lines:
         line = line.strip()
@@ -205,11 +209,15 @@ def reconcile_real_runs(state_dir: Path | str) -> int:
     runs_root = state_dir / "runs"
     new_lines: list[str] = []
     if runs_root.is_dir():
+        runs_root_canon = canonicalize(runs_root)
         try:
             for d in sorted(runs_root.iterdir()):
-                # Skip symlinks so a link escaping runs/ can't record fabricated
-                # runs; skip already-recorded ids.
-                if not d.is_dir() or d.is_symlink() or d.name in known:
+                if not d.is_dir() or d.name in known:
+                    continue
+                # Reject any entry whose canonical path escapes runs/ — a
+                # symlinked run dir OR a symlinked ancestor — so a link can't
+                # record a fabricated run from outside the state dir.
+                if not canonicalize(d).is_relative_to(runs_root_canon):
                     continue
                 meta = _genuine_run_meta(d)
                 if meta is None:

@@ -277,6 +277,39 @@ def test_real_runs_ledger_tolerates_corrupt_line(tmp_path):
     assert reconcile_real_runs(state_dir) == 2  # ghost-run + fresh; corrupt line skipped
 
 
+def test_real_runs_ledger_tolerates_undecodable_bytes(tmp_path):
+    # A partial/corrupt write can leave invalid UTF-8 in the ledger.
+    # read_text() then raises UnicodeDecodeError (a ValueError, not OSError);
+    # the readiness gate must fail closed, not crash.
+    from pxx.improve.autopromote import _REAL_RUNS_LEDGER, reconcile_real_runs
+
+    state_dir = tmp_path / ".pxx"
+    (state_dir / "runs").mkdir(parents=True)
+    (state_dir / _REAL_RUNS_LEDGER).write_bytes(b"\xff\xfe not utf-8\n")
+    _genuine_run(state_dir, "fresh")
+    # The undecodable ledger is treated as empty (fail closed); the fresh run
+    # is re-recorded — no crash.
+    assert reconcile_real_runs(state_dir) == 1
+
+
+def test_real_runs_rejects_symlinked_run_dir(tmp_path):
+    # A symlink under runs/ pointing at a fabricated genuine outcome outside the
+    # state dir must NOT count — its canonical path escapes runs/.
+    from pxx.improve.autopromote import reconcile_real_runs
+
+    state_dir = tmp_path / ".pxx"
+    (state_dir / "runs").mkdir(parents=True)
+    # A fabricated genuine outcome sitting OUTSIDE the state dir.
+    fake = tmp_path / "fabricated"
+    fake.mkdir()
+    (fake / "manifest.json").write_text(json.dumps({"backend": "native", "model": "m"}))
+    (fake / "outcome.json").write_text(json.dumps({"code": "COMPLETED", "tokens": 999}))
+    (state_dir / "runs" / "linked").symlink_to(fake, target_is_directory=True)
+    _genuine_run(state_dir, "legit")
+    # Only the legit in-tree run counts; the symlinked escape is rejected.
+    assert reconcile_real_runs(state_dir) == 1
+
+
 def test_readiness_missing_defects_ledger_fails_closed(tmp_path):
     state_dir = tmp_path / ".pxx"
     evals_dir = tmp_path / "evals"

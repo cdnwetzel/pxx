@@ -16,10 +16,25 @@ from pxx.improve.autopromote import (
     RiskClass,
     auto_promote,
     classify_risk,
+    counts_as_real_run,
     evaluate_readiness,
+    gather_counts,
     readiness,
 )
 from pxx.improve.candidates import CandidateClass, make_candidate
+
+
+def _genuine_run(state_dir: Path, run_id: str, *, backend="native", tokens=100, diff_lines=0):
+    """Create a runs/<id>/ dir that counts toward real_runs: a real backend +
+    an outcome.json showing the model did work (tokens or a diff)."""
+    d = state_dir / "runs" / run_id
+    d.mkdir(parents=True)
+    (d / "manifest.json").write_text(json.dumps({"backend": backend, "model": "m"}))
+    (d / "outcome.json").write_text(
+        json.dumps({"code": "COMPLETED", "tokens": tokens, "diff_lines": diff_lines})
+    )
+    return d
+
 
 # --- risk classification ----------------------------------------------------------
 
@@ -151,7 +166,7 @@ def test_readiness_from_disk(tmp_path):
         (evals_dir / "micro").mkdir(parents=True, exist_ok=True)
         (evals_dir / "micro" / f"case-{i}.toml").write_text("id = 'x'")
     for i in range(100):  # 100 real runs
-        (state_dir / "runs" / f"run-{i:03d}").mkdir(parents=True)
+        _genuine_run(state_dir, f"run-{i:03d}")
     (state_dir / "promotions").mkdir(parents=True)
     for i in range(3):  # 3 human-approved promotions
         (state_dir / "promotions" / f"p{i}.json").write_text(json.dumps({"approver": f"human-{i}"}))
@@ -167,6 +182,56 @@ def test_readiness_from_disk(tmp_path):
     assert report.counts.human_approved_promotions == 3
 
 
+def test_real_runs_counts_only_genuine_runs(tmp_path):
+    # F-1 hardening (R-014): the bar was a raw subdir count — mock/replay
+    # backends, crashes, and zero-work connection failures all inflated it.
+    state_dir = tmp_path / ".pxx"
+    runs = state_dir / "runs"
+    _genuine_run(state_dir, "good-tokens")  # native + tokens: counts
+    _genuine_run(state_dir, "good-diff", tokens=0, diff_lines=5)  # diff-only: counts
+    _genuine_run(state_dir, "good-aider", backend="aider")  # real backend: counts
+    _genuine_run(state_dir, "mock-run", backend="mock")  # test double: excluded
+    _genuine_run(state_dir, "replay-run", backend="replay")  # test double: excluded
+    _genuine_run(state_dir, "zero-work", tokens=0, diff_lines=0)  # no work: excluded
+    (runs / "crash-no-outcome").mkdir(parents=True)  # crashed before outcome: excluded
+    (runs / "empty").mkdir()  # bare dir: excluded
+
+    counts = gather_counts(state_dir)
+    assert counts.real_runs == 3  # the three genuine runs (native x2 + aider)
+
+
+def test_real_runs_zero_when_no_runs_dir(tmp_path):
+    assert gather_counts(tmp_path / ".pxx").real_runs == 0
+
+
+def test_counts_as_real_run_fail_closed_on_bad_records(tmp_path):
+    d = tmp_path / "runs" / "r1"
+    d.mkdir(parents=True)
+    (d / "outcome.json").write_text("{not json")  # unreadable outcome
+    (d / "manifest.json").write_text(json.dumps({"backend": "native"}))
+    assert counts_as_real_run(d) is False  # fail closed
+
+
+def test_counts_as_real_run_rejects_non_object_and_bool_evidence(tmp_path):
+    # A non-object JSON (null/array) must not crash; bool/float must not count.
+    d = tmp_path / "runs" / "r1"
+    d.mkdir(parents=True)
+    (d / "manifest.json").write_text("null")  # not an object
+    (d / "outcome.json").write_text(json.dumps({"tokens": 5}))
+    assert counts_as_real_run(d) is False
+    (d / "manifest.json").write_text(json.dumps({"backend": "native"}))
+    (d / "outcome.json").write_text(json.dumps({"tokens": True, "diff_lines": 1.5}))
+    assert counts_as_real_run(d) is False  # bool/float are not work evidence
+
+
+def test_real_runs_ignores_symlinked_run_dirs(tmp_path):
+    state_dir = tmp_path / ".pxx"
+    (state_dir / "runs").mkdir(parents=True)
+    outside = _genuine_run(tmp_path / "external", "real")  # genuine, but outside runs/
+    (state_dir / "runs" / "linked").symlink_to(outside, target_is_directory=True)
+    assert gather_counts(state_dir).real_runs == 0  # symlink escape does not count
+
+
 def test_readiness_missing_defects_ledger_fails_closed(tmp_path):
     state_dir = tmp_path / ".pxx"
     evals_dir = tmp_path / "evals"
@@ -174,7 +239,7 @@ def test_readiness_missing_defects_ledger_fails_closed(tmp_path):
     for i in range(50):
         (evals_dir / f"c{i}.toml").write_text("id = 'x'")
     for i in range(100):
-        (state_dir / "runs" / f"run-{i:03d}").mkdir(parents=True)
+        _genuine_run(state_dir, f"run-{i:03d}")
     (state_dir / "promotions").mkdir(parents=True)
     for i in range(3):
         (state_dir / "promotions" / f"p{i}.json").write_text(json.dumps({"approver": "h"}))

@@ -44,7 +44,15 @@ milestone reviewer-verified by execution):
   (100 real runs, 3 human promotions) — auto-promotion stays report-and-refuse
   until the platform earns it. **IN PROGRESS since 2026-07-29**: the daemon
   runs under launchd on the primary workstation (hourly ticks); first
-  proposal human-reviewed and rejected same day. real_runs at 50/100.
+  proposal human-reviewed and rejected same day. ~~real_runs at 50/100.~~
+  **Corrected 2026-08-01 (R-013/R-014 dogfood):** `real_runs` is a live subdir
+  count of `~/.local/state/pxx/runs/`, not a durable counter; the state dir was
+  cleared out-of-band since, so the live count was **16/100** at the R-013/R-014
+  snapshot (then **17/100** after the R-015 loop run — the count is live and
+  moves with each recorded run) — the earlier "50" no longer holds. The `unresolved_critical_defects` ledger was likewise cleared
+  (now absent → bar fails closed). Honest current bars: eval_cases 50/50 green;
+  real_runs 16/100, human_promotions 0/3, unresolved_critical_defects unmet —
+  NOT-READY.
 - Live (non-scripted) eval arms on real endpoints, with the calibration
   fp-rate tracked against production fp. The 2.2.0 per-role routing + the
   SSH-tunnelled two-box lane (R-011) now provide the real endpoints this
@@ -56,6 +64,18 @@ milestone reviewer-verified by execution):
   handles), so today it is trustworthy only in `--review-mode advisory`. Next:
   a structured / grammar-constrained verdict contract so a reasoning judge can
   gate a blocking loop deterministically.
+- **Dogfood-surfaced hardenings (2026-08-01, R-014), human-gated — the files
+  are protected control plane, so these need human review, not autonomous
+  edits:**
+  - `real_runs` bar integrity: `gather_counts` (`autopromote.py`) is a guardless
+    live `iterdir()` — mock/replay/crashed/self runs all count, no durability. A
+    failed probe bumped it live this session. Candidate: count only real-backend
+    runs that reached a terminal outcome; persist the count so state-dir clears
+    don't silently regress the bar.
+  - Clarity-gate false-positive: `ready_to_act` (`clarify.py`) refuses any
+    edit-verb task mentioning a `*.ext` token absent under cwd, even when the
+    file is a runtime/generated artifact only described. Candidate: distinguish
+    "edit THIS existing file" from a descriptive/to-be-created reference.
 - The `pxx-reviews` triage loop for boundary-review artifacts. The
   *proposal-inbox* half **shipped in 2.1.5** (2026-07-29): `pxx improve
   triage list|qualify|reject` with reviewer identity, and the cycle honors

@@ -87,6 +87,54 @@ def test_parse_empty_text() -> None:
     assert parse_review("") == (Verdict.NO_REVIEW, [])
 
 
+# --- reasoning-model judges: strip <think> before parsing -----------------
+
+
+def test_parse_think_before_verdict() -> None:
+    # A reasoning judge thinks, then answers: the answer's verdict wins.
+    verdict, _ = parse_review("<think>let me check the diff carefully</think>\nVERDICT: APPROVE")
+    assert verdict is Verdict.APPROVE
+
+
+def test_parse_ignores_verdict_reasoned_inside_think() -> None:
+    # The model reasons "aloud" toward REVISE, then finalises APPROVE. Without
+    # stripping, .search() would grab the first (thinking) verdict.
+    text = "<think>Initial read: VERDICT: REVISE — wait, it's actually correct.</think>\nVERDICT: APPROVE"
+    verdict, _ = parse_review(text)
+    assert verdict is Verdict.APPROVE
+
+
+def test_parse_drops_findings_inside_think() -> None:
+    # Draft findings in the scratchpad are not the final answer.
+    text = "<think>F-001 [high] calc.py:2 maybe off-by-one</think>\nVERDICT: APPROVE"
+    verdict, findings = parse_review(text)
+    assert verdict is Verdict.APPROVE
+    assert findings == []
+
+
+def test_parse_revise_and_findings_after_think() -> None:
+    text = (
+        "<think>reasoning about the loop bound</think>\n"
+        "VERDICT: REVISE\n"
+        "F-001 [high] calc.py:2 off-by-one in the range bound\n"
+    )
+    verdict, findings = parse_review(text)
+    assert verdict is Verdict.REVISE
+    assert [f.id for f in findings] == ["F-001"]
+
+
+def test_parse_dangling_think_swallows_answer_is_no_review() -> None:
+    # An unclosed <think> means the answer never arrived — degrade, don't
+    # mis-read a verdict the model only reasoned toward.
+    verdict, _ = parse_review("<think>I believe VERDICT: APPROVE is right, but")
+    assert verdict is Verdict.NO_REVIEW
+
+
+def test_parse_thinking_tag_variant() -> None:
+    verdict, _ = parse_review("<thinking>deliberating</thinking>\nVERDICT: REVISE\nF-001 [low] a.py:1 x")
+    assert verdict is Verdict.REVISE
+
+
 def test_parse_findings_less_revise_degrades_to_no_review() -> None:
     # A bare REVISE with zero finding-shaped lines is a generic block —
     # the documented contract ("never a generic block") maps it to NO_REVIEW.

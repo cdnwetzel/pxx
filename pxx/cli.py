@@ -205,7 +205,21 @@ def _build_parser() -> argparse.ArgumentParser:
 
     for name in ("ask", "edit", "plan", "run", "chat"):
         _add_run_options(sub.add_parser(name), files=name != "run")
-    _add_run_options(sub.add_parser("loop"), files=False)
+    loop_p = sub.add_parser("loop")
+    _add_run_options(loop_p, files=False)
+    loop_p.add_argument(
+        "--review",
+        action="store_true",
+        help="enable the model-backed review gate each round (runs on the "
+        "[roles.review] model/endpoint when set, else the coder model)",
+    )
+    loop_p.add_argument(
+        "--review-mode",
+        choices=["blocking", "advisory"],
+        default="blocking",
+        help="with --review: blocking (REVISE heals / fails closed) or advisory "
+        "(findings reported, never blocks). Default: blocking",
+    )
 
     memory = sub.add_parser("memory", help="inspect the persistent memory store")
     mem_sub = memory.add_subparsers(dest="memory_command", required=True)
@@ -627,7 +641,22 @@ def _cmd_loop(args: argparse.Namespace, unknown: list[str]) -> int:
         except ConfigError as exc:
             print(f"pxx: error: {exc}", file=sys.stderr)
             return 1
-    outcome = asyncio.run(run_loop(task, settings, lint_command=lint_command))
+    reviewer = None
+    review_mode = None
+    if getattr(args, "review", False):
+        from .review import NativeReviewer, ReviewMode
+
+        reviewer = NativeReviewer(settings.effective_review_model)
+        review_mode = (
+            ReviewMode.ADVISORY
+            if getattr(args, "review_mode", "blocking") == "advisory"
+            else ReviewMode.BLOCKING
+        )
+    loop_kwargs = {"lint_command": lint_command}
+    if reviewer is not None:
+        loop_kwargs["reviewer"] = reviewer
+        loop_kwargs["review_mode"] = review_mode
+    outcome = asyncio.run(run_loop(task, settings, **loop_kwargs))
     print(f"[{outcome.code}] {outcome.summary}")
     return exit_code_for(outcome)
 
@@ -1131,7 +1160,7 @@ def _cmd_calibrate(args: argparse.Namespace) -> int:
         print(f"pxx: usage: no calibration cases found in {corpus} (fail-closed)", file=sys.stderr)
         return EXIT_USAGE
     cases = load_cases(corpus)
-    reviewer = NativeReviewer(settings.model)
+    reviewer = NativeReviewer(settings.effective_review_model)
     report = asyncio.run(run_calibration(reviewer, cases))
     print(
         f"recall={report.recall:.3f} fp_rate={report.fp_rate:.3f} "
@@ -1830,7 +1859,7 @@ def _cmd_review(args: argparse.Namespace) -> int:
         review_changes(
             diff,
             "Review the current diff for correctness, risks, and missing tests.",
-            NativeReviewer(settings.model),
+            NativeReviewer(settings.effective_review_model),
             ReviewMode.ADVISORY,
         )
     )

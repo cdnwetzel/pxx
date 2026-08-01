@@ -198,3 +198,94 @@ def test_warn_unconsumed_env(monkeypatch, caplog):
     with caplog.at_level("WARNING", logger="pxx.config"):
         config.warn_unconsumed_env()
     assert "PXX_REVEIW_TIMEOUT" not in caplog.text
+
+
+# --- per-role model routing: the reviewer/judge can run on a different model
+#     or endpoint than the coder, defaulting to the coder model when unset ----
+
+
+def test_review_model_defaults_to_none_and_effective_falls_back(tmp_path):
+    settings = load_settings(cwd=tmp_path)
+    # No override: the field is absent and the effective reviewer model IS the
+    # coder model (a run is byte-identical to before this field existed).
+    assert settings.review_model is None
+    assert settings.effective_review_model is settings.model
+
+
+def test_roles_review_toml_splits_coder_and_reviewer_endpoints(tmp_path):
+    # The device-split intent: coder on the GPU box, judge on the Mac.
+    (tmp_path / "pxx.toml").write_text(
+        'model = "qwen3-coder:30b"\n'
+        'base_url = "http://gpu-box:11434"\n'
+        "[roles.review]\n"
+        'model = "qwen3.5:9b"\n'
+        'base_url = "http://mac:11434"\n'
+    )
+    settings = load_settings(cwd=tmp_path)
+    assert settings.model.endpoint == "http://gpu-box:11434"
+    assert settings.effective_review_model.model == "qwen3.5:9b"
+    assert settings.effective_review_model.endpoint == "http://mac:11434"
+    # coder endpoint is untouched by the reviewer overlay
+    assert settings.effective_review_model.endpoint != settings.model.endpoint
+
+
+def test_roles_review_partial_overlay_inherits_coder_model(tmp_path):
+    # Only the endpoint differs — same model name, a different box.
+    (tmp_path / "pxx.toml").write_text(
+        'model = "qwen3-coder:30b"\nprovider = "ollama"\n'
+        '[roles.review]\nbase_url = "http://mac:11434"\n'
+    )
+    settings = load_settings(cwd=tmp_path)
+    assert settings.effective_review_model.model == "qwen3-coder:30b"  # inherited
+    assert settings.effective_review_model.provider == "ollama"  # inherited
+    assert settings.effective_review_model.base_url == "http://mac:11434"
+
+
+def test_roles_review_env_overlay(tmp_path, monkeypatch):
+    monkeypatch.setenv("PXX_REVIEW_MODEL", "qwen3.5:9b")
+    monkeypatch.setenv("PXX_REVIEW_BASE_URL", "http://mac:11434")
+    settings = load_settings(cwd=tmp_path)
+    assert settings.review_model is not None
+    assert settings.effective_review_model.model == "qwen3.5:9b"
+    assert settings.effective_review_model.endpoint == "http://mac:11434"
+
+
+def test_roles_review_env_overrides_toml(tmp_path, monkeypatch):
+    (tmp_path / "pxx.toml").write_text(
+        '[roles.review]\nmodel = "from-toml"\nbase_url = "http://toml:11434"\n'
+    )
+    monkeypatch.setenv("PXX_REVIEW_MODEL", "from-env")
+    settings = load_settings(cwd=tmp_path)
+    assert settings.effective_review_model.model == "from-env"
+    # env overlays only the model; the TOML base_url is carried forward
+    assert settings.effective_review_model.base_url == "http://toml:11434"
+
+
+def test_unknown_role_rejected(tmp_path):
+    (tmp_path / "pxx.toml").write_text('[roles.planner]\nmodel = "x"\n')
+    with pytest.raises(ConfigError, match="unknown roles"):
+        load_settings(cwd=tmp_path)
+
+
+def test_unknown_role_subkey_rejected(tmp_path):
+    (tmp_path / "pxx.toml").write_text('[roles.review]\nmodl = "typo"\n')
+    with pytest.raises(ConfigError, match="unknown model keys"):
+        load_settings(cwd=tmp_path)
+
+
+def test_roles_review_bad_provider_rejected(tmp_path):
+    (tmp_path / "pxx.toml").write_text('[roles.review]\nprovider = "cohere"\n')
+    with pytest.raises(ConfigError, match="unknown provider"):
+        load_settings(cwd=tmp_path)
+
+
+def test_review_env_vars_are_consumed_no_typo_warning(monkeypatch, caplog):
+    import pxx.config as config
+
+    monkeypatch.setattr(config, "_warned_unconsumed", False)
+    monkeypatch.setenv("PXX_REVIEW_MODEL", "qwen3.5:9b")
+    monkeypatch.setenv("PXX_REVIEW_BASE_URL", "http://mac:11434")
+    with caplog.at_level("WARNING", logger="pxx.config"):
+        config.warn_unconsumed_env()
+    assert "PXX_REVIEW_MODEL" not in caplog.text
+    assert "PXX_REVIEW_BASE_URL" not in caplog.text

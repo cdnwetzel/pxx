@@ -41,3 +41,6 @@ Rules:
 - If you have no evidence a change happened (no diff, no files), output
   `VERDICT: REVISE` with a single `minor` finding saying so.
 - Anything outside this format is treated as REVISE — keep it exact.
+- If you must reason first, enclose it in `<think>…</think>`; the `VERDICT:`
+  line must begin your final answer (everything after `</think>`). Reasoning
+  inside `<think>` is ignored by the parser — never put the verdict there.

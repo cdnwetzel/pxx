@@ -1817,3 +1817,79 @@ def test_explicit_aider_request_skips_probe(monkeypatch) -> None:
         cli, "_aider_health", lambda path: (_ for _ in ()).throw(AssertionError("probed"))
     )
     assert cli._resolve_backend_name("edit", "aider") == "aider"
+
+
+# ---------------------------------------------------------------------------
+# pxx loop --review: opt-in model-backed judge wired into the edit loop
+
+
+def _patch_loop(monkeypatch, tmp_path, settings):
+    """Run `pxx loop` hermetically: no WORKFLOW.md, fake settings, and a
+    run_loop stub that captures the kwargs it was handed."""
+    import pxx.loop as loopmod
+
+    captured: dict = {}
+
+    async def fake_run_loop(task, settings, **kwargs):
+        captured["task"] = task
+        captured["settings"] = settings
+        captured["kwargs"] = kwargs
+        return RunOutcome(code=TerminalCode.COMPLETED, summary="ok", rounds=1, tokens=1)
+
+    monkeypatch.chdir(tmp_path)  # no WORKFLOW.md here → skip the lint-load branch
+    monkeypatch.setattr(cli, "load_settings", lambda cwd=None, overrides=None: settings)
+    monkeypatch.setattr(loopmod, "run_loop", fake_run_loop)
+    return captured
+
+
+def test_loop_review_flag_wires_reviewer_with_effective_model(monkeypatch, tmp_path):
+    from pxx.config import ModelRef, Settings
+    from pxx.review import NativeReviewer, ReviewMode
+
+    settings = Settings(
+        model=ModelRef(model="coder", base_url="http://coder:11434"),
+        review_model=ModelRef(model="judge", base_url="http://judge:11434"),
+    )
+    captured = _patch_loop(monkeypatch, tmp_path, settings)
+    assert cli.main(["loop", "-m", "do it", "--review"]) == 0
+    kw = captured["kwargs"]
+    reviewer = kw["reviewer"]
+    assert isinstance(reviewer, NativeReviewer)
+    # the judge runs on the [roles.review] endpoint, not the coder's
+    assert reviewer._model is settings.effective_review_model
+    assert reviewer._model.model == "judge"
+    assert reviewer._model.endpoint == "http://judge:11434"
+    assert kw["review_mode"] is ReviewMode.BLOCKING
+
+
+def test_loop_review_advisory_mode(monkeypatch, tmp_path):
+    from pxx.config import Settings
+    from pxx.review import ReviewMode
+
+    captured = _patch_loop(monkeypatch, tmp_path, Settings())
+    assert cli.main(["loop", "-m", "do it", "--review", "--review-mode", "advisory"]) == 0
+    assert captured["kwargs"]["review_mode"] is ReviewMode.ADVISORY
+
+
+def test_loop_without_review_flag_passes_no_reviewer(monkeypatch, tmp_path):
+    from pxx.config import Settings
+
+    captured = _patch_loop(monkeypatch, tmp_path, Settings())
+    assert cli.main(["loop", "-m", "do it"]) == 0
+    # unchanged default: no reviewer handed to the loop (gate stays skipped)
+    assert "reviewer" not in captured["kwargs"]
+    assert "review_mode" not in captured["kwargs"]
+
+
+def test_loop_review_falls_back_to_coder_model_when_no_overlay(monkeypatch, tmp_path):
+    from pxx.config import ModelRef, Settings
+    from pxx.review import NativeReviewer
+
+    settings = Settings(model=ModelRef(model="coder", base_url="http://coder:11434"))
+    captured = _patch_loop(monkeypatch, tmp_path, settings)
+    assert cli.main(["loop", "-m", "do it", "--review"]) == 0
+    reviewer = captured["kwargs"]["reviewer"]
+    assert isinstance(reviewer, NativeReviewer)
+    # no [roles.review] overlay → the judge reuses the coder model/endpoint
+    assert reviewer._model is settings.model
+    assert reviewer._model.endpoint == "http://coder:11434"

@@ -3,6 +3,39 @@
 All notable changes to pxx are documented here. The 1.x series history is
 preserved in git (tag `v1.3.3` and earlier).
 
+## [Unreleased]
+
+First step toward the ROADMAP "model-backed boundary roles" item: the
+reviewer/judge can now run on a different model and endpoint than the coder,
+so a modest two-box setup (a GPU-box coder + a Mac judge) is expressible in
+config alone — no code change, degrades cleanly to a single endpoint.
+
+### Added
+
+- **`[roles.review]` per-role model overlay** (config + `PXX_REVIEW_MODEL` /
+  `PXX_REVIEW_PROVIDER` / `PXX_REVIEW_BASE_URL` / `PXX_REVIEW_API_KEY`): an
+  optional `Settings.review_model` that the reviewer construction sites
+  (`pxx review`, `pxx calibrate`) resolve via `Settings.effective_review_model`.
+  Unspecified fields inherit the coder model, so a lone `base_url` reuses the
+  same model on another box. Fail-closed on unknown role names, unknown
+  sub-keys, and unknown providers — a typo is an error, never a silent no-op.
+  When unset, a run is byte-identical to before the field existed.
+- **`pxx loop --review` (opt-in model-backed judge)**: the bounded
+  edit→test→review loop can now run its review gate each round, driven by
+  `Settings.effective_review_model` — so with `[roles.review]` set, the judge
+  runs on a different model/endpoint than the coder. `--review-mode
+  blocking|advisory` (default blocking) selects whether a REVISE heals/fails
+  closed or is reported only. Without `--review` the loop is unchanged
+  (`reviewer=None`, gate skipped) — the flag lives only on `loop`, never as a
+  silent no-op on `ask`/`edit`/`run`.
+- **Reasoning-model judges supported**: the review parser strips
+  `<think>…</think>` / `<thinking>` scratchpads (closed pairs and a dangling
+  unclosed opener) before reading the `VERDICT:` line and findings, so a
+  reasoning judge (qwen3.5, deepseek-r1, qwen3 `/think`) that reasons "aloud"
+  toward one verdict and then finalises another is parsed from its final
+  answer, not its scratchpad. No-op for non-reasoning reviewers. The review
+  prompt now tells reasoning models to keep the verdict out of `<think>`.
+
 ## [2.1.7] — 2026-07-30
 
 ### Fixed

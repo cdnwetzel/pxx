@@ -98,6 +98,7 @@ class Budgets:
 class Settings:
     model: ModelRef
     fallback_models: tuple[ModelRef, ...] = ()
+    review_model: ModelRef | None = None              # per-role overlay; None -> reuse model
     permission: PermissionMode = PermissionMode.ASK   # default read-only
     scope: tuple[str, ...] = ()                        # repo-relative prefixes; () = repo root
     trusted_paths: tuple[str, ...] = ()
@@ -117,6 +118,12 @@ class Settings:
   config, no silent typos).
 - Env file `~/.config/pxx/env` (KEY=VALUE) still honored, loaded via
   `setdefault` **by `load_settings`**, never at import time.
+- Per-role overlay: `[roles.review]` (env `PXX_REVIEW_*`) fills
+  `review_model`; `Settings.effective_review_model` returns it or falls back
+  to `model`. Unspecified fields inherit the coder model. This is the seam the
+  ROADMAP "model-backed boundary roles" item builds on — the reviewer/judge
+  can run on a different endpoint than the coder (a GPU-box coder + a Mac
+  judge) while a run with no overlay stays byte-identical to before.
 
 ### events.py
 ```python

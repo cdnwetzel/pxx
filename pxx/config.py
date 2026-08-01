@@ -54,6 +54,12 @@ class McpServerSpec:
 class Settings:
     model: ModelRef = field(default_factory=ModelRef)
     fallback_models: tuple[ModelRef, ...] = ()
+    # Optional per-role model overlay. When None the role reuses ``model``
+    # (single-endpoint default — behaviour is byte-identical to not setting
+    # it). Set it to run the reviewer/judge on a different model or endpoint
+    # than the coder (e.g. a Mac judge + a GPU-box coder). This is the seam
+    # the ROADMAP "model-backed boundary roles" item builds on.
+    review_model: ModelRef | None = None
     permission: PermissionMode = PermissionMode.ASK
     scope: tuple[str, ...] = ()
     trusted_paths: tuple[str, ...] = ()
@@ -74,6 +80,14 @@ class Settings:
     safety_net: bool = True  # K5: stash + pxx-pre/<ts> tag on edit-capable starts
     auto_commit: bool = False  # opt-in: commit session work on COMPLETED (the undo tag still points at pre-session HEAD)
 
+    @property
+    def effective_review_model(self) -> ModelRef:
+        """The model the reviewer/judge runs on: the per-role ``review_model``
+        override when set, else the coder ``model``. Centralises the fallback
+        so every reviewer construction site shares one contract (and a run
+        with no override is byte-identical to before this field existed)."""
+        return self.review_model or self.model
+
 
 _USER_CONFIG = Path("~/.config/pxx/config.toml").expanduser()
 _USER_ENV = Path("~/.config/pxx/env").expanduser()
@@ -86,6 +100,7 @@ _KNOWN_KEYS = {
     "base_url",
     "api_key",
     "fallback_models",
+    "roles",
     "permission",
     "scope",
     "trusted_paths",
@@ -109,6 +124,35 @@ _KNOWN_BUDGET_KEYS = {
 }
 _KNOWN_HOOK_KEYS = {"event", "command", "timeout", "matcher"}
 _KNOWN_MCP_KEYS = {"name", "command"}
+# Roles that may carry a per-role model overlay today. Extensible (coder,
+# planner, …) but fail-closed: an unknown role name is a typo, not a silent
+# no-op. Only the reviewer/judge role is wired through the runtime so far.
+_KNOWN_ROLE_KEYS = {"review"}
+_ROLE_MODEL_KEYS = {"provider", "model", "base_url", "api_key"}
+_PROVIDERS = ("ollama", "openai", "vllm", "openai-compatible")
+
+
+def _merge_model_ref(base: ModelRef, entry: dict[str, Any], source: str) -> ModelRef:
+    """Overlay ``provider``/``model``/``base_url``/``api_key`` from ``entry``
+    onto ``base``. Unspecified fields inherit ``base`` so a partial overlay
+    (e.g. only ``base_url``) reuses the rest. Fail-closed on unknown keys and
+    unknown providers."""
+    unknown = set(entry) - _ROLE_MODEL_KEYS
+    if unknown:
+        raise ConfigError(f"{source}: unknown model keys {sorted(unknown)}")
+    ref = base
+    if "provider" in entry:
+        provider = str(entry["provider"])
+        if provider not in _PROVIDERS:
+            raise ConfigError(f"{source}: unknown provider {provider!r}")
+        ref = replace(ref, provider=provider)
+    if "model" in entry:
+        ref = replace(ref, model=str(entry["model"]))
+    if "base_url" in entry:
+        ref = replace(ref, base_url=str(entry["base_url"]))
+    if "api_key" in entry:
+        ref = replace(ref, api_key=str(entry["api_key"]))
+    return ref
 
 
 def _load_env_file() -> None:
@@ -161,7 +205,7 @@ def _settings_from_dict(
         model = replace(model, model=str(data["model"]))
     if "provider" in data:
         provider = str(data["provider"])
-        if provider not in ("ollama", "openai", "vllm", "openai-compatible"):
+        if provider not in _PROVIDERS:
             raise ConfigError(f"{source}: unknown provider {provider!r}")
         model = replace(model, provider=provider)
     if "base_url" in data:
@@ -183,6 +227,25 @@ def _settings_from_dict(
                 )
             )
         kwargs["fallback_models"] = tuple(refs)
+    if "roles" in data:
+        roles = data["roles"]
+        if not isinstance(roles, dict):
+            raise ConfigError(f"{source}: roles must be a table")
+        unknown = set(roles) - _KNOWN_ROLE_KEYS
+        if unknown:
+            raise ConfigError(f"{source}: unknown roles {sorted(unknown)}")
+        if "review" in roles:
+            entry = roles["review"]
+            if not isinstance(entry, dict):
+                raise ConfigError(f"{source}: roles.review must be a table")
+            # Unspecified fields inherit the effective coder model for this
+            # layer, so `[roles.review] base_url = ...` reuses the same model
+            # on a different endpoint. A review overlay from a lower-precedence
+            # layer is carried forward as the base when present.
+            role_base = base.review_model if base.review_model is not None else kwargs["model"]
+            kwargs["review_model"] = _merge_model_ref(
+                role_base, entry, f"{source}: roles.review"
+            )
     if "permission" in data:
         try:
             kwargs["permission"] = PermissionMode(str(data["permission"]))
@@ -259,6 +322,16 @@ _ENV_MAP = {
     "PXX_OLLAMA_MODEL": "model",
 }
 
+# Per-role reviewer overlay via env (maps to the ``[roles.review]`` sub-keys).
+# Kept separate from ``_ENV_MAP`` because these merge into a nested table, not
+# a flat Settings field.
+_REVIEW_ENV_MAP = {
+    "PXX_REVIEW_MODEL": "model",
+    "PXX_REVIEW_PROVIDER": "provider",
+    "PXX_REVIEW_BASE_URL": "base_url",
+    "PXX_REVIEW_API_KEY": "api_key",
+}
+
 
 def _settings_from_env(base: Settings) -> Settings:
     data: dict[str, Any] = {}
@@ -275,6 +348,13 @@ def _settings_from_env(base: Settings) -> Settings:
         data["memory_enabled"] = False
     if scope := os.environ.get("PXX_SCOPE"):
         data["scope"] = [s.strip() for s in scope.split(",") if s.strip()]
+    review: dict[str, Any] = {}
+    for env_key, sub in _REVIEW_ENV_MAP.items():
+        value = os.environ.get(env_key)
+        if value:
+            review[sub] = value
+    if review:
+        data["roles"] = {"review": review}
     if not data:
         return base
     return _settings_from_dict(data, base, "environment")
@@ -368,7 +448,7 @@ def native_timeout(default: float = 300.0) -> float:
 # Every PXX_* variable some part of the ecosystem consumes. Python readers
 # stay in this module plus the server-token check; the second set is read by
 # the git hooks and the release workflow, not this process.
-_CONSUMED_ENV = frozenset(_ENV_MAP) | {
+_CONSUMED_ENV = frozenset(_ENV_MAP) | frozenset(_REVIEW_ENV_MAP) | {
     "PXX_MEMORY_ENABLED",
     "PXX_MEMORY_DIR",
     "PXX_SCOPE",

@@ -44,3 +44,7 @@ Rules:
 - If you must reason first, enclose it in `<think>…</think>`; the `VERDICT:`
   line must begin your final answer (everything after `</think>`). Reasoning
   inside `<think>` is ignored by the parser — never put the verdict there.
+- When asked for JSON (a structured `response_format`), return exactly
+  `{"verdict": "APPROVE"|"REVISE", "findings": [{"severity", "file", "line",
+  "message"}]}` — put the line number in the `line` field (an integer), not
+  folded into `file`; `line` may be null.

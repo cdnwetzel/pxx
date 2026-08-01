@@ -9,6 +9,7 @@ unavailability all stop the loop. ``ADVISORY`` mode never blocks.
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 from dataclasses import dataclass
@@ -114,6 +115,36 @@ class Reviewer(Protocol):
 
 _VERDICT_RE = re.compile(r"VERDICT\s*:\s*([A-Za-z_]+)", re.IGNORECASE)
 
+#: Grammar-constrained verdict schema. Sent as an OpenAI ``response_format``
+#: (json_schema) so a reasoning judge is FORCED to emit a parseable verdict —
+#: fixing the R-012 case where qwen3.5 intermittently produced no ``VERDICT:``
+#: line, making it unusable for a BLOCKING gate. Endpoints without structured
+#: output are handled by a plain-request fallback + the text parser.
+_VERDICT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "verdict": {"type": "string", "enum": ["APPROVE", "REVISE"]},
+        "findings": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "severity": {"type": "string", "enum": list(SEVERITIES)},
+                    "file": {"type": "string"},
+                    "line": {"type": ["integer", "null"]},
+                    "message": {"type": "string"},
+                },
+                "required": ["severity", "file", "message"],
+            },
+        },
+    },
+    "required": ["verdict", "findings"],
+}
+_RESPONSE_FORMAT = {
+    "type": "json_schema",
+    "json_schema": {"name": "review_verdict", "schema": _VERDICT_SCHEMA},
+}
+
 #: Reasoning-model scratchpad. Closed ``<think>…</think>`` (or ``<thinking>``)
 #: pairs, plus a dangling opener with no close (everything after it is
 #: thinking). Qwen3/qwen3.5, DeepSeek-R1, and friends emit these BEFORE the
@@ -181,11 +212,79 @@ class ParsedReview:
     dropped: int  # evidence-less findings rejected (Phase 14.4)
 
 
+def _parse_structured_verdict(text: str) -> ParsedReview | None:
+    """Parse a structured JSON verdict (from ``response_format`` json_schema):
+    ``{"verdict": "APPROVE"|"REVISE", "findings": [{severity,file,line,message}]}``.
+    Returns ``None`` when ``text`` isn't such an object, so the caller falls back
+    to the free-text parser (endpoints that ignore ``response_format``)."""
+    stripped = text.strip()
+    if stripped.startswith("```"):  # tolerate a ```json fence
+        stripped = stripped.strip("`")
+        if stripped[:4].lower() == "json":
+            stripped = stripped[4:]
+        stripped = stripped.strip()
+    try:
+        data = json.loads(stripped)
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(data, dict) or "verdict" not in data:
+        return None
+    try:
+        verdict = Verdict(str(data["verdict"]).upper())
+    except ValueError:
+        return None
+    findings: list[Finding] = []
+    raw = dropped = 0
+    for i, item in enumerate(data.get("findings") or []):
+        if not isinstance(item, dict):
+            continue
+        raw += 1
+        severity = str(item.get("severity", "medium")).lower()
+        if severity not in SEVERITIES:
+            severity = "medium"
+        file_raw = str(item.get("file", "")).strip()
+        line = item.get("line")
+        line = line if isinstance(line, int) and not isinstance(line, bool) else None
+        # Models often fold the line into the file field ("calc.py:2").
+        embedded = re.match(r"^(.*?):(\d+)$", file_raw)
+        if embedded and line is None:
+            file_raw, line = embedded.group(1), int(embedded.group(2))
+        finding = Finding(
+            id=f"F-{i + 1:03d}",
+            severity=severity,
+            file=file_raw,
+            line=line,
+            message=str(item.get("message", "")).strip() or "(no details)",
+        )
+        # A structured finding that names a file IS anchored (the file is the
+        # locus); otherwise require a message anchor (same discipline as text).
+        if file_raw or _has_evidence(finding):
+            findings.append(finding)
+        else:
+            dropped += 1
+    if not findings and verdict is Verdict.REVISE:
+        # A REVISE with no evidence-linked findings is a generic block the loop
+        # would heal against forever — degrade (same policy as the text parser).
+        verdict = Verdict.NO_REVIEW
+    return ParsedReview(
+        verdict=verdict,
+        findings=tuple(findings),
+        had_verdict_line=True,
+        raw_findings=raw,
+        dropped=dropped,
+    )
+
+
 def parse_review_full(text: str) -> ParsedReview:
     """Parse raw reviewer text; see :func:`parse_review` for the policy."""
     # Reasoning judges (qwen3.5, deepseek-r1, …) think before answering; parse
     # the verdict/findings from the final answer, never the scratchpad.
     text = _strip_reasoning(text or "")
+    # Structured verdict first (the grammar-constrained JSON path); fall back to
+    # free-text parsing when the reviewer didn't return the JSON object.
+    structured = _parse_structured_verdict(text)
+    if structured is not None:
+        return structured
     verdict = Verdict.NO_REVIEW
     had_verdict_line = False
     if m := _VERDICT_RE.search(text or ""):
@@ -280,15 +379,25 @@ class NativeReviewer:
             ],
         }
         url = f"{model.endpoint}/v1/chat/completions"
+
+        def _overflow(resp: httpx.Response) -> bool:
+            # Ollama >= 0.32 fails loud (400) when the diff overflows num_ctx.
+            return resp.status_code == 400 and "exceed_context_size" in resp.text
+
         try:
             async with httpx.AsyncClient(
                 timeout=self._timeout, transport=self._transport
             ) as client:
-                resp = await client.post(url, json=payload, headers=headers)
-                if resp.status_code == 400 and "exceed_context_size" in resp.text:
-                    # Ollama >= 0.32 fails loud when the diff overflows
-                    # num_ctx — same special-case the native backend got
-                    # in 2.1.1. Surface the fix, not the raw JSON.
+                # Attempt 1: force a grammar-constrained JSON verdict so a
+                # reasoning judge always emits a parseable verdict.
+                resp = await client.post(
+                    url, json={**payload, "response_format": _RESPONSE_FORMAT}, headers=headers
+                )
+                if resp.status_code == 400 and not _overflow(resp):
+                    # The endpoint rejects response_format — retry without it
+                    # (the parser handles both structured JSON and free text).
+                    resp = await client.post(url, json=payload, headers=headers)
+                if _overflow(resp):
                     raise ReviewUnavailable(
                         "review diff exceeds the model's context window — "
                         "raise num_ctx or use a larger-context model, or "

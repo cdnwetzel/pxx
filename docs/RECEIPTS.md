@@ -609,6 +609,7 @@ after); `cwd=src/backend`; test command run in an out-of-repo scratch venv
 `--review --review-mode advisory --budget-rounds 10`.
 
 **Procedure.**
+
 ```sh
 # scratch venv outside the repo, deps from requirements.txt
 pxx loop -m "In utils/plan_limits.py, add get_plan_limits_summary(db, tenant)
@@ -619,6 +620,7 @@ pxx loop -m "In utils/plan_limits.py, add get_plan_limits_summary(db, tenant)
 ```
 
 **Results ledger.**
+
 | field | value |
 |---|---|
 | task | add read-only `get_plan_limits_summary` + test |

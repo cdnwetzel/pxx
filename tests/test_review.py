@@ -424,6 +424,31 @@ def test_parse_structured_revise_with_findings():
     assert [(f.severity, f.file, f.line) for f in findings] == [("high", "src/a.py", 12)]
 
 
+def test_parse_structured_splits_embedded_file_line():
+    # Models fold the line into the file field ("calc.py:5"): split it off.
+    _, f = parse_review(
+        json.dumps(
+            {
+                "verdict": "REVISE",
+                "findings": [{"severity": "high", "file": "calc.py:5", "message": "bug"}],
+            }
+        )
+    )
+    assert (f[0].file, f[0].line) == ("calc.py", 5)
+    # overlap: file embeds a line AND `line` is set — path is still cleaned.
+    _, f = parse_review(
+        json.dumps(
+            {
+                "verdict": "REVISE",
+                "findings": [
+                    {"severity": "high", "file": "calc.py:5", "line": 5, "message": "bug"}
+                ],
+            }
+        )
+    )
+    assert (f[0].file, f[0].line) == ("calc.py", 5)
+
+
 def test_parse_structured_revise_without_findings_degrades():
     verdict, findings = parse_review(json.dumps({"verdict": "REVISE", "findings": []}))
     assert verdict is Verdict.NO_REVIEW  # generic block would heal forever

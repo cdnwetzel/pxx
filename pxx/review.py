@@ -122,27 +122,33 @@ _VERDICT_RE = re.compile(r"VERDICT\s*:\s*([A-Za-z_]+)", re.IGNORECASE)
 #: output are handled by a plain-request fallback + the text parser.
 _VERDICT_SCHEMA = {
     "type": "object",
+    "additionalProperties": False,
     "properties": {
         "verdict": {"type": "string", "enum": ["APPROVE", "REVISE"]},
         "findings": {
             "type": "array",
             "items": {
                 "type": "object",
+                "additionalProperties": False,
                 "properties": {
                     "severity": {"type": "string", "enum": list(SEVERITIES)},
                     "file": {"type": "string"},
                     "line": {"type": ["integer", "null"]},
                     "message": {"type": "string"},
                 },
-                "required": ["severity", "file", "message"],
+                # strict mode: every property listed (line is nullable).
+                "required": ["severity", "file", "line", "message"],
             },
         },
     },
     "required": ["verdict", "findings"],
 }
+# ``strict: true`` makes OpenAI actually constrain decoding to the schema (json
+# mode alone does not enforce it); Ollama/vLLM constrain regardless. Endpoints
+# that reject it fall back to the plain request + free-text parser.
 _RESPONSE_FORMAT = {
     "type": "json_schema",
-    "json_schema": {"name": "review_verdict", "schema": _VERDICT_SCHEMA},
+    "json_schema": {"name": "review_verdict", "strict": True, "schema": _VERDICT_SCHEMA},
 }
 
 #: Reasoning-model scratchpad. Closed ``<think>…</think>`` (or ``<thinking>``)
@@ -245,10 +251,13 @@ def _parse_structured_verdict(text: str) -> ParsedReview | None:
         file_raw = str(item.get("file", "")).strip()
         line = item.get("line")
         line = line if isinstance(line, int) and not isinstance(line, bool) else None
-        # Models often fold the line into the file field ("calc.py:2").
+        # Models often fold the line into the file field ("calc.py:2"). Always
+        # strip the embedded line from the path; use it only if `line` is unset.
         embedded = re.match(r"^(.*?):(\d+)$", file_raw)
-        if embedded and line is None:
-            file_raw, line = embedded.group(1), int(embedded.group(2))
+        if embedded:
+            if line is None:
+                line = int(embedded.group(2))
+            file_raw = embedded.group(1)
         finding = Finding(
             id=f"F-{i + 1:03d}",
             severity=severity,

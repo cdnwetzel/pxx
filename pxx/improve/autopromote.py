@@ -99,6 +99,47 @@ def evaluate_readiness(counts: ReadinessCounts) -> ReadinessReport:
     return ReadinessReport(counts=counts, bars=bars)
 
 
+#: Backends that represent genuine agent work. ``mock`` and ``replay`` are test
+#: doubles and must never count toward the earned-enablement ``real_runs`` bar.
+_REAL_BACKENDS = frozenset({"native", "aider"})
+
+
+def _int_or_zero(value: object) -> int:
+    try:
+        return int(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return 0
+
+
+def counts_as_real_run(run_dir: Path) -> bool:
+    """Whether a ``runs/<id>/`` directory counts toward the ``real_runs`` bar.
+
+    A run counts only if it did genuine work (F-1 hardening): (1) a real
+    backend — not the ``mock``/``replay`` test doubles; (2) a recorded terminal
+    outcome (``outcome.json`` present — a crash before the outcome never
+    counts); and (3) evidence the model actually ran — tokens spent OR a diff
+    produced. Fail-closed: any unreadable/absent record means "does not count".
+
+    This closes the gap dogfooded on 2026-08-01 (R-014): the bar was a raw
+    subdirectory count, so a mock-backend run, a crash, or a zero-work
+    connection failure (``MODEL_UNAVAILABLE`` with 0 tokens) all inflated it.
+    """
+    outcome_path = run_dir / "outcome.json"
+    if not outcome_path.is_file():
+        return False
+    try:
+        backend = str(json.loads((run_dir / "manifest.json").read_text()).get("backend", ""))
+    except (OSError, ValueError):
+        return False
+    if backend not in _REAL_BACKENDS:
+        return False
+    try:
+        outcome = json.loads(outcome_path.read_text())
+    except (OSError, ValueError):
+        return False
+    return _int_or_zero(outcome.get("tokens")) > 0 or _int_or_zero(outcome.get("diff_lines")) > 0
+
+
 def gather_counts(state_dir: Path | str, *, evals_dir: Path | str | None = None) -> ReadinessCounts:
     """Thin I/O edge: read the counts from disk.
 
@@ -113,7 +154,11 @@ def gather_counts(state_dir: Path | str, *, evals_dir: Path | str | None = None)
         eval_cases = sum(1 for _ in Path(evals_dir).rglob("*.toml"))
 
     runs_root = state_dir / "runs"
-    real_runs = sum(1 for d in runs_root.iterdir() if d.is_dir()) if runs_root.is_dir() else 0
+    real_runs = (
+        sum(1 for d in runs_root.iterdir() if d.is_dir() and counts_as_real_run(d))
+        if runs_root.is_dir()
+        else 0
+    )
 
     human_approved = 0
     prom_dir = state_dir / "promotions"

@@ -653,5 +653,53 @@ covered.
 
 ---
 
+## R-016 — `real_runs` counts only genuine runs (F-1 fix)
+
+**Claim.** The earned-enablement `real_runs` bar now counts a `runs/<id>/`
+directory only if it did genuine work: a **real backend** (`native`/`aider`, not
+the `mock`/`replay` test doubles), a recorded **terminal outcome**
+(`outcome.json` present — a crash before the outcome never counts), and
+**evidence the model ran** (tokens spent OR a diff produced). Fail-closed: any
+unreadable/absent record does not count. This closes the F-1 gaming dogfooded in
+R-014 (the bar was a raw subdirectory count, so a `mock` run, a crash, or a
+zero-work `MODEL_UNAVAILABLE` probe all inflated it).
+
+**Grade.** Reproducible (the filter + tests) + Attested (2026-08-01, the effect
+on the maintainer's live run store).
+
+**Exact configuration (nothing inherits).** pxx v2 (`fix/f1-real-runs-counter`);
+`gather_counts` / `counts_as_real_run` in `pxx/improve/autopromote.py`. Only the
+`real_runs` bar's *counting* changes; the other bars and thresholds are
+unchanged.
+
+**Procedure (reproduction path).**
+
+```sh
+uv run --extra dev python -m pytest tests/test_improve_autopromote.py -q
+# and against a real store:
+uv run --extra dev python -c "from pxx.improve.autopromote import gather_counts; \
+from pathlib import Path; print(gather_counts(Path.home()/'.local/state/pxx').real_runs)"
+```
+
+**Observed (2026-08-01).** On the maintainer's 17-directory store the count went
+**17 (raw) → 13 (genuine)**: excluded were 2 `MODEL_UNAVAILABLE` probes (0
+tokens, 0 diff), 1 `OUT_OF_SCOPE` and 1 `BUDGET_EXCEEDED` with no recorded work;
+kept were 9 `COMPLETED` + 4 `BUDGET_EXCEEDED` that spent tokens or edited files.
+Pinned by `tests/test_improve_autopromote.py`
+(`test_real_runs_counts_only_genuine_runs`, `…_zero_when_no_runs_dir`,
+`test_counts_as_real_run_fail_closed_on_bad_records`); full suite 1030 passed.
+
+**Boundary — explicitly not claimed.** This is the **filter only** — it stops
+junk from inflating the bar. It does NOT make the counter durable: `real_runs`
+is still a live `iterdir()`, so an external run-dir clear still regresses it (the
+~48→17 drop of R-014 would still happen). Self-referential (pxx-repo) genuine
+runs still count. "Genuine work" is proxied by tokens/diff, not a semantic
+judgment of value. Durability (an evidenced ledger) and the fact that the
+accumulation daemon is not currently running are tracked ROADMAP follow-ups, not
+fixed here. No claim that the `real_runs` bar is now trustworthy end-to-end —
+only that mock/crash/zero-work runs no longer inflate it.
+
+---
+
 *Convention: entries are append-only and dated; superseded claims are
 struck through with a pointer to the superseding entry, never deleted.*

@@ -46,12 +46,52 @@ milestone reviewer-verified by execution):
   runs under launchd on the primary workstation (hourly ticks); first
   proposal human-reviewed and rejected same day. real_runs at 50/100.
 - Live (non-scripted) eval arms on real endpoints, with the calibration
-  fp-rate tracked against production fp.
+  fp-rate tracked against production fp. The 2.2.0 per-role routing + the
+  SSH-tunnelled two-box lane (R-011) now provide the real endpoints this
+  needs; the `ArmRunner` seam (`improve/candidate_eval.py`) is the documented
+  injection point.
+- Reliable reasoning judges for the *blocking* review gate. R-012 found a
+  reasoning judge (qwen3.5) intermittently emits no parseable `VERDICT:` line
+  (a `REVIEW_UNPARSEABLE` block that is not a `<think>` case the parser
+  handles), so today it is trustworthy only in `--review-mode advisory`. Next:
+  a structured / grammar-constrained verdict contract so a reasoning judge can
+  gate a blocking loop deterministically.
 - The `pxx-reviews` triage loop for boundary-review artifacts. The
   *proposal-inbox* half **shipped in 2.1.5** (2026-07-29): `pxx improve
   triage list|qualify|reject` with reviewer identity, and the cycle honors
   human dispositions instead of re-proposing them every tick (found live
   on the daemon's first day). Boundary-review artifacts remain open.
+
+## Shipped in 2.2.0 (2026-08-01)
+
+Per-role model routing — the first step of the *Later* "model-backed boundary
+roles" item. Authoritative detail in CHANGELOG.md; receipts R-008…R-012.
+
+- **`[roles.review]` per-role model overlay** (+ `PXX_REVIEW_*`): the
+  reviewer/judge runs on its own model/endpoint, resolved from a *sparse*
+  overlay against the final coder model (a later `PXX_MODEL`/`PXX_API_KEY`
+  still reaches the reviewer). **Reviewer routing is a data-egress surface**
+  (the diff + any bearer token go to `base_url`), so — like hooks/MCP — the
+  overlay is honoured only from user config, env, or CLI, never repo-local: a
+  checked-in `pxx.toml` cannot redirect a review to an attacker endpoint (a
+  critical exfil hole caught by the PR #8 CodeRabbit lane, fixed with
+  regression tests before merge).
+- **`pxx loop --review`** — opt-in model-backed judge in the edit loop
+  (`--review-mode blocking|advisory`); off by default, byte-identical when
+  unset, `--review-mode` without `--review` is a loud usage error.
+- **Reasoning-model judges** — the review parser strips `<think>` scratchpads
+  before reading the verdict (qwen3.5 / deepseek-r1 / qwen3 `/think`).
+- Verified on real two-box hardware: `qwen3-coder:30b` coder on an RTX 5060 Ti
+  (SSH-tunnelled) + a Mac judge complete one autonomous `pxx loop --review`
+  (R-011). The GGUF tool-call/template gap that makes the Unsloth Q3 unusable
+  as the agentic coder — a correct call emitted as `<tools>` prose the serving
+  layer never lifts to structured `tool_calls` — is mapped in R-010.
+- **Fixed:** `MemoryStore.add`/`search` were called un-awaited by the memory
+  tools and MCP server — every `remember` silently dropped, `recall_memory`
+  errored on the real store; now awaited via a shared `await_if_needed`.
+- CI parity (PR #9): PR CI now runs `ruff format --check`, matching the release
+  `verify` gate that the 2.2.0 tag first tripped (the gate held — nothing
+  published — but it cost a formatting hotfix mid-release).
 
 ## Shipped in 2.1.6 + 2.1.7 (2026-07-30)
 
@@ -148,12 +188,24 @@ CHANGELOG.md; highlights:
 ## Later
 
 - Model-backed boundary roles (today's are deterministic). **First step
-  shipped in 2.2.0**: per-role model routing (`[roles.review]` /
-  `PXX_REVIEW_*`) + opt-in `pxx loop --review` let the reviewer/judge run on a
-  different model/endpoint than the coder, with reasoning-model (`<think>`)
-  verdict parsing. Verified on real two-box hardware (RTX 5060 Ti coder + Mac
-  judge). The deterministic Reproducer/Boundary/Artifact roles remain to be
-  model-backed.
+  shipped in 2.2.0** (see above): the reviewer role can run on its own
+  model/endpoint. Remaining:
+  - **Extend per-role routing beyond `review`** — `[roles.coder]` /
+    `[roles.planner]` on the same overlay mechanism, so e.g. an
+    NL-interpreter/planner runs on the Mac and feeds the GPU coder (only the
+    reviewer role is wired through the runtime today; the config surface is
+    fail-closed on any other role name).
+  - **Model-back the deterministic Reproducer / Boundary-Reviewer /
+    Artifact-Reviewer** roles (`roles.py`), calibrated the same way the
+    review judge is (`pxx calibrate`).
+- **Local-first reference inference engines.** Camelid / NanoCamelid
+  (timtoole02; Rust, MIT, OpenAI-compatible, parity-receipts-driven) already
+  drive pxx today via `provider = "openai-compatible"` (R-007 maps the working
+  CPU lane and the v0.4.4 tool-surface gap). Direction: a documented,
+  receipts-cross-linked "pxx + Camelid" reference stack — pxx as the policy /
+  agent runtime, Camelid as the validated engine — and a collaboration RFC.
+  Shared "refuse-unverified-output" ethos makes the fit natural; the
+  integration stays optional and degrades to any OpenAI-compatible endpoint.
 - Cross-repo knowledge federation.
 
 ## Release story

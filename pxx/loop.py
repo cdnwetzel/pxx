@@ -248,9 +248,16 @@ async def _run_lint(root: Path, command: str) -> tuple[bool, str]:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
         )
-        out, _ = await asyncio.wait_for(proc.communicate(), TEST_TIMEOUT_SECONDS)
-    except (OSError, TimeoutError) as exc:
+    except OSError as exc:
         return False, f"lint command failed to run: {exc}"
+    try:
+        out, _ = await asyncio.wait_for(proc.communicate(), TEST_TIMEOUT_SECONDS)
+    except TimeoutError:
+        # Cancelling communicate() does NOT reap the child — kill and wait, or
+        # the lint subprocess leaks (matches _run_tests).
+        proc.kill()
+        await proc.wait()
+        return False, f"lint command timed out after {TEST_TIMEOUT_SECONDS:.0f}s"
     text = out.decode(errors="replace")
     return proc.returncode == 0, text.strip()[-1000:]
 
@@ -474,6 +481,11 @@ async def run_loop(
                     reviewer=reviewer,
                     review_mode=review_mode,
                 ):
+                    # Record the salvaged run's diff telemetry (the normal
+                    # scope/diff guards, which populate these, were bypassed).
+                    # `accounted_diff` is what _outcome reports as diff_lines.
+                    legs["files_changed"] = len(await _changed_paths(root, pre_sha))
+                    accounted_diff = _diff_line_count(salvage_diff)
                     await parent_bus.emit(
                         "gate_decision",
                         {"gate": "overwork_salvage", "round": round_no, "allowed": True},

@@ -95,12 +95,16 @@ milestone reviewer-verified by execution):
   terminate `COMPLETED` rather than burn rounds to the cap. Highest immediate
   quality lever — it affects every autonomous run — and reproducible on the
   two-box rig.
-- Reliable reasoning judges for the *blocking* review gate. R-012 found a
-  reasoning judge (qwen3.5) intermittently emits no parseable `VERDICT:` line
-  (a `REVIEW_UNPARSEABLE` block that is not a `<think>` case the parser
-  handles), so today it is trustworthy only in `--review-mode advisory`. Next:
-  a structured / grammar-constrained verdict contract so a reasoning judge can
-  gate a blocking loop deterministically.
+- ~~Reliable reasoning judges for the *blocking* review gate. R-012 found a
+  reasoning judge (qwen3.5) intermittently emits no parseable `VERDICT:` line…~~
+  **Shipped (2026-08-01, R-019):** the reviewer sends a grammar-constrained
+  `response_format` (json_schema) forcing a `{verdict, findings}` object, so a
+  reasoning judge always emits a parseable verdict; the parser reads structured
+  JSON first and falls back to free text (endpoints that reject/ignore
+  `response_format` retry plain). Validated on real hardware: qwen3.5 in
+  `--review-mode blocking` — 6/6 parseable, GOOD→APPROVE, BAD→REVISE with
+  file-anchored findings that block. Reasoning judges are now usable for the
+  blocking gate.
 - **Dogfood-surfaced hardenings (2026-08-01, R-014), human-gated — the files
   are protected control plane, so these need human review, not autonomous
   edits:**

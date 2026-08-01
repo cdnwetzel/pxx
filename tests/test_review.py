@@ -403,3 +403,130 @@ def test_reviewer_context_overflow_gets_actionable_message(tmp_path: Path) -> No
     reviewer = NativeReviewer(_model(), _missing_prompt(tmp_path), transport=transport)
     with pytest.raises(ReviewUnavailable, match="context window"):
         asyncio.run(reviewer.review("d", "t"))
+
+
+# --- structured verdict contract (response_format json_schema) ---------------
+
+
+def test_parse_structured_approve():
+    verdict, findings = parse_review(json.dumps({"verdict": "APPROVE", "findings": []}))
+    assert verdict is Verdict.APPROVE
+    assert findings == []
+
+
+def test_parse_structured_revise_with_findings():
+    payload = {
+        "verdict": "REVISE",
+        "findings": [{"severity": "high", "file": "src/a.py", "line": 12, "message": "off-by-one"}],
+    }
+    verdict, findings = parse_review(json.dumps(payload))
+    assert verdict is Verdict.REVISE
+    assert [(f.severity, f.file, f.line) for f in findings] == [("high", "src/a.py", 12)]
+
+
+def test_parse_structured_splits_embedded_file_line():
+    # Models fold the line into the file field ("calc.py:5"): split it off.
+    _, f = parse_review(
+        json.dumps(
+            {
+                "verdict": "REVISE",
+                "findings": [{"severity": "high", "file": "calc.py:5", "message": "bug"}],
+            }
+        )
+    )
+    assert (f[0].file, f[0].line) == ("calc.py", 5)
+    # overlap: file embeds a line AND `line` is set — path is still cleaned.
+    _, f = parse_review(
+        json.dumps(
+            {
+                "verdict": "REVISE",
+                "findings": [
+                    {"severity": "high", "file": "calc.py:5", "line": 5, "message": "bug"}
+                ],
+            }
+        )
+    )
+    assert (f[0].file, f[0].line) == ("calc.py", 5)
+
+
+def test_parse_structured_revise_without_findings_degrades():
+    verdict, findings = parse_review(json.dumps({"verdict": "REVISE", "findings": []}))
+    assert verdict is Verdict.NO_REVIEW  # generic block would heal forever
+    assert findings == []
+
+
+def test_parse_structured_drops_evidence_less_finding():
+    payload = {
+        "verdict": "REVISE",
+        "findings": [{"severity": "low", "file": "", "message": "vague"}],
+    }
+    verdict, _ = parse_review(json.dumps(payload))
+    assert verdict is Verdict.NO_REVIEW  # no evidence-linked finding -> degrade
+
+
+def test_parse_structured_tolerates_json_fence():
+    verdict, _ = parse_review('```json\n{"verdict": "APPROVE", "findings": []}\n```')
+    assert verdict is Verdict.APPROVE
+
+
+def test_parse_structured_after_think_block():
+    text = '<think>deliberating…</think>\n{"verdict": "APPROVE", "findings": []}'
+    assert parse_review(text)[0] is Verdict.APPROVE
+
+
+def test_parse_falls_back_to_text_when_not_json():
+    # A reviewer that ignored response_format returns free text — still parsed.
+    assert parse_review("Some prose.\nVERDICT: APPROVE")[0] is Verdict.APPROVE
+
+
+def test_native_reviewer_requests_structured_verdict(tmp_path: Path) -> None:
+    seen: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["body"] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": '{"verdict": "APPROVE", "findings": []}'}}]},
+        )
+
+    reviewer = NativeReviewer(
+        _model(), _missing_prompt(tmp_path), transport=httpx.MockTransport(handler)
+    )
+    text = asyncio.run(reviewer.review("d", "t"))
+    assert seen["body"]["response_format"]["type"] == "json_schema"
+    assert parse_review(text)[0] is Verdict.APPROVE
+
+
+def test_native_reviewer_falls_back_when_response_format_rejected(tmp_path: Path) -> None:
+    calls: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        calls.append(body)
+        if "response_format" in body:
+            return httpx.Response(400, text="unknown parameter response_format")
+        return httpx.Response(200, json={"choices": [{"message": {"content": "VERDICT: APPROVE"}}]})
+
+    reviewer = NativeReviewer(
+        _model(), _missing_prompt(tmp_path), transport=httpx.MockTransport(handler)
+    )
+    text = asyncio.run(reviewer.review("d", "t"))
+    assert len(calls) == 2  # structured attempt rejected -> plain retry
+    assert "response_format" not in calls[1]
+    assert parse_review(text)[0] is Verdict.APPROVE
+
+
+def test_structured_revise_blocks_in_blocking_mode(tmp_path: Path) -> None:
+    reviewer = ScriptedReviewer(
+        [
+            json.dumps(
+                {
+                    "verdict": "REVISE",
+                    "findings": [{"severity": "high", "file": "a.py", "line": 1, "message": "bug"}],
+                }
+            )
+        ]
+    )
+    result = asyncio.run(review_changes("d", "t", reviewer, ReviewMode.BLOCKING))
+    assert result.verdict is Verdict.REVISE
+    assert result.blocked is True

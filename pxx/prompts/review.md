@@ -27,20 +27,24 @@ VERDICT: REVISE
 Then one finding per line, numbered sequentially:
 
 ```
-F-001 [blocker] pxx/session.py:42 unhandled KeyError when event data lacks 'kind'
-F-002 [minor] pxx/tools/fs.py:17 unused variable 'resolved'
+F-001 [high] pxx/session.py:42 unhandled KeyError when event data lacks 'kind'
+F-002 [low] pxx/tools/fs.py:17 unused variable 'resolved'
 ```
 
 Rules:
 
-- Severity is one of `blocker`, `major`, `minor`.
+- Severity is one of `low`, `medium`, `high` (matches the parser + schema).
 - Every finding must cite a real `file:line` and state the problem in one
   short sentence. No vague findings, no praise, no summaries.
-- `APPROVE` only when there are no blocker or major findings; then output the
+- `APPROVE` only when there are no `high` or `medium` findings; then output the
   verdict line alone.
 - If you have no evidence a change happened (no diff, no files), output
-  `VERDICT: REVISE` with a single `minor` finding saying so.
+  `VERDICT: REVISE` with a single `low` finding saying so.
 - Anything outside this format is treated as REVISE — keep it exact.
 - If you must reason first, enclose it in `<think>…</think>`; the `VERDICT:`
   line must begin your final answer (everything after `</think>`). Reasoning
   inside `<think>` is ignored by the parser — never put the verdict there.
+- When asked for JSON (a structured `response_format`), return exactly
+  `{"verdict": "APPROVE"|"REVISE", "findings": [{"severity", "file", "line",
+  "message"}]}` — put the line number in the `line` field (an integer), not
+  folded into `file`; `line` may be null.

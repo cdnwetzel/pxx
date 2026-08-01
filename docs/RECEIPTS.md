@@ -787,5 +787,50 @@ not observed.
 
 ---
 
+## R-019 — Reasoning judges gate the blocking review deterministically (structured verdict)
+
+**Claim.** The reviewer requests a **grammar-constrained** verdict
+(`response_format` json_schema forcing `{verdict, findings}`), so a reasoning
+judge (qwen3.5-class) always emits a parseable verdict — fixing R-012, where
+qwen3.5 intermittently produced no `VERDICT:` line and so was unusable for a
+`--review-mode blocking` gate. The parser reads structured JSON first and falls
+back to free text; endpoints that reject `response_format` retry plain.
+
+**Grade.** Reproducible (parser + request tests) + Attested (2026-08-01, real
+qwen3.5 judge over the Mac Ollama).
+
+**Exact configuration (nothing inherits).** pxx v2 (`feat/reasoning-judges`);
+`_VERDICT_SCHEMA` / `_parse_structured_verdict` in `pxx/review.py`. Judge
+`qwen3.5:9b` on the Mac's own Ollama (`http://localhost:11666`), via
+`NativeReviewer` + `review_changes`.
+
+**Procedure (reproduction path).**
+
+```sh
+uv run --extra dev python -m pytest tests/test_review.py -q -k structured
+# real judge: NativeReviewer(qwen3.5 @ :11666), review_changes(diff, task, …, BLOCKING)
+```
+
+**Observed (2026-08-01).** Direct endpoint probe: `response_format` json_schema
+→ clean `{"verdict": …}` (plain `json_object` and Ollama `format` returned
+arbitrary keys). Through pxx's path, BLOCKING mode, 3 runs each: a correct diff
+→ `APPROVE` (not blocked); a buggy diff (`return a - b`) → `REVISE`, `blocked`,
+with a `calc.py`-anchored finding — **6/6 parseable, 0 `unparseable`** (vs R-012's
+intermittent failures). Models fold the line into the `file` field
+(`"calc.py:2"`); the structured parser splits an embedded `:line` and treats a
+named file as the finding's anchor. Ten tests
+(`tests/test_review.py::test_parse_structured_*`,
+`test_native_reviewer_requests_structured_verdict`,
+`…_falls_back_when_response_format_rejected`,
+`test_structured_revise_blocks_in_blocking_mode`); full suite 1055 passed.
+
+**Boundary — explicitly not claimed.** No model quality claim beyond
+parseability + correct verdict on these small diffs; a reasoning judge's
+*judgement* is only as good as the model. Structured output depends on the
+endpoint supporting `response_format` json_schema (Ollama/vLLM/OpenAI do; others
+fall back to free text — same reliability as before). Exact-config only.
+
+---
+
 *Convention: entries are append-only and dated; superseded claims are
 struck through with a pointer to the superseding entry, never deleted.*

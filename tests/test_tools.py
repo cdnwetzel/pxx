@@ -417,3 +417,37 @@ def test_remember_works_in_read_only_mode(reg: ToolRegistry, tmp_path: Path) -> 
     ctx = make_ctx(tmp_path, permission=PermissionMode.ASK, memory=mem)
     out = call(reg, "remember", {"content": "read-only can still remember"}, ctx)
     assert out.startswith("remembered")
+
+
+class AsyncFakeMemory:
+    """Double matching the REAL MemoryStore, whose ``add``/``search`` are
+    ``async def``. Guards the "coroutine was never awaited" regression: with a
+    bare (un-awaited) call the tool would embed a coroutine repr and persist
+    nothing."""
+
+    def __init__(self) -> None:
+        self.items: list[FakeObs] = []
+        self.add_calls: list[dict[str, Any]] = []
+
+    async def add(self, project: str, kind: str, content: str, **kwargs: Any) -> int:
+        self.items.append(FakeObs(kind, content))
+        self.add_calls.append({"project": project, "kind": kind, **kwargs})
+        return len(self.items)
+
+    async def search(self, project: str, query: str, *, k: int = 8) -> list[FakeObs]:
+        return self.items[:k]
+
+
+def test_remember_awaits_async_store(reg: ToolRegistry, tmp_path: Path) -> None:
+    mem = AsyncFakeMemory()
+    out = call(reg, "remember", {"content": "async store works"}, make_ctx(tmp_path, memory=mem))
+    assert out == "remembered (id 1)"  # a real int id, never a coroutine repr
+    assert len(mem.add_calls) == 1  # actually persisted, not a dropped coroutine
+    assert mem.items[0].content == "async store works"
+
+
+def test_recall_awaits_async_store(reg: ToolRegistry, tmp_path: Path) -> None:
+    mem = AsyncFakeMemory()
+    call(reg, "remember", {"content": "seeded via tool"}, make_ctx(tmp_path, memory=mem))
+    out = call(reg, "recall_memory", {"query": "seeded", "k": 5}, make_ctx(tmp_path, memory=mem))
+    assert "- [note] seeded via tool" in out

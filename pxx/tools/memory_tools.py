@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from .._async import await_if_needed
 from . import ToolContext, ToolSpec, tool_schema
 
 _NO_MEMORY = "memory is not available in this session (disabled or failed to open)"
@@ -41,7 +42,7 @@ class RecallMemory:
             return _NO_MEMORY
         query = str(args.get("query", ""))
         k = int(args.get("k") or 5)
-        results = ctx.memory.search(_project(ctx), query, k=k)
+        results = await await_if_needed(ctx.memory.search(_project(ctx), query, k=k))
         if not results:
             return f"no memories matching {query!r}"
         lines = []
@@ -79,12 +80,14 @@ class Remember:
         if not content.strip():
             return "error: content must not be empty"
         tags = [t.strip() for t in str(args.get("tags") or "").split(",") if t.strip()]
-        obs_id = ctx.memory.add(
-            _project(ctx),
-            "note",
-            content,
-            tags=tags,
-            source="tool",
-            session_id=ctx.session_id,
+        obs_id = await await_if_needed(
+            ctx.memory.add(
+                _project(ctx),
+                "note",
+                content,
+                tags=tags,
+                source="tool",
+                session_id=ctx.session_id,
+            )
         )
         return f"remembered (id {obs_id})"

@@ -3,6 +3,61 @@
 All notable changes to pxx are documented here. The 1.x series history is
 preserved in git (tag `v1.3.3` and earlier).
 
+## [2.2.0] — 2026-08-01
+
+First step toward the ROADMAP "model-backed boundary roles" item: the
+reviewer/judge can now run on a different model and endpoint than the coder,
+so a modest two-box setup (a GPU-box coder + a Mac judge) is expressible in
+config alone — no code change, degrades cleanly to a single endpoint. Verified
+on real hardware: a qwen3-coder coder on an RTX 5060 Ti + a Mac judge complete
+one autonomous `pxx loop --review`.
+
+### Added
+
+- **`[roles.review]` per-role model overlay** (config + `PXX_REVIEW_MODEL` /
+  `PXX_REVIEW_PROVIDER` / `PXX_REVIEW_BASE_URL` / `PXX_REVIEW_API_KEY`): an
+  optional `Settings.review_model` that the reviewer construction sites
+  (`pxx review`, `pxx calibrate`) resolve via `Settings.effective_review_model`.
+  Unspecified fields inherit the coder model, so a lone `base_url` reuses the
+  same model on another box. Fail-closed on unknown role names, unknown
+  sub-keys, and unknown providers — a typo is an error, never a silent no-op.
+  When unset, a run is byte-identical to before the field existed.
+  The overlay is stored *sparse* and resolved against the coder model once, at
+  the end of layering, so a later `PXX_MODEL`/`PXX_API_KEY` override still
+  propagates into the reviewer (no stale early copy). **Reviewer routing is a
+  data-egress surface** (the diff and any bearer token go to `base_url`), so —
+  like hooks and MCP servers — the overlay is honoured only from user config,
+  env, or CLI, and is **ignored (with a warning) from repo-local config**: a
+  checked-in `pxx.toml` cannot redirect a review to an attacker endpoint.
+- **`pxx loop --review` (opt-in model-backed judge)**: the bounded
+  edit→test→review loop can now run its review gate each round, driven by
+  `Settings.effective_review_model` — so with `[roles.review]` set, the judge
+  runs on a different model/endpoint than the coder. `--review-mode
+  blocking|advisory` (default blocking) selects whether a REVISE heals/fails
+  closed or is reported only. Without `--review` the loop is unchanged
+  (`reviewer=None`, gate skipped) — the flag lives only on `loop`, never as a
+  silent no-op on `ask`/`edit`/`run`.
+- **Reasoning-model judges supported**: the review parser strips
+  `<think>…</think>` / `<thinking>` scratchpads (closed pairs and a dangling
+  unclosed opener) before reading the `VERDICT:` line and findings, so a
+  reasoning judge (qwen3.5, deepseek-r1, qwen3 `/think`) that reasons "aloud"
+  toward one verdict and then finalises another is parsed from its final
+  answer, not its scratchpad. No-op for non-reasoning reviewers. The review
+  prompt now tells reasoning models to keep the verdict out of `<think>`.
+
+### Fixed
+
+- **Memory tools silently dropped every observation** (found while
+  dogfooding the two-box loop): `MemoryStore.add`/`search` are `async`, but
+  the `remember`/`recall_memory` agent tools and the MCP server called them
+  without awaiting — the coroutine was discarded (a `RuntimeWarning`), so
+  nothing was persisted and `recall_memory` errored against the real store.
+  All three call sites now await via a shared `await_if_needed` helper (also
+  de-duplicating the copy in `pxx serve`); the HTTP server was already
+  correct. Regression-guarded by async-store test doubles in the tool and MCP
+  suites, and verified against a real `MemoryStore` with the un-awaited
+  warning promoted to an error.
+
 ## [2.1.7] — 2026-07-30
 
 ### Fixed

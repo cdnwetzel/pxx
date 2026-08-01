@@ -257,5 +257,207 @@ is reproducible against the public Camelid v0.4.4 release.
 
 ---
 
+## R-008 — The reviewer/judge can run on a different endpoint than the coder
+
+**Claim.** With `[roles.review]` (or `PXX_REVIEW_*`) set, the reviewer/judge
+issues its `/v1/chat/completions` request to the review endpoint while the
+coder keeps its own; with the overlay unset, the reviewer uses the coder
+endpoint — a run is byte-identical to before the field existed. This is the
+config seam under the ROADMAP "model-backed boundary roles" item: a two-box
+setup (e.g. a GPU-box coder + a Mac judge) is expressible in config alone.
+
+**Grade.** Reproducible (procedure below, no external services or models).
+
+**Procedure.** Run two stub OpenAI-compatible servers that log which port a
+POST hits — port A ("coder") and port B ("reviewer") — each returning
+`VERDICT: APPROVE`. In a repo with an uncommitted diff:
+
+1. `PXX_PROVIDER=openai-compatible PXX_BASE_URL=http://127.0.0.1:A
+   PXX_REVIEW_BASE_URL=http://127.0.0.1:B pxx review` → the **reviewer** port
+   (B) receives the request; `verdict: APPROVE` is printed (full round trip).
+2. `PXX_PROVIDER=openai-compatible PXX_BASE_URL=http://127.0.0.1:A pxx review`
+   (no overlay) → the **coder** port (A) receives the request.
+
+**Observed (2026-08-01).** Exactly one hit per run: run 1 → `HIT reviewer`,
+run 2 → `HIT coder`; both parsed `verdict: APPROVE`. Config resolution is
+pinned by nine tests in `tests/test_config.py` (`test_roles_review_*`,
+`test_review_model_defaults_to_none_and_effective_falls_back`,
+`test_unknown_role_rejected`, …); full suite 995 passed / 2 skipped.
+
+**Boundary — explicitly not claimed.** ~~No claim yet of a live two-box run
+with production models over the network (that lane, incl. the SSH-tunnelled
+GPU coder + Mac judge, is future work)~~ — **superseded: the live two-box run
+is recorded in R-011.** The R-007 Camelid lanes are unchanged; only the
+reviewer role is wired through the runtime so far (coder/planner role overlays
+are not yet claimed); no quality/speed claim about any model.
+
+---
+
+## R-009 — `pxx loop --review` wires a model-backed judge into the edit loop
+
+**Claim.** `pxx loop --review` enables the review gate the bounded loop
+otherwise skips, constructing the reviewer from `effective_review_model` —
+so the judge can run on a different local model/endpoint than the coder. A
+real local model serves as that judge and returns a structured verdict.
+
+**Grade.** Reproducible (wiring + config) + Attested (the real-hardware judge
+verdict, on dated tunnelled hardware).
+
+**Wiring — Reproducible.** Four tests in `tests/test_cli.py`
+(`test_loop_review_flag_wires_reviewer_with_effective_model`,
+`test_loop_review_advisory_mode`,
+`test_loop_without_review_flag_passes_no_reviewer`,
+`test_loop_review_falls_back_to_coder_model_when_no_overlay`) pin that
+`--review` hands `run_loop` a `NativeReviewer` built from
+`effective_review_model` with the selected `ReviewMode`, and that omitting the
+flag hands it no reviewer (the gate stays skipped — unchanged default).
+
+**Real-hardware judge — Attested (2026-08-01).** Over an SSH tunnel
+(`ssh -L 11435:127.0.0.1:11434 asrock`) to a Ryzen 9 5950X + RTX 5060 Ti
+16 GB box (Gentoo, Ollama 0.30.5), `pxx review` with
+`PXX_REVIEW_MODEL=gemma2:9b` (`PXX_BASE_URL` on the tunnel) reviewed a real
+4-line diff and returned `verdict: APPROVE` — a real local model driving the
+same `NativeReviewer` the loop wires. The coder endpoint answered a live
+`qwen2.5:14b` completion over the same tunnel.
+
+**Autonomous lane — Attested (2026-08-01).** Initially the review gate (which
+fires only after a successful edit round) was unreachable because the *instruct*
+models on the box (`qwen2.5:14b/7b-instruct`, `gemma2:9b`) did not drive pxx's
+native tool-call loop to an edit (a run hit `BUDGET_EXCEEDED` with an empty
+diff). Resolved once a **coder-tuned** model was installed: with
+`PXX_MODEL=qwen3-coder:30b` (official Ollama build) as the coder and a review
+endpoint as the judge, `pxx loop --review --review-mode blocking` on the
+`add(a,b)` sandbox task **edited `calc.py` (+3), the review gate fired in-loop,
+and the run returned `[COMPLETED] … (verdict APPROVE)` in one round** — the full
+edit→judge→complete lane, unattended. See R-010 for why the coder model choice
+(and its serving template) is load-bearing here.
+
+**Boundary — explicitly not claimed.** No model quality/speed claim; the
+sandbox task is trivial (one function). qwen3-coder Q4 runs partially on CPU on
+this 16 GB card (see R-010) — a speed characterisation, not a correctness one.
+
+---
+
+## R-010 — Coder-role model must tool-call through the OpenAI API; GGUF template decides it
+
+**Claim.** For the pxx coder role over an OpenAI-compatible Ollama endpoint,
+what matters first is not size or speed but whether the served model returns
+**structured `tool_calls`** — and that depends on the GGUF's chat/tool
+template, not the weights. The official `qwen3-coder:30b` does; the Unsloth
+`UD-Q3_K_XL` GGUF of the same model does not (it returns the tool call as a
+`<tools>…</tools>` text block with `tool_calls: null`), so pxx never executes
+it and the loop no-op-completes.
+
+**Grade.** Attested + Reproducible (2026-08-01; Ryzen 9 5950X + RTX 5060 Ti
+16 GB, Gentoo, Ollama 0.30.5; probes are plain `curl` to
+`/v1/chat/completions` with a one-tool array).
+
+**Measured (same box, via the SSH tunnel).**
+
+| Model / quant | Size | tok/s | GPU placement | `tool_calls`? |
+|---|---|---|---|---|
+| `hf.co/unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF:UD-Q3_K_XL` | 13 GB | 63.8 | 100% GPU | **no** (`<tools>` as content) |
+| `qwen3-coder:30b` (official Q4_K_M) | 18 GB | 40.6 | 23%/77% CPU/GPU | **yes** (`finish_reason: tool_calls`) |
+| `qwen2.5:7b-instruct` (control) | 4.7 GB | 51.6 | 100% GPU | **yes** |
+
+The control (`qwen2.5:7b`) proves Ollama's OpenAI tool bridge itself works on
+this version — so the Unsloth-GGUF failure is a template/parser gap, not an
+engine bug. This is the same *class* as R-007 finding 3 (a correct tool call
+emitted as prose the serving layer doesn't lift into the structured field),
+here reproduced for Ollama + an Unsloth GGUF.
+
+**Consequence for pxx.** The faster, fully-resident Q3 is unusable as the
+agentic coder; the official Q4 is the coder despite partial CPU offload (its
+MoE 3B-active keeps it at ~40 tok/s). pxx's prose-tool-call detector
+(`native.py`) catches `<tool_call>`/bare-JSON shapes but not `<tools>`; teaching
+it that shape (parse-and-nudge, never execute) is the pxx-native mitigation if a
+non-official GGUF must be used.
+
+**Boundary — explicitly not claimed.** No coding-quality ranking between quants;
+tok/s are single-prompt samples, not a throughput benchmark; the Q3's `<tools>`
+behaviour is specific to that GGUF + Ollama 0.30.5 and may change with either.
+
+---
+
+## R-011 — True two-box run: GPU-box coder + Mac judge, one autonomous loop
+
+**Claim.** A single `pxx loop --review` runs the coder and the judge on two
+**physically distinct machines** — the coder-tuned model on an Nvidia GPU box,
+the review/judge model on an Apple-Silicon Mac — and completes the
+edit→judge→approve lane unattended, fully local (no cloud). This is the
+per-role routing of R-008 exercised across real hardware.
+
+**Grade.** Attested (2026-08-01, two role-described machines).
+
+**Setup.** Coder = `qwen3-coder:30b` (official Ollama) on the Ryzen 9 5950X +
+RTX 5060 Ti 16 GB box, reached from the Mac over an SSH tunnel
+(`PXX_BASE_URL=http://localhost:11435`). Judge = `gemma2:9b` on the M4 Mac
+mini's **own** Ollama (`PXX_REVIEW_BASE_URL=http://localhost:11666`, a distinct
+local instance serving only that model — not the tunnel). One command:
+`pxx loop --review --review-mode blocking` on the `add(a,b)` sandbox task.
+
+**Observed.** `[COMPLETED] completed in 1 round(s) (verdict APPROVE)`;
+`calc.py` edited (+5, coder added a docstring unprompted). The Mac Ollama
+access log recorded the judge call — `POST "/v1/chat/completions" 200` in
+8.4 s, prompt eval 510 tokens @ ~170 tok/s, 12 tokens generated — with
+`gemma2:9b` resident **100% GPU (Metal), 6.3 GB**. The coder generations were
+served by the GPU box over the tunnel. Two machines, ~$1,200 of consumer
+hardware total, no cloud dependency.
+
+**Reasoning judge variant — Attested (2026-08-01).** The same two-box loop was
+re-run with a **reasoning** judge on the Mac (`qwen3.5:9b`, resident 100% Metal,
+5.6 GB) instead of gemma2. The Mac served the review in 41.0 s generating **614
+tokens** (vs gemma2's 12) — i.e. it reasoned at length — and pxx parsed
+`verdict APPROVE` from the final answer via the new `<think>`-stripping parser;
+the loop `[COMPLETED]` in one round. Confirms reasoning judges work end-to-end,
+at a real latency cost (thorough but ~40 s/review here vs ~8 s).
+
+**Boundary — explicitly not claimed.** Trivial task (one function); no
+quality/latency claim (the cross-machine review adds a network hop and a Mac
+model load); the coder still runs partially on CPU on the 16 GB card (R-010).
+The point proven is *topological* — role routing places coder and judge on
+separate local machines in one loop — not a performance result.
+
+---
+
+## R-012 — Clean autonomous completion with qwen3-coder: the tuning that matters
+
+**Claim.** A qwen3-coder `pxx loop` completes cleanly (one round, `COMPLETED`)
+when given (a) an adequate round budget, (b) a test command as the done-signal,
+and (c) bytecode hygiene — and a *format-reliable* judge for blocking review.
+The earlier `BUDGET_EXCEEDED` runs were a starved budget, not a stuck coder.
+
+**Grade.** Attested (2026-08-01, two-box: RTX 5060 Ti coder + M4 Mac judge).
+
+**Root cause (from the run record).** The `rounds` budget is consumed **per
+native model turn**, not per outer loop iteration. qwen3-coder verifies its own
+edit with extra tool calls — one trivial `add()` task took **6 model turns**
+(5 tool-calls, then a natural `finish_reason: stop`). `--budget-rounds 5` cut it
+off at turn 6, recording `BUDGET_EXCEEDED rounds=0`. It stops on its own given
+room; the default budget (25) is ample.
+
+**Two more gotchas found.** (1) Running `python3 check.py` writes
+`__pycache__/*.pyc`, which churns the diff/scope each round — suppress with
+`PYTHONDONTWRITEBYTECODE=1` and a `.gitignore`. (2) A **reasoning** judge
+(`qwen3.5:9b`) is intermittently format-non-compliant — one run blocked with
+`REVIEW_UNPARSEABLE` (no parseable `VERDICT:` line; not a `<think>` case the
+parser handles). For a *blocking* gate use a format-reliable judge (gemma2 here
+returned `VERDICT: APPROVE` deterministically) or run the reasoning judge in
+`--review-mode advisory`.
+
+**Observed clean run.** `PXX_MODEL=qwen3-coder:30b` (coder, tunnelled GPU),
+`PXX_REVIEW_MODEL=gemma2:9b` (judge, Mac), `PXX_TEST_COMMAND="python3 check.py"`,
+default budget, `--review-mode blocking` → `[COMPLETED] … (verdict APPROVE)` in
+one round, `calc.py` +4, no stray files.
+
+**Boundary — explicitly not claimed.** Trivial task; reasoning-judge
+non-compliance is intermittent (not every run) and model/version specific. The
+`MemoryStore.add` "coroutine never awaited" `RuntimeWarning` was observed
+during these runs (a separate pre-existing defect) — **since fixed in 2.2.0**
+(the un-awaited `add`/`search` in the memory tools and MCP server; see
+`CHANGELOG.md`).
+
+---
+
 *Convention: entries are append-only and dated; superseded claims are
 struck through with a pointer to the superseding entry, never deleted.*

@@ -43,6 +43,38 @@ Ordered fallback chain, each entry: `model` (required), `provider`,
 `base_url`, `api_key`. On connection failure the native backend tries the
 next entry; `pxx.router.resolve_model` picks the first reachable.
 
+## `[roles.review]`
+
+Optional per-role model overlay for the reviewer/judge. When absent the
+reviewer runs on the coder `model` — a run is byte-identical to before this
+key existed. When present it accepts the same fields as a model (`provider`,
+`model`, `base_url`, `api_key`); unspecified fields inherit the coder model,
+so a lone `base_url` reuses the same model on a different endpoint. This lets
+the coder and the judge run on different hardware — e.g. a GPU-box coder and a
+Mac judge:
+
+```toml
+model = "qwen3-coder:30b"
+base_url = "http://gpu-box:11434"   # coder on the RTX box
+
+[roles.review]
+model = "qwen3.5:9b"
+base_url = "http://localhost:11434" # judge on the Mac (e.g. via SSH tunnel)
+```
+
+Only `review` is recognised today (an unknown role name is a fail-closed
+error). Precedence follows the normal layering; env `PXX_REVIEW_*` overlays
+the TOML, and the overlay is resolved against the final coder model (a later
+`PXX_MODEL`/`PXX_API_KEY` still reaches the reviewer). Consumed by `pxx review`,
+`pxx calibrate`, and the opt-in `pxx loop --review` gate (`--review-mode
+blocking|advisory`).
+
+**Trust boundary.** Reviewer routing is a data-egress surface — the diff (and
+any bearer token) is sent to `base_url`. Like `[[hooks]]` and `[[mcp_servers]]`,
+`[roles.review]` is honoured **only from user config, env, or CLI**, never from
+a repo-local `pxx.toml` / `.pxx/config.toml` (a checked-in file trying to set it
+is ignored with a warning).
+
 ## `[[hooks]]`
 
 Deterministic gates: `event` (`PreToolUse` / `PostToolUse`), `command`
@@ -59,4 +91,6 @@ its tools as `mcp__<name>__<tool>`.
 `PXX_MODEL`, `PXX_PROVIDER`, `PXX_BASE_URL`, `PXX_API_KEY`, `PXX_PERMISSION`,
 `PXX_TEST_COMMAND`, `PXX_SANDBOX_SHELL`, `PXX_MEMORY_ENABLED`, `PXX_MEMORY_DIR`,
 `PXX_SCOPE` (comma list), `PXX_SERVER_TOKEN` (auth for `pxx serve`).
+Reviewer role overlay (see `[roles.review]`): `PXX_REVIEW_MODEL`,
+`PXX_REVIEW_PROVIDER`, `PXX_REVIEW_BASE_URL`, `PXX_REVIEW_API_KEY`.
 Legacy: `PXX_OLLAMA_BASE`, `PXX_OLLAMA_MODEL`.

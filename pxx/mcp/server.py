@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from .. import __version__
+from .._async import await_if_needed
 from .client import PROTOCOL_VERSION
 
 log = logging.getLogger("pxx.mcp.server")
@@ -100,15 +101,18 @@ async def _call_tool(
         if name == "memory_search":
             query = str(arguments.get("query", ""))
             k = int(arguments.get("k", 8))
-            hits = await asyncio.to_thread(store.search, project, query, k=k)
+            # add/search are async on the real store; await_if_needed also
+            # accepts the sync test doubles (to_thread would leave the real
+            # coroutine un-awaited — the bug this replaced).
+            hits = await await_if_needed(store.search(project, query, k=k))
             text = "\n".join(_format_observation(h) for h in hits) or "no matches"
         elif name == "memory_add":
             content = str(arguments.get("content", ""))
             if not content:
                 raise _RpcError(INVALID_PARAMS, "memory_add requires 'content'")
             tags = [str(t) for t in arguments.get("tags") or []]
-            obs_id = await asyncio.to_thread(
-                store.add, project, "note", content, tags=tags, source="mcp"
+            obs_id = await await_if_needed(
+                store.add(project, "note", content, tags=tags, source="mcp")
             )
             text = f"stored observation {obs_id}"
         elif name == "memory_list":

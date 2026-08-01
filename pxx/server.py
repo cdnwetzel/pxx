@@ -17,7 +17,6 @@ Auth: when the ``PXX_SERVER_TOKEN`` env var is set, every endpoint except
 from __future__ import annotations
 
 import asyncio
-import inspect
 import logging
 import os
 from dataclasses import asdict, dataclass, is_dataclass, replace
@@ -25,6 +24,7 @@ from pathlib import Path
 from typing import Any
 
 from . import __version__
+from ._async import await_if_needed
 from .config import Settings
 from .errors import PxxError
 from .events import Event
@@ -57,12 +57,6 @@ def _make_backend(settings: Settings, name: str):
         return NativeBackend()
     except ImportError as exc:
         raise PxxError(f"backend '{name}' unavailable: {exc}") from exc
-
-
-async def _await_if_needed(value):
-    if inspect.isawaitable(value):
-        return await value
-    return value
 
 
 def _to_dict(obj) -> dict:
@@ -207,7 +201,7 @@ def create_app(settings: Settings):
     async def memory_search(q: str, k: int = 8) -> dict:
         if memory is None:
             raise HTTPException(503, "memory store unavailable")
-        rows = await _await_if_needed(memory.search(project, q, k=k))
+        rows = await await_if_needed(memory.search(project, q, k=k))
         return {"results": [_to_dict(row) for row in rows]}
 
     @app.post("/v1/memory/add", status_code=201)
@@ -219,7 +213,7 @@ def create_app(settings: Settings):
         if not content or not isinstance(content, str):
             raise HTTPException(422, "'content' (string) is required")
         tags = body.get("tags") or []
-        obs_id = await _await_if_needed(
+        obs_id = await await_if_needed(
             memory.add(project, "note", content, tags=list(tags), source="server")
         )
         return {"id": obs_id}

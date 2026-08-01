@@ -54,6 +54,19 @@ class McpServerSpec:
 class Settings:
     model: ModelRef = field(default_factory=ModelRef)
     fallback_models: tuple[ModelRef, ...] = ()
+    # Optional per-role model overlay for the reviewer/judge. ``review_overlay``
+    # holds only the fields explicitly set across ``[roles.review]`` /
+    # ``PXX_REVIEW_*`` layers (a *sparse* overlay); ``review_model`` is that
+    # overlay RESOLVED against the final coder ``model`` at the end of
+    # ``load_settings`` — resolving late so a later ``PXX_MODEL``/``PXX_API_KEY``
+    # override still propagates into the reviewer. When no overlay is set,
+    # ``review_model`` stays ``None`` and the role reuses ``model`` (behaviour is
+    # byte-identical to not setting it). This is the seam the ROADMAP
+    # "model-backed boundary roles" item builds on. Reviewer routing is a
+    # data-egress surface (the diff + bearer token go to ``base_url``), so the
+    # overlay is honoured only from user config, env, or CLI — never repo-local.
+    review_overlay: tuple[tuple[str, str], ...] = ()
+    review_model: ModelRef | None = None
     permission: PermissionMode = PermissionMode.ASK
     scope: tuple[str, ...] = ()
     trusted_paths: tuple[str, ...] = ()
@@ -74,6 +87,14 @@ class Settings:
     safety_net: bool = True  # K5: stash + pxx-pre/<ts> tag on edit-capable starts
     auto_commit: bool = False  # opt-in: commit session work on COMPLETED (the undo tag still points at pre-session HEAD)
 
+    @property
+    def effective_review_model(self) -> ModelRef:
+        """The model the reviewer/judge runs on: the per-role ``review_model``
+        override when set, else the coder ``model``. Centralises the fallback
+        so every reviewer construction site shares one contract (and a run
+        with no override is byte-identical to before this field existed)."""
+        return self.review_model or self.model
+
 
 _USER_CONFIG = Path("~/.config/pxx/config.toml").expanduser()
 _USER_ENV = Path("~/.config/pxx/env").expanduser()
@@ -86,6 +107,7 @@ _KNOWN_KEYS = {
     "base_url",
     "api_key",
     "fallback_models",
+    "roles",
     "permission",
     "scope",
     "trusted_paths",
@@ -109,6 +131,46 @@ _KNOWN_BUDGET_KEYS = {
 }
 _KNOWN_HOOK_KEYS = {"event", "command", "timeout", "matcher"}
 _KNOWN_MCP_KEYS = {"name", "command"}
+# Roles that may carry a per-role model overlay today. Extensible (coder,
+# planner, …) but fail-closed: an unknown role name is a typo, not a silent
+# no-op. Only the reviewer/judge role is wired through the runtime so far.
+_KNOWN_ROLE_KEYS = {"review"}
+_ROLE_MODEL_KEYS = {"provider", "model", "base_url", "api_key"}
+_PROVIDERS = ("ollama", "openai", "vllm", "openai-compatible")
+
+
+def _validate_role_overlay(entry: dict[str, Any], source: str) -> dict[str, str]:
+    """Validate a ``[roles.review]`` table and return only its explicitly-set
+    fields as a sparse ``{key: value}`` dict. Fail-closed on unknown keys and
+    unknown providers. Sparse so the reviewer inherits the *final* coder model
+    (resolved once, late — see :func:`_merge_model_ref` at finalize)."""
+    unknown = set(entry) - _ROLE_MODEL_KEYS
+    if unknown:
+        raise ConfigError(f"{source}: unknown model keys {sorted(unknown)}")
+    pairs: dict[str, str] = {}
+    for key in ("provider", "model", "base_url", "api_key"):
+        if key in entry:
+            value = str(entry[key])
+            if key == "provider" and value not in _PROVIDERS:
+                raise ConfigError(f"{source}: unknown provider {value!r}")
+            pairs[key] = value
+    return pairs
+
+
+def _merge_model_ref(base: ModelRef, entry: dict[str, str], source: str) -> ModelRef:
+    """Overlay a validated sparse ``entry`` (see :func:`_validate_role_overlay`)
+    onto ``base``. Unspecified fields inherit ``base`` so a partial overlay
+    (e.g. only ``base_url``) reuses the rest."""
+    ref = base
+    if "provider" in entry:
+        ref = replace(ref, provider=entry["provider"])
+    if "model" in entry:
+        ref = replace(ref, model=entry["model"])
+    if "base_url" in entry:
+        ref = replace(ref, base_url=entry["base_url"])
+    if "api_key" in entry:
+        ref = replace(ref, api_key=entry["api_key"])
+    return ref
 
 
 def _load_env_file() -> None:
@@ -155,13 +217,25 @@ def _settings_from_dict(
                 source,
             )
             data = {k: v for k, v in data.items() if k != key}
+    if "roles" in data and not allow_exec_surfaces:
+        # Reviewer routing is a data-egress surface: `[roles.review] base_url`
+        # sends the diff (and any inherited api_key bearer token) to that
+        # endpoint. A repo-local file must not be able to redirect the review —
+        # honour the overlay only from user config, env, or CLI (same trust
+        # boundary as hooks/mcp_servers).
+        log.warning(
+            "ignoring roles in repo-local config %s (reviewer endpoint routing "
+            "is a data-egress surface — set it in user config, env, or CLI)",
+            source,
+        )
+        data = {k: v for k, v in data.items() if k != "roles"}
     kwargs: dict[str, Any] = {}
     model = base.model
     if "model" in data:
         model = replace(model, model=str(data["model"]))
     if "provider" in data:
         provider = str(data["provider"])
-        if provider not in ("ollama", "openai", "vllm", "openai-compatible"):
+        if provider not in _PROVIDERS:
             raise ConfigError(f"{source}: unknown provider {provider!r}")
         model = replace(model, provider=provider)
     if "base_url" in data:
@@ -183,6 +257,24 @@ def _settings_from_dict(
                 )
             )
         kwargs["fallback_models"] = tuple(refs)
+    if "roles" in data:
+        roles = data["roles"]
+        if not isinstance(roles, dict):
+            raise ConfigError(f"{source}: roles must be a table")
+        unknown = set(roles) - _KNOWN_ROLE_KEYS
+        if unknown:
+            raise ConfigError(f"{source}: unknown roles {sorted(unknown)}")
+        if "review" in roles:
+            entry = roles["review"]
+            if not isinstance(entry, dict):
+                raise ConfigError(f"{source}: roles.review must be a table")
+            # Accumulate a SPARSE overlay: later layers override earlier for the
+            # same field, but unset fields are NOT filled from the coder model
+            # here — that happens once, at finalize, against the *final* model
+            # (so a later PXX_MODEL/PXX_API_KEY override still propagates).
+            merged = dict(base.review_overlay)
+            merged.update(_validate_role_overlay(entry, f"{source}: roles.review"))
+            kwargs["review_overlay"] = tuple(merged.items())
     if "permission" in data:
         try:
             kwargs["permission"] = PermissionMode(str(data["permission"]))
@@ -259,6 +351,16 @@ _ENV_MAP = {
     "PXX_OLLAMA_MODEL": "model",
 }
 
+# Per-role reviewer overlay via env (maps to the ``[roles.review]`` sub-keys).
+# Kept separate from ``_ENV_MAP`` because these merge into a nested table, not
+# a flat Settings field.
+_REVIEW_ENV_MAP = {
+    "PXX_REVIEW_MODEL": "model",
+    "PXX_REVIEW_PROVIDER": "provider",
+    "PXX_REVIEW_BASE_URL": "base_url",
+    "PXX_REVIEW_API_KEY": "api_key",
+}
+
 
 def _settings_from_env(base: Settings) -> Settings:
     data: dict[str, Any] = {}
@@ -275,6 +377,13 @@ def _settings_from_env(base: Settings) -> Settings:
         data["memory_enabled"] = False
     if scope := os.environ.get("PXX_SCOPE"):
         data["scope"] = [s.strip() for s in scope.split(",") if s.strip()]
+    review: dict[str, Any] = {}
+    for env_key, sub in _REVIEW_ENV_MAP.items():
+        value = os.environ.get(env_key)
+        if value:
+            review[sub] = value
+    if review:
+        data["roles"] = {"review": review}
     if not data:
         return base
     return _settings_from_dict(data, base, "environment")
@@ -301,6 +410,15 @@ def load_settings(
     if cli_overrides:
         settings = _settings_from_dict(
             {k: v for k, v in cli_overrides.items() if v is not None}, settings, "CLI"
+        )
+    # Resolve the reviewer overlay ONCE, now that every layer (and any
+    # PXX_MODEL/PXX_API_KEY override) has landed on the final coder model.
+    if settings.review_overlay:
+        settings = replace(
+            settings,
+            review_model=_merge_model_ref(
+                settings.model, dict(settings.review_overlay), "roles.review"
+            ),
         )
     return settings
 
@@ -368,7 +486,7 @@ def native_timeout(default: float = 300.0) -> float:
 # Every PXX_* variable some part of the ecosystem consumes. Python readers
 # stay in this module plus the server-token check; the second set is read by
 # the git hooks and the release workflow, not this process.
-_CONSUMED_ENV = frozenset(_ENV_MAP) | {
+_CONSUMED_ENV = frozenset(_ENV_MAP) | frozenset(_REVIEW_ENV_MAP) | {
     "PXX_MEMORY_ENABLED",
     "PXX_MEMORY_DIR",
     "PXX_SCOPE",

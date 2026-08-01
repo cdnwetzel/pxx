@@ -114,6 +114,26 @@ class Reviewer(Protocol):
 
 _VERDICT_RE = re.compile(r"VERDICT\s*:\s*([A-Za-z_]+)", re.IGNORECASE)
 
+#: Reasoning-model scratchpad. Closed ``<think>…</think>`` (or ``<thinking>``)
+#: pairs, plus a dangling opener with no close (everything after it is
+#: thinking). Qwen3/qwen3.5, DeepSeek-R1, and friends emit these BEFORE the
+#: machine-parsed answer; a verdict reasoned "aloud" inside them must not be
+#: mistaken for the final one.
+_THINK_BLOCK_RE = re.compile(r"<(think|thinking)\b[^>]*>.*?</\1\s*>", re.IGNORECASE | re.DOTALL)
+_DANGLING_THINK_RE = re.compile(r"<(?:think|thinking)\b[^>]*>.*\Z", re.IGNORECASE | re.DOTALL)
+
+
+def _strip_reasoning(text: str) -> str:
+    """Drop reasoning-model thinking so the verdict and findings are parsed
+    only from the model's final answer. Removes closed ``<think>…</think>``
+    pairs, then any dangling unclosed opener (its content is thinking, and the
+    answer — if any — comes after ``</think>``). A no-op for reviewers that
+    emit no such blocks, so non-reasoning output is unchanged."""
+    if not text:
+        return text
+    cleaned = _THINK_BLOCK_RE.sub("", text)
+    return _DANGLING_THINK_RE.sub("", cleaned)
+
 #: Evidence anchors for a finding: a backticked concrete input/command, or a
 #: file path inside the message text.
 _BACKTICK_RE = re.compile(r"`[^`\n]+`")
@@ -162,6 +182,9 @@ class ParsedReview:
 
 def parse_review_full(text: str) -> ParsedReview:
     """Parse raw reviewer text; see :func:`parse_review` for the policy."""
+    # Reasoning judges (qwen3.5, deepseek-r1, …) think before answering; parse
+    # the verdict/findings from the final answer, never the scratchpad.
+    text = _strip_reasoning(text or "")
     verdict = Verdict.NO_REVIEW
     had_verdict_line = False
     if m := _VERDICT_RE.search(text or ""):

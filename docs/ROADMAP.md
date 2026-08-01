@@ -147,7 +147,13 @@ CHANGELOG.md; highlights:
 
 ## Later
 
-- Model-backed boundary roles (today's are deterministic).
+- Model-backed boundary roles (today's are deterministic). **First step
+  shipped in 2.2.0**: per-role model routing (`[roles.review]` /
+  `PXX_REVIEW_*`) + opt-in `pxx loop --review` let the reviewer/judge run on a
+  different model/endpoint than the coder, with reasoning-model (`<think>`)
+  verdict parsing. Verified on real two-box hardware (RTX 5060 Ti coder + Mac
+  judge). The deterministic Reproducer/Boundary/Artifact roles remain to be
+  model-backed.
 - Cross-repo knowledge federation.
 
 ## Release story

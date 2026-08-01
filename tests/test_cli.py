@@ -1541,17 +1541,36 @@ def test_improve_status_fresh_state(harness, capsys):
     assert "cycle: none run yet" in out
     assert "queue: empty" in out
     assert "inbox qualified: 0" in out
-    assert "daemon: running" in out
+    assert "daemon: stopped" in out  # no daemon process is running
 
 
 def test_improve_pause_resume_roundtrip(harness, capsys):
+    import fcntl
+
+    from pxx.improve.scheduler import DAEMON_LOCK, is_paused
+
+    state_dir = harness["tmp_path"] / "state"
+    # pause/resume flip the DURABLE pause flag
     assert cli.main(["improve", "pause"]) == 0
     assert "paused" in capsys.readouterr().out
+    assert is_paused(state_dir) is True
+    # with no live daemon, status is 'stopped' regardless of the pause flag
     assert cli.main(["improve", "status"]) == 0
-    assert "daemon: paused" in capsys.readouterr().out
-    assert cli.main(["improve", "resume"]) == 0
-    assert cli.main(["improve", "status"]) == 0
-    assert "daemon: running" in capsys.readouterr().out
+    assert "daemon: stopped" in capsys.readouterr().out
+    # simulate a live daemon (hold the lock): now paused vs running is reported
+    state_dir.mkdir(parents=True, exist_ok=True)
+    handle = (state_dir / DAEMON_LOCK).open("a")
+    try:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        assert cli.main(["improve", "status"]) == 0
+        assert "daemon: paused" in capsys.readouterr().out  # live + paused
+        assert cli.main(["improve", "resume"]) == 0
+        assert is_paused(state_dir) is False
+        assert cli.main(["improve", "status"]) == 0
+        assert "daemon: running" in capsys.readouterr().out  # live + not paused
+    finally:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        handle.close()
 
 
 def test_improve_daemon_once(harness, capsys):

@@ -10,8 +10,10 @@ import pytest
 
 from pxx.errors import PxxError
 from pxx.improve.scheduler import (
+    DAEMON_LOCK,
     candidate_worktree,
     is_paused,
+    is_running,
     run_daemon,
     set_paused,
 )
@@ -112,3 +114,35 @@ def test_candidate_worktree_isolation(tmp_path):
 def test_candidate_worktree_rejects_unsafe_name(tmp_path):
     with pytest.raises(PxxError, match="unsafe"):
         candidate_worktree(tmp_path, "../escape")
+
+
+# --- is_running: real process liveness via the daemon flock (not the pause flag) --
+
+
+def test_is_running_false_without_lockfile(tmp_path):
+    assert is_running(tmp_path) is False
+
+
+def test_is_running_false_when_lock_is_free(tmp_path):
+    (tmp_path / DAEMON_LOCK).write_text("")  # stale lock file, not held
+    assert is_running(tmp_path) is False
+
+
+def test_is_running_true_when_lock_is_held(tmp_path):
+    lock = tmp_path / DAEMON_LOCK
+    lock.write_text("")
+    handle = lock.open("a")
+    try:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)  # simulate a live daemon
+        assert is_running(tmp_path) is True
+    finally:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        handle.close()
+    assert is_running(tmp_path) is False  # released -> stopped
+
+
+def test_is_running_independent_of_pause_flag(tmp_path):
+    # A pause flag with no live daemon must NOT read as running.
+    set_paused(tmp_path, True)
+    assert is_paused(tmp_path) is True
+    assert is_running(tmp_path) is False

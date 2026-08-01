@@ -747,5 +747,45 @@ salvaged. No model quality claim; exact-config only.
 
 ---
 
+## R-018 — `pxx improve status` reports real daemon liveness (running / paused / stopped)
+
+**Claim.** `pxx improve status` now reports the daemon as **running**,
+**paused**, or **stopped** from actual process liveness — a live daemon holds an
+exclusive flock on `daemon.lock` (released by the OS even on a crash), probed by
+`scheduler.is_running`. Previously it printed "running" whenever the pause flag
+was unset, so a daemon that was not running still read as "running" — the
+misleading claim the dogfood surfaced (R-014, and the ROADMAP earned-enablement
+correction).
+
+**Grade.** Reproducible (four unit tests) + Attested (2026-08-01, the live
+workstation now reads `daemon: stopped`).
+
+**Exact configuration (nothing inherits).** pxx v2 (`fix/daemon-liveness`);
+`is_running` in `pxx/improve/scheduler.py`, wired into the `pxx improve status`
+CLI. Liveness = the `daemon.lock` flock; the durable pause flag
+(`daemon-control.json`) is orthogonal.
+
+**Procedure (reproduction path).**
+
+```sh
+uv run --extra dev python -m pytest tests/test_improve_scheduler.py -q -k is_running
+pxx improve status   # 'daemon: stopped' when no daemon holds the lock
+```
+
+**Observed (2026-08-01).** `pxx improve status` on the workstation prints
+`daemon: stopped` (no daemon process — matching reality). Unit probe: no
+lockfile → `False`; a free (stale) lockfile → `False`; a held lockfile → `True`;
+released → `False`; a pause flag with no live daemon → `is_running False`.
+
+**Boundary — explicitly not claimed.** This makes the status *honest*; it does
+NOT stand the daemon up. No launchd job runs the improvement daemon yet, so
+earned-enablement counts still accrue only from manual runs — running it under
+launchd (`pxx improve daemon`, hourly `--once` or a KeepAlive job) is the
+remaining, environment-specific step, tracked in the ROADMAP. Liveness is
+detected via the local `daemon.lock`; a daemon on a different host/state-dir is
+not observed.
+
+---
+
 *Convention: entries are append-only and dated; superseded claims are
 struck through with a pointer to the superseding entry, never deleted.*

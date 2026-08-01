@@ -3,12 +3,14 @@
 All notable changes to pxx are documented here. The 1.x series history is
 preserved in git (tag `v1.3.3` and earlier).
 
-## [Unreleased]
+## [2.2.0] — 2026-08-01
 
 First step toward the ROADMAP "model-backed boundary roles" item: the
 reviewer/judge can now run on a different model and endpoint than the coder,
 so a modest two-box setup (a GPU-box coder + a Mac judge) is expressible in
-config alone — no code change, degrades cleanly to a single endpoint.
+config alone — no code change, degrades cleanly to a single endpoint. Verified
+on real hardware: a qwen3-coder coder on an RTX 5060 Ti + a Mac judge complete
+one autonomous `pxx loop --review`.
 
 ### Added
 

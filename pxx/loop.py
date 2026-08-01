@@ -181,6 +181,54 @@ async def _run_tests(root: Path, command: str) -> tuple[bool, set[str], str]:
     return proc.returncode == 0, failing, text.strip()[-1500:]
 
 
+async def _overwork_salvageable(
+    *,
+    root: Path,
+    pre_sha: str | None,
+    diff: str,
+    scope: ScopeGate,
+    max_diff_lines: int,
+    command: str | None,
+    lint_command: str | None,
+    task: str,
+    reviewer: Reviewer | None,
+    review_mode: ReviewMode,
+) -> bool:
+    """Whether an over-worked run's diff is complete AND passes every mandatory
+    guard, so a session that ran out of its per-turn budget (BUDGET_EXCEEDED) can
+    be reported as COMPLETED instead. Enforces the SAME gates a normal round
+    would before completing — a salvage must never wave a diff past a gate:
+
+    - scope: no changed path outside the declared scope,
+    - diff budget: the diff is within ``max_diff_lines``,
+    - lint: the lint gate (when configured) passes,
+    - tests: a configured test command PASSES — and without a test command there
+      is no objective signal, so the run is NOT salvaged (fail-closed),
+    - review: when a reviewer is set, the gate does not block.
+
+    Never heals; never rescues a run any gate would fail.
+    """
+    if not command:
+        return False  # no objective signal that the over-worked edit is complete
+    changed = await _changed_paths(root, pre_sha)
+    if any(not scope.in_scope(root / p) for p in changed):
+        return False  # would be OUT_OF_SCOPE
+    if _diff_line_count(diff) > max_diff_lines:
+        return False  # would be DIFF_CAP
+    if lint_command:
+        lint_ok, _ = await _run_lint(root, lint_command)
+        if not lint_ok:
+            return False  # would be LINT_BLOCKED
+    passed, _failing, _tail = await _run_tests(root, command)
+    if not passed:
+        return False
+    if reviewer is not None:
+        result = await review_changes(diff, task, reviewer, review_mode)
+        if result.blocked:
+            return False
+    return True
+
+
 def _default_factory(settings: Settings) -> Callable[[], AgentBackend]:
     def make() -> AgentBackend:
         from .backends import get_backend  # lazy: backends package may load later
@@ -200,9 +248,16 @@ async def _run_lint(root: Path, command: str) -> tuple[bool, str]:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
         )
-        out, _ = await asyncio.wait_for(proc.communicate(), TEST_TIMEOUT_SECONDS)
-    except (OSError, TimeoutError) as exc:
+    except OSError as exc:
         return False, f"lint command failed to run: {exc}"
+    try:
+        out, _ = await asyncio.wait_for(proc.communicate(), TEST_TIMEOUT_SECONDS)
+    except TimeoutError:
+        # Cancelling communicate() does NOT reap the child — kill and wait, or
+        # the lint subprocess leaks (matches _run_tests).
+        proc.kill()
+        await proc.wait()
+        return False, f"lint command timed out after {TEST_TIMEOUT_SECONDS:.0f}s"
     text = out.decode(errors="replace")
     return proc.returncode == 0, text.strip()[-1000:]
 
@@ -404,6 +459,46 @@ async def run_loop(
         legs["edit_seconds"] += time.monotonic() - edit_start
         tokens += outcome.tokens
         if outcome.code is not TerminalCode.COMPLETED:
+            # Clean-termination salvage: a coder can exhaust its per-turn round
+            # budget (session-level BUDGET_EXCEEDED) AFTER already producing a
+            # correct edit — the verification guards below never run, so a
+            # genuinely finished task is mis-reported as an over-work failure
+            # (observed on two codebases, R-014/R-015). If the over-worked run
+            # left a diff whose tests pass (and the review gate, if any, does not
+            # block), the task IS done → COMPLETED. Fail-closed otherwise; never
+            # heals (the budget is spent) and never rescues a failing run.
+            if outcome.code is TerminalCode.BUDGET_EXCEEDED and in_repo:
+                salvage_diff = (await _diff_since(root, pre_sha)).strip()
+                if salvage_diff and await _overwork_salvageable(
+                    root=root,
+                    pre_sha=pre_sha,
+                    diff=salvage_diff,
+                    scope=scope,
+                    max_diff_lines=settings.budgets.max_diff_lines,
+                    command=command,
+                    lint_command=lint_command,
+                    task=task,
+                    reviewer=reviewer,
+                    review_mode=review_mode,
+                ):
+                    # Record the salvaged run's diff telemetry (the normal
+                    # scope/diff guards, which populate these, were bypassed).
+                    # `accounted_diff` is what _outcome reports as diff_lines.
+                    legs["files_changed"] = len(await _changed_paths(root, pre_sha))
+                    accounted_diff = _diff_line_count(salvage_diff)
+                    await parent_bus.emit(
+                        "gate_decision",
+                        {"gate": "overwork_salvage", "round": round_no, "allowed": True},
+                    )
+                    return await _complete(
+                        _outcome(
+                            TerminalCode.COMPLETED,
+                            f"completed in {round_no} round(s) "
+                            "(over-work salvaged: budget spent mid-round, edit verified)",
+                            round_no,
+                            findings,
+                        )
+                    )
             if net_suffix:
                 outcome = replace(outcome, summary=outcome.summary + net_suffix)
             return outcome  # backend-level terminal code short-circuits the loop

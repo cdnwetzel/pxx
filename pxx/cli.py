@@ -1221,7 +1221,7 @@ def _cmd_improve(args: argparse.Namespace) -> int:
     state_dir = _state_dir()
     command = args.improve_command
     if command == "status":
-        from .improve.scheduler import is_paused
+        from .improve.scheduler import is_paused, is_running
 
         report_path = state_dir / "cycle-report.json"
         if report_path.is_file():
@@ -1245,7 +1245,13 @@ def _cmd_improve(args: argparse.Namespace) -> int:
             box_dir = state_dir / "inbox" / box
             n = len(list(box_dir.glob("*.json"))) if box_dir.is_dir() else 0
             print(f"inbox {box}: {n}")
-        print(f"daemon: {'paused' if is_paused(state_dir) else 'running'}")
+        # Real liveness (a live daemon holds daemon.lock), not just the pause
+        # flag: a daemon that isn't running is "stopped", not "running".
+        if is_running(state_dir):
+            daemon_state = "paused" if is_paused(state_dir) else "running"
+        else:
+            daemon_state = "stopped"
+        print(f"daemon: {daemon_state}")
         return 0
     if command == "daemon":
         from .improve.scheduler import run_daemon

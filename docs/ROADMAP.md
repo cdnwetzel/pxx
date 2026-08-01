@@ -70,12 +70,15 @@ milestone reviewer-verified by execution):
       an external run-dir clear silently erases earned progress (it regressed
       ~48→17 with no code cause). Persist an append-only, evidenced ledger of
       genuine run IDs so accumulated real usage survives run-dir rotation.
-    - *Daemon liveness*: the improvement daemon is **not currently running as a
-      process** (no launchd job for it — only tunnels/watch are; `daemon:
-      running` reflects a control-file flag, not liveness). Make status report
-      real liveness, and actually run the daemon so earned enablement can
-      accumulate. The "runs under launchd, hourly ticks" note above overstates
-      current reality and should be reconciled when this lands.
+    - *Daemon liveness*: ~~`daemon: running` reflects a control-file flag, not
+      liveness~~ **status fixed (2026-08-01, R-018):** `pxx improve status` now
+      reports **running / paused / stopped** from real process liveness — a live
+      daemon holds the `daemon.lock` flock (`scheduler.is_running`), released by
+      the OS even on a crash. The live workstation now honestly reads `daemon:
+      stopped`. **Still open:** *actually running* the daemon — no launchd job
+      exists for it, so earned enablement accrues only from manual runs. Stand
+      it up (`pxx improve daemon` under launchd/`--once` hourly) for real
+      accumulation; the status now tells the truth about whether it's up.
 - Live (non-scripted) eval arms on real endpoints, with the calibration
   fp-rate tracked against production fp. The 2.2.0 per-role routing + the
   SSH-tunnelled two-box lane (R-011) now provide the real endpoints this

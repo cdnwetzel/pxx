@@ -54,8 +54,40 @@ def _read_control(state_dir: Path) -> dict[str, Any]:
 
 
 def is_paused(state_dir: Path | str) -> bool:
-    """Whether the daemon is paused (durable operator control)."""
+    """Whether the daemon is paused (durable operator control).
+
+    Note: this is the durable pause FLAG, not process liveness — a paused
+    daemon is still running (idling at tick boundaries). For "is a daemon
+    actually alive" use :func:`is_running`.
+    """
     return bool(_read_control(Path(state_dir)).get("paused"))
+
+
+def is_running(state_dir: Path | str) -> bool:
+    """Whether an improvement daemon process is actually ALIVE.
+
+    A live daemon holds an exclusive flock on ``daemon.lock`` for its whole
+    run; the OS releases it when the process exits — even on a crash — so the
+    lock is authoritative liveness (unlike the ``daemon-status.json`` ``state``
+    field, which can be stale if the daemon died). Probe it: if we cannot take
+    the lock, a live daemon holds it. Fail-closed (any error → not running).
+    """
+    lock_path = Path(state_dir) / DAEMON_LOCK
+    if not lock_path.exists():
+        return False
+    try:
+        handle = lock_path.open("a")  # writable, never truncates the lock file
+    except OSError:
+        return False
+    try:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        return True  # held by a live daemon
+    else:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        return False
+    finally:
+        handle.close()
 
 
 def set_paused(state_dir: Path | str, paused: bool) -> None:
@@ -185,6 +217,7 @@ __all__ = [
     "DaemonReport",
     "candidate_worktree",
     "is_paused",
+    "is_running",
     "run_daemon",
     "set_paused",
 ]

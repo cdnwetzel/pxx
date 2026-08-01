@@ -131,7 +131,9 @@ def test_parse_dangling_think_swallows_answer_is_no_review() -> None:
 
 
 def test_parse_thinking_tag_variant() -> None:
-    verdict, _ = parse_review("<thinking>deliberating</thinking>\nVERDICT: REVISE\nF-001 [low] a.py:1 x")
+    verdict, _ = parse_review(
+        "<thinking>deliberating</thinking>\nVERDICT: REVISE\nF-001 [low] a.py:1 x"
+    )
     assert verdict is Verdict.REVISE
 
 

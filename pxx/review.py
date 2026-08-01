@@ -134,6 +134,7 @@ def _strip_reasoning(text: str) -> str:
     cleaned = _THINK_BLOCK_RE.sub("", text)
     return _DANGLING_THINK_RE.sub("", cleaned)
 
+
 #: Evidence anchors for a finding: a backticked concrete input/command, or a
 #: file path inside the message text.
 _BACKTICK_RE = re.compile(r"`[^`\n]+`")

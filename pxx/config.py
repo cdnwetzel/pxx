@@ -486,14 +486,18 @@ def native_timeout(default: float = 300.0) -> float:
 # Every PXX_* variable some part of the ecosystem consumes. Python readers
 # stay in this module plus the server-token check; the second set is read by
 # the git hooks and the release workflow, not this process.
-_CONSUMED_ENV = frozenset(_ENV_MAP) | frozenset(_REVIEW_ENV_MAP) | {
-    "PXX_MEMORY_ENABLED",
-    "PXX_MEMORY_DIR",
-    "PXX_SCOPE",
-    "PXX_REVIEW_TIMEOUT",
-    "PXX_NATIVE_TIMEOUT",
-    "PXX_SERVER_TOKEN",
-}
+_CONSUMED_ENV = (
+    frozenset(_ENV_MAP)
+    | frozenset(_REVIEW_ENV_MAP)
+    | {
+        "PXX_MEMORY_ENABLED",
+        "PXX_MEMORY_DIR",
+        "PXX_SCOPE",
+        "PXX_REVIEW_TIMEOUT",
+        "PXX_NATIVE_TIMEOUT",
+        "PXX_SERVER_TOKEN",
+    }
+)
 _ECOSYSTEM_ENV = frozenset({"PXX_DIFF_CAP", "PXX_PRECOMMIT_SKIP", "PXX_CONTENT_DENYLIST"})
 _warned_unconsumed = False
 

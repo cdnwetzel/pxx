@@ -832,5 +832,44 @@ fall back to free text — same reliability as before). Exact-config only.
 
 ---
 
+## R-020 — `real_runs` is durable: an evidenced ledger survives run-dir clears
+
+**Claim.** `real_runs` is reconciled through a durable, append-only ledger
+(`real-runs.jsonl` in the state dir): every genuine run (R-016 criteria) is
+recorded once by run id, and the count is the number of DISTINCT recorded ids —
+which **never shrinks when run dirs are rotated or cleared**. This closes the
+F-1 durability gap: the count was a live `iterdir()`, so an external state-dir
+clear silently erased earned progress (observed live ~48 → 17, R-014/R-016).
+
+**Grade.** Reproducible (three unit tests + a durability smoke).
+
+**Exact configuration (nothing inherits).** pxx v2 (`fix/f1-durable-ledger`);
+`reconcile_real_runs` / `_ledger_run_ids` / `_genuine_run_meta` in
+`pxx/improve/autopromote.py`; `gather_counts` counts via the ledger. Only the
+`real_runs` bar changes.
+
+**Procedure (reproduction path).**
+
+```sh
+uv run --extra dev python -m pytest tests/test_improve_autopromote.py -q -k ledger
+```
+
+**Observed (2026-08-01).** Smoke: 5 genuine runs (a `mock` run excluded) →
+`real_runs=5`, 5 ledger lines; **`shutil.rmtree(runs/)` then recount →
+`real_runs=5`** (durable); a new genuine run → 6. Tests pin: durability across a
+clear; idempotent reconcile (no double-count); a corrupt ledger line skipped
+while valid entries still count. Full suite 1059 passed.
+
+**Boundary — explicitly not claimed.** A run is captured into the durable ledger
+when `gather_counts`/`reconcile_real_runs` next runs (readiness check or daemon
+tick) — a genuine run whose dir is cleared BEFORE any reconcile is not captured
+(the daemon, once stood up, closes this window; today reconcile runs on each
+readiness check). The ledger records `run_id`/`recorded_at`/`backend`/`code`/
+work counts, not the full run evidence (the run dir holds that while it exists).
+No change to the genuine-run criteria (R-016). Symlinked run dirs are still
+skipped.
+
+---
+
 *Convention: entries are append-only and dated; superseded claims are
 struck through with a pointer to the superseding entry, never deleted.*

@@ -27,6 +27,7 @@ from __future__ import annotations
 import fcntl
 import json
 import logging
+import time
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -111,8 +112,8 @@ def _positive_int(value: object) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and value > 0
 
 
-def counts_as_real_run(run_dir: Path) -> bool:
-    """Whether a ``runs/<id>/`` directory counts toward the ``real_runs`` bar.
+def _genuine_run_meta(run_dir: Path) -> dict[str, Any] | None:
+    """The evidence record for a run that counts toward ``real_runs``, or None.
 
     A run counts only if it did genuine work (F-1 hardening): (1) a real
     backend — not the ``mock``/``replay`` test doubles; (2) a recorded terminal
@@ -127,25 +128,117 @@ def counts_as_real_run(run_dir: Path) -> bool:
     """
     outcome_path = run_dir / "outcome.json"
     if not outcome_path.is_file():
-        return False
+        return None
     try:
         manifest = json.loads((run_dir / "manifest.json").read_text())
         outcome = json.loads(outcome_path.read_text())
     except (OSError, ValueError):
-        return False
+        return None
     if not isinstance(manifest, dict) or not isinstance(outcome, dict):
-        return False
-    if str(manifest.get("backend", "")) not in _REAL_BACKENDS:
-        return False
-    return _positive_int(outcome.get("tokens")) or _positive_int(outcome.get("diff_lines"))
+        return None
+    backend = str(manifest.get("backend", ""))
+    if backend not in _REAL_BACKENDS:
+        return None
+    tokens = outcome.get("tokens")
+    diff_lines = outcome.get("diff_lines")
+    if not (_positive_int(tokens) or _positive_int(diff_lines)):
+        return None
+    return {
+        "backend": backend,
+        "code": str(outcome.get("code", "")),
+        "tokens": tokens if isinstance(tokens, int) and not isinstance(tokens, bool) else 0,
+        "diff_lines": diff_lines
+        if isinstance(diff_lines, int) and not isinstance(diff_lines, bool)
+        else 0,
+    }
+
+
+def counts_as_real_run(run_dir: Path) -> bool:
+    """Whether a ``runs/<id>/`` directory counts toward ``real_runs``
+    (:func:`_genuine_run_meta` is not None)."""
+    return _genuine_run_meta(run_dir) is not None
+
+
+#: Durable, append-only ledger of genuine run ids. ``real_runs`` was a live
+#: count of ``runs/`` subdirectories, so an external clear of the state dir
+#: silently erased earned-enablement progress (observed live ~48 -> 17,
+#: R-014/R-016). The ledger records each genuine run once so the count never
+#: shrinks when run dirs are rotated or cleared.
+_REAL_RUNS_LEDGER = "real-runs.jsonl"
+
+
+def _ledger_run_ids(state_dir: Path) -> set[str]:
+    """Run ids already recorded in the durable real-runs ledger; tolerant of a
+    corrupt line (skip it, never drop the whole ledger)."""
+    ids: set[str] = set()
+    ledger = state_dir / _REAL_RUNS_LEDGER
+    if not ledger.is_file():
+        return ids
+    try:
+        lines = ledger.read_text().splitlines()
+    except OSError:
+        return ids
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rid = json.loads(line).get("run_id")
+        except (ValueError, TypeError, AttributeError):
+            continue
+        if isinstance(rid, str) and rid:
+            ids.add(rid)
+    return ids
+
+
+def reconcile_real_runs(state_dir: Path | str) -> int:
+    """Durable, evidenced ``real_runs`` count.
+
+    Appends every not-yet-recorded genuine run (see :func:`_genuine_run_meta`)
+    to the append-only ledger, keyed by run id, and returns the number of
+    DISTINCT recorded run ids — which never shrinks when run dirs are rotated or
+    cleared. Ledger writes are best-effort (a failed write still returns the
+    count of what is known); duplicate lines from a race are deduped on read.
+    """
+    state_dir = Path(state_dir)
+    known = _ledger_run_ids(state_dir)
+    runs_root = state_dir / "runs"
+    new_lines: list[str] = []
+    if runs_root.is_dir():
+        try:
+            for d in sorted(runs_root.iterdir()):
+                # Skip symlinks so a link escaping runs/ can't record fabricated
+                # runs; skip already-recorded ids.
+                if not d.is_dir() or d.is_symlink() or d.name in known:
+                    continue
+                meta = _genuine_run_meta(d)
+                if meta is None:
+                    continue
+                new_lines.append(
+                    json.dumps(
+                        {"run_id": d.name, "recorded_at": time.time(), **meta}, sort_keys=True
+                    )
+                )
+                known.add(d.name)
+        except OSError:
+            pass  # fail closed on enumeration error: count what is known
+    if new_lines:
+        try:
+            with (state_dir / _REAL_RUNS_LEDGER).open("a") as fh:
+                fh.write("\n".join(new_lines) + "\n")
+        except OSError:
+            pass  # best-effort: the count still reflects `known`
+    return len(known)
 
 
 def gather_counts(state_dir: Path | str, *, evals_dir: Path | str | None = None) -> ReadinessCounts:
-    """Thin I/O edge: read the counts from disk.
+    """Read the readiness counts from disk.
 
-    Absent runs/promotions dirs are legitimately zero; a missing or
-    malformed defects ledger is MISSING EVIDENCE (None) — we cannot prove
-    zero unresolved critical defects, so the bar must fail closed.
+    ``real_runs`` is reconciled through a DURABLE ledger (so it survives a
+    run-dir clear — see :func:`reconcile_real_runs`). Absent runs/promotions
+    dirs are legitimately zero; a missing or malformed defects ledger is MISSING
+    EVIDENCE (None) — we cannot prove zero unresolved critical defects, so the
+    bar must fail closed.
     """
     state_dir = Path(state_dir)
 
@@ -153,19 +246,7 @@ def gather_counts(state_dir: Path | str, *, evals_dir: Path | str | None = None)
     if evals_dir is not None and Path(evals_dir).is_dir():
         eval_cases = sum(1 for _ in Path(evals_dir).rglob("*.toml"))
 
-    runs_root = state_dir / "runs"
-    real_runs = 0
-    if runs_root.is_dir():
-        try:
-            # Skip symlinks so a link escaping runs/ can't count fabricated
-            # records; fail closed if the dir can't be enumerated.
-            real_runs = sum(
-                1
-                for d in runs_root.iterdir()
-                if d.is_dir() and not d.is_symlink() and counts_as_real_run(d)
-            )
-        except OSError:
-            real_runs = 0
+    real_runs = reconcile_real_runs(state_dir)
 
     human_approved = 0
     prom_dir = state_dir / "promotions"

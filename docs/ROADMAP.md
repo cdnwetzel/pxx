@@ -66,10 +66,13 @@ milestone reviewer-verified by execution):
     "any subdir counts" gaming (a zero-work `MODEL_UNAVAILABLE` probe no longer
     inflates the bar). See the R-016 receipt.
   - **Follow-ups (best-practices, human-gated control plane):**
-    - *Durability / evidenced ledger*: the count is still a live `iterdir()`, so
-      an external run-dir clear silently erases earned progress (it regressed
-      ~48→17 with no code cause). Persist an append-only, evidenced ledger of
-      genuine run IDs so accumulated real usage survives run-dir rotation.
+    - ~~*Durability / evidenced ledger*: the count is still a live `iterdir()`,
+      so an external run-dir clear silently erases earned progress~~ **shipped
+      (2026-08-01, R-020):** `real_runs` is now reconciled through a durable
+      append-only ledger (`real-runs.jsonl`) — every genuine run is recorded
+      once by id, and the count is the number of distinct recorded ids, which
+      never shrinks when run dirs are rotated/cleared. Corrupt lines tolerated;
+      duplicate lines deduped on read.
     - *Daemon liveness*: ~~`daemon: running` reflects a control-file flag, not
       liveness~~ **status fixed (2026-08-01, R-018):** `pxx improve status` now
       reports **running / paused / stopped** from real process liveness — a live

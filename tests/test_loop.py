@@ -924,3 +924,106 @@ def test_healthy_healing_loop_not_flagged(tmp_path: Path) -> None:
         )
     )
     assert outcome.code is TerminalCode.COMPLETED
+
+
+# --- clean-termination salvage: over-work (BUDGET_EXCEEDED) with a verified edit --
+
+
+def _overwork_backend(edits: dict[str, str] | None = None) -> ScriptedBackend:
+    """A backend that (optionally) edits, then reports session-level over-work."""
+    return ScriptedBackend(
+        edits=edits if edits is not None else {"calc.py": "x = 2\n"},
+        outcome=RunOutcome(code=TerminalCode.BUDGET_EXCEEDED, summary="budget exceeded", tokens=50),
+    )
+
+
+@needs_git
+def test_overwork_salvaged_to_completed_when_tests_pass(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_repo(repo, files={"calc.py": "x = 1\n"})
+    settings = _settings(tmp_path, test_command="true")
+    outcome = asyncio.run(
+        run_loop("task", settings, cwd=repo, backend_factory=Factory([_overwork_backend()]))
+    )
+    assert outcome.code is TerminalCode.COMPLETED
+    assert "salvaged" in outcome.summary
+
+
+@needs_git
+def test_overwork_not_salvaged_when_tests_fail(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_repo(repo, files={"calc.py": "x = 1\n"})
+    settings = _settings(tmp_path, test_command="false")
+    outcome = asyncio.run(
+        run_loop("task", settings, cwd=repo, backend_factory=Factory([_overwork_backend()]))
+    )
+    assert outcome.code is TerminalCode.BUDGET_EXCEEDED
+
+
+@needs_git
+def test_overwork_not_salvaged_without_test_command(tmp_path: Path) -> None:
+    # No objective signal that the over-worked edit is complete -> stands.
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_repo(repo, files={"calc.py": "x = 1\n"})
+    outcome = asyncio.run(
+        run_loop(
+            "task", _settings(tmp_path), cwd=repo, backend_factory=Factory([_overwork_backend()])
+        )
+    )
+    assert outcome.code is TerminalCode.BUDGET_EXCEEDED
+
+
+@needs_git
+def test_overwork_not_salvaged_without_diff(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_repo(repo, files={"calc.py": "x = 1\n"})
+    settings = _settings(tmp_path, test_command="true")
+    outcome = asyncio.run(
+        run_loop("task", settings, cwd=repo, backend_factory=Factory([_overwork_backend(edits={})]))
+    )
+    assert outcome.code is TerminalCode.BUDGET_EXCEEDED
+
+
+@needs_git
+def test_overwork_not_salvaged_when_blocking_review_revises(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_repo(repo, files={"calc.py": "x = 1\n"})
+    settings = _settings(tmp_path, test_command="true")
+    reviewer = ScriptedReviewer(["VERDICT: REVISE\nF-001 [medium] calc.py:1 nope"])
+    outcome = asyncio.run(
+        run_loop(
+            "task",
+            settings,
+            cwd=repo,
+            backend_factory=Factory([_overwork_backend()]),
+            reviewer=reviewer,
+            review_mode=ReviewMode.BLOCKING,
+        )
+    )
+    assert outcome.code is TerminalCode.BUDGET_EXCEEDED  # review blocked the salvage
+
+
+@needs_git
+def test_overwork_salvaged_under_advisory_review(tmp_path: Path) -> None:
+    # Advisory review never blocks, so a tests-passing over-work run still salvages.
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_repo(repo, files={"calc.py": "x = 1\n"})
+    settings = _settings(tmp_path, test_command="true")
+    reviewer = ScriptedReviewer(["VERDICT: REVISE\nF-001 [low] calc.py:1 nit"])
+    outcome = asyncio.run(
+        run_loop(
+            "task",
+            settings,
+            cwd=repo,
+            backend_factory=Factory([_overwork_backend()]),
+            reviewer=reviewer,
+            review_mode=ReviewMode.ADVISORY,
+        )
+    )
+    assert outcome.code is TerminalCode.COMPLETED

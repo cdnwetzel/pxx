@@ -701,5 +701,51 @@ only that mock/crash/zero-work runs no longer inflate it.
 
 ---
 
+## R-017 — Clean loop termination: an over-worked run with a verified edit reports COMPLETED
+
+**Claim.** When a coder exhausts its per-turn round budget (session-level
+`BUDGET_EXCEEDED`) but has already produced a correct edit, `run_loop` now
+verifies that edit once — if a configured test command passes (and a configured
+review gate does not block) — and reports `COMPLETED` instead of the over-work
+terminal. Fail-closed: without a test command, or if tests fail / the gate
+blocks, the original terminal stands. It never heals (the budget is spent) and
+never rescues a run the guards would fail.
+
+**Grade.** Reproducible (six unit tests) + Attested (2026-08-01, a real two-box
+before/after on a live SaaS repo).
+
+**Exact configuration (nothing inherits).** pxx v2 (`fix/clean-loop-termination`);
+`_overwork_verified` + the salvage block in `pxx/loop.py`. Coder
+`qwen3-coder:30b` over the SSH tunnel (`11435`), advisory judge `gemma2:9b`
+(`11666`), target `workorder_wizard` at `a4fc2f3`, scratch-venv test command.
+
+**Procedure (reproduction path).**
+
+```sh
+uv run --extra dev python -m pytest tests/test_loop.py -q -k overwork
+# real two-box: re-run the R-015 task with the fixed loop and observe the terminal
+```
+
+**Observed (2026-08-01).** The **same task/setup that reported `BUDGET_EXCEEDED`
+in R-015** now reports:
+`[COMPLETED] completed in 1 round(s) (over-work salvaged: budget spent
+mid-round, edit verified)`. The coder over-worked identically (same
+`get_plan_limits_summary` edit, `+69` lines) and the scoped suite went 9→13 all
+passing (2.92 s) — the terminal now reflects reality. A `gate_decision`
+`overwork_salvage` event is emitted. Six tests pin the branches
+(`tests/test_loop.py::test_overwork_*`): salvaged when tests pass / under
+advisory review; NOT salvaged when tests fail, no test command, no diff, or a
+blocking review REVISEs.
+
+**Boundary — explicitly not claimed.** This corrects the *terminal code* of an
+over-worked-but-successful run; it does **not** reduce the over-work itself (the
+coder still burns rounds — a separate efficiency item / the roadmap
+`tighten_budget` and done-signal work). It fires only for session-level
+`BUDGET_EXCEEDED` with a diff, not the outer `ROUND_CAP` or other terminals. It
+requires an objective test signal — a run with no test command is never
+salvaged. No model quality claim; exact-config only.
+
+---
+
 *Convention: entries are append-only and dated; superseded claims are
 struck through with a pointer to the superseding entry, never deleted.*

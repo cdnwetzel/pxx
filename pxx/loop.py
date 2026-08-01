@@ -181,6 +181,33 @@ async def _run_tests(root: Path, command: str) -> tuple[bool, set[str], str]:
     return proc.returncode == 0, failing, text.strip()[-1500:]
 
 
+async def _overwork_verified(
+    root: Path,
+    command: str | None,
+    diff: str,
+    task: str,
+    reviewer: Reviewer | None,
+    review_mode: ReviewMode,
+) -> bool:
+    """Whether an over-worked run's diff is objectively complete, so a session
+    that ran out of its per-turn budget (BUDGET_EXCEEDED) can be reported as
+    COMPLETED instead. Requires an OBJECTIVE signal: a configured test command
+    that PASSES, and — when a reviewer is set — a review gate that does not
+    block. Without a test command there is nothing to confirm the edit is done,
+    so the over-work terminal stands (fail-closed). Never heals; never rescues a
+    run the guards would fail."""
+    if not command:
+        return False
+    passed, _failing, _tail = await _run_tests(root, command)
+    if not passed:
+        return False
+    if reviewer is not None:
+        result = await review_changes(diff, task, reviewer, review_mode)
+        if result.blocked:
+            return False
+    return True
+
+
 def _default_factory(settings: Settings) -> Callable[[], AgentBackend]:
     def make() -> AgentBackend:
         from .backends import get_backend  # lazy: backends package may load later
@@ -404,6 +431,32 @@ async def run_loop(
         legs["edit_seconds"] += time.monotonic() - edit_start
         tokens += outcome.tokens
         if outcome.code is not TerminalCode.COMPLETED:
+            # Clean-termination salvage: a coder can exhaust its per-turn round
+            # budget (session-level BUDGET_EXCEEDED) AFTER already producing a
+            # correct edit — the verification guards below never run, so a
+            # genuinely finished task is mis-reported as an over-work failure
+            # (observed on two codebases, R-014/R-015). If the over-worked run
+            # left a diff whose tests pass (and the review gate, if any, does not
+            # block), the task IS done → COMPLETED. Fail-closed otherwise; never
+            # heals (the budget is spent) and never rescues a failing run.
+            if outcome.code is TerminalCode.BUDGET_EXCEEDED and in_repo:
+                salvage_diff = (await _diff_since(root, pre_sha)).strip()
+                if salvage_diff and await _overwork_verified(
+                    root, command, salvage_diff, task, reviewer, review_mode
+                ):
+                    await parent_bus.emit(
+                        "gate_decision",
+                        {"gate": "overwork_salvage", "round": round_no, "allowed": True},
+                    )
+                    return await _complete(
+                        _outcome(
+                            TerminalCode.COMPLETED,
+                            f"completed in {round_no} round(s) "
+                            "(over-work salvaged: budget spent mid-round, edit verified)",
+                            round_no,
+                            findings,
+                        )
+                    )
             if net_suffix:
                 outcome = replace(outcome, summary=outcome.summary + net_suffix)
             return outcome  # backend-level terminal code short-circuits the loop

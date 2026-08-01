@@ -36,6 +36,19 @@ config alone — no code change, degrades cleanly to a single endpoint.
   answer, not its scratchpad. No-op for non-reasoning reviewers. The review
   prompt now tells reasoning models to keep the verdict out of `<think>`.
 
+### Fixed
+
+- **Memory tools silently dropped every observation** (found while
+  dogfooding the two-box loop): `MemoryStore.add`/`search` are `async`, but
+  the `remember`/`recall_memory` agent tools and the MCP server called them
+  without awaiting — the coroutine was discarded (a `RuntimeWarning`), so
+  nothing was persisted and `recall_memory` errored against the real store.
+  All three call sites now await via a shared `await_if_needed` helper (also
+  de-duplicating the copy in `pxx serve`); the HTTP server was already
+  correct. Regression-guarded by async-store test doubles in the tool and MCP
+  suites, and verified against a real `MemoryStore` with the un-awaited
+  warning promoted to an error.
+
 ## [2.1.7] — 2026-07-30
 
 ### Fixed

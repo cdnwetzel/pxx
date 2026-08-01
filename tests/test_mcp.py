@@ -162,6 +162,24 @@ class FakeStore:
         return list(self.items)
 
 
+class AsyncFakeStore:
+    """The real MemoryStore has ``async`` add/search (list stays sync). Guards
+    the MCP server against leaving those coroutines un-awaited."""
+
+    def __init__(self) -> None:
+        self.items: list[SimpleNamespace] = []
+
+    async def add(self, project, kind, content, *, tags=(), source="", **kwargs):
+        self.items.append(SimpleNamespace(content=content, tags=list(tags)))
+        return len(self.items)
+
+    async def search(self, project, query, *, k=8):
+        return [o for o in self.items if query.lower() in o.content.lower()][:k]
+
+    def list(self, project):  # sync on the real store
+        return list(self.items)
+
+
 def _req(rid: int, method: str, params: dict | None = None) -> bytes:
     return json.dumps(
         {"jsonrpc": "2.0", "id": rid, "method": method, "params": params or {}}
@@ -214,6 +232,30 @@ def test_server_tool_roundtrip_dispatch() -> None:
             _req(3, "tools/call", {"name": "memory_list", "arguments": {"limit": 5}}),
         )
         assert "use ruff" in resp["result"]["content"][0]["text"]
+
+    asyncio.run(go())
+
+
+def test_server_awaits_async_store() -> None:
+    # Regression: the real MemoryStore.add/search are async; the MCP server
+    # must await them. The old asyncio.to_thread wrap left the coroutine
+    # un-awaited (nothing persisted, id was a coroutine repr).
+    async def go() -> None:
+        store = AsyncFakeStore()
+        resp = await handle_line(
+            store,
+            "proj",
+            _req(1, "tools/call", {"name": "memory_add", "arguments": {"content": "async ok"}}),
+        )
+        assert resp["result"]["isError"] is False
+        assert "stored observation 1" in resp["result"]["content"][0]["text"]
+        assert store.items[0].content == "async ok"  # actually persisted
+        resp = await handle_line(
+            store,
+            "proj",
+            _req(2, "tools/call", {"name": "memory_search", "arguments": {"query": "async"}}),
+        )
+        assert "async ok" in resp["result"]["content"][0]["text"]
 
     asyncio.run(go())
 

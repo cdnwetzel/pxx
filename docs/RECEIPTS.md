@@ -581,5 +581,70 @@ padding.
 
 ---
 
+## R-015 — Dogfood: the autonomous loop lands a correct, tested change on a real live mature codebase
+
+**Claim.** An autonomous `pxx loop` (v2.2.0, real qwen3-coder backend) completed
+the full edit→test→review cycle on a **live, mature, multi-tenant FastAPI SaaS
+backend** (not the pxx repo), producing a correct, idiomatic, read-only helper
+plus four passing tests — with **zero human intervention** during the run. The
+one blemish, `BUDGET_EXCEEDED` (over-work past a working solution), independently
+reproduces the R-012 budget finding and the R-013 `tighten_budget` proposal on a
+second, unrelated codebase.
+
+**Grade.** Attested (2026-08-01, two-box hardware; the target is a private repo,
+so the diff/results are cited, the repo is not published).
+
+**Exact configuration (nothing inherits).** pxx 2.2.0 (uv-tool install); coder
+`qwen3-coder:30b` (official Ollama Q4_K_M) on Ryzen 9 5950X + RTX 5060 Ti 16GB
+over SSH tunnel (`PXX_BASE_URL=http://localhost:11435`); advisory judge
+`gemma2:9b` on the M4 Mac (`PXX_REVIEW_BASE_URL=http://localhost:11666`); target
+repo `workorder_wizard` at commit `a4fc2f3` (working tree clean before and
+after); `cwd=src/backend`; test command run in an out-of-repo scratch venv
+(`requirements.txt`, pytest 9.1.1) so the live tree stayed pristine;
+`--review --review-mode advisory --budget-rounds 10`.
+
+**Procedure.**
+```sh
+# scratch venv outside the repo, deps from requirements.txt
+pxx loop -m "In utils/plan_limits.py, add get_plan_limits_summary(db, tenant)
+  composing the existing getters (read-only, no behaviour change); add a test to
+  tests/test_plan_limits.py." --review --review-mode advisory --budget-rounds 10
+# (PXX_MODEL=qwen3-coder:30b @11435, PXX_REVIEW_MODEL=gemma2:9b @11666,
+#  PXX_TEST_COMMAND=<scratch-venv>/bin/python -m pytest tests/test_plan_limits.py)
+```
+
+**Results ledger.**
+| field | value |
+|---|---|
+| task | add read-only `get_plan_limits_summary` + test |
+| terminal_code | `BUDGET_EXCEEDED` (10 rounds — over-work, not a failure to produce) |
+| files changed | `utils/plan_limits.py` +13, `tests/test_plan_limits.py` +62 |
+| tests | 9 → **13, all pass** (2.95 s) |
+| change correctness | composes existing getters, read-only, no behaviour change (as tasked) |
+| real_runs before/after | 16 → 17 |
+| disposition | diff reviewed, **RESET to `a4fc2f3`** (observation, not landed) |
+
+**Observed (2026-08-01).** The loop added `get_plan_limits_summary(db, tenant)`
+returning `{"max_users": get_max_users(...), "max_work_orders_per_month":
+get_max_work_orders_per_month(...)}` with a correct docstring, and a
+`TestPlanLimitsSummary` class of four tests (free / starter / trial / override
+plan scenarios) with full-dict assertions on the existing fixtures. The scoped
+suite went 9→13, all green. It ran 10 rounds and stopped at `BUDGET_EXCEEDED`
+(the coder kept working past a passing solution — same over-work pattern R-012
+tuned and R-013's cycle independently flagged). The change was reviewed and the
+live tree reset to its exact prior commit; nothing was committed to the target
+repo. Log: `scratchpad/dogfood-logs/02-workorder-*.log`.
+
+**Boundary — explicitly not claimed.** The change was NOT landed (dogfood =
+observe; reset to `a4fc2f3`) — no claim that this code shipped or was adopted.
+`BUDGET_EXCEEDED` (not `COMPLETED`) means the loop over-worked; this is the
+R-012 budget finding reproduced, not a clean-completion claim. One task, one
+small read-only helper — no claim about larger/multi-file/behaviour-changing
+tasks. The scratch venv (`requirements.txt`) is not the project's CI environment
+and may differ from it. Exact-config only; a different task/model/repo is not
+covered.
+
+---
+
 *Convention: entries are append-only and dated; superseded claims are
 struck through with a pointer to the superseding entry, never deleted.*

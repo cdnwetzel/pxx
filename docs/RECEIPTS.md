@@ -138,8 +138,10 @@ The two green bars were the last desk-completable ones; the remaining
 two fill only through recorded real usage and human promotion decisions.
 ~~**real_runs (~48/100)**~~ ~~**unresolved_critical_defects green**~~
 **updated 2026-08-01 (dogfood R-013/R-014):** the state dir was cleared
-out-of-band since — `real_runs` (a live subdir count of `runs/`) is now
-**16/100**, and `evaluator-defects.json` is absent so
+out-of-band since — `real_runs` (a live subdir count of `runs/`) was
+**16/100** at the R-013/R-014 snapshot (it then moved to **17/100** after the
+R-015 loop run — the count is live and monotone within a session), and
+`evaluator-defects.json` is absent so
 **unresolved_critical_defects is UNMET** (fails closed) again. eval_cases
 stays green (50/50); human_approved_promotions 0/3. Overall still NOT-READY.
 The `real_runs` counter is a live `iterdir()` with no durability or guards —
@@ -483,6 +485,7 @@ randomness) + Attested (2026-08-01, the maintainer's local run store).
 isolation. A different run store yields different clusters.
 
 **Procedure (reproduction path).**
+
 ```sh
 pxx improve pause
 pxx improve cycle    # run 1
@@ -491,6 +494,7 @@ python3 -c "import json;print(json.load(open('$HOME/.local/state/pxx/cycle-repor
 ```
 
 **Results ledger.**
+
 | field | value |
 |---|---|
 | cycle_id (run 1 == run 2) | `cycle-745010b191e5` |
@@ -522,9 +526,10 @@ Determinism claimed only for identical run-store input. Exact-config only.
 **Claim.** An autonomous `pxx loop` (v2.2.0, real qwen3-coder backend) tasked to
 change pxx's own control-plane code is refused — first by the deterministic
 clarity gate on ambiguous file references, and (when that is cleared) by the
-protected-path gate, in every permission mode. The self-improvement targets the
-dogfood surfaced live in pxx's protected control plane, so autonomous
-self-modification is architecturally forbidden and must go through human review.
+protected-path gate, in every permission mode. The self-improvement targets that
+surfaced during live dogfooding all live in pxx's protected control plane, so
+autonomous self-modification is architecturally forbidden and must go through
+human review.
 
 **Grade.** Attested (2026-08-01, two-box hardware).
 

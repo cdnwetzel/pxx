@@ -47,8 +47,9 @@ milestone reviewer-verified by execution):
   proposal human-reviewed and rejected same day. ~~real_runs at 50/100.~~
   **Corrected 2026-08-01 (R-013/R-014 dogfood):** `real_runs` is a live subdir
   count of `~/.local/state/pxx/runs/`, not a durable counter; the state dir was
-  cleared out-of-band since, so the live count is **16/100** — the earlier "50"
-  no longer holds. The `unresolved_critical_defects` ledger was likewise cleared
+  cleared out-of-band since, so the live count was **16/100** at the R-013/R-014
+  snapshot (then **17/100** after the R-015 loop run — the count is live and
+  moves with each recorded run) — the earlier "50" no longer holds. The `unresolved_critical_defects` ledger was likewise cleared
   (now absent → bar fails closed). Honest current bars: eval_cases 50/50 green;
   real_runs 16/100, human_promotions 0/3, unresolved_critical_defects unmet —
   NOT-READY.

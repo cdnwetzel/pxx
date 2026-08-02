@@ -199,6 +199,55 @@ def test_claimed_but_suppressed_edit_projects_blocked(tmp_path, monkeypatch):
     assert any(e.kind == "gate_decision" and e.data["allowed"] is False for e in ctx.bus.history)
 
 
+def test_provider_down_exit_zero_maps_to_model_unavailable(tmp_path):
+    """Truthfulness: aider often exits 0 with a provider-down message and no
+    edit — that must read as MODEL_UNAVAILABLE, never COMPLETED (portable-box
+    degrade receipt, 2026-08-02)."""
+    path = fake_aider(tmp_path, "echo 'The API providers servers are down or overloaded.'\nexit 0")
+    ctx = make_ctx(tmp_path)  # no git repo -> no diff, no reported edit
+    outcome = asyncio.run(AiderBackend(aider_path=path).run("do it", ctx))
+    assert outcome.code is TerminalCode.MODEL_UNAVAILABLE
+    assert "unavailable" in outcome.summary.lower()
+
+
+def test_litellm_api_error_no_edit_maps_to_model_unavailable(tmp_path):
+    path = fake_aider(tmp_path, "echo 'litellm.APIConnectionError: Connection refused'\nexit 0")
+    ctx = make_ctx(tmp_path)
+    outcome = asyncio.run(AiderBackend(aider_path=path).run("do it", ctx))
+    assert outcome.code is TerminalCode.MODEL_UNAVAILABLE
+
+
+def test_error_phrase_with_real_edit_stays_completed(tmp_path, monkeypatch):
+    """Guard: an error word in the transcript does NOT downgrade a run that
+    actually landed an in-scope edit — only no-edit runs are reclassified."""
+    path = fake_aider(
+        tmp_path,
+        "echo 'Applied edit to converter.py'\necho 'note: earlier connection error, retried ok'",
+    )
+    backend = AiderBackend(aider_path=path)
+
+    async def fake_git(cwd, *args):
+        if args[:2] == ("rev-parse", "HEAD"):
+            return "abc123"
+        if args[:2] == ("diff", "--stat"):
+            return " converter.py | 2 +-\n 1 file changed, 1 insertion(+), 1 deletion(-)"
+        if args[:2] == ("diff", "--name-only"):
+            return "converter.py"
+        return None
+
+    monkeypatch.setattr(backend, "_git", fake_git)
+    ctx = make_ctx(tmp_path, scope=ScopeGate(tmp_path, (".",)))
+    outcome = asyncio.run(backend.run("t", ctx))
+    assert outcome.code is TerminalCode.COMPLETED
+
+
+def test_clean_completion_without_error_stays_completed(tmp_path):
+    """Guard: a no-edit run with no error signature is still COMPLETED."""
+    path = fake_aider(tmp_path, "echo 'nothing to change; all good'")
+    outcome = asyncio.run(AiderBackend(aider_path=path).run("t", make_ctx(tmp_path)))
+    assert outcome.code is TerminalCode.COMPLETED
+
+
 def test_in_scope_edit_stays_completed(tmp_path, monkeypatch):
     """Control: the same reported edit under a covering scope is unaffected."""
     path = fake_aider(tmp_path, "echo 'Applied edit to converter.py'")

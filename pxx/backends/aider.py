@@ -35,6 +35,23 @@ INSTALL_HINT = "pip install pxx-orchestrator[aider]"
 #: aider's own stdout marker for an applied edit (its reporting, not ours).
 _APPLIED_EDIT_RE = re.compile(r"^Applied edit to\s+(.+?)\s*$")
 
+#: Provider/endpoint-down signatures aider (via litellm) prints when the model
+#: endpoint is unreachable or failing. aider commonly exits 0 in these cases and
+#: makes no edit, so without this a down endpoint reads as COMPLETED. Only
+#: consulted when nothing was edited, so a real edit that merely mentions one of
+#: these words is never misclassified.
+_MODEL_DOWN_RE = re.compile(
+    r"servers are down or overloaded"
+    r"|api[ _]?(?:connection[ _]?)?error"
+    r"|internal ?server ?error|service ?unavailable"
+    r"|litellm\.\w*(?:error|exception)"
+    r"|connection (?:error|refused|timed out)"
+    r"|max retries exceeded"
+    r"|rate[ _-]?limit"
+    r"|overloaded_error",
+    re.IGNORECASE,
+)
+
 
 class AiderBackend:
     """Runs ``aider --message <task>`` headless as an async subprocess."""
@@ -259,6 +276,23 @@ class AiderBackend:
                 diff_lines=diff_lines,
                 session_id=ctx.session_id,
             )
+
+        # Truthfulness: aider frequently exits 0 even when the LLM endpoint was
+        # down/overloaded — it prints the provider error and makes no edit.
+        # Reporting that as COMPLETED is a false success (portable-box degrade
+        # receipt, 2026-08-02); reclassify it as MODEL_UNAVAILABLE. Guarded by
+        # "nothing was edited" (no diff, no reported edit) so a genuine
+        # completion that merely mentions an error word stays COMPLETED.
+        if diff_lines == 0 and not reported:
+            probe = [*lines, *stderr_text.splitlines()]
+            hit = next((ln.strip() for ln in probe if _MODEL_DOWN_RE.search(ln)), "")
+            if hit:
+                return RunOutcome(
+                    code=TerminalCode.MODEL_UNAVAILABLE,
+                    summary=f"aider: model endpoint unavailable — {hit[:300]}",
+                    rounds=1,
+                    session_id=ctx.session_id,
+                )
 
         tail = [line for line in lines if line.strip()][-5:]
         summary = "\n".join(tail)[:500] or "aider completed"

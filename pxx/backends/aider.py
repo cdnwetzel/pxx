@@ -35,6 +35,29 @@ INSTALL_HINT = "pip install pxx-orchestrator[aider]"
 #: aider's own stdout marker for an applied edit (its reporting, not ours).
 _APPLIED_EDIT_RE = re.compile(r"^Applied edit to\s+(.+?)\s*$")
 
+#: Provider/endpoint-down signatures aider (via litellm) prints when the model
+#: endpoint is unreachable or failing. aider commonly exits 0 in these cases and
+#: makes no edit, so without this a down endpoint reads as COMPLETED. Only
+#: consulted when nothing was edited.
+#:
+#: Deliberately restricted to DISTINCTIVE error tokens (exception class names,
+#: aider's own down message). Loose prose phrases ("rate limit", "connection
+#: error/refused") were dropped (neo advisory 2026-08-02): ask-mode answers are
+#: also zero-edit exit-0 runs, and an answer that merely discusses rate limiting
+#: or connection errors must not be reclassified. The real litellm failures
+#: (RateLimitError, APIConnectionError, Timeout, …) still match via the
+#: ``litellm.*Error`` and class-name alternatives below.
+_MODEL_DOWN_RE = re.compile(
+    r"servers are down or overloaded"  # aider's own friendly message
+    r"|litellm\.\w*(?:error|exception)"  # any litellm exception class
+    r"|api ?connection ?error"  # APIConnectionError
+    r"|internal ?server ?error"  # InternalServerError
+    r"|service ?unavailable(?:error)?"  # ServiceUnavailable(Error)
+    r"|overloaded_error"  # provider overload class
+    r"|max retries exceeded",  # urllib3/requests exhaustion
+    re.IGNORECASE,
+)
+
 
 class AiderBackend:
     """Runs ``aider --message <task>`` headless as an async subprocess."""
@@ -259,6 +282,23 @@ class AiderBackend:
                 diff_lines=diff_lines,
                 session_id=ctx.session_id,
             )
+
+        # Truthfulness: aider frequently exits 0 even when the LLM endpoint was
+        # down/overloaded — it prints the provider error and makes no edit.
+        # Reporting that as COMPLETED is a false success (portable-box degrade
+        # receipt, 2026-08-02); reclassify it as MODEL_UNAVAILABLE. Guarded by
+        # "nothing was edited" (no diff, no reported edit) so a genuine
+        # completion that merely mentions an error word stays COMPLETED.
+        if diff_lines == 0 and not reported:
+            probe = [*lines, *stderr_text.splitlines()]
+            hit = next((ln.strip() for ln in probe if _MODEL_DOWN_RE.search(ln)), "")
+            if hit:
+                return RunOutcome(
+                    code=TerminalCode.MODEL_UNAVAILABLE,
+                    summary=f"aider: model endpoint unavailable — {hit[:300]}",
+                    rounds=1,
+                    session_id=ctx.session_id,
+                )
 
         tail = [line for line in lines if line.strip()][-5:]
         summary = "\n".join(tail)[:500] or "aider completed"

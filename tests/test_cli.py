@@ -408,6 +408,76 @@ def test_loop_backend_native_still_accepted(harness, monkeypatch):
     assert cli.main(["loop", "-m", "x", "--backend", "native"]) == 0
 
 
+_LOOP_WORKFLOW_CONTRACT = """\
+schema_version = 1
+hooks = []
+
+[states]
+initial = "idle"
+names = ["idle", "done"]
+terminal = ["done"]
+
+[budgets]
+max_rounds = 5
+
+[commands]
+test = "echo workflow-test"
+lint = "echo workflow-lint"
+
+[permissions]
+ask = ["read"]
+
+[protected_paths]
+paths = ["pxx/safety.py"]
+"""
+
+
+def _write_loop_workflow(root):
+    (root / "WORKFLOW.md").write_text(f"# contract\n\n```toml\n{_LOOP_WORKFLOW_CONTRACT}\n```\n")
+
+
+def _capture_loop_kwargs(monkeypatch):
+    import sys
+    import types
+
+    seen = {}
+
+    async def fake_run_loop(task, settings, **kwargs):
+        seen.update(kwargs)
+        return RunOutcome(code=TerminalCode.COMPLETED, summary="looped")
+
+    monkeypatch.setitem(sys.modules, "pxx.loop", types.SimpleNamespace(run_loop=fake_run_loop))
+    return seen
+
+
+def test_loop_workflow_test_command_is_fallback(harness, monkeypatch, tmp_path):
+    """WORKFLOW.md [commands] test feeds run_loop when settings define none."""
+    _write_loop_workflow(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    seen = _capture_loop_kwargs(monkeypatch)
+    assert cli.main(["loop", "-m", "x"]) == 0
+    assert seen["test_command"] == "echo workflow-test"
+    assert seen["lint_command"] == "echo workflow-lint"
+
+
+def test_loop_settings_test_command_wins_over_workflow(harness, monkeypatch, tmp_path):
+    """A configured test_command (config/env) beats the WORKFLOW.md fallback."""
+    _write_loop_workflow(tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    def settings_with_test(cwd=None, overrides=None):
+        return Settings(
+            memory_dir=harness["tmp_path"] / "mem",
+            state_dir=harness["tmp_path"] / "state",
+            test_command="echo from-settings",
+        )
+
+    monkeypatch.setattr(cli, "load_settings", settings_with_test)
+    seen = _capture_loop_kwargs(monkeypatch)
+    assert cli.main(["loop", "-m", "x"]) == 0
+    assert seen["test_command"] == "echo from-settings"
+
+
 def test_memory_add_search_list_forget(harness, capsys):
     pytest.importorskip("pxx.memory.store")
     assert cli.main(["memory", "add", "prefers ruff over flake8", "--tags", "style,lint"]) == 0

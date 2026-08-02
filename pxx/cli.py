@@ -639,12 +639,15 @@ def _cmd_loop(args: argparse.Namespace, unknown: list[str]) -> int:
         return EXIT_USAGE
     settings = load_settings(Path.cwd(), _cli_overrides(args, PermissionMode.AUTO))
     lint_command = None
+    workflow_test = None
     if (Path.cwd() / "WORKFLOW.md").is_file():
         from .errors import ConfigError
         from .workflow import load_workflow
 
         try:
-            lint_command = load_workflow(Path.cwd()).commands.get("lint") or None
+            workflow = load_workflow(Path.cwd())
+            lint_command = workflow.commands.get("lint") or None
+            workflow_test = workflow.commands.get("test") or None
         except ConfigError as exc:
             print(f"pxx: error: {exc}", file=sys.stderr)
             return 1
@@ -660,7 +663,10 @@ def _cmd_loop(args: argparse.Namespace, unknown: list[str]) -> int:
             if getattr(args, "review_mode", None) == "advisory"
             else ReviewMode.BLOCKING
         )
-    loop_kwargs = {"lint_command": lint_command}
+    loop_kwargs = {
+        "lint_command": lint_command,
+        "test_command": settings.test_command or workflow_test,
+    }
     if reviewer is not None:
         loop_kwargs["reviewer"] = reviewer
         loop_kwargs["review_mode"] = review_mode

@@ -77,6 +77,8 @@ def test_read_scope_cannot_escape_root(tmp_path):
         gate.check_read(tmp_path / "outside.txt")
     with pytest.raises(ScopeViolation):
         gate.check_read("/etc/passwd")
+    with pytest.raises(ScopeViolation):
+        gate.check_read("../outside.txt")  # relative parent traversal from root
 
 
 def test_scope_restricts_to_prefixes(tmp_path):

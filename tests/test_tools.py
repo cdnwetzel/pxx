@@ -116,6 +116,23 @@ def test_read_allowed_outside_write_scope_but_in_repo(reg: ToolRegistry, tmp_pat
         call(reg, "write_file", {"path": "docs/readme.md", "content": "x"}, ctx)
 
 
+def test_search_py_fallback_blocks_symlink_escape(reg, tmp_path, monkeypatch) -> None:
+    """The Python search fallback must not expose a file a symlink points to
+    OUTSIDE the project root (CodeRabbit #26)."""
+    import pxx.tools.fs as fsmod
+
+    monkeypatch.setattr(fsmod.shutil, "which", lambda name: None)  # force the _py fallback
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    # secret content DISTINCT from the search pattern (the pattern echoes in the
+    # "no matches" message, so we assert on the surrounding content instead).
+    (tmp_path / "secret.txt").write_text("NEEDLE leaked-secret-xyz\n")  # OUTSIDE the root
+    (proj / "link.txt").symlink_to(tmp_path / "secret.txt")  # symlink INSIDE the root
+    out = call(reg, "search_files", {"pattern": "NEEDLE", "path": "."}, make_ctx(proj))
+    assert "leaked-secret-xyz" not in out  # the escaping file's content is not exposed
+    assert "no matches" in out.lower()  # the symlink candidate was skipped
+
+
 # --------------------------------------------------------------- write_file
 
 

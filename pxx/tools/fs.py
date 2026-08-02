@@ -14,9 +14,12 @@ import asyncio
 import re
 import shutil
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from . import ToolContext, ToolSpec, tool_schema
+
+if TYPE_CHECKING:
+    from ..safety import ScopeGate
 
 #: Hard cap on lines returned by read_file.
 MAX_READ_LINES = 2000
@@ -250,7 +253,7 @@ class SearchFiles:
         limit = int(args.get("limit") or MAX_SEARCH_MATCHES)
         if shutil.which("rg"):
             return await self._rg(pattern, base, limit)
-        return await self._py(pattern, base, limit)
+        return await self._py(pattern, base, limit, ctx.scope)
 
     async def _rg(self, pattern: str, base: Path, limit: int) -> str:
         proc = await asyncio.create_subprocess_exec(
@@ -290,7 +293,7 @@ class SearchFiles:
             out += f"\n… truncated at {limit} matches"
         return out
 
-    async def _py(self, pattern: str, base: Path, limit: int) -> str:
+    async def _py(self, pattern: str, base: Path, limit: int, scope: ScopeGate) -> str:
         try:
             regex = re.compile(pattern)
         except re.error as exc:
@@ -307,6 +310,10 @@ class SearchFiles:
             if any(part in SKIP_DIRS for part in rel_parts):
                 continue
             if not path.is_file():
+                continue
+            # A symlink under `base` can point outside the project root — re-gate
+            # each candidate before reading (rglob does not canonicalize).
+            if not scope.in_read_scope(path):
                 continue
             try:
                 text = path.read_text(errors="replace")

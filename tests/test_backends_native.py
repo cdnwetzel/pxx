@@ -210,6 +210,23 @@ def test_model_not_found_on_last_endpoint_still_raises(tmp_path):
         asyncio.run(make_backend(handler).run("task", make_ctx(tmp_path, settings=settings)))
 
 
+@pytest.mark.parametrize(
+    "status,body,expected",
+    [
+        (404, "anything at all", True),  # 404 is always model-not-found
+        (400, "model 'x' not found", True),  # vLLM-style
+        (422, "the model does not exist", True),  # OpenAI-style
+        (400, "exceed_context_size", False),  # a real 400, not model-not-found
+        (400, "bad request", False),  # generic 400
+        (500, "model not found", False),  # 5xx is not our correctable case
+    ],
+)
+def test_model_not_found_detection(status, body, expected):
+    from pxx.backends.native import _model_not_found
+
+    assert _model_not_found(status, body) is expected
+
+
 def test_all_endpoints_down_raises_backend_error(tmp_path):
     settings = Settings(
         model=ModelRef(model="m1", base_url="http://down1.local"),

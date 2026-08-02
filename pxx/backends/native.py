@@ -280,7 +280,7 @@ class NativeBackend:
                 # or a "model not found" body) is not a dead end — advance the
                 # fallback chain, same as an unreachable endpoint, instead of
                 # hard-failing MODEL_UNAVAILABLE.
-                if _model_not_found(resp.status_code, resp.text) and active + 1 < len(models):
+                if _model_not_found(resp.status_code, body) and active + 1 < len(models):
                     log.warning(
                         "endpoint %s does not serve %s (HTTP %s); falling back",
                         model.endpoint,

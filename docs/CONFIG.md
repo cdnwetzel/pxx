@@ -106,6 +106,13 @@ has no separate fallback chain: when portable, either drop `--review` (the coder
 and your `test_command` still gate the run) or point `[roles.review]` at a local
 endpoint.
 
+When a `[[fallback_models]]` chain is set, the **auto** backend lane
+(`ask`/`edit`/`plan`/`chat`) prefers the native backend — the aider backend does
+not consult the chain, so picking it would silently void the degrade config.
+`run`/`loop` are always native. To fix a backend for a box regardless, set the
+`backend` key (`native` | `aider` | `auto`) or `PXX_BACKEND`; an explicit
+`--backend` flag still wins.
+
 ## `[[hooks]]`
 
 Deterministic gates: `event` (`PreToolUse` / `PostToolUse`), `command`
@@ -120,6 +127,7 @@ its tools as `mcp__<name>__<tool>`.
 ## Environment variables
 
 `PXX_MODEL`, `PXX_PROVIDER`, `PXX_BASE_URL`, `PXX_API_KEY`, `PXX_PERMISSION`,
+`PXX_BACKEND` (`native`/`aider`/`auto`),
 `PXX_TEST_COMMAND`, `PXX_SANDBOX_SHELL`, `PXX_MEMORY_ENABLED`, `PXX_MEMORY_DIR`,
 `PXX_SCOPE` (comma list), `PXX_SERVER_TOKEN` (auth for `pxx serve`).
 Reviewer role overlay (see `[roles.review]`): `PXX_REVIEW_MODEL`,

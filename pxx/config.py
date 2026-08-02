@@ -82,6 +82,11 @@ class Settings:
     )
     hooks: tuple[Hook, ...] = ()
     test_command: str | None = None
+    #: Durable per-box backend posture ("native" | "aider" | "auto"). When set,
+    #: it fixes the backend for the auto lane (ask/edit/plan/chat) without a
+    #: per-invocation --backend flag; an explicit --backend still wins. None
+    #: means "auto" (the historical default).
+    backend: str | None = None
     sandbox_shell: bool = False
     mcp_servers: tuple[McpServerSpec, ...] = ()
     safety_net: bool = True  # K5: stash + pxx-pre/<ts> tag on edit-capable starts
@@ -290,6 +295,13 @@ def _settings_from_dict(
         kwargs["memory_enabled"] = bool(data["memory_enabled"])
     if "test_command" in data:
         kwargs["test_command"] = str(data["test_command"])
+    if "backend" in data:
+        backend = str(data["backend"]).strip().lower()
+        if backend not in ("native", "aider", "auto"):
+            raise ConfigError(
+                f"{source}: backend must be 'native', 'aider', or 'auto' (got {data['backend']!r})"
+            )
+        kwargs["backend"] = backend
     if "sandbox_shell" in data:
         kwargs["sandbox_shell"] = bool(data["sandbox_shell"])
     if "safety_net" in data:
@@ -346,6 +358,7 @@ _ENV_MAP = {
     "PXX_TEST_COMMAND": "test_command",
     "PXX_SANDBOX_SHELL": "sandbox_shell",
     "PXX_AUTO_COMMIT": "auto_commit",
+    "PXX_BACKEND": "backend",
     # 1.x compat
     "PXX_OLLAMA_BASE": "base_url",
     "PXX_OLLAMA_MODEL": "model",

@@ -362,7 +362,6 @@ class Session:
                         session_id=self.session_id,
                     )
                     outcome = replace(outcome, summary=f"{outcome.summary} [committed {sha[:8]}]")
-
             await self.bus.emit(
                 "session_end",
                 {
@@ -390,6 +389,21 @@ class Session:
                 except Exception:
                     log.exception("memory capture failed (best-effort)")
                 memory.close()
+
+            # F1: on an ABORT, restore the user's pre-run tree (tracked-dirty AND
+            # untracked) instead of stranding it in the net stash. Done LAST —
+            # after _close_run_dir — so the user's uncommitted WIP is never
+            # captured into the run artifact (diff.patch). On COMPLETED the net
+            # is left for the user to reconcile (pop is their move).
+            if self._net is not None and outcome.code is not TerminalCode.COMPLETED:
+                from .safety_net import restore_safety_net
+
+                if await restore_safety_net(self.cwd, self._net):
+                    await self.bus.emit(
+                        "gate_decision",
+                        {"gate": "safety_net", "allowed": True, "restored": True},
+                        session_id=self.session_id,
+                    )
             return outcome
         finally:
             await self._cleanup()

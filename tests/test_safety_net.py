@@ -114,6 +114,62 @@ def test_dirty_tree_stashes_and_tags_and_round_trips(tmp_path: Path) -> None:
     assert (repo / "new.txt").read_text() == "untracked\n"
 
 
+@needs_git
+def test_restore_brings_back_untracked_on_abort(tmp_path: Path) -> None:
+    """F1: on an abort, restore the user's pre-run tree — including UNTRACKED
+    files, which the pxx-pre tag alone cannot recover (neo, R-023)."""
+    from pxx.safety_net import restore_safety_net
+
+    repo = tmp_path / "repo"
+    _init_repo(repo, files={"a.txt": "hello\n"})
+    (repo / "a.txt").write_text("user-wip\n")  # tracked-dirty
+    (repo / "notes.txt").write_text("user-untracked\n")  # untracked — the vulnerable one
+
+    net = run(tie_safety_net(repo, "run-abort"))
+    assert net.stash_message and "run-abort" in net.stash_message
+    assert not (repo / "notes.txt").exists()  # parked in the stash
+    (repo / "a.txt").write_text("pxx-partial-garbage\n")  # a failed run's leftover edit
+
+    assert run(restore_safety_net(repo, net)) is True
+    assert (repo / "a.txt").read_text() == "user-wip\n"  # partial discarded, wip back
+    assert (repo / "notes.txt").read_text() == "user-untracked\n"  # untracked RESTORED
+    assert _git(repo, "stash", "list") == ""  # our stash consumed, not stranded
+
+
+@needs_git
+def test_restore_resets_tag_only_net_on_abort(tmp_path: Path) -> None:
+    """A clean-tree abort (tag-only net) still resets — the failed run's partial
+    tracked edits are discarded, not left behind (CodeRabbit #24)."""
+    from pxx.safety_net import restore_safety_net
+
+    repo = tmp_path / "repo"
+    _init_repo(repo, files={"a.txt": "orig\n"})
+    net = run(tie_safety_net(repo, "run-clean"))
+    assert net.stash_message is None and net.tag  # tag-only
+    (repo / "a.txt").write_text("failed-run-partial\n")  # a failed run's leftover edit
+    assert run(restore_safety_net(repo, net)) is True
+    assert (repo / "a.txt").read_text() == "orig\n"  # partial reverted to the tag
+
+
+@needs_git
+def test_stash_ref_matches_exactly_not_by_prefix(tmp_path: Path) -> None:
+    """`run-1` must not select the `run-10` stash (exact trailing-message match,
+    CodeRabbit #24)."""
+    from pxx.safety_net import _stash_ref
+
+    repo = tmp_path / "repo"
+    _init_repo(repo, files={"a.txt": "base\n"})
+    (repo / "a.txt").write_text("v10\n")
+    _git(repo, "stash", "push", "-m", "pxx safety net run-10")
+    (repo / "a.txt").write_text("v1\n")
+    _git(repo, "stash", "push", "-m", "pxx safety net run-1")
+
+    ref = run(_stash_ref(repo, "pxx safety net run-1"))
+    assert ref is not None
+    _git(repo, "stash", "pop", ref)
+    assert (repo / "a.txt").read_text() == "v1\n"  # the run-1 stash, not run-10
+
+
 def test_non_git_cwd_is_noop(tmp_path: Path) -> None:
     assert run(tie_safety_net(tmp_path, "run-1")) is None
 

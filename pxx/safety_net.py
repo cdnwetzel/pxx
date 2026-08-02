@@ -84,6 +84,54 @@ async def tie_safety_net(cwd: Path, run_id: str) -> SafetyNet | None:
     return SafetyNet(tag=tag, stash_message=stash_message)
 
 
+async def _stash_ref(cwd: Path, message: str) -> str | None:
+    """The ``stash@{N}`` whose message equals ``message`` EXACTLY — matched on
+    the trailing message so ``run-1`` never selects ``run-10`` and the user's
+    other stashes are never touched. None if absent."""
+    listing = await _git(cwd, "stash", "list")
+    if not listing:
+        return None
+    for line in listing.splitlines():
+        ref, sep, rest = line.partition(":")  # "stash@{N}: On <branch>: <message>"
+        if not sep:
+            continue
+        _, _, subject = rest.rpartition(": ")  # the message is after the last ": "
+        if subject.strip() == message:
+            return ref.strip()
+    return None
+
+
+async def restore_safety_net(cwd: Path, net: SafetyNet | None) -> bool:
+    """Restore the user's pre-run working tree — for use on an ABORT (a
+    non-COMPLETED outcome), so a run that produced nothing worth keeping does
+    not strand the user's uncommitted work.
+
+    ``reset --hard`` to the ``pxx-pre`` tag (discards the failed run's partial
+    edits, back to pre-run HEAD), then pops the net's OWN stash — restoring both
+    tracked-dirty AND **untracked** files. The tag alone cannot bring untracked
+    files back (they are in no commit), which is the data-loss this fixes.
+
+    A tag-only net (clean pre-run tree) is still reset, so a failed run leaves a
+    clean tree, not its garbage.
+
+    Fail-soft (hard rule 1): if the reset fails the stash is left untouched (we
+    never pop onto an unexpected tree); any git failure leaves tag/stash intact
+    for manual recovery. Returns True when something was restored.
+    """
+    if net is None or (net.tag is None and not net.stash_message):
+        return False
+    did = False
+    if net.tag:
+        if await _git(cwd, "reset", "--hard", net.tag) is None:
+            return False  # reset failed — do NOT pop onto an unexpected tree
+        did = True
+    if net.stash_message:
+        ref = await _stash_ref(cwd, net.stash_message)
+        if ref is not None and await _git(cwd, "stash", "pop", ref) is not None:
+            did = True
+    return did
+
+
 async def commit_session_work(
     cwd: Path,
     *,
@@ -138,4 +186,4 @@ async def commit_session_work(
     return await _git(cwd, "rev-parse", "HEAD")
 
 
-__all__ = ["SafetyNet", "commit_session_work", "tie_safety_net"]
+__all__ = ["SafetyNet", "commit_session_work", "restore_safety_net", "tie_safety_net"]

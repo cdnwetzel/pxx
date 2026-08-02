@@ -243,11 +243,19 @@ class Session:
                 outcome = RunOutcome(
                     code=TerminalCode.EDIT_TIMEOUT,
                     summary="wall-clock budget exceeded while editing",
+                    tokens=budgets.tokens,
                     session_id=self.session_id,
                 )
             except BudgetExceeded as exc:
+                # Report the tokens actually spent (the guard is the source of
+                # truth). Without this the outcome defaulted to tokens=0 even
+                # when the run burned its whole token budget — a false zero that
+                # under-counts real_runs and hides the over-work.
                 outcome = RunOutcome(
-                    code=TerminalCode.BUDGET_EXCEEDED, summary=str(exc), session_id=self.session_id
+                    code=TerminalCode.BUDGET_EXCEEDED,
+                    summary=str(exc),
+                    tokens=budgets.tokens,
+                    session_id=self.session_id,
                 )
             except ScopeViolation as exc:
                 outcome = RunOutcome(

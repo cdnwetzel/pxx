@@ -117,6 +117,29 @@ def test_session_failed_run_captures_episodic_observations(tmp_path):
         store.close()
 
 
+def test_budget_exceeded_reports_spent_tokens(tmp_path):
+    """A run that exhausts its token budget must report the tokens it actually
+    spent, not 0 — else real_runs under-counts and the over-work is hidden
+    (dogfood follow-up, 2026-08-02)."""
+    from pxx.errors import BudgetExceeded
+
+    class SpendThenExceedBackend:
+        name = "spend"
+        capabilities = None
+
+        async def run(self, task, ctx):
+            ctx.budgets.consume(tokens=5000)  # genuine work spent into the guard
+            raise BudgetExceeded("max_tokens", "4000")  # then the cap trips
+
+        async def cancel(self):
+            pass
+
+    session = Session(_settings(tmp_path), SpendThenExceedBackend(), cwd=tmp_path)
+    outcome = run(session.run("do a lot"))
+    assert outcome.code is TerminalCode.BUDGET_EXCEEDED
+    assert outcome.tokens == 5000  # the guard's real spend, never a false 0
+
+
 def test_session_maps_scope_violation(tmp_path):
     backend = MockBackend(
         [{"tool": "write_file", "args": {"path": "/etc/pxx-evil", "content": "x"}}]

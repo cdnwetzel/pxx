@@ -6,6 +6,12 @@ without a configured test command stops with a question instead of burning
 an autonomous run on a guess. Fail-safe by construction: the gate only
 fires on POSITIVE ambiguity signals; anything it can't classify proceeds
 (uncertain analysis never blocks a clear task).
+
+The missing-file signal is *governed*, not global: it fires only when an edit
+verb is the nearest cue to a specific path within its clause. A path introduced
+by a creation/description cue ("emits ``out.json``", "such as ``build/x.json``",
+"a new ``foo.py``") is not treated as an edit target, so a task that merely
+*describes* a generated/runtime artifact no longer false-blocks (F-2 / R-014).
 """
 
 from __future__ import annotations
@@ -40,11 +46,42 @@ _EXISTING_FILE_VERBS = re.compile(
     re.IGNORECASE,
 )
 
+#: Cues that a nearby path is NOT an edit target — creation intent, or a
+#: described/generated/example artifact. When one of these governs a path more
+#: closely than an edit verb, a missing file is not ambiguity: the task is
+#: making it, or merely naming an output. This closes the F-2 false positive
+#: (R-014) where an edit-verb task that only *describes* a generated artifact
+#: (e.g. "improve the detector so it emits ``prose-tool-call.json``") was gated
+#: on that never-meant-to-be-edited path.
+_NON_EDIT_TARGET_CUE = re.compile(
+    r"(?:\b(?:"
+    r"creat(?:e|es|ing|ed)|add(?:s|ing|ed)?|generat(?:e|es|ing|ed)|"
+    r"produc(?:e|es|ing|ed)|scaffold(?:s|ing|ed)?|introduc(?:e|es|ing|ed)|"
+    r"implement(?:s|ing|ed)?|emit(?:s|ting|ted)?|output(?:s|ting|ted)?|"
+    r"writ(?:e|es|ing|ten)|new|generated|produced|runtime|artifact|"
+    r"such as|for example|named|called"
+    r")\b)|(?:e\.g\.)",
+    re.IGNORECASE,
+)
+
+#: Sentence/clause terminators that stop a governing cue from binding across
+#: them — a cue in a prior sentence does not govern this path.
+_CLAUSE_BREAK = re.compile(r"[.!?;:\n]")
+
 #: Repo-relative-looking file references.
 _PATH_RE = re.compile(
     r"\b([\w][\w./-]*\.(?:py|md|toml|yaml|yml|json|js|ts|tsx|go|rs|c|h|cc|cpp|"
     r"sh|sql|txt|cfg|ini))\b"
 )
+
+
+def _last_start(rx: re.Pattern[str], s: str) -> int | None:
+    """Start index of the LAST (nearest-to-end) match of ``rx`` in ``s``, or None."""
+    last: int | None = None
+    for m in rx.finditer(s):
+        last = m.start()
+    return last
+
 
 #: Task phrasings that imply running a test suite.
 _TEST_INTENT_RE = re.compile(
@@ -73,21 +110,33 @@ def ready_to_act(task: str, *, cwd: Path, test_command: str | None) -> ReadyDeci
             "This task involves tests, but no test command is configured "
             "(settings.test_command). Which command should verify the fix?",
         )
-    if _EXISTING_FILE_VERBS.search(text):
-        for match in _PATH_RE.finditer(text):
-            rel = match.group(1)
-            if rel.startswith(("/", "../")) or "://" in rel:
-                continue
-            try:
-                exists = (cwd / rel).exists()
-            except OSError:
-                exists = True  # unreadable fs state is not ambiguity evidence
-            if not exists:
-                return ReadyDecision(
-                    ReadyState.INSUFFICIENT_CONTEXT,
-                    f"The task references '{rel}', which does not exist under "
-                    f"{cwd}. Which file did you mean?",
-                )
+    for match in _PATH_RE.finditer(text):
+        rel = match.group(1)
+        if rel.startswith(("/", "../")) or "://" in rel:
+            continue
+        # Governance: only gate when an edit verb is the NEAREST cue governing
+        # this specific path within its own clause. A creation/description cue
+        # sitting nearer the path (or the absence of any edit verb) means the
+        # path is not an edit target — a missing file is then not ambiguity.
+        before = text[: match.start()]
+        brk = _last_start(_CLAUSE_BREAK, before)
+        window = before[brk + 1 :] if brk is not None else before
+        edit_at = _last_start(_EXISTING_FILE_VERBS, window)
+        if edit_at is None:
+            continue  # no edit verb governs this path
+        suppress_at = _last_start(_NON_EDIT_TARGET_CUE, window)
+        if suppress_at is not None and suppress_at > edit_at:
+            continue  # a creation/description cue governs the path more closely
+        try:
+            exists = (cwd / rel).exists()
+        except OSError:
+            exists = True  # unreadable fs state is not ambiguity evidence
+        if not exists:
+            return ReadyDecision(
+                ReadyState.INSUFFICIENT_CONTEXT,
+                f"The task references '{rel}', which does not exist under "
+                f"{cwd}. Which file did you mean?",
+            )
     return ReadyDecision(ReadyState.READY_TO_EXECUTE)
 
 

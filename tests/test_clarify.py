@@ -68,6 +68,72 @@ def test_create_verb_with_missing_file_proceeds(tmp_path: Path) -> None:
     assert decision.state is ReadyState.READY_TO_EXECUTE
 
 
+# --- F-2 (R-014): an edit-verb task that only DESCRIBES a generated/runtime
+#     artifact must NOT gate on that never-meant-to-be-edited path -------------
+
+
+def test_edit_verb_describing_generated_artifact_proceeds(tmp_path: Path) -> None:
+    # The dogfooded false positive: "improve" is an edit verb, but the missing
+    # path is an emitted artifact, not an edit target.
+    decision = ready_to_act(
+        "improve the run-integrity detector so it emits prose-tool-call.json",
+        cwd=tmp_path,
+        test_command=None,
+    )
+    assert decision.state is ReadyState.READY_TO_EXECUTE
+
+
+def test_edit_verb_with_written_output_path_proceeds(tmp_path: Path) -> None:
+    decision = ready_to_act(
+        "refactor the reporter so it writes results to build/out.json",
+        cwd=tmp_path,
+        test_command=None,
+    )
+    assert decision.state is ReadyState.READY_TO_EXECUTE
+
+
+def test_edit_verb_with_example_path_proceeds(tmp_path: Path) -> None:
+    decision = ready_to_act(
+        "update the loader to handle generated files such as dist/bundle.js",
+        cwd=tmp_path,
+        test_command=None,
+    )
+    assert decision.state is ReadyState.READY_TO_EXECUTE
+
+
+def test_edit_target_still_gates_when_missing(tmp_path: Path) -> None:
+    # The nearest cue is the edit verb, no creation/description cue between it
+    # and the path — genuine ambiguity, still gates.
+    decision = ready_to_act(
+        "improve the detector, then fix the bug in src/detector.py",
+        cwd=tmp_path,
+        test_command=None,
+    )
+    assert decision.state is ReadyState.INSUFFICIENT_CONTEXT
+    assert "src/detector.py" in decision.question
+
+
+def test_creation_cue_from_prior_clause_does_not_suppress(tmp_path: Path) -> None:
+    # "generate" is in a PRIOR clause (before the period); it must not govern the
+    # edit-target path in the next sentence.
+    decision = ready_to_act(
+        "generate a schema. then edit src/missing.py",
+        cwd=tmp_path,
+        test_command=None,
+    )
+    assert decision.state is ReadyState.INSUFFICIENT_CONTEXT
+    assert "src/missing.py" in decision.question
+
+
+def test_existing_described_artifact_still_proceeds(tmp_path: Path) -> None:
+    # A described artifact that DOES exist proceeds regardless (belt and braces).
+    (tmp_path / "out.json").write_text("{}")
+    decision = ready_to_act(
+        "improve the detector so it emits out.json", cwd=tmp_path, test_command=None
+    )
+    assert decision.state is ReadyState.READY_TO_EXECUTE
+
+
 # --- session wiring: ambiguous tasks stop WITHOUT editing ------------------------
 
 

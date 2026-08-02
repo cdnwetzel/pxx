@@ -20,12 +20,21 @@ priorities in `docs/ROADMAP.md`; this is the "start here next time" pointer._
   ollama/vllm get a high/None max_tokens; paid keeps the cost cap) → then cut
   **2.3.2** → `uv tool upgrade` neo → neo runs the **auto-lane degrade sequel**
   (PXX_BACKEND pinned) → author its receipt.
-- **Follow-ups logged (not yet done):** `__pycache__/*.pyc` counted as
+- **F7 (mini lane, open tail — neo verified F1/F3/F5 and filed this):** F1 fixed
+  the ABORT case, but on a COMPLETED run over a *dirty* tree the net still
+  stashes the user's pre-run WIP (tracked AND untracked) and never restores it —
+  so a green run silently "reverts" the user's WIP into a stash they may not
+  know to pop. Decide the COMPLETED-path behavior (auto-reconcile pop over pxx's
+  edits? loud warning that WIP is stashed? don't stash a dirty tree?). Same
+  `pxx/safety_net.py` + loop/session teardown I just touched.
+- **Other follow-ups logged (not yet done):** `__pycache__/*.pyc` counted as
   OUT_OF_SCOPE by the changed-path guard (should ignore gitignored/build
   detritus); F2 (`pxx doctor` should probe tool-calling under a REALISTIC
   context — a toy probe lies; also fix `scratchpad/pxx-portable-setup.sh` which
   uses a toy probe + recommends qwen2.5-coder/instruct that fails on 8GB — use
-  `qwen3:4b-instruct-8k`); F6 (stale user-config model id).
+  `qwen3:4b-instruct-8k`); F6 (stale user-config model id — neo corrected its
+  own configs; the mini's `~/.config/pxx/config.toml` keeps qwen2.5:7b-instruct,
+  which works on 16GB).
 - **CLI gotcha (still true):** PATH `pxx` = uv-tool `pxx-orchestrator` (a
   published wheel, currently 2.3.1) — NOT repo source. `uv tool upgrade` after a
   release; `uv run --extra dev` to exercise the branch.

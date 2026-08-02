@@ -85,14 +85,18 @@ async def tie_safety_net(cwd: Path, run_id: str) -> SafetyNet | None:
 
 
 async def _stash_ref(cwd: Path, message: str) -> str | None:
-    """The ``stash@{N}`` whose subject carries ``message`` — our own net stash,
-    not merely the latest (the user may have stashed since). None if absent."""
+    """The ``stash@{N}`` whose message equals ``message`` EXACTLY — matched on
+    the trailing message so ``run-1`` never selects ``run-10`` and the user's
+    other stashes are never touched. None if absent."""
     listing = await _git(cwd, "stash", "list")
     if not listing:
         return None
     for line in listing.splitlines():
-        ref, _, subject = line.partition(":")
-        if message in subject:
+        ref, sep, rest = line.partition(":")  # "stash@{N}: On <branch>: <message>"
+        if not sep:
+            continue
+        _, _, subject = rest.rpartition(": ")  # the message is after the last ": "
+        if subject.strip() == message:
             return ref.strip()
     return None
 
@@ -107,18 +111,25 @@ async def restore_safety_net(cwd: Path, net: SafetyNet | None) -> bool:
     tracked-dirty AND **untracked** files. The tag alone cannot bring untracked
     files back (they are in no commit), which is the data-loss this fixes.
 
-    Fail-soft (hard rule 1): any git failure leaves the tag/stash intact for a
-    manual ``git reset --hard <tag>`` + ``git stash pop`` and returns False;
-    never crashes. Returns True when the stash was popped.
+    A tag-only net (clean pre-run tree) is still reset, so a failed run leaves a
+    clean tree, not its garbage.
+
+    Fail-soft (hard rule 1): if the reset fails the stash is left untouched (we
+    never pop onto an unexpected tree); any git failure leaves tag/stash intact
+    for manual recovery. Returns True when something was restored.
     """
-    if net is None or not net.stash_message:
+    if net is None or (net.tag is None and not net.stash_message):
         return False
+    did = False
     if net.tag:
-        await _git(cwd, "reset", "--hard", net.tag)
-    ref = await _stash_ref(cwd, net.stash_message)
-    if ref is None:
-        return False
-    return await _git(cwd, "stash", "pop", ref) is not None
+        if await _git(cwd, "reset", "--hard", net.tag) is None:
+            return False  # reset failed — do NOT pop onto an unexpected tree
+        did = True
+    if net.stash_message:
+        ref = await _stash_ref(cwd, net.stash_message)
+        if ref is not None and await _git(cwd, "stash", "pop", ref) is not None:
+            did = True
+    return did
 
 
 async def commit_session_work(

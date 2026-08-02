@@ -356,11 +356,12 @@ async def run_loop(
             if sha:
                 await parent_bus.emit("observation", {"source": "auto_commit", "sha": sha})
                 outcome = replace(outcome, summary=f"{outcome.summary} [committed {sha[:8]}]")
-        elif net is not None and net.stash_message and outcome.code is not TerminalCode.COMPLETED:
+        elif net is not None and outcome.code is not TerminalCode.COMPLETED:
             # F1: a run that did NOT complete kept nothing worth reviewing — give
-            # the user their pre-run tree back (tracked-dirty AND untracked)
-            # instead of stranding it in the net stash. On COMPLETED the stash is
-            # left for the user to reconcile with pxx's work (pop is their move).
+            # the user their pre-run tree back (tracked-dirty AND untracked, and
+            # a tag-only net is reset too) instead of stranding it / leaving the
+            # failed run's garbage. On COMPLETED the net is left for the user to
+            # reconcile with pxx's work (pop is their move).
             from .safety_net import restore_safety_net
 
             if await restore_safety_net(root, net):

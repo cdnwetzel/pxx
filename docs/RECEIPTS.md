@@ -981,19 +981,20 @@ and the LaunchAgent are human-authored control-plane, not autonomously editable.
 ## R-023 — portable / single-box degrade, verified on one box across three states
 
 **Claim.** pxx's local-first degrade — the router probes `model` then each
-`[[fallback_models]]` entry and uses the first *usable* one (reachable AND
-serving the requested model; see Boundary (b) — bare reachability is not
-sufficient) — works end-to-end across three deployment states (a remote GPU
-**primary-up**, **primary-down** falling to an on-device model, and
-**local-only**) on BOTH the native lane and the auto lane (after BUG A, #21).
-Every run completes; nothing phantoms. Single box, three states — not a
-multi-box "fleet" claim.
+`[[fallback_models]]` entry and prefers the first *reachable* one — works
+end-to-end across three deployment states (a remote GPU **primary-up**,
+**primary-down** falling to an on-device model, and **local-only**) on BOTH the
+native lane and the auto lane (after BUG A, #21). Every run completes; nothing
+phantoms. Single box, three states — not a multi-box "fleet" claim. (Reachability
+is *not* sufficiency: a reachable endpoint serving a different model id is a
+known un-handled gap — Boundary (b), not claimed here.)
 
 **Grade.** Reproduced live on one 8GB portable box — 8 runs, zero failures.
 
 **Exact configuration (nothing inherits).** pxx **2.3.1** (PyPI wheel carrying
-PRs 17 BUG B, 18 DF-02, 20 token truthfulness, 21 BUG A). Hermetic scratch repo (a buggy
-function + a failing test), identical coder task across the loop runs. Coder =
+PRs 17 BUG B, 18 DF-02, 20 token truthfulness, 21 BUG A). Hermetic scratch repo
+(a buggy function + a failing test), identical coder task across the loop runs.
+Coder =
 a remote GPU model as primary with a `[[fallback_models]]` chain → an on-device
 instruct model. Reviewer pinned to a local endpoint via `PXX_REVIEW_*` for the
 standard runs (repo-local `[roles.review]` is ignored by design — data-egress

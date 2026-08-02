@@ -928,5 +928,55 @@ verb still gates). It reads task text only — never the diff or model intent.
 
 ---
 
+## R-022 — the improve daemon is stood up (hourly, propose-only, non-mutating)
+
+**Claim.** A macOS LaunchAgent runs `pxx improve daemon --once` hourly. Each tick
+runs ONE propose-only improvement cycle (mine terminal run records → cluster →
+write proposals to the human-review inbox). It never edits the working tree, runs
+the agent, or promotes anything. Operator controls: `pxx improve pause` durably
+halts the cycle at the next tick, `resume` clears it, `launchctl bootout`
+uninstalls.
+
+**Grade.** Reproduced live on the Mac mini (2026-08-01).
+
+**Exact configuration (nothing inherits).** pxx **2.3.0** (uv-tool
+`pxx-orchestrator`, PATH `/Users/cwetzel/.local/bin/pxx`). LaunchAgent
+`~/Library/LaunchAgents/local.pxx.improve-daemon.plist` (committed to the repo at
+`docs/ops/local.pxx.improve-daemon.plist`): `ProgramArguments` = `pxx improve
+daemon --once`; `WorkingDirectory` = `~/ai/pxx`; `StartCalendarInterval` Minute 0
+(hourly); `RunAtLoad` false; `ProcessType` Background, `Nice` 5; logs to
+`~/Library/Logs/pxx-improve.log`. State dir `~/.local/state/pxx`. The cycle is
+deterministic/offline (`cycle.py`/`mining.py` reference "model" only as a run-record
+field — no network/model calls), so it has NO dependency on the two-box rig.
+
+**Procedure (reproduction path).**
+
+```sh
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/local.pxx.improve-daemon.plist
+launchctl kickstart -k gui/$(id -u)/local.pxx.improve-daemon
+tail -1 ~/Library/Logs/pxx-improve.log
+```
+
+**Observed (2026-08-01).** Kickstart via launchd → `daemon: ticks=1 cycles=1
+paused-skips=0`, last exit code 0, working tree clean (no mutation), 2 proposals
+in `inbox/human-review-required`. Pause kill-switch: after `pxx improve pause`, a
+kickstart logs `ticks=1 cycles=0 paused-skips=1` (cycle skipped); `resume` clears
+it. `pxx improve readiness` reads eval_cases + unresolved_critical_defects green,
+real_runs + human_approved_promotions unmet → **NOT-READY** (auto-promotion still
+refuses).
+
+**Boundary — explicitly not claimed.** The daemon accrues *proposals for human
+triage*, NOT earned-enablement counts: `real_runs` moves only from genuine `pxx`
+agent runs, not daemon cycles — so standing it up does not advance the
+`real_runs`/`human_approved_promotions` bars. Because it runs `--once`, `pxx
+improve status` reads `daemon: stopped` between ticks by design (the flock is only
+held during a tick) — a long-lived `KeepAlive` variant would read `running`.
+Nothing is auto-promoted (cycle is propose-only, `stopped_before_promotion` pinned
+True). The daemon holds `work.lock` only for its brief tick; the cycle is
+read-analyze-propose only, so a concurrent manual run is safe. `autopromote.py`
+and the LaunchAgent are human-authored control-plane, not autonomously editable.
+
+---
+
 *Convention: entries are append-only and dated; superseded claims are
 struck through with a pointer to the superseding entry, never deleted.*

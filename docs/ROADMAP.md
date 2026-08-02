@@ -81,10 +81,14 @@ milestone reviewer-verified by execution):
       reports **running / paused / stopped** from real process liveness — a live
       daemon holds the `daemon.lock` flock (`scheduler.is_running`), released by
       the OS even on a crash. The live workstation now honestly reads `daemon:
-      stopped`. **Still open:** *actually running* the daemon — no launchd job
-      exists for it, so earned enablement accrues only from manual runs. Stand
-      it up (`pxx improve daemon` under launchd/`--once` hourly) for real
-      accumulation; the status now tells the truth about whether it's up.
+      stopped`. ~~**Still open:** *actually running* the daemon — no launchd job
+      exists for it.~~ **Stood up (2026-08-01, R-022):** a macOS LaunchAgent
+      (`local.pxx.improve-daemon`) runs `pxx improve daemon --once` hourly under
+      pxx 2.3.0 — propose-only, non-mutating, logs to `~/Library/Logs/pxx-improve.log`,
+      pause/resume honored per tick. Note the accrual boundary: the daemon
+      accrues *proposals for human triage*, NOT `real_runs` — that bar still
+      moves only from genuine `pxx` agent runs. Under the `--once`/cron model,
+      `status` reads `stopped` between ticks by design.
 - Live (non-scripted) eval arms on real endpoints, with the calibration
   fp-rate tracked against production fp. The 2.2.0 per-role routing + the
   SSH-tunnelled two-box lane (R-011) now provide the real endpoints this

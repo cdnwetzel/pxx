@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Reference LaunchAgent for the pxx improvement daemon (see docs/ops/README.md
+  and receipt R-022). Runs one propose-only cycle hourly. Adjust the absolute
+  paths for your machine (the pxx binary, the working dir, HOME, and the log).
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>local.pxx.improve-daemon</string>
+  <key>ProgramArguments</key>
+  <array><string>/Users/cwetzel/.local/bin/pxx</string><string>improve</string><string>daemon</string><string>--once</string></array>
+  <key>WorkingDirectory</key><string>/Users/cwetzel/ai/pxx</string>
+  <key>EnvironmentVariables</key><dict>
+    <key>HOME</key><string>/Users/cwetzel</string>
+    <key>PATH</key><string>/Users/cwetzel/.local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
+  </dict>
+  <key>StartCalendarInterval</key><dict><key>Minute</key><integer>0</integer></dict>
+  <key>RunAtLoad</key><false/>
+  <key>ProcessType</key><string>Background</string>
+  <key>Nice</key><integer>5</integer>
+  <key>StandardOutPath</key><string>/Users/cwetzel/Library/Logs/pxx-improve.log</string>
+  <key>StandardErrorPath</key><string>/Users/cwetzel/Library/Logs/pxx-improve.log</string>
+</dict></plist>

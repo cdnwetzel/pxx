@@ -75,6 +75,37 @@ any bearer token) is sent to `base_url`. Like `[[hooks]]` and `[[mcp_servers]]`,
 a repo-local `pxx.toml` / `.pxx/config.toml` (a checked-in file trying to set it
 is ignored with a warning).
 
+## Portable / single-box degrade
+
+pxx runs on one box by default: set only `model` (or `PXX_MODEL`) and the
+reviewer inherits it — no second endpoint, no `--review` needed. An 8GB laptop
+with a small local coder (e.g. `qwen2.5-coder:3b` on Ollama) is a complete
+setup, and `pxx improve` runs its cycle offline (deterministic, no model).
+
+For a machine that is sometimes docked to a GPU box and sometimes portable, make
+the on-device model a **fallback** so a single config degrades automatically.
+pxx is local-first: it probes `model` then each `[[fallback_models]]` entry at
+session start and uses the first reachable — an unreachable endpoint is data,
+not an error, so there is nothing to switch by hand.
+
+```toml
+# primary: the GPU box (reachable only when docked / tunnelled)
+model = "Qwen3-Coder"
+provider = "vllm"
+base_url = "http://127.0.0.1:8001"
+
+# fallback: an on-device model, always reachable
+[[fallback_models]]
+provider = "ollama"
+model = "qwen2.5-coder:3b"
+base_url = "http://127.0.0.1:11434"
+```
+
+Docked → the GPU coder; on the road → the local one, same config. The reviewer
+has no separate fallback chain: when portable, either drop `--review` (the coder
+and your `test_command` still gate the run) or point `[roles.review]` at a local
+endpoint.
+
 ## `[[hooks]]`
 
 Deterministic gates: `event` (`PreToolUse` / `PostToolUse`), `command`

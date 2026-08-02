@@ -878,5 +878,55 @@ symlink, or a symlinked ancestor) is rejected.
 
 ---
 
+## R-021 — F-2 clarity gate: a described artifact no longer false-blocks
+
+**Claim.** The clarity gate's missing-file signal is now *governed* per path, not
+global. It gates only when an edit verb is the NEAREST cue to a specific path
+within its clause; a path introduced by a creation/generation cue (`emits
+out.json`, `such as build/x.json`, `a new foo.py`) is not treated as an edit
+target, so an edit-verb task that merely *describes* a generated/runtime artifact
+no longer stops with a spurious question. Genuine ambiguity ("fix the bug in
+`src/nope.py`" with no such cue) still gates.
+
+**Grade.** Reproducible (18 unit tests, 8 new for the governance boundary).
+
+**Exact configuration (nothing inherits).** pxx v2; `ready_to_act` in
+`pxx/clarify.py` — per-path clause window (`_CLAUSE_BREAK`), nearest-cue
+comparison of `_EXISTING_FILE_VERBS` vs `_NON_EDIT_TARGET_CUE`. The suppression
+cue set is deliberately tight — creation/generation verbs (incl. past
+participles like `generated`/`written`) plus explicit exemplifiers (`such as`,
+`for example`, `e.g.`); generic nouns/adjectives that also sit near real edit
+targets (`runtime`, `artifact`, the file `called`/`named` X) are excluded so
+they can't false-suppress genuine ambiguity (CodeRabbit, PR #16). Untrusted task
+paths with a `..` segment are ignored (no cwd-escaping probe). The old logic
+gated on *any* edit verb anywhere + *any* missing path. Only the missing-file
+branch changes; empty-task and test-intent branches untouched.
+
+**Procedure (reproduction path).**
+
+```sh
+uv run --extra dev python -m pytest tests/test_clarify.py -q
+```
+
+**Observed (2026-08-01).** The dogfooded false positive — "improve the
+run-integrity detector so it emits `prose-tool-call.json`" — now returns
+`READY_TO_EXECUTE` (was `INSUFFICIENT_CONTEXT`). Preserved: missing edit target
+still gates ("...then fix the bug in `src/detector.py`" → gated); a creation cue
+in a PRIOR clause does not suppress the next clause's edit target
+("generate a schema. then edit `src/missing.py`" → gated). Post-review
+hardening pins: `fix runtime crash in src/nope.py` and `...the file called
+src/nope.py` still gate (generic words don't suppress); `a/../../outside.py` is
+ignored (no cwd escape). Full suite 1069 passed.
+
+**Boundary — explicitly not claimed.** This is still a deterministic surface
+heuristic on task prose, not parsing. It reduces false positives; it does not
+guarantee zero. The "nearest cue wins within a clause" rule can misjudge unusual
+phrasings (an edit target that happens to sit right after a creation word in the
+same clause is suppressed; a described artifact with no cue and an upstream edit
+verb still gates). It reads task text only — never the diff or model intent.
+`clarify.py` is protected control-plane code; this change is human-authored.
+
+---
+
 *Convention: entries are append-only and dated; superseded claims are
 struck through with a pointer to the superseding entry, never deleted.*

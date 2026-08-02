@@ -121,10 +121,13 @@ milestone reviewer-verified by execution):
     token/diff work) landed in **R-016**, and durability (an evidenced
     append-only ledger, so state-dir clears don't regress persisted ids) in
     **R-020** — see the "Follow-ups" entry above.
-  - Clarity-gate false-positive: `ready_to_act` (`clarify.py`) refuses any
+  - ~~Clarity-gate false-positive: `ready_to_act` (`clarify.py`) refuses any
     edit-verb task mentioning a `*.ext` token absent under cwd, even when the
-    file is a runtime/generated artifact only described. Candidate: distinguish
-    "edit THIS existing file" from a descriptive/to-be-created reference.
+    file is a runtime/generated artifact only described.~~ **Shipped
+    (2026-08-01, R-021):** the missing-file signal is now governed per path —
+    it gates only when an edit verb is the nearest cue to a specific path within
+    its clause; a path introduced by a creation/description cue (`emits x.json`,
+    `such as build/y.json`, `a new z.py`) is not treated as an edit target.
 - The `pxx-reviews` triage loop for boundary-review artifacts. The
   *proposal-inbox* half **shipped in 2.1.5** (2026-07-29): `pxx improve
   triage list|qualify|reject` with reviewer identity, and the cycle honors

@@ -940,7 +940,7 @@ uninstalls.
 **Grade.** Reproduced live on the Mac mini (2026-08-01).
 
 **Exact configuration (nothing inherits).** pxx **2.3.0** (uv-tool
-`pxx-orchestrator`, PATH `/Users/cwetzel/.local/bin/pxx`). LaunchAgent
+`pxx-orchestrator`, PATH `~/.local/bin/pxx`). LaunchAgent
 `~/Library/LaunchAgents/local.pxx.improve-daemon.plist` (committed to the repo at
 `docs/ops/local.pxx.improve-daemon.plist`): `ProgramArguments` = `pxx improve
 daemon --once`; `WorkingDirectory` = `~/ai/pxx`; `StartCalendarInterval` Minute 0

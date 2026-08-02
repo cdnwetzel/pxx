@@ -72,6 +72,27 @@ def test_cli_overrides_env(tmp_path, monkeypatch):
     assert settings.model.model == "from-cli"
 
 
+def test_backend_posture_env_and_validation(tmp_path, monkeypatch):
+    monkeypatch.setenv("PXX_BACKEND", "native")
+    assert load_settings(tmp_path).backend == "native"
+
+
+def test_backend_config_key_validated(tmp_path):
+    from pxx.config import _settings_from_dict
+
+    for good in ("native", "aider", "auto"):
+        assert _settings_from_dict({"backend": good}, Settings(), "t").backend == good
+    with pytest.raises(ConfigError, match="backend must be"):
+        _settings_from_dict({"backend": "bogus"}, Settings(), "t")
+
+
+def test_backend_key_accepted_from_toml(tmp_path):
+    """`backend` must be in _KNOWN_KEYS or a full TOML load rejects it as unknown
+    (CodeRabbit on #21)."""
+    (tmp_path / "pxx.toml").write_text('backend = "native"\n')
+    assert load_settings(tmp_path).backend == "native"
+
+
 def test_legacy_env_vars_compat(tmp_path, monkeypatch):
     monkeypatch.setenv("PXX_OLLAMA_BASE", "http://lan-host:11434")
     monkeypatch.setenv("PXX_OLLAMA_MODEL", "llama3.1:8b")

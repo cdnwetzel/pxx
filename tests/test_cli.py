@@ -60,7 +60,7 @@ def harness(monkeypatch, tmp_path):
     monkeypatch.setattr(cli, "Session", FakeSession)
     monkeypatch.setattr(cli, "load_settings", fake_load_settings)
     monkeypatch.setattr(cli, "_make_backend", lambda name, settings: FakeBackend())
-    monkeypatch.setattr(cli, "_resolve_backend_name", lambda cmd, req: req or "native")
+    monkeypatch.setattr(cli, "_resolve_backend_name", lambda cmd, req, settings: req or "native")
     FakeSession.instances = []
     FakeSession.outcome = RunOutcome(
         code=TerminalCode.COMPLETED, summary="done", rounds=1, tokens=10
@@ -246,7 +246,7 @@ def test_unknown_flag_matching_subcommand_hints(harness, capsys):
 
 
 def test_unknown_flag_forwarded_to_aider(harness, monkeypatch, capsys):
-    monkeypatch.setattr(cli, "_resolve_backend_name", lambda cmd, req: "aider")
+    monkeypatch.setattr(cli, "_resolve_backend_name", lambda cmd, req, settings: "aider")
     assert cli.main(["--bogus-flag", "-m", "x"]) == 0
     assert "unknown flag forwarded: --bogus-flag" in capsys.readouterr().err
     assert "--bogus-flag" in FakeSession.instances[0].tasks[0]
@@ -406,6 +406,42 @@ def test_loop_backend_native_still_accepted(harness, monkeypatch):
 
     monkeypatch.setitem(sys.modules, "pxx.loop", types.SimpleNamespace(run_loop=fake_run_loop))
     assert cli.main(["loop", "-m", "x", "--backend", "native"]) == 0
+
+
+def test_auto_backend_prefers_native_with_fallback_chain():
+    """BUG A: the auto lane must not pick aider (which ignores [[fallback_models]])
+    when a fallback chain is configured — that would void the degrade config."""
+    from pxx.config import ModelRef, Settings
+
+    s = Settings(fallback_models=(ModelRef(provider="ollama", model="x"),))
+    assert cli._resolve_backend_name("ask", None, s) == "native"
+
+
+def test_backend_posture_forces_backend_and_flag_wins():
+    from pxx.config import Settings
+
+    assert cli._resolve_backend_name("ask", None, Settings(backend="native")) == "native"
+    assert cli._resolve_backend_name("ask", None, Settings(backend="aider")) == "aider"
+    # an explicit --backend still overrides the durable posture
+    assert cli._resolve_backend_name("ask", "native", Settings(backend="aider")) == "native"
+
+
+def test_nonpositive_budget_rounds_rejected_at_parse(capsys):
+    import pytest
+
+    for bad in ("0", "-1"):
+        with pytest.raises(SystemExit):
+            cli.main(["loop", "-m", "x", "--budget-rounds", bad])
+    assert "positive" in capsys.readouterr().err
+
+
+def test_nonfinite_budget_seconds_rejected_at_parse(capsys):
+    import pytest
+
+    for bad in ("nan", "inf", "-inf"):
+        with pytest.raises(SystemExit):
+            cli.main(["loop", "-m", "x", "--budget-seconds", bad])
+    assert "positive" in capsys.readouterr().err
 
 
 _LOOP_WORKFLOW_CONTRACT = """\
@@ -1890,14 +1926,14 @@ def test_review_includes_all_filename_shapes(harness, monkeypatch, capsys, tmp_p
 def test_auto_backend_falls_back_when_aider_broken(monkeypatch, capsys) -> None:
     monkeypatch.setattr(cli.shutil, "which", lambda name: "/fake/aider")
     monkeypatch.setattr(cli, "_aider_health", lambda path: False)
-    assert cli._resolve_backend_name("edit", None) == "native"
+    assert cli._resolve_backend_name("edit", None, Settings()) == "native"
     assert "broken" in capsys.readouterr().err
 
 
 def test_auto_backend_uses_healthy_aider(monkeypatch) -> None:
     monkeypatch.setattr(cli.shutil, "which", lambda name: "/fake/aider")
     monkeypatch.setattr(cli, "_aider_health", lambda path: True)
-    assert cli._resolve_backend_name("edit", None) == "aider"
+    assert cli._resolve_backend_name("edit", None, Settings()) == "aider"
 
 
 def test_explicit_aider_request_skips_probe(monkeypatch) -> None:
@@ -1905,7 +1941,7 @@ def test_explicit_aider_request_skips_probe(monkeypatch) -> None:
     monkeypatch.setattr(
         cli, "_aider_health", lambda path: (_ for _ in ()).throw(AssertionError("probed"))
     )
-    assert cli._resolve_backend_name("edit", "aider") == "aider"
+    assert cli._resolve_backend_name("edit", "aider", Settings()) == "aider"
 
 
 # ---------------------------------------------------------------------------

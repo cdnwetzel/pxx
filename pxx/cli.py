@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import math
 import shlex
 import shutil
 import subprocess
@@ -163,6 +164,31 @@ def _compat_rewrite(argv: list[str]) -> list[str]:
 # Parser
 
 
+def _positive_int(value: str) -> int:
+    """argparse type: a strictly-positive integer. A 0 or negative budget is
+    nonsensical (e.g. ``--budget-rounds 0`` would make the loop run no rounds)."""
+    try:
+        n = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"expected an integer, got {value!r}") from None
+    if n <= 0:
+        raise argparse.ArgumentTypeError(f"must be a positive integer, got {n}")
+    return n
+
+
+def _positive_float(value: str) -> float:
+    """argparse type: a strictly-positive, FINITE number (budget seconds / cost).
+    NaN/inf are rejected — they slip past ``<= 0`` and poison budget math (a NaN
+    deadline never trips)."""
+    try:
+        f = float(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"expected a number, got {value!r}") from None
+    if not math.isfinite(f) or f <= 0:
+        raise argparse.ArgumentTypeError(f"must be a positive number, got {value!r}")
+    return f
+
+
 def _add_run_options(parser: argparse.ArgumentParser, *, files: bool = True) -> None:
     parser.add_argument("-m", "--message", help="task / prompt text (default: stdin)")
     if files:
@@ -171,11 +197,11 @@ def _add_run_options(parser: argparse.ArgumentParser, *, files: bool = True) -> 
     parser.add_argument("--base-url", help="endpoint base URL")
     parser.add_argument("--provider", choices=["ollama", "openai", "vllm", "openai-compatible"])
     parser.add_argument("--scope", help="comma-separated repo-relative scope prefixes")
-    parser.add_argument("--budget-rounds", type=int, help="max agent rounds")
-    parser.add_argument("--budget-tokens", type=int, help="max tokens")
-    parser.add_argument("--budget-cost", type=float, help="max cost in USD")
-    parser.add_argument("--budget-seconds", type=float, help="max wall-clock seconds")
-    parser.add_argument("--budget-diff-lines", type=int, help="max diff lines")
+    parser.add_argument("--budget-rounds", type=_positive_int, help="max agent rounds")
+    parser.add_argument("--budget-tokens", type=_positive_int, help="max tokens")
+    parser.add_argument("--budget-cost", type=_positive_float, help="max cost in USD")
+    parser.add_argument("--budget-seconds", type=_positive_float, help="max wall-clock seconds")
+    parser.add_argument("--budget-diff-lines", type=_positive_int, help="max diff lines")
     parser.add_argument("--no-memory", action="store_true", help="disable memory")
     parser.add_argument("--sandbox", action="store_true", help="sandbox shell commands")
     parser.add_argument(
@@ -491,12 +517,23 @@ def _aider_health(aider_path: str) -> bool:
     return proc.returncode == 0
 
 
-def _resolve_backend_name(command: str, requested: str | None) -> str:
+def _resolve_backend_name(command: str, requested: str | None, settings) -> str:
+    # An explicit --backend always wins.
     if requested in ("native", "aider"):
         return requested
+    # Durable per-box posture ([backend] config / PXX_BACKEND); "auto" falls
+    # through to the auto logic below.
+    if settings.backend in ("native", "aider"):
+        return settings.backend
     if command in ("run", "loop"):
         return "native"
-    # auto: aider when available AND working, else pxx's native loop
+    # Auto lane: a configured [[fallback_models]] chain expresses a degrade
+    # intent that ONLY the native backend honors (aider ignores the chain and
+    # sits in litellm retries when the primary is down). Prefer native rather
+    # than silently voiding the degrade config.
+    if settings.fallback_models:
+        return "native"
+    # else: aider when available AND working, else pxx's native loop
     aider = shutil.which("aider")
     if aider:
         if _aider_health(aider):
@@ -592,15 +629,17 @@ def _run_session(settings, backend, task: str) -> RunOutcome:
 
 
 def _cmd_run_like(args: argparse.Namespace, unknown: list[str]) -> int:
-    backend_name = _resolve_backend_name(args.command, args.backend)
     task = _read_task(args)
     if getattr(args, "files", None):
         task += "\n\nContext files (user-supplied): " + ", ".join(args.files)
-    task += _handle_unknown_flags(unknown, backend_name)
     if not task.strip():
+        # Fail on usage before touching config (a missing task shouldn't surface
+        # config errors/warnings).
         print("pxx: usage: a task is required (-m/--message or stdin)", file=sys.stderr)
         return EXIT_USAGE
     settings = load_settings(Path.cwd(), _cli_overrides(args, _MODE_BY_COMMAND[args.command]))
+    backend_name = _resolve_backend_name(args.command, args.backend, settings)
+    task += _handle_unknown_flags(unknown, backend_name)
     backend = _make_backend(backend_name, settings)
     outcome = _run_session(settings, backend, task)
     print(
@@ -2028,7 +2067,7 @@ def _cmd_goal(args: argparse.Namespace, unknown: list[str]) -> int:
         print("pxx: usage: a goal is required (-m/--message or stdin)", file=sys.stderr)
         return EXIT_USAGE
     settings = load_settings(Path.cwd(), _cli_overrides(args, PermissionMode.AUTO))
-    backend_name = _resolve_backend_name("run", args.backend)
+    backend_name = _resolve_backend_name("run", args.backend, settings)
     planner_settings = replace(settings, permission=PermissionMode.ASK)
 
     async def planner(text: str) -> str:

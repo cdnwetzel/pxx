@@ -1,25 +1,50 @@
 # Next session — working plan
 
-_Handoff note, 2026-08-01. Durable priorities live in `docs/ROADMAP.md`; this is
-the short "start here next time" pointer. Delete/rewrite freely._
+_Handoff note, updated 2026-08-02 (end of a long two-session day). Durable
+priorities in `docs/ROADMAP.md`; this is the "start here next time" pointer._
 
-## State at handoff
-- On `v2` (clean). **2.3.0 published** to PyPI. This session merged **PRs #8–#16**
-  and added receipts **R-008…R-022**. The dogfood hardening batch (#11–#16) is
-  released; every dogfood finding is fixed.
-- **Improve daemon is LIVE** — LaunchAgent `local.pxx.improve-daemon` runs
-  `pxx improve daemon --once` hourly (propose-only, non-mutating; see
-  `docs/ops/` + R-022). It accrues *proposals for triage*, not earned-enablement
-  counts. `evaluator-defects.json` re-established (empty). `pxx improve readiness`
-  is honest → **NOT-READY** (real_runs + human_promotions legitimately unmet).
-- **CLI install gotcha:** the PATH `pxx` is the uv-tool `pxx-orchestrator`, a
-  published wheel — NOT the repo source. After a release, run
-  `uv tool upgrade pxx-orchestrator` or the CLI stays on the old version. Use
-  `uv run --extra dev` to exercise repo source directly.
-- Two-box rig for real runs: coder `qwen3-coder:30b` on asrock via
-  `ssh -L 11435:127.0.0.1:11434 chris@asrock`; judge on the Mac's own Ollama at
-  `:11666`. Use the OFFICIAL qwen3-coder (the Unsloth Q3 GGUF won't return
-  structured `tool_calls`).
+## State at handoff (2026-08-02 stand-down)
+- On `v2` (clean, CI green). **2.3.1 published** to PyPI (the portable-box
+  degrade batch: BUG A/B, DF-02, tokens=0, PXX_BACKEND — PRs #17–#21).
+- **UNRELEASED on `v2` (past 2.3.1)** — neo's three R-023 findings, all merged:
+  - **#24 F1** — safety net restores the tree (incl. UNTRACKED) on abort (was
+    data loss). CodeRabbit caught a privacy leak in the first cut (restore ran
+    before the run artifact was written) — fixed.
+  - **#25 F3** — a 404 / model-not-found advances the `[[fallback_models]]`
+    chain instead of hard-failing (closes R-023 boundary b).
+  - **#26 F5** — read/write scope split: reads span the repo root, writes stay
+    in `--scope`. Fixes single-file scope + the dogfood OUT_OF_SCOPE failures.
+    CodeRabbit caught a symlink escape in the search fallback — fixed.
+- **NEXT UP (approved sequence):** DF-03 review toggle (`PXX_LOOP_REVIEW` /
+  add `--no-review`; keep opt-in default) + provider-aware token budget (local
+  ollama/vllm get a high/None max_tokens; paid keeps the cost cap) → then cut
+  **2.3.2** → `uv tool upgrade` neo → neo runs the **auto-lane degrade sequel**
+  (PXX_BACKEND pinned) → author its receipt.
+- **Follow-ups logged (not yet done):** `__pycache__/*.pyc` counted as
+  OUT_OF_SCOPE by the changed-path guard (should ignore gitignored/build
+  detritus); F2 (`pxx doctor` should probe tool-calling under a REALISTIC
+  context — a toy probe lies; also fix `scratchpad/pxx-portable-setup.sh` which
+  uses a toy probe + recommends qwen2.5-coder/instruct that fails on 8GB — use
+  `qwen3:4b-instruct-8k`); F6 (stale user-config model id).
+- **CLI gotcha (still true):** PATH `pxx` = uv-tool `pxx-orchestrator` (a
+  published wheel, currently 2.3.1) — NOT repo source. `uv tool upgrade` after a
+  release; `uv run --extra dev` to exercise the branch.
+
+## NEW strategic thread (awaits the human — do NOT auto-start)
+A third agent (Kimi) drafted **"VIOLOOP vs pxx-dispatch"** + a
+**"screen-vision roadmap"**; neo VERIFIED the assessment (~22 claims vs tree,
+3 errata: 23 not 21 terminal codes; PXX_BACKEND exists as of 2.3.1;
+vision-text-injection posture needs a probe receipt). Source + neo's verified
+assessment are in `/tmp/pxx/neo/` (see `00-INDEX.md`). Phase 0 spike is
+bridge-side only (no collision with pxx-core). **Awaiting the human's word.**
+
+## Two-session workflow (mini + neo)
+- **mini** (Mac Mini, this session) = integrator/lead: owns `v2` merges, decides
+  order, hand-codes/dogfoods, authors receipts, waits for CodeRabbit before
+  merging (it caught 2 real security bugs today).
+- **neo** (8GB MacBook, Fable 5) = testing/degradation/hardware lane. Coms are
+  FILE-based: neo→mini in `/tmp/pxx/neo/`, mini→neo in `/tmp/pxx/mini/`. neo is
+  push-frozen on `v2` (feeds receipts/branches only). neo wheel = 2.3.1.
 
 ## Feedback from the portable box (2026-08-02)
 

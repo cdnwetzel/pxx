@@ -435,6 +435,15 @@ def test_nonpositive_budget_rounds_rejected_at_parse(capsys):
     assert "positive" in capsys.readouterr().err
 
 
+def test_nonfinite_budget_seconds_rejected_at_parse(capsys):
+    import pytest
+
+    for bad in ("nan", "inf", "-inf"):
+        with pytest.raises(SystemExit):
+            cli.main(["loop", "-m", "x", "--budget-seconds", bad])
+    assert "positive" in capsys.readouterr().err
+
+
 _LOOP_WORKFLOW_CONTRACT = """\
 schema_version = 1
 hooks = []

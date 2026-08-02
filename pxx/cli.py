@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import math
 import shlex
 import shutil
 import subprocess
@@ -176,13 +177,15 @@ def _positive_int(value: str) -> int:
 
 
 def _positive_float(value: str) -> float:
-    """argparse type: a strictly-positive number (budget seconds / cost)."""
+    """argparse type: a strictly-positive, FINITE number (budget seconds / cost).
+    NaN/inf are rejected — they slip past ``<= 0`` and poison budget math (a NaN
+    deadline never trips)."""
     try:
         f = float(value)
     except ValueError:
         raise argparse.ArgumentTypeError(f"expected a number, got {value!r}") from None
-    if f <= 0:
-        raise argparse.ArgumentTypeError(f"must be a positive number, got {f}")
+    if not math.isfinite(f) or f <= 0:
+        raise argparse.ArgumentTypeError(f"must be a positive number, got {value!r}")
     return f
 
 
@@ -626,15 +629,17 @@ def _run_session(settings, backend, task: str) -> RunOutcome:
 
 
 def _cmd_run_like(args: argparse.Namespace, unknown: list[str]) -> int:
-    settings = load_settings(Path.cwd(), _cli_overrides(args, _MODE_BY_COMMAND[args.command]))
-    backend_name = _resolve_backend_name(args.command, args.backend, settings)
     task = _read_task(args)
     if getattr(args, "files", None):
         task += "\n\nContext files (user-supplied): " + ", ".join(args.files)
-    task += _handle_unknown_flags(unknown, backend_name)
     if not task.strip():
+        # Fail on usage before touching config (a missing task shouldn't surface
+        # config errors/warnings).
         print("pxx: usage: a task is required (-m/--message or stdin)", file=sys.stderr)
         return EXIT_USAGE
+    settings = load_settings(Path.cwd(), _cli_overrides(args, _MODE_BY_COMMAND[args.command]))
+    backend_name = _resolve_backend_name(args.command, args.backend, settings)
+    task += _handle_unknown_flags(unknown, backend_name)
     backend = _make_backend(backend_name, settings)
     outcome = _run_session(settings, backend, task)
     print(

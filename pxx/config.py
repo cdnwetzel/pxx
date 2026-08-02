@@ -114,6 +114,7 @@ _KNOWN_KEYS = {
     "fallback_models",
     "roles",
     "permission",
+    "backend",
     "scope",
     "trusted_paths",
     "memory_enabled",

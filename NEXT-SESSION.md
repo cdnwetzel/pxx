@@ -51,6 +51,41 @@ on the 8GB portable box with the GPU-box primary unreachable. Receipts:
   re-merged into the new `--review` loop_kwargs, cli+loop suites green, still
   awaiting human commit on `dogfood/phase0`.
 
+## Transferred DF work orders (2026-08-02)
+
+Ownership of the remaining Phase 0 dogfood orders moves to the primary
+session (they live in the portable box's gitignored `.pxx/review/`, so full
+text is relayed here). DF-01 landed in 0b31b4d (see feedback section above).
+
+### DF-02 — `--budget-rounds` can raise the loop's round cap (OPEN, valid)
+
+- base_sha: 0b31b4d (DF-01 merged). Scope: `pxx/cli.py` + `tests/test_cli.py`;
+  `pxx/loop.py` unchanged (default stays 3). Diff ≤ 80 lines.
+- **Bug [P1]:** `run_loop` defaults `max_rounds=3` and `_cmd_loop` never
+  passes it. `--budget-rounds N` only tightens BudgetGuard, so a loop needing
+  4+ genuine heal rounds always exits ROUND_CAP at 3.
+- **Fix:** in `_cmd_loop`, pass `max_rounds=args.budget_rounds` to `run_loop`
+  when the flag was provided; otherwise omit it. `WORKFLOW.md`
+  `budgets.max_rounds` still clamps via BudgetGuard — no change there.
+- **Test:** monkeypatch `pxx.loop.run_loop`, capture kwargs:
+  `pxx loop --budget-rounds 8` passes `max_rounds=8`; without the flag,
+  `max_rounds` absent.
+
+### DF-03 — reviewer leg on the loop CLI path (NEEDS RECONCILIATION)
+
+- Original order [P1 FAIL-OPEN]: `_cmd_loop` passes `reviewer=None`, so
+  `pxx loop` completes on green tests alone; fix was reviewer ON by default
+  (`NativeReviewer(settings.model)`, BLOCKING) with a loud `--no-review`
+  opt-out.
+- **Superseded in part by 2.3.0:** the loop parser now has `--review` /
+  `--review-mode` (opt-IN, `settings.effective_review_model`, blocking
+  default, #14/f175434). The reviewer leg is reachable but the default
+  remains review-off — the opposite posture from the order's spec.
+- Owner's decision: keep opt-in (close DF-03 as redesigned, mirroring the
+  py313 closure pattern) or flip the default to review-on + `--no-review`
+  per the original fail-open argument. Don't implement against the stale
+  spec (`settings.model` is also superseded by `effective_review_model`).
+
 ## Recommended order next time
 1. **Earn the bars.** real_runs needs 100 genuine `pxx` agent runs (the daemon
    does NOT move it — it only writes proposals); human_approved_promotions needs

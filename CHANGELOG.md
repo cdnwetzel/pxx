@@ -3,6 +3,54 @@
 All notable changes to pxx are documented here. The 1.x series history is
 preserved in git (tag `v1.3.3` and earlier).
 
+## [2.3.0] — 2026-08-01
+
+Reliability and safety hardening surfaced by a full **zero-intervention dogfood**
+of pxx on itself and on a live codebase. The reasoning-judge blocking gate and
+the earned-enablement counters are now trustworthy end-to-end. Receipts
+R-013…R-021 record the exact configurations and negative results.
+
+### Added
+
+- **Reasoning-judge structured verdict contract** (#14): the blocking review gate
+  parses a strict `response_format` json_schema verdict first, then falls back to
+  free text, so a reasoning judge reliably emits a parseable APPROVE/REVISE with
+  file-anchored findings that block. Endpoints that ignore `response_format`
+  retry as plain text — same reliability as before. Validated on real hardware
+  (qwen3.5 in `--review-mode blocking`, 6/6 parseable).
+- **Durable `real_runs` ledger** (#15): the earned-enablement `real_runs` count is
+  reconciled through an append-only `real-runs.jsonl` in the state dir, so an
+  external run-dir clear no longer erases accrued progress. Records each genuine
+  run once by id; persistence is best-effort; a run dir whose canonical path
+  escapes `runs/` (symlink or symlinked ancestor) is rejected; an
+  undecodable/corrupt ledger fails closed.
+
+### Fixed
+
+- **`real_runs` counts only genuine runs** (#11): `mock`/`replay` backends,
+  crashes before a terminal outcome, and zero-work connection failures no longer
+  inflate the bar — only real-backend runs with a recorded outcome and token or
+  diff evidence count.
+- **Daemon status reports real liveness** (#13): `pxx improve status` now reports
+  **running / paused / stopped** from the `daemon.lock` flock, instead of always
+  claiming "running" from the pause flag. A daemon that is not running reads
+  `stopped`.
+- **Clarity gate no longer false-blocks a described artifact** (#16): the
+  missing-file signal is governed per path — it gates only when an edit verb is
+  the nearest cue to a specific path within its clause, so a task that merely
+  *describes* a generated/runtime artifact ("…so it emits `out.json`") proceeds.
+  Genuine ambiguity still gates. Untrusted task paths with a `..` segment are
+  ignored (no cwd-escaping probe).
+- **Clean termination for over-worked runs** (#12): a run that exceeds its budget
+  but produced a verified, in-scope edit is salvaged to COMPLETED — honoring the
+  scope, diff-budget, lint, test, and review guards — instead of terminating as
+  BUDGET_EXCEEDED with work stranded.
+
+### Changed
+
+- PR CI runs `ruff format --check` for parity with the release `verify` gate (#9),
+  so a format-only drift is caught on the PR, not at release time.
+
 ## [2.2.0] — 2026-08-01
 
 First step toward the ROADMAP "model-backed boundary roles" item: the

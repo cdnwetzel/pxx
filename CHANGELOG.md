@@ -3,6 +3,35 @@
 All notable changes to pxx are documented here. The 1.x series history is
 preserved in git (tag `v1.3.3` and earlier).
 
+## [2.3.2] — 2026-08-02
+
+Three fixes surfaced and independently re-verified by the second-lane (8GB
+portable) degrade campaign behind R-023.
+
+### Fixed
+
+- **Safety net restores the working tree on abort, including UNTRACKED files
+  (F1).** The net stashes a dirty tree (`--include-untracked`) at session start;
+  on an ABORT (e.g. `MODEL_UNAVAILABLE`, which does zero work) the user's
+  uncommitted files were stranded in a stash — the `pxx-pre` tag restores tracked
+  files but not untracked ones. An aborted run now resets to the tag (discarding
+  the failed run's partial edits) and pops the net's own stash, restoring
+  tracked-dirty AND untracked. Fail-soft. Done last, after the run artifact is
+  written, so the restored WIP is never captured into `diff.patch`.
+- **A 404 / model-not-found advances the fallback chain (F3).** A reachable
+  endpoint that doesn't serve the requested model id (HTTP 404, or a 400/422
+  body naming a missing model) now walks `[[fallback_models]]` — same as an
+  unreachable endpoint — instead of hard-failing `MODEL_UNAVAILABLE`. A 404 on
+  the last endpoint still raises.
+
+### Changed
+
+- **Scope: reads span the repo, writes stay in `scope` (F5).** A single-file or
+  single-dir `--scope` no longer blocks *reads* — the agent may read anything
+  under the project root (tests, imports, context) but may only WRITE within
+  `scope`. Reads still cannot escape the root. The broker authorizes read-class
+  actions via `check_read`, write-class via `check_write`.
+
 ## [2.3.1] — 2026-08-02
 
 Fixes from a two-session portable-box dogfood (primary GPU coder / on-device

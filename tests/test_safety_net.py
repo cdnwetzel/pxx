@@ -114,6 +114,40 @@ def test_dirty_tree_stashes_and_tags_and_round_trips(tmp_path: Path) -> None:
     assert (repo / "new.txt").read_text() == "untracked\n"
 
 
+@needs_git
+def test_restore_brings_back_untracked_on_abort(tmp_path: Path) -> None:
+    """F1: on an abort, restore the user's pre-run tree — including UNTRACKED
+    files, which the pxx-pre tag alone cannot recover (neo, R-023)."""
+    from pxx.safety_net import restore_safety_net
+
+    repo = tmp_path / "repo"
+    _init_repo(repo, files={"a.txt": "hello\n"})
+    (repo / "a.txt").write_text("user-wip\n")  # tracked-dirty
+    (repo / "notes.txt").write_text("user-untracked\n")  # untracked — the vulnerable one
+
+    net = run(tie_safety_net(repo, "run-abort"))
+    assert net.stash_message and "run-abort" in net.stash_message
+    assert not (repo / "notes.txt").exists()  # parked in the stash
+    (repo / "a.txt").write_text("pxx-partial-garbage\n")  # a failed run's leftover edit
+
+    assert run(restore_safety_net(repo, net)) is True
+    assert (repo / "a.txt").read_text() == "user-wip\n"  # partial discarded, wip back
+    assert (repo / "notes.txt").read_text() == "user-untracked\n"  # untracked RESTORED
+    assert _git(repo, "stash", "list") == ""  # our stash consumed, not stranded
+
+
+@needs_git
+def test_restore_is_noop_without_a_stash(tmp_path: Path) -> None:
+    """A clean-tree net is tag-only — nothing to restore."""
+    from pxx.safety_net import restore_safety_net
+
+    repo = tmp_path / "repo"
+    _init_repo(repo, files={"a.txt": "hello\n"})
+    net = run(tie_safety_net(repo, "run-clean"))
+    assert net.stash_message is None
+    assert run(restore_safety_net(repo, net)) is False
+
+
 def test_non_git_cwd_is_noop(tmp_path: Path) -> None:
     assert run(tie_safety_net(tmp_path, "run-1")) is None
 

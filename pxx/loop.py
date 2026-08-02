@@ -356,6 +356,18 @@ async def run_loop(
             if sha:
                 await parent_bus.emit("observation", {"source": "auto_commit", "sha": sha})
                 outcome = replace(outcome, summary=f"{outcome.summary} [committed {sha[:8]}]")
+        elif net is not None and net.stash_message and outcome.code is not TerminalCode.COMPLETED:
+            # F1: a run that did NOT complete kept nothing worth reviewing — give
+            # the user their pre-run tree back (tracked-dirty AND untracked)
+            # instead of stranding it in the net stash. On COMPLETED the stash is
+            # left for the user to reconcile with pxx's work (pop is their move).
+            from .safety_net import restore_safety_net
+
+            if await restore_safety_net(root, net):
+                await parent_bus.emit(
+                    "gate_decision",
+                    {"gate": "safety_net", "allowed": True, "restored": True, "tag": net.tag or ""},
+                )
         return outcome
 
     baseline_failures: set[str] | None = None
@@ -438,7 +450,9 @@ async def run_loop(
         try:
             budgets.consume(rounds=1)
         except BudgetExceeded as exc:
-            return _outcome(TerminalCode.BUDGET_EXCEEDED, str(exc), round_no - 1, findings)
+            return await _complete(
+                _outcome(TerminalCode.BUDGET_EXCEEDED, str(exc), round_no - 1, findings)
+            )
 
         backend = factory()  # fresh backend/context per round — an invariant
         if round_no == 1:
@@ -501,7 +515,7 @@ async def run_loop(
                     )
             if net_suffix:
                 outcome = replace(outcome, summary=outcome.summary + net_suffix)
-            return outcome  # backend-level terminal code short-circuits the loop
+            return await _complete(outcome)  # backend-level terminal code short-circuits the loop
 
         # Guard 1: scope re-check (backend commits can bypass hooks).
         if in_repo:
@@ -519,11 +533,14 @@ async def run_loop(
                 },
             )
             if offenders:
-                return _outcome(
-                    TerminalCode.OUT_OF_SCOPE,
-                    f"round {round_no}: changed paths outside scope: " + ", ".join(offenders[:5]),
-                    round_no,
-                    findings,
+                return await _complete(
+                    _outcome(
+                        TerminalCode.OUT_OF_SCOPE,
+                        f"round {round_no}: changed paths outside scope: "
+                        + ", ".join(offenders[:5]),
+                        round_no,
+                        findings,
+                    )
                 )
 
         # Guard 2: diff accounting against the pre-loop git state.
@@ -544,7 +561,9 @@ async def run_loop(
                         "diff_lines": total,
                     },
                 )
-                return _outcome(TerminalCode.DIFF_CAP, str(exc), round_no, findings)
+                return await _complete(
+                    _outcome(TerminalCode.DIFF_CAP, str(exc), round_no, findings)
+                )
             await parent_bus.emit(
                 "gate_decision",
                 {"gate": "diff_budget", "round": round_no, "allowed": True, "diff_lines": total},
@@ -563,12 +582,14 @@ async def run_loop(
             }
             if infra and infra == failing:
                 # the suite itself could not run — infrastructure, not a regression
-                return _outcome(
-                    TerminalCode.TEST_RUN_FAILED,
-                    f"round {round_no}: test command could not run: "
-                    + ", ".join(sorted(infra)[:5]),
-                    round_no,
-                    findings,
+                return await _complete(
+                    _outcome(
+                        TerminalCode.TEST_RUN_FAILED,
+                        f"round {round_no}: test command could not run: "
+                        + ", ".join(sorted(infra)[:5]),
+                        round_no,
+                        findings,
+                    )
                 )
             if baseline_failures is None:
                 baseline_failures = set(failing)
@@ -588,12 +609,14 @@ async def run_loop(
             )
             if new_failures:
                 legs["introduced_failures"] = len(new_failures)
-                return _outcome(
-                    TerminalCode.TEST_REGRESSION,
-                    f"round {round_no}: new test failures beyond baseline: "
-                    + ", ".join(new_failures[:5]),
-                    round_no,
-                    findings,
+                return await _complete(
+                    _outcome(
+                        TerminalCode.TEST_REGRESSION,
+                        f"round {round_no}: new test failures beyond baseline: "
+                        + ", ".join(new_failures[:5]),
+                        round_no,
+                        findings,
+                    )
                 )
             if not passed:
                 if failing and failing == previous_failing:
@@ -612,7 +635,7 @@ async def run_loop(
                 summary = f"round {round_no}: tests still failing ({len(failing)})"
                 stuck = _check_stagnation(round_no)
                 if stuck is not None:
-                    return stuck
+                    return await _complete(stuck)
                 continue
 
         # Guard 3b: lint gate (when configured — from WORKFLOW.md commands).
@@ -624,11 +647,13 @@ async def run_loop(
             )
             if not lint_ok:
                 legs["lint_errors"] += 1
-                return _outcome(
-                    TerminalCode.LINT_BLOCKED,
-                    f"round {round_no}: lint gate failed: {lint_tail[-300:]}",
-                    round_no,
-                    findings,
+                return await _complete(
+                    _outcome(
+                        TerminalCode.LINT_BLOCKED,
+                        f"round {round_no}: lint gate failed: {lint_tail[-300:]}",
+                        round_no,
+                        findings,
+                    )
                 )
 
         # Guard 4: review gate (only when tests pass or no tests configured).
@@ -686,12 +711,14 @@ async def run_loop(
                 legs["review_seconds"] += time.monotonic() - review_start
                 head_now2 = await _git(root, "rev-parse", "HEAD")
                 if head2 and head_now2 and head2.strip() != head_now2.strip():
-                    return _outcome(
-                        TerminalCode.REVIEW_UNAVAILABLE,
-                        f"round {round_no}: review cannot bind to a stable HEAD "
-                        "(tree keeps moving)",
-                        round_no,
-                        findings,
+                    return await _complete(
+                        _outcome(
+                            TerminalCode.REVIEW_UNAVAILABLE,
+                            f"round {round_no}: review cannot bind to a stable HEAD "
+                            "(tree keeps moving)",
+                            round_no,
+                            findings,
+                        )
                     )
 
         findings = result.findings
@@ -713,7 +740,7 @@ async def run_loop(
             summary = f"round {round_no}: reviewer requested changes ({len(findings)} findings)"
             stuck = _check_stagnation(round_no)
             if stuck is not None:
-                return stuck
+                return await _complete(stuck)
             continue
         if result.blocked:
             # NO_REVIEW in blocking mode: fail-closed, with the SPECIFIC cause.
@@ -722,12 +749,14 @@ async def run_loop(
                 "empty": TerminalCode.REVIEW_EMPTY,
                 "unparseable": TerminalCode.REVIEW_UNPARSEABLE,
             }.get(result.review_error, TerminalCode.REVIEW_UNPARSEABLE)
-            return _outcome(
-                code,
-                f"round {round_no}: review gate blocked "
-                f"({result.review_error or 'unknown'}, verdict {result.verdict})",
-                round_no,
-                findings,
+            return await _complete(
+                _outcome(
+                    code,
+                    f"round {round_no}: review gate blocked "
+                    f"({result.review_error or 'unknown'}, verdict {result.verdict})",
+                    round_no,
+                    findings,
+                )
             )
         # APPROVE, or NO_REVIEW in advisory mode (nothing actionable -> accept).
         if result.review_error:
@@ -749,9 +778,11 @@ async def run_loop(
 
     if last_review_verdict is Verdict.REVISE:
         contributing.append("REVIEW_REJECTED")
-    return _outcome(
-        TerminalCode.ROUND_CAP,
-        f"round cap reached ({max_rounds}); last: {summary}",
-        max_rounds,
-        findings,
+    return await _complete(
+        _outcome(
+            TerminalCode.ROUND_CAP,
+            f"round cap reached ({max_rounds}); last: {summary}",
+            max_rounds,
+            findings,
+        )
     )

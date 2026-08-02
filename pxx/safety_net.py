@@ -84,6 +84,43 @@ async def tie_safety_net(cwd: Path, run_id: str) -> SafetyNet | None:
     return SafetyNet(tag=tag, stash_message=stash_message)
 
 
+async def _stash_ref(cwd: Path, message: str) -> str | None:
+    """The ``stash@{N}`` whose subject carries ``message`` — our own net stash,
+    not merely the latest (the user may have stashed since). None if absent."""
+    listing = await _git(cwd, "stash", "list")
+    if not listing:
+        return None
+    for line in listing.splitlines():
+        ref, _, subject = line.partition(":")
+        if message in subject:
+            return ref.strip()
+    return None
+
+
+async def restore_safety_net(cwd: Path, net: SafetyNet | None) -> bool:
+    """Restore the user's pre-run working tree — for use on an ABORT (a
+    non-COMPLETED outcome), so a run that produced nothing worth keeping does
+    not strand the user's uncommitted work.
+
+    ``reset --hard`` to the ``pxx-pre`` tag (discards the failed run's partial
+    edits, back to pre-run HEAD), then pops the net's OWN stash — restoring both
+    tracked-dirty AND **untracked** files. The tag alone cannot bring untracked
+    files back (they are in no commit), which is the data-loss this fixes.
+
+    Fail-soft (hard rule 1): any git failure leaves the tag/stash intact for a
+    manual ``git reset --hard <tag>`` + ``git stash pop`` and returns False;
+    never crashes. Returns True when the stash was popped.
+    """
+    if net is None or not net.stash_message:
+        return False
+    if net.tag:
+        await _git(cwd, "reset", "--hard", net.tag)
+    ref = await _stash_ref(cwd, net.stash_message)
+    if ref is None:
+        return False
+    return await _git(cwd, "stash", "pop", ref) is not None
+
+
 async def commit_session_work(
     cwd: Path,
     *,
@@ -138,4 +175,4 @@ async def commit_session_work(
     return await _git(cwd, "rev-parse", "HEAD")
 
 
-__all__ = ["SafetyNet", "commit_session_work", "tie_safety_net"]
+__all__ = ["SafetyNet", "commit_session_work", "restore_safety_net", "tie_safety_net"]

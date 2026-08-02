@@ -1,9 +1,11 @@
 """Filesystem tools: read_file, write_file, edit_file, list_files, search_files.
 
-Every path from the model is untrusted input: all of them go through
-``ctx.scope.check`` / ``check_write`` (canonicalized, symlink-resolved)
-before any I/O. Expected failures (missing file, ambiguous edit, bad regex)
-are returned as error strings for the model; gate errors propagate.
+Every path from the model is untrusted input: all go through the scope gate
+(canonicalized, symlink-resolved) before any I/O. Reads (read_file, list_files,
+search_files) use ``check_read`` — anywhere under the project root; writes
+(write_file, edit_file) use ``check_write`` — only within ``scope``. Expected
+failures (missing file, ambiguous edit, bad regex) are returned as error
+strings for the model; gate errors propagate.
 """
 
 from __future__ import annotations
@@ -59,7 +61,7 @@ class ReadFile:
     )
 
     async def run(self, args: dict[str, Any], ctx: ToolContext) -> str:
-        path = ctx.scope.check(str(args.get("path", "")))
+        path = ctx.scope.check_read(str(args.get("path", "")))
         if not path.is_file():
             return _err(f"not a file: {path}")
         raw = path.read_bytes()
@@ -189,7 +191,7 @@ class ListFiles:
     )
 
     async def run(self, args: dict[str, Any], ctx: ToolContext) -> str:
-        base = ctx.scope.check(ctx.cwd)
+        base = ctx.scope.check_read(ctx.cwd)
         pattern = str(args.get("pattern") or "**/*")
         limit = int(args.get("limit") or MAX_LIST_ENTRIES)
         try:
@@ -200,7 +202,7 @@ class ListFiles:
                 rel_parts = path.relative_to(base).parts
                 if any(part in SKIP_DIRS for part in rel_parts):
                     continue
-                if not ctx.scope.in_scope(path):
+                if not ctx.scope.in_read_scope(path):
                     continue
                 if len(matches) >= limit:
                     truncated = True
@@ -244,7 +246,7 @@ class SearchFiles:
 
     async def run(self, args: dict[str, Any], ctx: ToolContext) -> str:
         pattern = str(args.get("pattern", ""))
-        base = ctx.scope.check(str(args.get("path") or "."))
+        base = ctx.scope.check_read(str(args.get("path") or "."))
         limit = int(args.get("limit") or MAX_SEARCH_MATCHES)
         if shutil.which("rg"):
             return await self._rg(pattern, base, limit)

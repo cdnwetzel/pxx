@@ -213,12 +213,16 @@ class ActionBroker:
             await self._emit_decision(ctx, action, decision)
             raise ScopeViolation(decision.reason)
 
-        # Scope enforcement (raises ScopeViolation on violation).
+        # Scope enforcement (raises ScopeViolation on violation). Writes are
+        # confined to `scope`; reads are broader — anywhere under the project
+        # root — so the agent reads the context it needs (tests, imports) to
+        # edit well, even under a narrow single-file scope (F5). Reads still
+        # cannot escape the root.
         for target in action.targets:
             if action.mutating:
                 ctx.scope.check_write(target, ctx.permission)
             else:
-                ctx.scope.check(target)
+                ctx.scope.check_read(target)
 
         # Protected-path enforcement (A0): the trusted control plane is
         # HUMAN-ONLY — a write-class action against a protected path is

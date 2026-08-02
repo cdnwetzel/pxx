@@ -1,9 +1,11 @@
 """Filesystem tools: read_file, write_file, edit_file, list_files, search_files.
 
-Every path from the model is untrusted input: all of them go through
-``ctx.scope.check`` / ``check_write`` (canonicalized, symlink-resolved)
-before any I/O. Expected failures (missing file, ambiguous edit, bad regex)
-are returned as error strings for the model; gate errors propagate.
+Every path from the model is untrusted input: all go through the scope gate
+(canonicalized, symlink-resolved) before any I/O. Reads (read_file, list_files,
+search_files) use ``check_read`` — anywhere under the project root; writes
+(write_file, edit_file) use ``check_write`` — only within ``scope``. Expected
+failures (missing file, ambiguous edit, bad regex) are returned as error
+strings for the model; gate errors propagate.
 """
 
 from __future__ import annotations
@@ -12,9 +14,12 @@ import asyncio
 import re
 import shutil
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from . import ToolContext, ToolSpec, tool_schema
+
+if TYPE_CHECKING:
+    from ..safety import ScopeGate
 
 #: Hard cap on lines returned by read_file.
 MAX_READ_LINES = 2000
@@ -59,7 +64,7 @@ class ReadFile:
     )
 
     async def run(self, args: dict[str, Any], ctx: ToolContext) -> str:
-        path = ctx.scope.check(str(args.get("path", "")))
+        path = ctx.scope.check_read(str(args.get("path", "")))
         if not path.is_file():
             return _err(f"not a file: {path}")
         raw = path.read_bytes()
@@ -189,7 +194,7 @@ class ListFiles:
     )
 
     async def run(self, args: dict[str, Any], ctx: ToolContext) -> str:
-        base = ctx.scope.check(ctx.cwd)
+        base = ctx.scope.check_read(ctx.cwd)
         pattern = str(args.get("pattern") or "**/*")
         limit = int(args.get("limit") or MAX_LIST_ENTRIES)
         try:
@@ -200,7 +205,7 @@ class ListFiles:
                 rel_parts = path.relative_to(base).parts
                 if any(part in SKIP_DIRS for part in rel_parts):
                     continue
-                if not ctx.scope.in_scope(path):
+                if not ctx.scope.in_read_scope(path):
                     continue
                 if len(matches) >= limit:
                     truncated = True
@@ -244,11 +249,11 @@ class SearchFiles:
 
     async def run(self, args: dict[str, Any], ctx: ToolContext) -> str:
         pattern = str(args.get("pattern", ""))
-        base = ctx.scope.check(str(args.get("path") or "."))
+        base = ctx.scope.check_read(str(args.get("path") or "."))
         limit = int(args.get("limit") or MAX_SEARCH_MATCHES)
         if shutil.which("rg"):
             return await self._rg(pattern, base, limit)
-        return await self._py(pattern, base, limit)
+        return await self._py(pattern, base, limit, ctx.scope)
 
     async def _rg(self, pattern: str, base: Path, limit: int) -> str:
         proc = await asyncio.create_subprocess_exec(
@@ -288,7 +293,7 @@ class SearchFiles:
             out += f"\n… truncated at {limit} matches"
         return out
 
-    async def _py(self, pattern: str, base: Path, limit: int) -> str:
+    async def _py(self, pattern: str, base: Path, limit: int, scope: ScopeGate) -> str:
         try:
             regex = re.compile(pattern)
         except re.error as exc:
@@ -305,6 +310,10 @@ class SearchFiles:
             if any(part in SKIP_DIRS for part in rel_parts):
                 continue
             if not path.is_file():
+                continue
+            # A symlink under `base` can point outside the project root — re-gate
+            # each candidate before reading (rglob does not canonicalize).
+            if not scope.in_read_scope(path):
                 continue
             try:
                 text = path.read_text(errors="replace")

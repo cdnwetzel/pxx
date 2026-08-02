@@ -52,7 +52,15 @@ class ScopeGate:
     ``root`` is the project root (canonicalized). ``scope`` entries are
     root-relative prefixes; empty means the whole root. ``trusted`` are
     additional canonical absolute roots that are read/write allowed.
-    Everything else raises :class:`ScopeViolation`.
+
+    Reads and writes have DIFFERENT boundaries. Writes are confined to
+    ``scope`` (:meth:`check_write`) — that is the blast radius of changes.
+    Reads (:meth:`check_read`) are broader: anywhere under ``root`` (or a
+    trusted root), so the agent can read the context it needs (tests, imports)
+    to edit well, even under a narrow single-file scope. Reads still cannot
+    escape the project root (``..``, absolute paths elsewhere) — that raises
+    :class:`ScopeViolation`. ``check`` remains the write-scope test (used by
+    ``check_write`` and ``in_scope``, which the loop's changed-path guard uses).
     """
 
     def __init__(
@@ -82,6 +90,23 @@ class ScopeGate:
     def in_scope(self, path: str | Path) -> bool:
         try:
             self.check(path)
+            return True
+        except ScopeViolation:
+            return False
+
+    def check_read(self, path: str | Path) -> Path:
+        """Read gate: any path within the project ``root`` (or a trusted root).
+        Broader than the write ``scope`` so the agent reads context freely, but
+        still cannot escape the project (``..``/absolute elsewhere raises)."""
+        canon = canonicalize(path, cwd=self.root)
+        for base in (self.root, *self._trusted):
+            if canon == base or base in canon.parents:
+                return canon
+        raise ScopeViolation(f"path outside the project root: {path} (root: {self.root})")
+
+    def in_read_scope(self, path: str | Path) -> bool:
+        try:
+            self.check_read(path)
             return True
         except ScopeViolation:
             return False

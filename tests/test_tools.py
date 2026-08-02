@@ -90,8 +90,47 @@ def test_read_file_missing_and_offset_past_end(reg: ToolRegistry, tmp_path: Path
 
 
 def test_read_file_outside_scope_raises(reg: ToolRegistry, tmp_path: Path) -> None:
+    # a path outside the project ROOT (absolute elsewhere) is still denied
     with pytest.raises(ScopeViolation):
         call(reg, "read_file", {"path": "/etc/passwd"}, make_ctx(tmp_path))
+
+
+def test_read_allowed_outside_write_scope_but_in_repo(reg: ToolRegistry, tmp_path: Path) -> None:
+    """F5: read_file reads a sibling OUTSIDE the write-scope (but inside the
+    repo); write_file to the same path is still denied."""
+    (tmp_path / "src").mkdir()
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "readme.md").write_text("context the agent needs\n")
+    ctx = ToolContext(
+        scope=ScopeGate(tmp_path, scope=("src",)),
+        hooks=HookRunner(),
+        permission=PermissionMode.AUTO,
+        bus=EventBus(),
+        cwd=tmp_path,
+        memory=None,
+        session_id="t",
+        sandbox_shell=False,
+    )
+    assert "context the agent needs" in call(reg, "read_file", {"path": "docs/readme.md"}, ctx)
+    with pytest.raises(ScopeViolation):
+        call(reg, "write_file", {"path": "docs/readme.md", "content": "x"}, ctx)
+
+
+def test_search_py_fallback_blocks_symlink_escape(reg, tmp_path, monkeypatch) -> None:
+    """The Python search fallback must not expose a file a symlink points to
+    OUTSIDE the project root (CodeRabbit #26)."""
+    import pxx.tools.fs as fsmod
+
+    monkeypatch.setattr(fsmod.shutil, "which", lambda name: None)  # force the _py fallback
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    # secret content DISTINCT from the search pattern (the pattern echoes in the
+    # "no matches" message, so we assert on the surrounding content instead).
+    (tmp_path / "secret.txt").write_text("NEEDLE leaked-secret-xyz\n")  # OUTSIDE the root
+    (proj / "link.txt").symlink_to(tmp_path / "secret.txt")  # symlink INSIDE the root
+    out = call(reg, "search_files", {"pattern": "NEEDLE", "path": "."}, make_ctx(proj))
+    assert "leaked-secret-xyz" not in out  # the escaping file's content is not exposed
+    assert "no matches" in out.lower()  # the symlink candidate was skipped
 
 
 # --------------------------------------------------------------- write_file

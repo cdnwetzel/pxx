@@ -52,6 +52,35 @@ def test_scope_denies_traversal(tmp_path):
         gate.check(tmp_path / "other" / "x.py")
 
 
+def test_read_write_scope_split(tmp_path):
+    """F5: reads are allowed anywhere under the project root; writes only within
+    ``scope``. A single-file/dir scope no longer blocks reading sibling context."""
+    (tmp_path / "src").mkdir()
+    (tmp_path / "docs").mkdir()
+    gate = ScopeGate(tmp_path, scope=("src",))
+    docs = tmp_path / "docs" / "readme.md"
+    # a sibling OUTSIDE the write-scope but inside the repo: readable, NOT writable
+    gate.check_read(docs)  # no raise
+    assert gate.in_read_scope(docs)
+    assert not gate.in_scope(docs)  # write scope unchanged
+    with pytest.raises(ScopeViolation):
+        gate.check_write(docs, PermissionMode.AUTO)
+    # in-scope writes still work
+    gate.check_write(tmp_path / "src" / "a.py", PermissionMode.AUTO)
+
+
+def test_read_scope_cannot_escape_root(tmp_path):
+    """Reads are broader than writes but still cannot escape the project root."""
+    (tmp_path / "proj").mkdir()
+    gate = ScopeGate(tmp_path / "proj", scope=("src",))
+    with pytest.raises(ScopeViolation):
+        gate.check_read(tmp_path / "outside.txt")
+    with pytest.raises(ScopeViolation):
+        gate.check_read("/etc/passwd")
+    with pytest.raises(ScopeViolation):
+        gate.check_read("../outside.txt")  # relative parent traversal from root
+
+
 def test_scope_restricts_to_prefixes(tmp_path):
     (tmp_path / "src").mkdir()
     (tmp_path / "docs").mkdir()

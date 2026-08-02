@@ -1030,13 +1030,14 @@ case) and a native run with the reviewer endpoint dead (the NO_REVIEW bonus) —
 context-dependent** — a model that returns structured `tool_calls` on a toy
 probe can degrade to *prose* under pxx's real loop prompt (the detector then
 correctly terminates MODEL_UNAVAILABLE). Validate an on-device fallback coder
-under a realistic-size context, not a one-line probe. (b) A reachable primary
+under a realistic-size context, not a one-line probe. (b) ~~A reachable primary
 serving a *different model id* hard-fails MODEL_UNAVAILABLE (404) without
-advancing the chain — the native loop path doesn't use the router's
-single-model-id correction (tracked follow-up). (c) The **reviewer has no
-fallback chain**: when its endpoint is down it is honestly absent (NO_REVIEW),
-never a phantom pass. (d) The safety-net stash does not currently restore
-*untracked* files on a mid-run abort (tracked follow-up). Evidence is from one
+advancing the chain.~~ **FIXED (F3): a 404 / "model not found" from a reachable
+endpoint now advances the `[[fallback_models]]` chain, same as an unreachable
+one.** (c) The **reviewer has no fallback chain**: when its endpoint is down it
+is honestly absent (NO_REVIEW), never a phantom pass. (d) ~~The safety-net stash
+does not currently restore *untracked* files on a mid-run abort.~~ **FIXED (F1):
+an aborted run now restores the pre-run tree (tracked-dirty AND untracked).** Evidence is from one
 8GB box; per-run rows live in that box's local state dir.
 
 ---

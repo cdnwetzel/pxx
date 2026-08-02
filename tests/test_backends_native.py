@@ -175,6 +175,41 @@ def test_fallback_chain_on_connect_error(tmp_path):
     assert fallbacks[0].data["to"] == "m2"
 
 
+def test_fallback_chain_on_model_not_found_404(tmp_path):
+    """F3: a REACHABLE primary that returns 404 (wrong model id) advances the
+    fallback chain instead of hard-failing MODEL_UNAVAILABLE (neo, R-023)."""
+    settings = Settings(
+        model=ModelRef(model="m1", base_url="http://reachable-wrong.local"),
+        fallback_models=(ModelRef(model="m2", base_url="http://up.local"),),
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "reachable-wrong.local" in str(request.url):
+            return httpx.Response(404, json={"error": {"message": "model 'm1' not found"}})
+        return httpx.Response(200, json=completion("via fallback"))
+
+    ctx = make_ctx(tmp_path, settings=settings)
+    outcome = asyncio.run(make_backend(handler).run("task", ctx))
+    assert outcome.code is TerminalCode.COMPLETED
+    assert outcome.summary == "via fallback"
+    fb = [
+        e for e in ctx.bus.history if e.kind == "gate_decision" and e.data.get("gate") == "fallback"
+    ]
+    assert len(fb) == 1 and fb[0].data["to"] == "m2"
+    assert "model_not_found" in fb[0].data["reason"]
+
+
+def test_model_not_found_on_last_endpoint_still_raises(tmp_path):
+    """A 404 with no fallback left is still a hard error (not silently swallowed)."""
+    settings = Settings(model=ModelRef(model="m1", base_url="http://wrong.local"))
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(404, text="model not found")
+
+    with pytest.raises(BackendError, match="HTTP 404"):
+        asyncio.run(make_backend(handler).run("task", make_ctx(tmp_path, settings=settings)))
+
+
 def test_all_endpoints_down_raises_backend_error(tmp_path):
     settings = Settings(
         model=ModelRef(model="m1", base_url="http://down1.local"),

@@ -248,6 +248,21 @@ def test_clean_completion_without_error_stays_completed(tmp_path):
     assert outcome.code is TerminalCode.COMPLETED
 
 
+def test_answer_prose_mentioning_errors_stays_completed(tmp_path):
+    """neo advisory 2026-08-02: an ask-mode answer is a zero-edit exit-0 run;
+    prose that merely discusses rate limits / connection errors must NOT
+    reclassify to MODEL_UNAVAILABLE (the signature needs a distinctive error
+    token, not the topic words)."""
+    path = fake_aider(
+        tmp_path,
+        "echo 'To add a rate limiter, catch connection errors and retry with backoff.'",
+    )
+    outcome = asyncio.run(
+        AiderBackend(aider_path=path).run("how do I add a rate limiter?", make_ctx(tmp_path))
+    )
+    assert outcome.code is TerminalCode.COMPLETED
+
+
 def test_in_scope_edit_stays_completed(tmp_path, monkeypatch):
     """Control: the same reported edit under a covering scope is unaffected."""
     path = fake_aider(tmp_path, "echo 'Applied edit to converter.py'")

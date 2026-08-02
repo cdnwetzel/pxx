@@ -38,17 +38,23 @@ _APPLIED_EDIT_RE = re.compile(r"^Applied edit to\s+(.+?)\s*$")
 #: Provider/endpoint-down signatures aider (via litellm) prints when the model
 #: endpoint is unreachable or failing. aider commonly exits 0 in these cases and
 #: makes no edit, so without this a down endpoint reads as COMPLETED. Only
-#: consulted when nothing was edited, so a real edit that merely mentions one of
-#: these words is never misclassified.
+#: consulted when nothing was edited.
+#:
+#: Deliberately restricted to DISTINCTIVE error tokens (exception class names,
+#: aider's own down message). Loose prose phrases ("rate limit", "connection
+#: error/refused") were dropped (neo advisory 2026-08-02): ask-mode answers are
+#: also zero-edit exit-0 runs, and an answer that merely discusses rate limiting
+#: or connection errors must not be reclassified. The real litellm failures
+#: (RateLimitError, APIConnectionError, Timeout, …) still match via the
+#: ``litellm.*Error`` and class-name alternatives below.
 _MODEL_DOWN_RE = re.compile(
-    r"servers are down or overloaded"
-    r"|api[ _]?(?:connection[ _]?)?error"
-    r"|internal ?server ?error|service ?unavailable"
-    r"|litellm\.\w*(?:error|exception)"
-    r"|connection (?:error|refused|timed out)"
-    r"|max retries exceeded"
-    r"|rate[ _-]?limit"
-    r"|overloaded_error",
+    r"servers are down or overloaded"  # aider's own friendly message
+    r"|litellm\.\w*(?:error|exception)"  # any litellm exception class
+    r"|api ?connection ?error"  # APIConnectionError
+    r"|internal ?server ?error"  # InternalServerError
+    r"|service ?unavailable(?:error)?"  # ServiceUnavailable(Error)
+    r"|overloaded_error"  # provider overload class
+    r"|max retries exceeded",  # urllib3/requests exhaustion
     re.IGNORECASE,
 )
 

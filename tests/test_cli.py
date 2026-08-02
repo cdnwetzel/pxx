@@ -1993,3 +1993,19 @@ def test_loop_review_mode_without_review_is_usage_error(monkeypatch, tmp_path, c
     assert rc == cli.EXIT_USAGE
     assert "--review-mode requires --review" in capsys.readouterr().err
     assert "kwargs" not in captured  # never reached run_loop
+
+
+def test_loop_budget_rounds_passed_to_run_loop(monkeypatch, tmp_path):
+    """Test that --budget-rounds N is passed as max_rounds to run_loop."""
+    from pxx.config import Settings
+
+    captured = _patch_loop(monkeypatch, tmp_path, Settings())
+
+    # Test with --budget-rounds flag
+    assert cli.main(["loop", "-m", "do it", "--budget-rounds", "8"]) == 0
+    assert captured["kwargs"]["max_rounds"] == 8
+
+    # Test without --budget-rounds flag (should not have max_rounds key)
+    captured.clear()
+    assert cli.main(["loop", "-m", "do it"]) == 0
+    assert "max_rounds" not in captured["kwargs"]

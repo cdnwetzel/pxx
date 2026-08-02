@@ -136,6 +136,19 @@ def _assistant_message(choice: dict[str, Any]) -> dict[str, Any]:
     return msg
 
 
+def _model_not_found(status: int, body: str) -> bool:
+    """A REACHABLE endpoint that does not serve the requested model id — an HTTP
+    404, or a 400/422 whose body names a missing model (vLLM / Ollama / OpenAI
+    phrasings). Distinct from an unreachable endpoint: it should still advance
+    the ``[[fallback_models]]`` chain rather than hard-fail (F3)."""
+    if status == 404:
+        return True
+    if status not in (400, 422):
+        return False
+    low = body.lower()
+    return "model" in low and ("not found" in low or "does not exist" in low or "not exist" in low)
+
+
 class NativeBackend:
     """pxx-owned tool-calling agent loop against an OpenAI-compatible endpoint."""
 
@@ -263,6 +276,29 @@ class NativeBackend:
                         f"or use a larger-context model — see docs/TUTORIAL.md "
                         f"troubleshooting. [{body}]"
                     )
+                # F3: a reachable endpoint that doesn't serve this model id (404,
+                # or a "model not found" body) is not a dead end — advance the
+                # fallback chain, same as an unreachable endpoint, instead of
+                # hard-failing MODEL_UNAVAILABLE.
+                if _model_not_found(resp.status_code, body) and active + 1 < len(models):
+                    log.warning(
+                        "endpoint %s does not serve %s (HTTP %s); falling back",
+                        model.endpoint,
+                        model.model,
+                        resp.status_code,
+                    )
+                    active += 1
+                    await ctx.bus.emit(
+                        "gate_decision",
+                        {
+                            "gate": "fallback",
+                            "from": model.model,
+                            "to": models[active].model,
+                            "reason": f"model_not_found_{resp.status_code}",
+                        },
+                        session_id=ctx.session_id,
+                    )
+                    continue
                 raise BackendError(f"{model.endpoint} returned HTTP {resp.status_code}: {body}")
             try:
                 data = resp.json()

@@ -53,13 +53,17 @@ _EXISTING_FILE_VERBS = re.compile(
 #: (R-014) where an edit-verb task that only *describes* a generated artifact
 #: (e.g. "improve the detector so it emits ``prose-tool-call.json``") was gated
 #: on that never-meant-to-be-edited path.
+#: Kept deliberately tight: creation/generation VERBS (incl. past participles
+#: like "generated"/"written" that describe an emitted artifact) plus explicit
+#: exemplifiers. Generic nouns/adjectives that also sit near genuine edit targets
+#: ("runtime crash", "the file called foo.py", "the bug named …") are excluded —
+#: they would false-SUPPRESS a real missing-file ambiguity.
 _NON_EDIT_TARGET_CUE = re.compile(
     r"(?:\b(?:"
     r"creat(?:e|es|ing|ed)|add(?:s|ing|ed)?|generat(?:e|es|ing|ed)|"
     r"produc(?:e|es|ing|ed)|scaffold(?:s|ing|ed)?|introduc(?:e|es|ing|ed)|"
     r"implement(?:s|ing|ed)?|emit(?:s|ting|ted)?|output(?:s|ting|ted)?|"
-    r"writ(?:e|es|ing|ten)|new|generated|produced|runtime|artifact|"
-    r"such as|for example|named|called"
+    r"writ(?:e|es|ing|ten)|new|such as|for example"
     r")\b)|(?:e\.g\.)",
     re.IGNORECASE,
 )
@@ -112,7 +116,9 @@ def ready_to_act(task: str, *, cwd: Path, test_command: str | None) -> ReadyDeci
         )
     for match in _PATH_RE.finditer(text):
         rel = match.group(1)
-        if rel.startswith(("/", "../")) or "://" in rel:
+        # Untrusted task text: skip absolutes, URLs, and any path with a ".."
+        # segment (e.g. "a/../../outside.py") so a probe can't escape cwd.
+        if rel.startswith("/") or "://" in rel or ".." in rel.split("/"):
             continue
         # Governance: only gate when an edit verb is the NEAREST cue governing
         # this specific path within its own clause. A creation/description cue

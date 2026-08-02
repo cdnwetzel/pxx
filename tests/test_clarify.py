@@ -134,6 +134,24 @@ def test_existing_described_artifact_still_proceeds(tmp_path: Path) -> None:
     assert decision.state is ReadyState.READY_TO_EXECUTE
 
 
+def test_generic_noun_does_not_suppress_edit_target(tmp_path: Path) -> None:
+    # "runtime"/"called" are generic words that sit near real edit targets — they
+    # must NOT suppress the gate (would be a false negative on genuine ambiguity).
+    for task in (
+        "fix runtime crash in src/nope.py",
+        "fix the bug in the file called src/nope.py",
+    ):
+        decision = ready_to_act(task, cwd=tmp_path, test_command=None)
+        assert decision.state is ReadyState.INSUFFICIENT_CONTEXT, task
+        assert "src/nope.py" in decision.question
+
+
+def test_parent_traversal_path_is_ignored(tmp_path: Path) -> None:
+    # Untrusted task text with a ".." segment must not be probed (cwd escape).
+    decision = ready_to_act("fix the bug in a/../../outside.py", cwd=tmp_path, test_command=None)
+    assert decision.state is ReadyState.READY_TO_EXECUTE
+
+
 # --- session wiring: ambiguous tasks stop WITHOUT editing ------------------------
 
 

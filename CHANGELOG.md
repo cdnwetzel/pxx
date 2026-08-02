@@ -3,6 +3,45 @@
 All notable changes to pxx are documented here. The 1.x series history is
 preserved in git (tag `v1.3.3` and earlier).
 
+## [2.3.1] — 2026-08-02
+
+Fixes from a two-session portable-box dogfood (primary GPU coder / on-device
+degrade). Truthfulness + degrade correctness.
+
+### Fixed
+
+- **Auto backend lane honors the fallback chain (BUG A).** `pxx ask/edit` picked
+  aider on binary presence alone, and aider ignores `[[fallback_models]]` — so
+  with the primary endpoint down it sat in litellm retries instead of degrading.
+  The auto lane now prefers native when a fallback chain is configured (only
+  native honors it). `run`/`loop` were already native; an explicit `--backend`
+  still wins.
+- **A provider-down aider run is `MODEL_UNAVAILABLE`, not `COMPLETED` (BUG B).**
+  aider exits 0 even when the endpoint is down/overloaded — it prints the
+  provider error and makes no edit, which fell through to a phantom `COMPLETED`
+  (tokens=0). Now reclassified when nothing was edited and the transcript matches
+  a distinctive endpoint-down signature.
+- **`--budget-rounds` can raise the loop round cap (DF-02).** It fed only the
+  BudgetGuard (which tightens), never `run_loop`'s `max_rounds` (default 3), so a
+  loop needing 4+ heal rounds always hit ROUND_CAP at 3.
+- **`BUDGET_EXCEEDED`/`EDIT_TIMEOUT` report the real tokens spent, not 0.** The
+  session omitted the token count on those terminal branches, so an over-work run
+  recorded tokens=0 — under-counting `real_runs` and hiding the over-work.
+- Budget flags reject non-positive and non-finite values (`--budget-rounds 0`,
+  `--budget-seconds nan`/`inf`) at parse.
+
+### Added
+
+- **`backend` config key / `PXX_BACKEND`** (`native`/`aider`/`auto`) — a durable
+  per-box backend posture without a per-invocation `--backend` flag.
+
+### Docs
+
+- `docs/MIGRATION.md`: the 1.x→2.x reorg removed importable modules (`pxx.scope`,
+  `pxx.audit`) that downstream integrations depended on — drive pxx via its CLI.
+- `docs/CONFIG.md`: the portable / single-box degrade pattern and the backend
+  posture key.
+
 ## [2.3.0] — 2026-08-01
 
 Reliability and safety hardening surfaced by a full **zero-intervention dogfood**

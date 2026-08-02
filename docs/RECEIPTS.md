@@ -978,5 +978,61 @@ and the LaunchAgent are human-authored control-plane, not autonomously editable.
 
 ---
 
+## R-023 — portable / single-box degrade, verified across the fleet
+
+**Claim.** pxx's local-first degrade — the router probes `model` then each
+`[[fallback_models]]` entry and uses the first reachable — works end-to-end
+across three deployment states (a remote GPU **primary-up**, **primary-down**
+falling to an on-device model, and **local-only**) on BOTH the native lane and
+the auto lane (after BUG A, #21). Every run completes; nothing phantoms.
+
+**Grade.** Reproduced live on an 8GB portable box — 8 runs, zero failures.
+
+**Exact configuration (nothing inherits).** pxx **2.3.1** (PyPI wheel: #17 BUG B,
+#18 DF-02, #20 token truthfulness, #21 BUG A). Hermetic scratch repo (a buggy
+function + a failing test), identical coder task across the loop runs. Coder =
+a remote GPU model as primary with a `[[fallback_models]]` chain → an on-device
+instruct model. Reviewer pinned to a local endpoint via `PXX_REVIEW_*` for the
+standard runs (repo-local `[roles.review]` is ignored by design — data-egress
+boundary). `pxx loop --review --review-mode advisory` (native) and `pxx ask`
+(auto) per state.
+
+**Procedure (reproduction path).** Configure a fallback chain (remote primary +
+on-device fallback); for each of {primary-up, primary-down (dead port),
+local-only} run both the native loop and the auto `ask`.
+
+**Observed (2026-08-02).** All 8 runs COMPLETED:
+
+| State | Lane | Result |
+|---|---|---|
+| local-only | native loop / auto ask | COMPLETED (on-device) |
+| primary-down | native loop | COMPLETED — one clean "endpoint unreachable; falling back" line |
+| primary-down | auto ask (aider absent / **present**) | COMPLETED — **native preferred, clean fallback** (BUG A) |
+| primary-up | native loop / auto ask | COMPLETED (GPU primary, no fallback line) |
+| primary-down (bonus) | native, reviewer→dead endpoint | COMPLETED, verdict **NO_REVIEW** + loud "reviewer unavailable" |
+
+- **BUG A before/after:** same setup (aider on PATH, dead primary, chain set) on
+  pre-fix source picks aider → ~32s litellm retries → ~97s wall → phantom
+  COMPLETED (tokens=0); on 2.3.1 → native preferred → **0.9s clean COMPLETED**.
+- **Fallback overhead ≈ zero** (65s primary-down vs 62s local-only for the loop —
+  the dead-port probe fails instantly, the chain advances silently-but-logged).
+- `real_runs` accrued 63 → 77 over the campaign (includes aborted setup runs —
+  an honest ledger).
+
+**Boundary — explicitly not claimed.** (a) **Tool-call capability is
+context-dependent** — a model that returns structured `tool_calls` on a toy
+probe can degrade to *prose* under pxx's real loop prompt (the detector then
+correctly terminates MODEL_UNAVAILABLE). Validate an on-device fallback coder
+under a realistic-size context, not a one-line probe. (b) A reachable primary
+serving a *different model id* hard-fails MODEL_UNAVAILABLE (404) without
+advancing the chain — the native loop path doesn't use the router's
+single-model-id correction (tracked follow-up). (c) The **reviewer has no
+fallback chain**: when its endpoint is down it is honestly absent (NO_REVIEW),
+never a phantom pass. (d) The safety-net stash does not currently restore
+*untracked* files on a mid-run abort (tracked follow-up). Evidence is from one
+8GB box; per-run rows live in that box's local state dir.
+
+---
+
 *Convention: entries are append-only and dated; superseded claims are
 struck through with a pointer to the superseding entry, never deleted.*

@@ -670,6 +670,8 @@ def _cmd_loop(args: argparse.Namespace, unknown: list[str]) -> int:
     if reviewer is not None:
         loop_kwargs["reviewer"] = reviewer
         loop_kwargs["review_mode"] = review_mode
+    if args.budget_rounds is not None:
+        loop_kwargs["max_rounds"] = args.budget_rounds
     outcome = asyncio.run(run_loop(task, settings, **loop_kwargs))
     print(f"[{outcome.code}] {outcome.summary}")
     return exit_code_for(outcome)

@@ -3,7 +3,12 @@
 All notable changes to pxx are documented here. The 1.x series history is
 preserved in git (tag `v1.3.3` and earlier).
 
-## [Unreleased]
+## [2.3.3] — 2026-08-03
+
+Local-first ergonomics and honest diagnostics from an overnight batch: a per-box
+review default, a token budget that stops fighting free local inference, a
+`pxx doctor` probe that tests *usable* tool-calling under a real context, and
+quieter scope accounting.
 
 ### Added
 

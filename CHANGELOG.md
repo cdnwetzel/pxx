@@ -3,6 +3,17 @@
 All notable changes to pxx are documented here. The 1.x series history is
 preserved in git (tag `v1.3.3` and earlier).
 
+## [Unreleased]
+
+### Added
+
+- **Per-box `pxx loop` review default (`loop_review` / `PXX_LOOP_REVIEW`).** The
+  model-backed review gate stays opt-in per run (`--review`), but a box that
+  always wants it can now flip the default with `loop_review = true` (or
+  `PXX_LOOP_REVIEW=1`). `pxx loop` gains a matching `--no-review` so a single run
+  can turn the gate off even when the setting is on; an explicit flag always wins
+  over the config default. The shipped default is unchanged (review off).
+
 ## [2.3.2] — 2026-08-02
 
 Three fixes surfaced and independently re-verified by the second-lane (8GB

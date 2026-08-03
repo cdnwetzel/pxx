@@ -91,6 +91,11 @@ class Settings:
     mcp_servers: tuple[McpServerSpec, ...] = ()
     safety_net: bool = True  # K5: stash + pxx-pre/<ts> tag on edit-capable starts
     auto_commit: bool = False  # opt-in: commit session work on COMPLETED (the undo tag still points at pre-session HEAD)
+    #: Per-box default for the ``pxx loop`` model-backed review gate. The shipped
+    #: default is OFF (review is opt-in via ``--review``); setting this true flips
+    #: the default to ON for this box, and ``--no-review`` still turns it off for
+    #: a single run. A ``--review``/``--no-review`` flag always wins over this.
+    loop_review: bool = False
 
     @property
     def effective_review_model(self) -> ModelRef:
@@ -124,6 +129,7 @@ _KNOWN_KEYS = {
     "sandbox_shell",
     "safety_net",
     "auto_commit",
+    "loop_review",
     "budgets",
     "hooks",
     "mcp_servers",
@@ -309,6 +315,8 @@ def _settings_from_dict(
         kwargs["safety_net"] = bool(data["safety_net"])
     if "auto_commit" in data:
         kwargs["auto_commit"] = bool(data["auto_commit"])
+    if "loop_review" in data:
+        kwargs["loop_review"] = bool(data["loop_review"])
     if "budgets" in data:
         b = data["budgets"]
         unknown = set(b) - _KNOWN_BUDGET_KEYS
@@ -359,6 +367,7 @@ _ENV_MAP = {
     "PXX_TEST_COMMAND": "test_command",
     "PXX_SANDBOX_SHELL": "sandbox_shell",
     "PXX_AUTO_COMMIT": "auto_commit",
+    "PXX_LOOP_REVIEW": "loop_review",
     "PXX_BACKEND": "backend",
     # 1.x compat
     "PXX_OLLAMA_BASE": "base_url",
@@ -384,6 +393,8 @@ def _settings_from_env(base: Settings) -> Settings:
             if cfg_key == "sandbox_shell":
                 data[cfg_key] = value.lower() in ("1", "true", "yes")
             elif cfg_key == "auto_commit":
+                data[cfg_key] = value.lower() in ("1", "true", "yes")
+            elif cfg_key == "loop_review":
                 data[cfg_key] = value.lower() in ("1", "true", "yes")
             else:
                 data[cfg_key] = value

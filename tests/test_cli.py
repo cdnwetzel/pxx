@@ -2027,7 +2027,56 @@ def test_loop_review_mode_without_review_is_usage_error(monkeypatch, tmp_path, c
     # --review-mode without --review has no effect → fail loud, never silent.
     rc = cli.main(["loop", "-m", "do it", "--review-mode", "advisory"])
     assert rc == cli.EXIT_USAGE
-    assert "--review-mode requires --review" in capsys.readouterr().err
+    assert "--review-mode requires review to be enabled" in capsys.readouterr().err
+    assert "kwargs" not in captured  # never reached run_loop
+
+
+# DF-03: per-box loop_review default + --no-review override
+
+
+def test_loop_review_enabled_by_loop_review_setting(monkeypatch, tmp_path):
+    """loop_review=True flips the default to ON with no --review flag."""
+    from pxx.config import Settings
+    from pxx.review import NativeReviewer, ReviewMode
+
+    settings = Settings(loop_review=True)
+    captured = _patch_loop(monkeypatch, tmp_path, settings)
+    assert cli.main(["loop", "-m", "do it"]) == 0
+    assert isinstance(captured["kwargs"]["reviewer"], NativeReviewer)
+    assert captured["kwargs"]["review_mode"] is ReviewMode.BLOCKING
+
+
+def test_loop_no_review_overrides_loop_review_setting(monkeypatch, tmp_path):
+    """An explicit --no-review turns the gate off even when loop_review=True."""
+    from pxx.config import Settings
+
+    settings = Settings(loop_review=True)
+    captured = _patch_loop(monkeypatch, tmp_path, settings)
+    assert cli.main(["loop", "-m", "do it", "--no-review"]) == 0
+    assert "reviewer" not in captured["kwargs"]
+    assert "review_mode" not in captured["kwargs"]
+
+
+def test_loop_review_mode_with_loop_review_setting_ok(monkeypatch, tmp_path):
+    """--review-mode is valid when review is enabled via the setting (no flag)."""
+    from pxx.config import Settings
+    from pxx.review import ReviewMode
+
+    settings = Settings(loop_review=True)
+    captured = _patch_loop(monkeypatch, tmp_path, settings)
+    assert cli.main(["loop", "-m", "do it", "--review-mode", "advisory"]) == 0
+    assert captured["kwargs"]["review_mode"] is ReviewMode.ADVISORY
+
+
+def test_loop_no_review_with_review_mode_is_usage_error(monkeypatch, tmp_path, capsys):
+    """--no-review contradicts --review-mode → fail loud, even with loop_review=True."""
+    from pxx.config import Settings
+
+    settings = Settings(loop_review=True)
+    captured = _patch_loop(monkeypatch, tmp_path, settings)
+    rc = cli.main(["loop", "-m", "do it", "--no-review", "--review-mode", "advisory"])
+    assert rc == cli.EXIT_USAGE
+    assert "--review-mode requires review to be enabled" in capsys.readouterr().err
     assert "kwargs" not in captured  # never reached run_loop
 
 

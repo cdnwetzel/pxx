@@ -136,7 +136,7 @@ class Session:
 
         scope = ScopeGate(self.cwd, settings.scope, settings.trusted_paths)
         hooks = HookRunner(settings.hooks)
-        budgets = BudgetGuard(settings.budgets)
+        budgets = BudgetGuard(settings.effective_budgets)
         cancel_event = asyncio.Event()
 
         memory: MemoryStore | None = None

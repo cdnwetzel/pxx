@@ -14,6 +14,18 @@ preserved in git (tag `v1.3.3` and earlier).
   can turn the gate off even when the setting is on; an explicit flag always wins
   over the config default. The shipped default is unchanged (review off).
 
+### Changed
+
+- **Provider-aware token budget.** On a local provider (`ollama`/`vllm`), where
+  tokens are free, the default `max_tokens` ceiling (200k) is lifted to a high
+  finite backstop so a real task on a small box isn't cut short with a false
+  `BUDGET_EXCEEDED` mid-work. The lift applies only when `max_tokens` is left at
+  its `200000` default (any other value — tighter *or* looser — is honoured
+  verbatim; an explicit `200000` is indistinguishable from the default and is
+  still lifted), and never touches `max_rounds`, `max_wall_seconds`, or
+  `max_cost_usd`, so runaways and paid spend stay bounded exactly as before.
+  Paid providers keep the configured cap.
+
 ## [2.3.2] — 2026-08-02
 
 Three fixes surfaced and independently re-verified by the second-lane (8GB

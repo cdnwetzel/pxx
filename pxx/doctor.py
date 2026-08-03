@@ -10,6 +10,7 @@ Nothing here crashes: every probe is best-effort and reported, never raised.
 from __future__ import annotations
 
 import asyncio
+import logging
 import shutil
 import sys
 from dataclasses import dataclass
@@ -18,6 +19,8 @@ from pathlib import Path
 import httpx
 
 from .config import ModelRef, Settings
+
+log = logging.getLogger("pxx.doctor")
 
 
 def _client_factory(timeout: float) -> httpx.AsyncClient:
@@ -61,37 +64,79 @@ def _config_check(cwd: Path) -> Check:
 #: calling (`--enable-auto-tool-choice --tool-call-parser`).
 _TOOL_CHOICE_ERROR = "tool choice requires --enable-auto-tool-choice"
 
+#: A realistic tool for the probe — a file read is the most common first move a
+#: coding agent makes, so a model that can drive `pxx loop` will reach for it.
+_PROBE_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "read_file",
+            "description": "Read a UTF-8 text file from the repository.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "repo-relative file path"}
+                },
+                "required": ["path"],
+            },
+        },
+    }
+]
+#: An unambiguous task that a tool-using agent answers with a call, never prose.
+_PROBE_USER = (
+    "Read the file README.md so you can summarize it. Use the read_file tool "
+    'with path "README.md". Do not answer in prose — make the tool call.'
+)
+_PROBE_FALLBACK_SYSTEM = (
+    "You are pxx, a local-first coding agent. You act only by calling the "
+    "provided tools, never by describing actions in prose."
+)
+
+
+def _probe_system_prompt() -> str:
+    """The real native-backend system prompt, so the probe puts the model under
+    the same instruction load a `pxx loop` round does (F2). Best-effort: if the
+    resource can't be imported, fall back to a compact equivalent."""
+    try:
+        from .backends.native import load_system_prompt
+
+        return load_system_prompt()
+    except Exception:
+        # A broken import silently degrades the probe from a "realistic context"
+        # test to a generic one — leave a diagnostic trail (mirrors native.py).
+        log.exception("native system prompt unavailable for probe; using fallback")
+        return _PROBE_FALLBACK_SYSTEM
+
 
 async def _tool_calling_check(
     spec: ModelRef,
     *,
-    timeout: float = 2.0,  # noqa: ASYNC109 - httpx probe timeout, not asyncio scope
+    timeout: float = 15.0,  # noqa: ASYNC109 - httpx probe timeout (a real generation), not asyncio scope
 ) -> Check | None:
-    """Probe one endpoint for tool-calling support (F8).
+    """Probe one endpoint for *usable* tool-calling (F2/F8).
 
-    The native backend — and therefore every ``pxx loop`` run — needs an
-    endpoint that accepts a ``tools`` array. Ollama supports tool calling out
-    of the box (skipped). Fail-soft: any probe failure is a warning line,
-    never a doctor failure.
+    The native backend — and therefore every ``pxx loop`` run — needs a model
+    that emits a structured ``tool_call`` under a real agent context, not just
+    an endpoint that accepts a ``tools`` array. A toy one-token probe lies:
+    some models (notably small instruct models on constrained hardware) accept
+    ``tools`` and return HTTP 200, yet answer in PROSE once the context is the
+    size of an actual loop prompt — which strands the loop. So this probe sends
+    the real system prompt plus an unambiguous file-read task and requires the
+    response to contain a tool call. Runs for every provider, ollama included
+    (that is where the degradation shows up). Fail-soft: any probe failure is a
+    warning line, never a doctor failure.
     """
-    if spec.provider == "ollama":
-        return None
     name = f"tool-calling:{spec.model}"
     headers = {"Authorization": f"Bearer {spec.api_key}"} if spec.api_key else {}
     payload = {
         "model": spec.model,
-        "messages": [{"role": "user", "content": "ping"}],
-        "tools": [
-            {
-                "type": "function",
-                "function": {
-                    "name": "noop",
-                    "description": "no-op probe",
-                    "parameters": {"type": "object", "properties": {}},
-                },
-            }
+        "messages": [
+            {"role": "system", "content": _probe_system_prompt()},
+            {"role": "user", "content": _PROBE_USER},
         ],
-        "max_tokens": 1,
+        "tools": _PROBE_TOOLS,
+        "tool_choice": "auto",
+        "max_tokens": 256,
     }
     try:
         async with _client_factory(timeout) as client:
@@ -100,8 +145,6 @@ async def _tool_calling_check(
             )
     except Exception as exc:
         return Check(name, False, f"probe failed ({exc!r:.120})", hard=False)
-    if resp.status_code == 200:
-        return Check(name, True, "tool calling supported", hard=False)
     if resp.status_code == 400 and _TOOL_CHOICE_ERROR in resp.text:
         return Check(
             name,
@@ -111,10 +154,32 @@ async def _tool_calling_check(
             "--tool-call-parser <parser>",
             hard=False,
         )
+    if resp.status_code != 200:
+        return Check(
+            name,
+            False,
+            f"probe returned HTTP {resp.status_code} ({resp.text[:120]})",
+            hard=False,
+        )
+    try:
+        message = resp.json()["choices"][0]["message"]
+    except (ValueError, KeyError, IndexError, TypeError):
+        return Check(name, False, "probe returned an unparseable 200 body", hard=False)
+    if not isinstance(message, dict):
+        # A parseable 200 whose message isn't an object — preserve fail-soft.
+        return Check(name, False, "probe returned an unexpected 200 message shape", hard=False)
+    if message.get("tool_calls"):
+        return Check(name, True, "tool-calling verified under a realistic context", hard=False)
+    # 200, parsed, no tool call. Distinguish a genuine prose reply (non-empty
+    # content) from an empty/degenerate response so the warning isn't misleading.
+    answered_in_prose = bool((message.get("content") or "").strip())
+    what = "answered in prose" if answered_in_prose else "returned no tool call and no content"
     return Check(
         name,
         False,
-        f"probe returned HTTP {resp.status_code} ({resp.text[:120]})",
+        f"accepts `tools` but {what} under a realistic context — this model "
+        "may not reliably drive the native backend / 'pxx loop' on this hardware (F2). "
+        "Pick a model verified to tool-call here, or serve it with a larger context.",
         hard=False,
     )
 

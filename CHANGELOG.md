@@ -5,6 +5,7 @@ preserved in git (tag `v1.3.3` and earlier).
 
 ## [Unreleased]
 
+<<<<<<< HEAD
 ### Added
 
 - **Per-box `pxx loop` review default (`loop_review` / `PXX_LOOP_REVIEW`).** The
@@ -25,6 +26,16 @@ preserved in git (tag `v1.3.3` and earlier).
   still lifted), and never touches `max_rounds`, `max_wall_seconds`, or
   `max_cost_usd`, so runaways and paid spend stay bounded exactly as before.
   Paid providers keep the configured cap.
+- **`pxx doctor` verifies *usable* tool-calling, not just an accepted `tools`
+  array (F2).** The old probe sent a one-token "ping" and passed on any HTTP
+  200 — and skipped ollama entirely. But accepting `tools` ≠ emitting a
+  `tool_call`: some small instruct models return 200 yet answer in PROSE once
+  the context is the size of a real loop prompt, which strands `pxx loop`
+  (observed on an 8GB box). The probe now sends the real native system prompt
+  plus an unambiguous file-read task and requires the response to contain a
+  structured tool call, running for every provider including ollama. A
+  prose response is an actionable F2 warning; still fail-soft (never a hard
+  doctor failure).
 
 ## [2.3.2] — 2026-08-02
 

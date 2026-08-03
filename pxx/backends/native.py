@@ -53,6 +53,13 @@ def _load_system_prompt() -> str:
         return _FALLBACK_SYSTEM_PROMPT
 
 
+#: Public accessor for the native system prompt, so other modules (e.g.
+#: ``doctor``'s realistic tool-calling probe) can depend on an explicit contract
+#: rather than the module-private ``_load_system_prompt``.
+def load_system_prompt() -> str:
+    return _load_system_prompt()
+
+
 def _estimate_cost(model: ModelRef, prompt_tokens: int, completion_tokens: int) -> float | None:
     """USD cost for one completion, or None when unpriced (never fabricated)."""
     if model.provider != "openai":

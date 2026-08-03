@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 
 import httpx
 
@@ -32,16 +33,89 @@ def mock_client(monkeypatch, handler) -> None:
     )
 
 
-def test_tool_capable_endpoint_reports_ok(monkeypatch):
+#: A 200 body carrying a structured tool call (the healthy result).
+TOOL_CALL_BODY = {
+    "choices": [
+        {
+            "message": {
+                "role": "assistant",
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {"name": "read_file", "arguments": '{"path": "README.md"}'},
+                    }
+                ],
+            }
+        }
+    ]
+}
+#: A 200 body where the model answered in prose instead of calling the tool.
+PROSE_BODY = {
+    "choices": [{"message": {"role": "assistant", "content": "Sure — I'd open README.md and…"}}]
+}
+
+
+def test_tool_call_under_realistic_context_reports_ok(monkeypatch):
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url == "http://test.local/v1/chat/completions"
-        return httpx.Response(200, json={"choices": [], "usage": {"total_tokens": 1}})
+        # The probe must carry a realistic context, not a toy "ping": the real
+        # system prompt, a tool definition, and tool_choice=auto (F2). Assert on
+        # the decoded structure, not raw-text substrings (serialization-agnostic).
+        payload = json.loads(request.read())
+        assert payload["tool_choice"] == "auto"
+        assert any(t["function"]["name"] == "read_file" for t in payload["tools"])
+        roles = [m["role"] for m in payload["messages"]]
+        assert "system" in roles and "user" in roles
+        # The system message carries real instruction load, not a one-liner.
+        system = next(m["content"] for m in payload["messages"] if m["role"] == "system")
+        assert len(system) > 100
+        return httpx.Response(200, json=TOOL_CALL_BODY)
 
     mock_client(monkeypatch, handler)
     check = asyncio.run(_tool_calling_check(SPEC))
     assert check is not None
     assert check.ok and not check.hard
-    assert "tool calling supported" in check.detail
+    assert "verified under a realistic context" in check.detail
+
+
+def test_prose_under_realistic_context_is_f2_warning(monkeypatch):
+    # The endpoint accepts `tools` and returns 200, but the model answered in
+    # prose — the exact F2 degradation a toy probe would have called "supported".
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=PROSE_BODY)
+
+    mock_client(monkeypatch, handler)
+    check = asyncio.run(_tool_calling_check(SPEC))
+    assert check is not None
+    assert not check.ok and not check.hard  # warning, never a doctor failure
+    assert "answered in prose" in check.detail
+    assert "F2" in check.detail
+
+
+def test_empty_message_under_realistic_context_is_distinct_warning(monkeypatch):
+    # 200 with neither tool_calls nor content — not "prose", a degenerate reply.
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"choices": [{"message": {"role": "assistant"}}]})
+
+    mock_client(monkeypatch, handler)
+    check = asyncio.run(_tool_calling_check(SPEC))
+    assert check is not None
+    assert not check.ok and not check.hard
+    assert "no tool call and no content" in check.detail
+    assert "answered in prose" not in check.detail
+
+
+def test_non_dict_message_is_a_warning(monkeypatch):
+    # A parseable 200 whose message isn't an object must stay fail-soft, not raise.
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"choices": [{"message": "oops"}]})
+
+    mock_client(monkeypatch, handler)
+    check = asyncio.run(_tool_calling_check(SPEC))
+    assert check is not None
+    assert not check.ok and not check.hard
+    assert "unexpected 200 message shape" in check.detail
 
 
 def test_vllm_without_tool_flags_reports_actionable_warning(monkeypatch):
@@ -68,9 +142,55 @@ def test_connection_error_is_a_warning_not_a_failure(monkeypatch):
     assert "probe failed" in check.detail
 
 
-def test_ollama_is_skipped():
-    # Ollama endpoints support tool calling out of the box — no probe.
-    assert asyncio.run(_tool_calling_check(ModelRef(provider="ollama"))) is None
+def test_unparseable_200_body_is_a_warning(monkeypatch):
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"unexpected": "shape"})
+
+    mock_client(monkeypatch, handler)
+    check = asyncio.run(_tool_calling_check(SPEC))
+    assert check is not None
+    assert not check.ok and not check.hard
+    assert "unparseable" in check.detail
+
+
+def test_ollama_is_probed_not_skipped(monkeypatch):
+    # F2: ollama is exactly where small instruct models accept `tools` but
+    # prose out under load — so it must be probed, not skipped.
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=TOOL_CALL_BODY)
+
+    mock_client(monkeypatch, handler)
+    check = asyncio.run(_tool_calling_check(ModelRef(provider="ollama", model="qwen2.5-coder:7b")))
+    assert check is not None
+    assert check.ok
+    assert "verified under a realistic context" in check.detail
+
+
+def test_probe_system_prompt_uses_real_native_prompt():
+    # The probe must load the actual native system prompt (realistic load),
+    # not silently fall back to the compact stub.
+    from pxx.backends.native import load_system_prompt
+    from pxx.doctor import _PROBE_FALLBACK_SYSTEM, _probe_system_prompt
+
+    prompt = _probe_system_prompt()
+    assert prompt == load_system_prompt()
+    assert prompt != _PROBE_FALLBACK_SYSTEM  # the real resource, not the stub
+    assert len(prompt) > 100
+
+
+def test_probe_system_prompt_falls_back_and_logs(monkeypatch, caplog):
+    # If the native prompt can't be imported/read, the probe degrades to the
+    # compact stub AND leaves a diagnostic trail (never silent).
+    import pxx.backends.native as native
+    from pxx.doctor import _PROBE_FALLBACK_SYSTEM, _probe_system_prompt
+
+    def boom():
+        raise RuntimeError("resource unavailable")
+
+    monkeypatch.setattr(native, "load_system_prompt", boom)
+    with caplog.at_level("ERROR", logger="pxx.doctor"):
+        assert _probe_system_prompt() == _PROBE_FALLBACK_SYSTEM
+    assert "using fallback" in caplog.text
 
 
 def test_hook_coverage_warns_in_edit_mode_without_matching_hook():

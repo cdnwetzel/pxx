@@ -29,8 +29,13 @@ Precedence (highest wins): CLI flags → `PXX_*` env vars → `./pxx.toml` or
 supports tool calling out of the box. A vLLM server must be launched with
 `--enable-auto-tool-choice --tool-call-parser <parser>`; without those flags
 every native round fails with HTTP 400 (`"auto" tool choice requires …`).
-`pxx doctor` probes the configured endpoints for this. The aider backend
-(`ask`/`edit`, or `run --backend aider`) does not need endpoint tool calling.
+`pxx doctor` probes the configured endpoints for this — under the real agent
+system prompt, not a toy call — and warns (F2) when a model accepts `tools` but
+answers in prose, which strands `pxx loop`. Some small instruct models pass a
+one-line probe yet degrade under a real loop context on constrained hardware, so
+the probe requires an actual tool call and runs for ollama too. The aider
+backend (`ask`/`edit`, or `run --backend aider`) does not need endpoint tool
+calling.
 
 **`pxx loop` review gate.** The model-backed review gate is opt-in per run via
 `--review` (and `--review-mode blocking|advisory`). A box that always wants it

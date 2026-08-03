@@ -25,13 +25,11 @@ install + `pxx doctor` + hands-on tutorial (R-001, 6/6 on 8 GB). The public
 narrative is grounded, not vaporware.
 
 **Genuine gaps (evaluation-readiness, small):**
-- [ ] CI status badges (3.11/3.12/3.13) in the README — the one missing
-  "flawless landing" polish; the release gates (R-005) are already green,
-  just unbadged.
-- [ ] Author receipts **R-024–R-026** for the just-shipped, independently
+- [x] CI status badges (CI/PyPI/pyversions/MIT) in the README — done 2026-08-02.
+- [x] Author receipts **R-024–R-026** for the just-shipped, independently
   re-verified fixes — F1 (untracked-restore on abort), F3 (model-404 advances
-  the fallback chain), F5 (read/write scope split). Extends the receipt trail a
-  committee inspects; the fixes are in 2.3.2 with repros already re-run.
+  the fallback chain), F5 (read/write scope split). Done 2026-08-02; RECEIPTS.md
+  is current with PyPI 2.3.2.
 - [ ] A one-command clean-machine reproduction of R-001 (install → `pxx doctor`
   → tutorial 6/6) captured as a dated check, so "runs in 5 min" is itself
   receipted.

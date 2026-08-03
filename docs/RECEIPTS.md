@@ -1042,5 +1042,120 @@ F1, PR #24: an aborted run restores the pre-run tree, incl. untracked.]** Eviden
 
 ---
 
+## R-024 — the safety net restores the working tree on abort, incl. UNTRACKED
+
+**Claim.** When an edit-capable run ABORTS (any non-COMPLETED outcome), the
+safety net restores the user's pre-run working tree — tracked-dirty AND
+untracked files — instead of stranding it in a stash pxx never pops. Fixes F1:
+the `pxx-pre` tag restores tracked files (they are at HEAD) but cannot restore
+untracked ones (they are in no commit), so an aborted run over a dirty tree
+silently lost the user's untracked files.
+
+**Grade.** Reproducible (unit tests) + Attested (mini 2026-08-02, and
+independently re-verified on the 8GB portable box by re-running the original
+repro).
+
+**Exact configuration (nothing inherits).** pxx **2.3.2**; `restore_safety_net`
++ `_stash_ref` in `pxx/safety_net.py`; wired into the loop and session teardown
+(runs LAST, after the run artifact is written, so restored WIP is never captured
+into `diff.patch`). `reset --hard` to the tag then pop the net's OWN stash
+(matched on the exact message). Fail-soft.
+
+**Procedure (reproduction path).**
+
+```sh
+uv run --extra dev python -m pytest tests/test_safety_net.py -q
+# e2e: in a git repo with a tracked-dirty file + an untracked file, run
+#   pxx loop -m "…" --scope . --base-url http://127.0.0.1:9999   # dead endpoint
+# (no [[fallback_models]]) -> MODEL_UNAVAILABLE abort.
+```
+
+**Observed (2026-08-02).** On released 2.3.1 a dead-endpoint `MODEL_UNAVAILABLE`
+loop LOSES an untracked `notes.txt` (stranded in a `pxx safety net loop-*`
+stash). On 2.3.2 the same abort restores `notes.txt` and the tracked-dirty file,
+discards the failed run's partial edit, leaves no stash; a pre-run `SECRET_KEY`
+never appears in any run `diff.patch`. Full suite 1088+ passed.
+
+**Boundary — explicitly not claimed.** Restore fires on ABORT only. On a
+COMPLETED run over a dirty tree the net still stashes the user's pre-run WIP and
+does not pop it (pop is the user's move) — an open follow-up (F7). Reads that
+canonicalize outside the repo, and any git failure, leave tag/stash intact for
+manual recovery (never crashes).
+
+---
+
+## R-025 — a 404 / model-not-found advances the fallback chain
+
+**Claim.** A REACHABLE endpoint that does not serve the requested model id
+(HTTP 404, or a 400/422 body naming a missing model) advances the
+`[[fallback_models]]` chain — the same path as an unreachable endpoint — instead
+of hard-failing `MODEL_UNAVAILABLE`. Fixes F3: only connection/timeout errors
+advanced the chain, so a reachable-but-wrong-model primary hard-failed.
+
+**Grade.** Reproducible (unit tests) + Attested (mini 2026-08-02; F3 was
+surfaced and re-verified end-to-end on the portable box with an auditable
+`gate_decision` fallback event).
+
+**Exact configuration (nothing inherits).** pxx **2.3.2**; `_model_not_found`
++ the advance branch in `pxx/backends/native.py`. 404 always; 400/422 only when
+the body names a missing model; 5xx and generic 400s are NOT correctable.
+
+**Procedure (reproduction path).**
+
+```sh
+uv run --extra dev python -m pytest tests/test_backends_native.py -q -k "model_not_found or fallback"
+```
+
+**Observed (2026-08-02).** A primary returning 404 + a healthy fallback → the
+run COMPLETES on the fallback, emitting one `fallback` gate event to the next
+model. A 404 on the LAST endpoint still raises `BackendError` (never silently
+swallowed). Parametrized detection pins 404/400-model-not-found/422 as
+correctable and exceed-context / generic-400 / 5xx as not.
+
+**Boundary — explicitly not claimed.** This ADVANCES the chain; it does not
+auto-correct the model id on a single-model endpoint (the router has that seam;
+the native loop path only advances). Bare reachability is still not sufficiency.
+
+---
+
+## R-026 — scope split: reads span the repo, writes stay in `scope`
+
+**Claim.** A single-file or single-dir `--scope` no longer blocks READS: the
+agent may read anything under the project root (tests, imports, context) but may
+only WRITE within `scope`. Reads still cannot escape the root. Fixes F5, the
+root cause of the dogfood `OUT_OF_SCOPE` failures — the agent could not read the
+test it needed to edit correctly.
+
+**Grade.** Reproducible (unit + tool tests) + Attested (mini 2026-08-02; the
+morning's exact single-file-scope failure now reads the sibling test with no
+violation).
+
+**Exact configuration (nothing inherits).** pxx **2.3.2**; `ScopeGate.check_read`
+(repo-root or trusted) vs `check_write` (scope) in `pxx/safety.py`; the broker
+(`pxx/broker.py`) authorizes read-class actions via `check_read`, write-class via
+`check_write`; `read_file`/`list_files`/`search_files` re-gate through the read
+scope (the search fallback re-checks each symlink candidate).
+
+**Procedure (reproduction path).**
+
+```sh
+uv run --extra dev python -m pytest tests/test_safety.py tests/test_tools.py -q -k "scope"
+```
+
+**Observed (2026-08-02).** Under `--scope src`, `read_file docs/readme.md`
+succeeds while `write_file docs/readme.md` is denied; a read of `/etc/passwd` or
+`../outside.txt` still raises; the Python search fallback returns "no matches"
+for a symlink pointing at an out-of-root secret (content not exposed). Full suite
+1100 passed.
+
+**Boundary — explicitly not claimed.** Reads are confined to the project root —
+a user who needs to prevent the agent from *reading* an in-repo file should
+gitignore/vault it (scope no longer gates reads). The write boundary and the
+loop's changed-path guard are unchanged. Test-generated build artifacts
+(`__pycache__/*.pyc`) counted by the changed-path guard as OUT_OF_SCOPE are a
+separate open follow-up.
+
+---
+
 *Convention: entries are append-only and dated; superseded claims are
 struck through with a pointer to the superseding entry, never deleted.*

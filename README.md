@@ -1,5 +1,10 @@
 # pxx 2.0 — local-first AI coding agent runtime
 
+[![CI](https://github.com/cdnwetzel/pxx/actions/workflows/ci.yml/badge.svg?branch=v2)](https://github.com/cdnwetzel/pxx/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/pxx-orchestrator)](https://pypi.org/project/pxx-orchestrator/)
+[![Python](https://img.shields.io/pypi/pyversions/pxx-orchestrator)](https://pypi.org/project/pxx-orchestrator/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+
 `pxx` is an async, event-sourced coding-agent runtime that runs against **your own
 inference** (Ollama, vLLM, or any OpenAI-compatible endpoint) — no cloud dependency,
 no telemetry, no API keys required. It pairs a native tool-calling agent loop with

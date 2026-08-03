@@ -386,6 +386,53 @@ def test_roles_review_bad_provider_rejected(tmp_path, monkeypatch):
         load_settings(cwd=tmp_path)
 
 
+# Provider-aware token budget: local providers lift the free-to-run token cap.
+
+
+def _budgets_for(provider, **budget_kwargs):
+    from pxx.config import ModelRef, Settings
+    from pxx.safety import Budgets
+
+    return Settings(
+        model=ModelRef(provider=provider), budgets=Budgets(**budget_kwargs)
+    ).effective_budgets
+
+
+@pytest.mark.parametrize("provider", ["ollama", "vllm"])
+def test_effective_budgets_lifts_tokens_for_local_provider(provider):
+    from pxx.config import _LOCAL_TOKEN_BUDGET
+
+    assert _budgets_for(provider).max_tokens == _LOCAL_TOKEN_BUDGET
+
+
+@pytest.mark.parametrize("provider", ["openai", "openai-compatible"])
+def test_effective_budgets_keeps_cap_for_paid_provider(provider):
+    from pxx.safety import Budgets
+
+    assert _budgets_for(provider).max_tokens == Budgets().max_tokens
+
+
+def test_effective_budgets_honors_explicit_max_tokens_on_local():
+    # An operator who set max_tokens keeps exactly their value, even on ollama.
+    assert _budgets_for("ollama", max_tokens=50_000).max_tokens == 50_000
+    assert _budgets_for("ollama", max_tokens=500_000).max_tokens == 500_000
+
+
+def test_effective_budgets_never_touches_cost_or_rounds():
+    from pxx.config import _LOCAL_TOKEN_BUDGET
+
+    b = _budgets_for("ollama", max_cost_usd=2.0, max_rounds=7)
+    assert b.max_tokens == _LOCAL_TOKEN_BUDGET  # lifted
+    assert b.max_cost_usd == 2.0 and b.max_rounds == 7  # untouched
+
+
+def test_effective_budgets_default_provider_is_local():
+    # The shipped default provider is ollama → tokens lifted out of the box.
+    from pxx.config import _LOCAL_TOKEN_BUDGET
+
+    assert Settings().effective_budgets.max_tokens == _LOCAL_TOKEN_BUDGET
+
+
 def test_review_env_vars_are_consumed_no_typo_warning(monkeypatch, caplog):
     import pxx.config as config
 

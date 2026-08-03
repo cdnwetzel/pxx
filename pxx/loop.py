@@ -285,7 +285,7 @@ async def run_loop(
     parent_bus = bus or EventBus()
     factory = backend_factory or _default_factory(settings)
     scope = ScopeGate(root, settings.scope, settings.trusted_paths)
-    budgets = BudgetGuard(settings.budgets)
+    budgets = BudgetGuard(settings.effective_budgets)
     command = test_command or settings.test_command
     in_repo = await _in_git_repo(root)
     pre_sha = None

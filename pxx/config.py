@@ -23,6 +23,14 @@ from typing import Any
 from .errors import ConfigError
 from .safety import Budgets, Hook, PermissionMode
 
+# Providers that run on the operator's own hardware, where a token has no
+# marginal cost. For these the max_tokens ceiling is pure friction — a run that
+# does real work on an 8GB box can burn 200k tokens legitimately — so it is
+# lifted to a high finite backstop (runaways are still bounded by max_rounds and
+# max_wall_seconds, and paid spend by max_cost_usd, which stays untouched).
+_LOCAL_PROVIDERS = frozenset({"ollama", "vllm"})
+_LOCAL_TOKEN_BUDGET = 20_000_000
+
 log = logging.getLogger("pxx.config")
 
 
@@ -96,6 +104,25 @@ class Settings:
     #: the default to ON for this box, and ``--no-review`` still turns it off for
     #: a single run. A ``--review``/``--no-review`` flag always wins over this.
     loop_review: bool = False
+
+    @property
+    def effective_budgets(self) -> Budgets:
+        """Budgets adjusted for the coder provider. On a local provider
+        (``ollama``/``vllm``) where tokens are free, the ``max_tokens`` ceiling
+        is lifted to a high backstop — *unless* the operator explicitly changed
+        it, in which case their value is honoured verbatim. "Explicit" is
+        detected as differing from the shipped default: a user who tightened (or
+        raised) ``max_tokens`` keeps exactly what they set. Paid providers, and
+        every non-token budget (rounds, wall-clock, cost), are never touched, so
+        this only ever *relaxes* a free-to-run token cap. Use this instead of
+        ``.budgets`` at BudgetGuard construction so the guard sees the resolved
+        ceiling."""
+        if (
+            self.model.provider.lower() in _LOCAL_PROVIDERS
+            and self.budgets.max_tokens == Budgets().max_tokens
+        ):
+            return replace(self.budgets, max_tokens=_LOCAL_TOKEN_BUDGET)
+        return self.budgets
 
     @property
     def effective_review_model(self) -> ModelRef:

@@ -48,12 +48,15 @@ the run with `BUDGET_EXCEEDED`.
 **Provider-aware token ceiling.** On a local provider (`ollama`/`vllm`) a token
 has no marginal cost, so the default `max_tokens` ceiling is pure friction — a
 real task on a small box can legitimately burn 200k tokens. When the coder runs
-on a local provider **and** you have not changed `max_tokens` yourself, pxx
+on a local provider **and** `max_tokens` is still at its `200000` default, pxx
 lifts it to a high finite backstop so local runs aren't cut short mid-work.
 Runaways stay bounded by `max_rounds` and `max_wall_seconds`, and paid spend by
-`max_cost_usd` — none of which are touched. Set `max_tokens` explicitly (any
-value) to opt out and get exactly the cap you name. Paid providers (`openai`,
-`openai-compatible`) always keep the configured cap.
+`max_cost_usd` — none of which are touched. To opt out, set `max_tokens` to any
+value **other than** `200000` and you get exactly the cap you name (the lift is
+detected by comparison to the default, so an explicit `200000` reads as
+unchanged and is still lifted — pick `199999`/`200001` for a hard local cap
+there). Paid providers (`openai`, `openai-compatible`) always keep the
+configured cap.
 
 ## `[[fallback_models]]`
 

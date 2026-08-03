@@ -67,7 +67,10 @@ Default selection: **aider when the `aider` binary is on `PATH`, else native**
 (`tools` in the chat-completions request). Ollama supports tool calling out of
 the box. vLLM must be launched with `--enable-auto-tool-choice
 --tool-call-parser <parser>` — without those flags every native round fails
-with HTTP 400 (`"auto" tool choice requires …`). `pxx doctor` probes for this.
+with HTTP 400 (`"auto" tool choice requires …`). `pxx doctor` probes for this
+under a realistic agent context and reports if a model accepts `tools` but
+answers in prose (some small models tool-call on a toy probe yet degrade under
+a real loop prompt on constrained hardware).
 `ask`/`edit` (and `run` with `--backend aider`) can sidestep via the aider
 backend; `pxx loop` is native-only and cannot.
 

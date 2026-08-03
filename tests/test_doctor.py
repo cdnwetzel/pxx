@@ -32,16 +32,59 @@ def mock_client(monkeypatch, handler) -> None:
     )
 
 
-def test_tool_capable_endpoint_reports_ok(monkeypatch):
+#: A 200 body carrying a structured tool call (the healthy result).
+TOOL_CALL_BODY = {
+    "choices": [
+        {
+            "message": {
+                "role": "assistant",
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {"name": "read_file", "arguments": '{"path": "README.md"}'},
+                    }
+                ],
+            }
+        }
+    ]
+}
+#: A 200 body where the model answered in prose instead of calling the tool.
+PROSE_BODY = {
+    "choices": [{"message": {"role": "assistant", "content": "Sure — I'd open README.md and…"}}]
+}
+
+
+def test_tool_call_under_realistic_context_reports_ok(monkeypatch):
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url == "http://test.local/v1/chat/completions"
-        return httpx.Response(200, json={"choices": [], "usage": {"total_tokens": 1}})
+        body = request.read().decode()
+        # The probe must carry a realistic context, not a toy "ping": the real
+        # system prompt, a tool definition, and tool_choice=auto (F2).
+        assert '"tool_choice": "auto"' in body or '"tool_choice":"auto"' in body
+        assert "read_file" in body
+        assert '"role": "system"' in body or '"role":"system"' in body
+        return httpx.Response(200, json=TOOL_CALL_BODY)
 
     mock_client(monkeypatch, handler)
     check = asyncio.run(_tool_calling_check(SPEC))
     assert check is not None
     assert check.ok and not check.hard
-    assert "tool calling supported" in check.detail
+    assert "verified under a realistic context" in check.detail
+
+
+def test_prose_under_realistic_context_is_f2_warning(monkeypatch):
+    # The endpoint accepts `tools` and returns 200, but the model answered in
+    # prose — the exact F2 degradation a toy probe would have called "supported".
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=PROSE_BODY)
+
+    mock_client(monkeypatch, handler)
+    check = asyncio.run(_tool_calling_check(SPEC))
+    assert check is not None
+    assert not check.ok and not check.hard  # warning, never a doctor failure
+    assert "PROSE" in check.detail
+    assert "F2" in check.detail
 
 
 def test_vllm_without_tool_flags_reports_actionable_warning(monkeypatch):
@@ -68,9 +111,28 @@ def test_connection_error_is_a_warning_not_a_failure(monkeypatch):
     assert "probe failed" in check.detail
 
 
-def test_ollama_is_skipped():
-    # Ollama endpoints support tool calling out of the box — no probe.
-    assert asyncio.run(_tool_calling_check(ModelRef(provider="ollama"))) is None
+def test_unparseable_200_body_is_a_warning(monkeypatch):
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"unexpected": "shape"})
+
+    mock_client(monkeypatch, handler)
+    check = asyncio.run(_tool_calling_check(SPEC))
+    assert check is not None
+    assert not check.ok and not check.hard
+    assert "unparseable" in check.detail
+
+
+def test_ollama_is_probed_not_skipped(monkeypatch):
+    # F2: ollama is exactly where small instruct models accept `tools` but
+    # prose out under load — so it must be probed, not skipped.
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=TOOL_CALL_BODY)
+
+    mock_client(monkeypatch, handler)
+    check = asyncio.run(_tool_calling_check(ModelRef(provider="ollama", model="qwen2.5-coder:7b")))
+    assert check is not None
+    assert check.ok
+    assert "verified under a realistic context" in check.detail
 
 
 def test_hook_coverage_warns_in_edit_mode_without_matching_hook():

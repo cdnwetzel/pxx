@@ -5,7 +5,6 @@ preserved in git (tag `v1.3.3` and earlier).
 
 ## [Unreleased]
 
-<<<<<<< HEAD
 ### Added
 
 - **Per-box `pxx loop` review default (`loop_review` / `PXX_LOOP_REVIEW`).** The
@@ -36,6 +35,16 @@ preserved in git (tag `v1.3.3` and earlier).
   structured tool call, running for every provider including ollama. A
   prose response is an actionable F2 warning; still fail-soft (never a hard
   doctor failure).
+
+### Fixed
+
+- **Interpreter/test caches no longer trip OUT_OF_SCOPE or inflate the diff.**
+  When a target repo doesn't `.gitignore` them, the loop's own `test_command`
+  (pytest/mypy/ruff) creates `__pycache__/`, `*.pyc`, `.pytest_cache/`, etc.
+  *after* the agent's edits — and `_changed_paths` counted them as changes,
+  which could false-trigger `OUT_OF_SCOPE`. These never-agent-authored artifacts
+  are now filtered from the changed-path set (by path component, so nested dirs
+  are covered).
 
 ## [2.3.2] — 2026-08-02
 

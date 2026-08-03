@@ -1064,3 +1064,47 @@ def test_overwork_not_salvaged_when_lint_fails(tmp_path: Path) -> None:
         run_loop("task", settings, cwd=repo, backend_factory=factory, lint_command="false")
     )
     assert outcome.code is TerminalCode.BUDGET_EXCEEDED
+
+
+# --- generated-artifact filtering in _changed_paths (scope-noise) -----------
+
+
+@pytest.mark.parametrize(
+    "rel_path, expected",
+    [
+        ("__pycache__/foo.cpython-311.pyc", True),
+        ("src/pkg/__pycache__/mod.pyc", True),
+        ("foo.pyc", True),
+        ("foo.pyo", True),
+        (".pytest_cache/v/cache/lastfailed", True),
+        (".mypy_cache/3.11/x.data.json", True),
+        (".ruff_cache/content", True),
+        ("src/foo.py", False),
+        ("tests/test_foo.py", False),
+        ("docs/pycache_notes.md", False),  # substring, not a path component
+        ("a.pycx", False),  # not a .pyc suffix
+    ],
+)
+def test_is_generated_artifact(rel_path: str, expected: bool) -> None:
+    from pxx.loop import _is_generated_artifact
+
+    assert _is_generated_artifact(rel_path) is expected
+
+
+def test_changed_paths_filters_generated_artifacts(tmp_path: Path) -> None:
+    from pxx.loop import _changed_paths
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_repo(repo)
+    # A real source edit (should be reported) alongside test/interpreter
+    # byproducts (should be filtered) — the repo does NOT gitignore them.
+    (repo / "src").mkdir()
+    (repo / "src" / "foo.py").write_text("x = 1\n")
+    (repo / "src" / "__pycache__").mkdir()
+    (repo / "src" / "__pycache__" / "foo.pyc").write_bytes(b"\x00cached")
+    (repo / ".pytest_cache").mkdir()
+    (repo / ".pytest_cache" / "lastfailed").write_text("{}")
+
+    changed = asyncio.run(_changed_paths(repo))
+    assert changed == ["src/foo.py"]

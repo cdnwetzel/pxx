@@ -5,6 +5,57 @@
 > history is preserved in git at this path before this commit. For the v2
 > architecture contracts see `DESIGN.md` and `DESIGN-ROADMAP.md`.
 
+## Partnership / grant readiness — the bar (2026-08-02)
+
+North star: pxx should be evaluable by a top-tier compute program (e.g. the
+Apodex Frontier Program) as a **fully-audited, fail-closed engine that already
+works** — not a proposal. The bar IS the project's existing discipline made
+explicit: every external claim maps 1:1 to a dated receipt (R-NNN) with a
+provenance grade and an explicit boundary; nothing aspirational is ever stated
+as done; a compute request is framed as *scaling a proven engine*, never as
+proof we already ran at scale.
+
+**Already at the bar — do NOT re-do:** 23 evidence-gated receipts (R-001–R-023;
+grades + boundaries documented at the top of `docs/RECEIPTS.md`); published MIT
+package on PyPI (`pxx-orchestrator`, currently 2.3.2); host-enforced scope +
+protected control plane proven un-subvertable by the agent (R-014); role-based
+two-box routing (R-008/R-011); durable, un-gameable readiness ledger
+(R-016/R-020); zero-phantom degrade across remote/local nodes (R-023); README
+install + `pxx doctor` + hands-on tutorial (R-001, 6/6 on 8 GB). The public
+narrative is grounded, not vaporware.
+
+**Genuine gaps (evaluation-readiness, small):**
+- [ ] CI status badges (3.11/3.12/3.13) in the README — the one missing
+  "flawless landing" polish; the release gates (R-005) are already green,
+  just unbadged.
+- [ ] Author receipts **R-024–R-026** for the just-shipped, independently
+  re-verified fixes — F1 (untracked-restore on abort), F3 (model-404 advances
+  the fallback chain), F5 (read/write scope split). Extends the receipt trail a
+  committee inspects; the fixes are in 2.3.2 with repros already re-run.
+- [ ] A one-command clean-machine reproduction of R-001 (install → `pxx doctor`
+  → tutorial 6/6) captured as a dated check, so "runs in 5 min" is itself
+  receipted.
+- [ ] Submission hygiene (NOT a repo change): external links must target `v2`
+  or a version tag — the default branch is `v2` and `main` is retired, so any
+  `blob/main/…` URL 404s. (The in-repo README already uses `v2`.)
+
+**The at-scale research a compute grant funds — honestly NOT yet done; each
+lands as a NEW receipt only after it runs, never claimed in advance:**
+- [ ] `pxx compare` / eval matrix at N-thousand parallel tool-calling loops.
+  Today: single / small-scale. This is the core compute ask, not a current
+  capability.
+- [ ] Distributed verifier routing *at scale* — extend per-role routing
+  (R-008/R-011) to many decoupled coder/judge nodes over isolated overlays.
+- [ ] Long-horizon degradation studies: agentic drift, context-window
+  degradation (extends R-006), tool-call template failures (extends R-010),
+  over multi-GB corpora — measured, receipted, fp-rate tracked vs production.
+- [ ] Live model-scored eval arms on real endpoints (the `ArmRunner` seam /
+  R-019) — already under "Next"; scale is what the compute unlocks.
+
+Guardrail: this section is itself subject to the receipts discipline. An item
+moves from "gap" to "done" only when a receipt exists; a compute request
+describes scaling a proven engine, never a result we have not produced.
+
 ## Shipped in 2.0.0
 
 The complete program, built and verified (build track M0 → B10, each

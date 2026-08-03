@@ -10,6 +10,7 @@ Nothing here crashes: every probe is best-effort and reported, never raised.
 from __future__ import annotations
 
 import asyncio
+import logging
 import shutil
 import sys
 from dataclasses import dataclass
@@ -18,6 +19,8 @@ from pathlib import Path
 import httpx
 
 from .config import ModelRef, Settings
+
+log = logging.getLogger("pxx.doctor")
 
 
 def _client_factory(timeout: float) -> httpx.AsyncClient:
@@ -95,10 +98,13 @@ def _probe_system_prompt() -> str:
     the same instruction load a `pxx loop` round does (F2). Best-effort: if the
     resource can't be imported, fall back to a compact equivalent."""
     try:
-        from .backends.native import _load_system_prompt
+        from .backends.native import load_system_prompt
 
-        return _load_system_prompt()
+        return load_system_prompt()
     except Exception:
+        # A broken import silently degrades the probe from a "realistic context"
+        # test to a generic one — leave a diagnostic trail (mirrors native.py).
+        log.exception("native system prompt unavailable for probe; using fallback")
         return _PROBE_FALLBACK_SYSTEM
 
 
@@ -159,12 +165,19 @@ async def _tool_calling_check(
         message = resp.json()["choices"][0]["message"]
     except (ValueError, KeyError, IndexError, TypeError):
         return Check(name, False, "probe returned an unparseable 200 body", hard=False)
+    if not isinstance(message, dict):
+        # A parseable 200 whose message isn't an object — preserve fail-soft.
+        return Check(name, False, "probe returned an unexpected 200 message shape", hard=False)
     if message.get("tool_calls"):
         return Check(name, True, "tool-calling verified under a realistic context", hard=False)
+    # 200, parsed, no tool call. Distinguish a genuine prose reply (non-empty
+    # content) from an empty/degenerate response so the warning isn't misleading.
+    answered_in_prose = bool((message.get("content") or "").strip())
+    what = "answered in prose" if answered_in_prose else "returned no tool call and no content"
     return Check(
         name,
         False,
-        "accepts `tools` but returned PROSE under a realistic context — this model "
+        f"accepts `tools` but {what} under a realistic context — this model "
         "may not reliably drive the native backend / 'pxx loop' on this hardware (F2). "
         "Pick a model verified to tool-call here, or serve it with a larger context.",
         hard=False,

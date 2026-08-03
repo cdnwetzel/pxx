@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 
 import httpx
 
@@ -58,12 +59,17 @@ PROSE_BODY = {
 def test_tool_call_under_realistic_context_reports_ok(monkeypatch):
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url == "http://test.local/v1/chat/completions"
-        body = request.read().decode()
         # The probe must carry a realistic context, not a toy "ping": the real
-        # system prompt, a tool definition, and tool_choice=auto (F2).
-        assert '"tool_choice": "auto"' in body or '"tool_choice":"auto"' in body
-        assert "read_file" in body
-        assert '"role": "system"' in body or '"role":"system"' in body
+        # system prompt, a tool definition, and tool_choice=auto (F2). Assert on
+        # the decoded structure, not raw-text substrings (serialization-agnostic).
+        payload = json.loads(request.read())
+        assert payload["tool_choice"] == "auto"
+        assert any(t["function"]["name"] == "read_file" for t in payload["tools"])
+        roles = [m["role"] for m in payload["messages"]]
+        assert "system" in roles and "user" in roles
+        # The system message carries real instruction load, not a one-liner.
+        system = next(m["content"] for m in payload["messages"] if m["role"] == "system")
+        assert len(system) > 100
         return httpx.Response(200, json=TOOL_CALL_BODY)
 
     mock_client(monkeypatch, handler)
@@ -83,8 +89,33 @@ def test_prose_under_realistic_context_is_f2_warning(monkeypatch):
     check = asyncio.run(_tool_calling_check(SPEC))
     assert check is not None
     assert not check.ok and not check.hard  # warning, never a doctor failure
-    assert "PROSE" in check.detail
+    assert "answered in prose" in check.detail
     assert "F2" in check.detail
+
+
+def test_empty_message_under_realistic_context_is_distinct_warning(monkeypatch):
+    # 200 with neither tool_calls nor content — not "prose", a degenerate reply.
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"choices": [{"message": {"role": "assistant"}}]})
+
+    mock_client(monkeypatch, handler)
+    check = asyncio.run(_tool_calling_check(SPEC))
+    assert check is not None
+    assert not check.ok and not check.hard
+    assert "no tool call and no content" in check.detail
+    assert "answered in prose" not in check.detail
+
+
+def test_non_dict_message_is_a_warning(monkeypatch):
+    # A parseable 200 whose message isn't an object must stay fail-soft, not raise.
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"choices": [{"message": "oops"}]})
+
+    mock_client(monkeypatch, handler)
+    check = asyncio.run(_tool_calling_check(SPEC))
+    assert check is not None
+    assert not check.ok and not check.hard
+    assert "unexpected 200 message shape" in check.detail
 
 
 def test_vllm_without_tool_flags_reports_actionable_warning(monkeypatch):
@@ -133,6 +164,33 @@ def test_ollama_is_probed_not_skipped(monkeypatch):
     assert check is not None
     assert check.ok
     assert "verified under a realistic context" in check.detail
+
+
+def test_probe_system_prompt_uses_real_native_prompt():
+    # The probe must load the actual native system prompt (realistic load),
+    # not silently fall back to the compact stub.
+    from pxx.backends.native import load_system_prompt
+    from pxx.doctor import _PROBE_FALLBACK_SYSTEM, _probe_system_prompt
+
+    prompt = _probe_system_prompt()
+    assert prompt == load_system_prompt()
+    assert prompt != _PROBE_FALLBACK_SYSTEM  # the real resource, not the stub
+    assert len(prompt) > 100
+
+
+def test_probe_system_prompt_falls_back_and_logs(monkeypatch, caplog):
+    # If the native prompt can't be imported/read, the probe degrades to the
+    # compact stub AND leaves a diagnostic trail (never silent).
+    import pxx.backends.native as native
+    from pxx.doctor import _PROBE_FALLBACK_SYSTEM, _probe_system_prompt
+
+    def boom():
+        raise RuntimeError("resource unavailable")
+
+    monkeypatch.setattr(native, "load_system_prompt", boom)
+    with caplog.at_level("ERROR", logger="pxx.doctor"):
+        assert _probe_system_prompt() == _PROBE_FALLBACK_SYSTEM
+    assert "using fallback" in caplog.text
 
 
 def test_hook_coverage_warns_in_edit_mode_without_matching_hook():

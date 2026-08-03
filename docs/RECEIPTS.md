@@ -1157,5 +1157,53 @@ separate open follow-up.
 
 ---
 
+## R-027 — Fresh PyPI install → doctor → first real task (~5 min)
+
+**Claim.** A new user can `pip install pxx-orchestrator`, run `pxx doctor`, and
+complete a real read-only task against a local model — the install-and-first-task
+path works end to end on the shipped 2.3.2 wheel, and a read-only run leaves the
+working tree untouched.
+
+**Grade.** Reproducible — run live on the 16 GB Mac mini (2026-08-03) against a
+local Ollama endpoint. Complements R-001 (the full 6/6 tutorial on the 8 GB path).
+
+**Exact configuration (nothing inherits).** pxx **2.3.2** installed from PyPI
+into a fresh `python -m venv` (CPython 3.14.6) via `pip install
+pxx-orchestrator`; macOS, Apple-silicon Mac mini (16 GB); coder model
+`qwen2.5:7b-instruct` served by Ollama at `http://127.0.0.1:11666`
+(`PXX_PROVIDER`/`PXX_MODEL`/`PXX_BASE_URL`); a second, deliberately-unreachable
+endpoint (`Qwen3-Coder` @ `:8001`) present to show reachability reporting.
+
+**Procedure (reproduction path).**
+
+```sh
+python -m venv venv && ./venv/bin/pip install pxx-orchestrator
+./venv/bin/pxx --version                      # reports version 2.3.2
+./venv/bin/pxx doctor                         # setup diagnosis
+mkdir demo && cd demo && printf 'def add(a, b):\n    return a - b\n' > calc.py
+git init -q && git add -A && git -c user.name=t -c user.email=t@t commit -qm init
+PXX_PROVIDER=ollama PXX_MODEL=qwen2.5:7b-instruct PXX_BASE_URL=http://127.0.0.1:11666 \
+  ../venv/bin/pxx ask -m "Does the add function in calc.py have a bug? ..."
+```
+
+**Observed (2026-08-03).** `pip install` completed in ~1 s (cached wheels;
+first-ever install with a cold cache is longer). `pxx --version` reported `2.3.2`.
+`pxx doctor`: `python 3.14.6`, `config`, `memory_dir`, `state_dir`, `hooks`,
+`git`, `rg` all ✅; the reachable endpoint reported `reachable
+(http://127.0.0.1:11666)` and the down one `unreachable (…:8001)` (⚠, not an
+error — the fallback semantics). The read-only `pxx ask` terminated `COMPLETED`
+with a genuine model round (`rounds=3 tokens=4295 diff_lines=0`) and `git status`
+stayed empty — read-only mode wrote nothing.
+
+**Boundary — explicitly not claimed.** This attests the install → CLI → runtime
+→ read-only-safety path, **not** model answer-correctness and **not** the full
+6/6 tutorial completion (that is R-001, on the recommended 8 GB `qwen3:4b-instruct-8k`
+path). The `qwen2.5:7b-instruct` judge model *hedged* rather than definitively
+naming the `a - b` bug — no capability claim is made about that model here.
+Timing and endpoint reachability depend on a local Ollama being up; a cold-cache
+`pip install` is not ~1 s.
+
+---
+
 *Convention: entries are append-only and dated; superseded claims are
 struck through with a pointer to the superseding entry, never deleted.*

@@ -316,7 +316,13 @@ def _settings_from_dict(
     if "auto_commit" in data:
         kwargs["auto_commit"] = bool(data["auto_commit"])
     if "loop_review" in data:
-        kwargs["loop_review"] = bool(data["loop_review"])
+        # Strict: TOML has native booleans, so reject a quoted string rather than
+        # silently truthy-coercing it (bool("false") is True — a fail-open trap
+        # for a gate that makes a model call). Enables the review gate by default.
+        value = data["loop_review"]
+        if not isinstance(value, bool):
+            raise ConfigError(f"{source}: loop_review must be a boolean")
+        kwargs["loop_review"] = value
     if "budgets" in data:
         b = data["budgets"]
         unknown = set(b) - _KNOWN_BUDGET_KEYS

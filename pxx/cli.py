@@ -245,7 +245,8 @@ def _build_parser() -> argparse.ArgumentParser:
         "--review-mode",
         choices=["blocking", "advisory"],
         default=None,
-        help="requires --review: blocking (REVISE heals / fails closed) or advisory "
+        help="requires review to be enabled (--review or loop_review/"
+        "PXX_LOOP_REVIEW): blocking (REVISE heals / fails closed) or advisory "
         "(findings reported, never blocks). Default: blocking",
     )
 

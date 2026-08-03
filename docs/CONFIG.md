@@ -136,7 +136,8 @@ its tools as `mcp__<name>__<tool>`.
 
 `PXX_MODEL`, `PXX_PROVIDER`, `PXX_BASE_URL`, `PXX_API_KEY`, `PXX_PERMISSION`,
 `PXX_BACKEND` (`native`/`aider`/`auto`),
-`PXX_TEST_COMMAND`, `PXX_SANDBOX_SHELL`, `PXX_MEMORY_ENABLED`, `PXX_MEMORY_DIR`,
+`PXX_TEST_COMMAND`, `PXX_SANDBOX_SHELL`, `PXX_LOOP_REVIEW` (default the `pxx loop`
+review gate on for this box), `PXX_MEMORY_ENABLED`, `PXX_MEMORY_DIR`,
 `PXX_SCOPE` (comma list), `PXX_SERVER_TOKEN` (auth for `pxx serve`).
 Reviewer role overlay (see `[roles.review]`): `PXX_REVIEW_MODEL`,
 `PXX_REVIEW_PROVIDER`, `PXX_REVIEW_BASE_URL`, `PXX_REVIEW_API_KEY`.

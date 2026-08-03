@@ -22,6 +22,7 @@ Precedence (highest wins): CLI flags → `PXX_*` env vars → `./pxx.toml` or
 | `test_command` | string | — | used by `pxx loop` |
 | `sandbox_shell` | bool | `false` | wrap `run_shell` in sandbox-exec/bubblewrap |
 | `safety_net` | bool | `true` | stash + `pxx-pre/<ts>` tag on edit-capable session starts (git repos) |
+| `loop_review` | bool | `false` | per-box default for the `pxx loop` model-backed review gate (see below) |
 
 **Tool calling.** The native backend (and therefore every `pxx loop` run, and
 `pxx run` by default) needs an endpoint that accepts tool calls. Ollama
@@ -30,6 +31,13 @@ supports tool calling out of the box. A vLLM server must be launched with
 every native round fails with HTTP 400 (`"auto" tool choice requires …`).
 `pxx doctor` probes the configured endpoints for this. The aider backend
 (`ask`/`edit`, or `run --backend aider`) does not need endpoint tool calling.
+
+**`pxx loop` review gate.** The model-backed review gate is opt-in per run via
+`--review` (and `--review-mode blocking|advisory`). A box that always wants it
+can flip the default with `loop_review = true` (or `PXX_LOOP_REVIEW=1`); the
+shipped default stays off. Precedence is the usual layering — an explicit
+`--review` / `--no-review` on the command always wins over `loop_review`, so
+`--no-review` turns the gate off for a single run even when the setting is on.
 
 ## `[budgets]`
 
@@ -128,7 +136,8 @@ its tools as `mcp__<name>__<tool>`.
 
 `PXX_MODEL`, `PXX_PROVIDER`, `PXX_BASE_URL`, `PXX_API_KEY`, `PXX_PERMISSION`,
 `PXX_BACKEND` (`native`/`aider`/`auto`),
-`PXX_TEST_COMMAND`, `PXX_SANDBOX_SHELL`, `PXX_MEMORY_ENABLED`, `PXX_MEMORY_DIR`,
+`PXX_TEST_COMMAND`, `PXX_SANDBOX_SHELL`, `PXX_LOOP_REVIEW` (default the `pxx loop`
+review gate on for this box), `PXX_MEMORY_ENABLED`, `PXX_MEMORY_DIR`,
 `PXX_SCOPE` (comma list), `PXX_SERVER_TOKEN` (auth for `pxx serve`).
 Reviewer role overlay (see `[roles.review]`): `PXX_REVIEW_MODEL`,
 `PXX_REVIEW_PROVIDER`, `PXX_REVIEW_BASE_URL`, `PXX_REVIEW_API_KEY`.

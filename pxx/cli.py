@@ -235,15 +235,18 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_run_options(loop_p, files=False)
     loop_p.add_argument(
         "--review",
-        action="store_true",
-        help="enable the model-backed review gate each round (runs on the "
-        "[roles.review] model/endpoint when set, else the coder model)",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="enable/disable (--no-review) the model-backed review gate each "
+        "round (runs on the [roles.review] model/endpoint when set, else the "
+        "coder model). Default: off, unless loop_review/PXX_LOOP_REVIEW is set.",
     )
     loop_p.add_argument(
         "--review-mode",
         choices=["blocking", "advisory"],
         default=None,
-        help="requires --review: blocking (REVISE heals / fails closed) or advisory "
+        help="requires review to be enabled (--review or loop_review/"
+        "PXX_LOOP_REVIEW): blocking (REVISE heals / fails closed) or advisory "
         "(findings reported, never blocks). Default: blocking",
     )
 
@@ -659,13 +662,6 @@ def _cmd_loop(args: argparse.Namespace, unknown: list[str]) -> int:
             file=sys.stderr,
         )
         return EXIT_USAGE
-    # --review-mode has no effect without --review; fail loud, never silent.
-    if getattr(args, "review_mode", None) is not None and not getattr(args, "review", False):
-        print(
-            "pxx: usage: --review-mode requires --review",
-            file=sys.stderr,
-        )
-        return EXIT_USAGE
     try:
         from .loop import run_loop
     except ImportError:
@@ -690,9 +686,22 @@ def _cmd_loop(args: argparse.Namespace, unknown: list[str]) -> int:
         except ConfigError as exc:
             print(f"pxx: error: {exc}", file=sys.stderr)
             return 1
+    # Resolve the review toggle: an explicit --review/--no-review flag wins;
+    # when unset (None), fall back to the per-box loop_review default. The
+    # shipped default stays OFF (opt-in) unless loop_review/PXX_LOOP_REVIEW set it.
+    review_enabled = args.review if args.review is not None else settings.loop_review
+    # --review-mode has no effect unless review is enabled; fail loud, never
+    # silent (covers --no-review --review-mode and --review-mode with review off).
+    if getattr(args, "review_mode", None) is not None and not review_enabled:
+        print(
+            "pxx: usage: --review-mode requires review to be enabled "
+            "(--review or loop_review/PXX_LOOP_REVIEW)",
+            file=sys.stderr,
+        )
+        return EXIT_USAGE
     reviewer = None
     review_mode = None
-    if getattr(args, "review", False):
+    if review_enabled:
         from .review import NativeReviewer, ReviewMode
 
         reviewer = NativeReviewer(settings.effective_review_model)

@@ -47,6 +47,35 @@ def test_unknown_key_rejected(tmp_path):
         load_settings(cwd=tmp_path)
 
 
+def test_loop_review_from_toml(tmp_path):
+    (tmp_path / "pxx.toml").write_text("loop_review = true\n")
+    assert load_settings(cwd=tmp_path).loop_review is True
+
+
+def test_loop_review_defaults_off(tmp_path):
+    (tmp_path / "pxx.toml").write_text('model = "x"\n')
+    assert load_settings(cwd=tmp_path).loop_review is False
+
+
+def test_loop_review_env_overrides_toml(tmp_path, monkeypatch):
+    (tmp_path / "pxx.toml").write_text("loop_review = true\n")
+    monkeypatch.setenv("PXX_LOOP_REVIEW", "0")
+    assert load_settings(cwd=tmp_path).loop_review is False
+
+
+@pytest.mark.parametrize("raw", ["1", "true", "TrUe", "yes"])
+def test_loop_review_env_truthy(tmp_path, monkeypatch, raw):
+    monkeypatch.setenv("PXX_LOOP_REVIEW", raw)
+    assert load_settings(cwd=tmp_path).loop_review is True
+
+
+def test_loop_review_non_boolean_toml_rejected(tmp_path):
+    # A quoted string must not silently truthy-coerce (bool("false") is True).
+    (tmp_path / "pxx.toml").write_text('loop_review = "false"\n')
+    with pytest.raises(ConfigError, match="loop_review must be a boolean"):
+        load_settings(cwd=tmp_path)
+
+
 def test_invalid_toml_rejected(tmp_path):
     (tmp_path / "pxx.toml").write_text("not = = toml\n")
     with pytest.raises(ConfigError, match="invalid TOML"):

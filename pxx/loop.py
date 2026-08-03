@@ -24,7 +24,7 @@ import time
 import uuid
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, replace
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from .backends.base import AgentBackend
 from .config import Settings
@@ -94,6 +94,24 @@ async def _in_git_repo(root: Path) -> bool:
     return out is not None and out.strip() == "true"
 
 
+# Interpreter/tooling byproducts that surface in `git status` only when the
+# TARGET repo forgot to .gitignore them. Running the loop's own `test_command`
+# (pytest, mypy, ruff) creates them AFTER the agent's edits, so they are never
+# agent-authored source — they must not count as changed files or trip the
+# OUT_OF_SCOPE gate. Matched by path component so nested dirs are covered.
+_GENERATED_ARTIFACT_DIRS = frozenset({"__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache"})
+_GENERATED_ARTIFACT_SUFFIXES = (".pyc", ".pyo")
+
+
+def _is_generated_artifact(rel_path: str) -> bool:
+    """True for tool/interpreter caches that the agent never authors (git
+    porcelain paths are always ``/``-separated, so PurePosixPath is exact)."""
+    parts = PurePosixPath(rel_path).parts
+    if any(part in _GENERATED_ARTIFACT_DIRS for part in parts):
+        return True
+    return rel_path.endswith(_GENERATED_ARTIFACT_SUFFIXES)
+
+
 async def _changed_paths(root: Path, pre_sha: str | None = None) -> list[str]:
     """Repo-relative paths changed vs the pre-loop state.
 
@@ -102,7 +120,9 @@ async def _changed_paths(root: Path, pre_sha: str | None = None) -> list[str]:
     auto-commits) leaves a clean ``git status`` but must still be caught.
     Rename detection is disabled so a rename can't collapse away the source
     path; if a rename ever slips through, BOTH source and destination are
-    reported (fail-safe).
+    reported (fail-safe). Interpreter/tooling caches (``__pycache__``, ``.pyc``,
+    ``.pytest_cache``, …) are filtered — the loop's `test_command` creates them,
+    the agent never does, so they neither count as changes nor gate on scope.
     """
     paths: set[str] = set()
     if pre_sha:
@@ -112,7 +132,7 @@ async def _changed_paths(root: Path, pre_sha: str | None = None) -> list[str]:
             paths.update(n for n in out.split("\0") if n.strip())
     out = await _git(root, "status", "--porcelain", "--no-renames", "--untracked-files=all", "-z")
     if not out:
-        return sorted(paths)
+        return sorted(p for p in paths if not _is_generated_artifact(p))
     for entry in out.split("\0"):
         if len(entry) >= 4:
             path = entry[3:]
@@ -122,7 +142,7 @@ async def _changed_paths(root: Path, pre_sha: str | None = None) -> list[str]:
                 paths.add(dst)
                 continue
             paths.add(path)
-    return sorted(paths)
+    return sorted(p for p in paths if not _is_generated_artifact(p))
 
 
 async def _diff_since(root: Path, pre_sha: str | None) -> str:

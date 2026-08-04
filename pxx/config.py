@@ -443,7 +443,18 @@ def _settings_from_env(base: Settings) -> Settings:
             if cfg_key == "sandbox_shell":
                 data[cfg_key] = value.lower() in ("1", "true", "yes")
             elif cfg_key == "allow_ungated_shell":
-                data[cfg_key] = value.lower() in ("1", "true", "yes")
+                # Strict: this env var disables a safety gate, so a typo'd value
+                # is surfaced loudly (ConfigError) rather than silently coerced.
+                low = value.strip().lower()
+                if low in ("1", "true", "yes", "on"):
+                    data[cfg_key] = True
+                elif low in ("0", "false", "no", "off"):
+                    data[cfg_key] = False
+                else:
+                    raise ConfigError(
+                        f"{env_key} must be a boolean "
+                        "(1/true/yes/on or 0/false/no/off), got " + repr(value)
+                    )
             elif cfg_key == "auto_commit":
                 data[cfg_key] = value.lower() in ("1", "true", "yes")
             elif cfg_key == "loop_review":

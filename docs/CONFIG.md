@@ -145,6 +145,36 @@ Deterministic gates: `event` (`PreToolUse` / `PostToolUse`), `command`
 (shell), `timeout` (10s), `matcher` (optional tool-name substring). The hook
 receives JSON on stdin; exit 0 allows, anything else denies (fail-closed).
 
+**Payload.** pxx writes one JSON object to the hook's stdin —
+`{"tool": "<name>", "args": {...}}` for `PreToolUse` (`PostToolUse` adds
+`"result_preview"`). The hook is spawned with pxx's working directory (**the
+project root**) and environment. The verdict is the exit code: `0` allow,
+non-zero deny (fail-closed — a timeout or crash denies).
+
+**Path contract — read this before writing a scope/boundary hook.** The
+filesystem tools (`read_file` / `write_file` / `edit_file` / `list_files` /
+`search_files`) put their target in `args["path"]` **relative to the project
+root**, not as an absolute path. A hook that enforces a path boundary MUST:
+
+1. **Resolve it itself, against a trusted root.** Anchor the relative path to the
+   hook's own working directory (pxx sets it to the project root) to get an
+   absolute path. Do *not* trust any pre-resolved path handed in by the run —
+   the run is the thing being governed, so its guard must derive the target
+   independently (no confused deputy). pxx sends the raw relative path on
+   purpose, for exactly this reason.
+2. **Canonicalize with `realpath`, never lexically first.** Follow symlinks
+   (`os.path.realpath` / `Path.resolve()`) before the in/out-of-scope check, and
+   do **not** `os.path.normpath` (or otherwise collapse `..`) beforehand: lexical
+   `..` collapse happens *before* symlinks are followed, so `link/../secret` (an
+   in-scope symlink `link` that points elsewhere, then `..`) becomes `secret` —
+   the symlink is erased and the escape is masked (**fail-open**). Join with `..`
+   intact and let a single `realpath` pass resolve symlinks and `..` together.
+3. **Boundary-anchor the prefix check.** Compare with `target == root` or
+   `target.startswith(root.rstrip("/") + "/")` so a sibling like `/repo-evil`
+   does not match the scope `/repo`.
+
+`run_shell`'s target is a command string, not a path — don't anchor it.
+
 ## `[[mcp_servers]]`
 
 `name` + `command` (argv list). pxx spawns the server over stdio and mounts

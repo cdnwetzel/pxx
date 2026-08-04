@@ -232,6 +232,32 @@ def test_task_from_stdin(harness, monkeypatch):
     assert FakeSession.instances[0].tasks == ["stdin task"]
 
 
+def test_open_silent_stdin_exits_usage_not_hang(harness, monkeypatch, capsys):
+    # No -m, stdin is a pipe (not a tty) that is OPEN but never delivers data —
+    # the subprocess footgun that made pxx block sys.stdin.read() forever (the
+    # 900s "hang"). select() reports not-ready -> fall through to the usage error.
+    class _OpenSilent:
+        def isatty(self):
+            return False
+
+        def read(self):  # pragma: no cover - reaching this is the hang we prevent
+            raise AssertionError("read() must not be called on a data-less stdin")
+
+    monkeypatch.setattr("sys.stdin", _OpenSilent())
+    monkeypatch.setattr("select.select", lambda r, w, x, timeout: ([], [], []))
+    assert cli.main(["run"]) == 64
+    assert "task is required" in capsys.readouterr().err
+
+
+def test_read_task_reads_when_select_ready(monkeypatch):
+    import argparse
+    import io
+
+    monkeypatch.setattr("sys.stdin", io.StringIO("piped task"))
+    monkeypatch.setattr("select.select", lambda r, w, x, timeout: ([object()], [], []))
+    assert cli._read_task(argparse.Namespace(message=None)) == "piped task"
+
+
 def test_unknown_flag_ignored_on_native(harness, capsys):
     assert cli.main(["-m", "x", "--bogus-flag"]) == 0
     err = capsys.readouterr().err

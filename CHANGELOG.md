@@ -3,6 +3,44 @@
 All notable changes to pxx are documented here. The 1.x series history is
 preserved in git (tag `v1.3.3` and earlier).
 
+## [2.3.4] — 2026-08-04
+
+Hardening from pxx's first governed production integration inside a third-party
+host (see R-028): a real run surfaced a startup footgun and the fix for it.
+
+### Fixed
+
+- **`pxx run`/`ask`/`edit` no longer hang forever on an open, data-less stdin.**
+  When invoked with no `-m/--message` and a non-TTY stdin that is *open but never
+  delivers data* — a common headless-subprocess footgun (`subprocess.run(...)`
+  without `stdin=DEVNULL`) — `_read_task` blocked `sys.stdin.read()` indefinitely,
+  waiting for a task that never came (observed as a ~900s "hang" before the run
+  even started, so the wall-clock budget could not fire). It now waits a bounded
+  window for piped input, then fails fast with the usual "task is required" usage
+  error. A real `echo … | pxx` pipe (data ready immediately) and a closed stdin
+  (EOF) are both unaffected; a non-selectable stdin (Windows, substituted test
+  streams) keeps the historical blocking read.
+
+### Docs
+
+- **`docs/CONFIG.md` §`[[hooks]]` — the PreToolUse payload + path contract.**
+  Documents the JSON payload pxx sends (`{"tool", "args"}`), that the hook runs
+  with the project root as cwd, and — for scope/boundary hooks — that fs-tool
+  `path` args are **repo-root-relative** and must be resolved against a trusted
+  root and canonicalized with `realpath` (never `normpath`-then-`realpath`, which
+  masks a `symlink/../…` escape) with a boundary-anchored prefix check. The guard
+  must resolve the raw path itself, never trust a pre-resolved path from the
+  governed run (no confused deputy).
+- **`docs/RECEIPTS.md` R-028** — first governed production edit inside a
+  third-party host (attested; both enforcement layers exercised on a real write).
+
+### Deferred
+
+- An **init-watchdog** bounding pre-loop startup (memory-embed and MCP-handshake
+  can hang before the run's own wall-clock budget engages) is scoped for a
+  follow-up — it needs careful async teardown (killing spawned MCP subprocesses
+  on timeout) and is deliberately not rushed into the startup path here.
+
 ## [2.3.3] — 2026-08-03
 
 Local-first ergonomics and honest diagnostics from an overnight batch: a per-box

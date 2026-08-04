@@ -602,10 +602,33 @@ def _cli_overrides(args: argparse.Namespace, permission: PermissionMode) -> dict
     return overrides
 
 
+#: Bounded wait for a task piped on stdin. A caller that invokes a run verb with
+#: no ``-m`` and leaves an open, data-less stdin (a common subprocess footgun —
+#: ``subprocess.run(...)`` without ``stdin=DEVNULL``) would otherwise block
+#: ``sys.stdin.read()`` FOREVER, waiting for a task that never comes (observed as
+#: a 900s "hang" under a headless governed invocation). A real ``echo x | pxx``
+#: pipe has data ready instantly, so a short wait fails fast to the usage error
+#: without penalising legitimate piped input.
+_STDIN_TASK_WAIT_SECONDS = 2.0
+
+
 def _read_task(args: argparse.Namespace) -> str:
     task = args.message
     if task is None and not sys.stdin.isatty():
-        task = sys.stdin.read().strip()
+        # Never block indefinitely on a data-less stdin. select() reports ready
+        # on either available data OR EOF (closed stdin), so a real pipe and a
+        # closed stdin both proceed immediately; only an *open but silent* stdin
+        # waits — and after the bounded window we fall through to "task required".
+        import select
+
+        try:
+            ready, _, _ = select.select([sys.stdin], [], [], _STDIN_TASK_WAIT_SECONDS)
+        except (OSError, ValueError):
+            # stdin has no selectable fileno (Windows, or a substituted stream in
+            # tests) — preserve the historical blocking read there.
+            ready = [sys.stdin]
+        if ready:
+            task = sys.stdin.read().strip()
     return task or ""
 
 

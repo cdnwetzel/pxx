@@ -30,7 +30,7 @@ from .backends.base import AgentBackend
 from .config import Settings
 from .errors import BudgetExceeded
 from .events import Event, EventBus
-from .gitenv import git_env
+from .gitenv import communicate_bounded, git_env
 from .outcome import RunOutcome, TerminalCode
 from .review import (
     Finding,
@@ -81,8 +81,8 @@ async def _git(root: Path, *args: str) -> str | None:
             stderr=asyncio.subprocess.DEVNULL,
             env=git_env(),
         )
-        out, _ = await proc.communicate()
-    except OSError:
+        out, _ = await communicate_bounded(proc, label=args[0] if args else "")
+    except (OSError, TimeoutError):
         return None
     if proc.returncode != 0:
         return None

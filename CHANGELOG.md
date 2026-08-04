@@ -3,6 +3,25 @@
 All notable changes to pxx are documented here. The 1.x series history is
 preserved in git (tag `v1.3.3` and earlier).
 
+## [2.3.6] — 2026-08-04
+
+The "init-watchdog" follow-up, re-scoped by the evidence: the pre-loop network
+ops (memory-embed 30s, MCP-handshake 30s, model-fingerprint 2s) are already
+individually bounded — but pxx's **git subprocess helpers were not**, so a
+wedged git or a **blocking git hook** (a pre-commit prompt, a credential helper)
+could hang a run, most dangerously at the safety-net tie which runs at startup,
+before the run's own wall-clock budget exists.
+
+### Fixed
+
+- **Every git subprocess in the run path is now time-bounded** and killed +
+  reaped on timeout (`gitenv.communicate_bounded`), matching what the test-runner
+  and worktree helpers already did. The three previously-unbounded helpers —
+  `safety_net._git` (startup safety net, pre-budget), `loop._git` (per-round
+  changed-paths/diff), and `goal._git` (task-DAG git) — degrade on timeout
+  (git-unavailable / non-zero) instead of hanging. Bound is `PXX_GIT_TIMEOUT`
+  seconds (default 60; positive-finite, else the default).
+
 ## [2.3.5] — 2026-08-04
 
 Security: close the `run_shell` auto-mode gap surfaced while documenting the hook

@@ -214,7 +214,9 @@ its tools as `mcp__<name>__<tool>`.
 rejected, since it toggles a safety gate),
 `PXX_LOOP_REVIEW` (default the `pxx loop`
 review gate on for this box), `PXX_MEMORY_ENABLED`, `PXX_MEMORY_DIR`,
-`PXX_SCOPE` (comma list), `PXX_SERVER_TOKEN` (auth for `pxx serve`).
+`PXX_SCOPE` (comma list), `PXX_SERVER_TOKEN` (auth for `pxx serve`),
+`PXX_GIT_TIMEOUT` (seconds; default 60 — the wall-clock bound on any single git
+subprocess, so a wedged git or a blocking git hook can't hang a run).
 Reviewer role overlay (see `[roles.review]`): `PXX_REVIEW_MODEL`,
 `PXX_REVIEW_PROVIDER`, `PXX_REVIEW_BASE_URL`, `PXX_REVIEW_API_KEY`.
 Legacy: `PXX_OLLAMA_BASE`, `PXX_OLLAMA_MODEL`.

@@ -112,3 +112,90 @@ def test_eval_harness_git_is_scrubbed(tmp_path: Path, monkeypatch: pytest.Monkey
         check=True,
     ).stdout
     assert victim_status == ""  # victim index untouched
+
+
+# --- git subprocess timeout backstop (2.3.6) --------------------------------
+
+from pxx.gitenv import communicate_bounded, git_timeout  # noqa: E402
+
+
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        (None, 60.0),
+        ("12.5", 12.5),
+        ("0.5", 0.5),
+        ("bad", 60.0),
+        ("-1", 60.0),
+        ("0", 60.0),
+        ("inf", 60.0),
+    ],
+)
+def test_git_timeout_env_parsing(monkeypatch, raw, expected):
+    if raw is None:
+        monkeypatch.delenv("PXX_GIT_TIMEOUT", raising=False)
+    else:
+        monkeypatch.setenv("PXX_GIT_TIMEOUT", raw)
+    assert git_timeout() == expected
+
+
+def test_communicate_bounded_times_out_kills_and_raises(monkeypatch):
+    # A real, killable child that never exits on its own must be killed + reaped,
+    # and TimeoutError re-raised — never a hang, never a leaked process.
+    monkeypatch.setenv("PXX_GIT_TIMEOUT", "0.2")
+
+    async def go():
+        proc = await asyncio.create_subprocess_exec(
+            "sleep", "10", stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+        )
+        with pytest.raises(TimeoutError):
+            await communicate_bounded(proc, label="sleep")
+        assert proc.returncode is not None  # reaped (killed), not left running
+
+    asyncio.run(go())
+
+
+class _FakeProc:
+    """A git process stand-in — the timeout path is forced via a stubbed
+    communicate_bounded, so create_subprocess_exec must not spawn real git."""
+
+    returncode = None
+
+    def kill(self) -> None:  # pragma: no cover - not reached via the stub
+        pass
+
+    async def wait(self) -> int:  # pragma: no cover
+        return 0
+
+
+async def _fake_exec(*_a, **_k):
+    return _FakeProc()
+
+
+async def _raise_timeout(*_a, **_k):
+    raise TimeoutError
+
+
+def test_safety_net_git_degrades_to_none_on_timeout(monkeypatch, tmp_path: Path):
+    import pxx.safety_net as sn
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _fake_exec)
+    monkeypatch.setattr(sn, "communicate_bounded", _raise_timeout)
+    assert asyncio.run(sn._git(tmp_path, "status")) is None
+
+
+def test_loop_git_degrades_to_none_on_timeout(monkeypatch, tmp_path: Path):
+    import pxx.loop as loopmod
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _fake_exec)
+    monkeypatch.setattr(loopmod, "communicate_bounded", _raise_timeout)
+    assert asyncio.run(loopmod._git(tmp_path, "diff")) is None
+
+
+def test_goal_git_reports_failure_on_timeout(monkeypatch, tmp_path: Path):
+    import pxx.goal as goalmod
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _fake_exec)
+    monkeypatch.setattr(goalmod, "communicate_bounded", _raise_timeout)
+    code, out = asyncio.run(goalmod._git(tmp_path, "apply"))
+    assert code != 0 and "timed out" in out

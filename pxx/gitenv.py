@@ -17,7 +17,14 @@ setups without any wrong-repo risk.
 
 from __future__ import annotations
 
+import asyncio
+import logging
+import math
 import os
+
+log = logging.getLogger("pxx.gitenv")
+
+_DEFAULT_GIT_TIMEOUT = 60.0
 
 SCRUBBED_GIT_VARS: tuple[str, ...] = (
     # repo targeting — the wrong-repo class
@@ -42,3 +49,42 @@ SCRUBBED_GIT_VARS: tuple[str, ...] = (
 def git_env() -> dict[str, str]:
     """A copy of the current environment safe to hand a git subprocess."""
     return {k: v for k, v in os.environ.items() if k not in SCRUBBED_GIT_VARS}
+
+
+def git_timeout() -> float:
+    """Wall-clock bound for a single git subprocess. Generous enough for a large
+    stash/diff, but finite: a wedged git or a BLOCKING git hook (a pre-commit
+    prompt, a credential helper) must never hang a run — least of all the
+    safety-net tie at startup, which runs before the run's own budget exists.
+    Override with ``PXX_GIT_TIMEOUT`` (positive, finite seconds)."""
+    raw = os.environ.get("PXX_GIT_TIMEOUT")
+    if raw:
+        try:
+            value = float(raw)
+        except ValueError:
+            value = 0.0
+        if value > 0 and math.isfinite(value):
+            return value
+    return _DEFAULT_GIT_TIMEOUT
+
+
+async def communicate_bounded(
+    proc: asyncio.subprocess.Process,
+    input_bytes: bytes | None = None,
+    *,
+    label: str = "",
+) -> tuple[bytes, bytes | None]:
+    """``proc.communicate()`` bounded by :func:`git_timeout`. On timeout the child
+    is KILLED and reaped — cancelling ``communicate()`` alone leaves the process
+    running and its transport abandoned — then :class:`TimeoutError` is re-raised
+    so the caller degrades (a git subprocess must not outlive the bound)."""
+    try:
+        return await asyncio.wait_for(proc.communicate(input_bytes), timeout=git_timeout())
+    except TimeoutError:
+        proc.kill()
+        try:
+            await proc.wait()  # reap the child; never leak the transport
+        except ProcessLookupError:
+            pass
+        log.warning("git %s timed out after %.0fs — killed", label or "command", git_timeout())
+        raise

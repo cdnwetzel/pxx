@@ -1309,5 +1309,44 @@ pxx-standalone unattended users.
 
 ---
 
+## R-030 — git subprocesses are time-bounded (no pre-budget hang)
+
+**Claim.** No git subprocess in the run path can hang a run. Every one is bounded
+by `PXX_GIT_TIMEOUT` (default 60s) and, on timeout, the child is killed + reaped
+and the call degrades (git-unavailable / non-zero) — including the safety-net tie
+that runs at startup, *before* the run's own wall-clock budget exists.
+
+**Grade.** Reproducible (unit tests) — the bound kills a real never-exiting child
+and re-raises; each of the three helpers degrades on timeout; env parsing covered.
+
+**Exact configuration (nothing inherits).** pxx **2.3.6**; `gitenv.git_timeout()`
+(reads `PXX_GIT_TIMEOUT`; positive-finite else 60.0) + `gitenv.communicate_bounded`
+(`asyncio.wait_for` on `proc.communicate()`, then `proc.kill()` + `await
+proc.wait()` on `TimeoutError`, re-raised). Routed through it: `safety_net._git`,
+`loop._git`, `goal._git`. (`worktree._git` and the `_run_tests`/`review` shells
+were already bounded; `probe_model_fingerprint` 2s, MCP handshake 30s, and the
+Ollama embedder 30s were already bounded too — git was the gap.)
+
+**Procedure (reproduction path).**
+
+```sh
+uv run --extra dev python -m pytest tests/test_gitenv.py -q
+```
+
+**Observed (2026-08-04).** With `PXX_GIT_TIMEOUT=0.2`, `communicate_bounded` on a
+`sleep 10` child raises `TimeoutError` at ~0.2s and the child is reaped
+(`returncode` set, SIGKILL). `safety_net._git` and `loop._git` return `None` on a
+timed-out git; `goal._git` returns a non-zero code with "timed out". `git_timeout`
+rejects `bad`/`-1`/`0`/`inf`, honours `12.5`.
+
+**Boundary — explicitly not claimed.** (1) 60s is a generous backstop, not a
+tight SLA — a legitimately slow git op (a huge `stash --include-untracked`)
+completes normally; only a genuine wedge/hang is cut. (2) On a safety-net tie
+timeout the run proceeds **without** the undo tag (degrade + warning), since a
+wedged git can't establish one — the working tree is not modified by the failed
+tie. (3) The `pxx upgrade` git/pip calls are outside the run path and unchanged.
+
+---
+
 *Convention: entries are append-only and dated; superseded claims are
 struck through with a pointer to the superseding entry, never deleted.*

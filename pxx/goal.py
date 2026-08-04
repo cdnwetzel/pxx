@@ -30,7 +30,7 @@ from .backends.base import AgentBackend
 from .config import Settings
 from .errors import BackendUnavailable, ConfigError, ScopeViolation
 from .events import EventBus
-from .gitenv import git_env
+from .gitenv import communicate_bounded, git_env
 from .loop import run_loop
 from .outcome import RunOutcome, TerminalCode
 from .safety import canonicalize
@@ -202,7 +202,8 @@ async def _run_integration(root: Path, command: str) -> tuple[bool, str]:
 
 
 async def _git(cwd: Path, *args: str, stdin_text: str | None = None) -> tuple[int, str]:
-    """Run a git command; return (returncode, combined output)."""
+    """Run a git command; return (returncode, combined output). Bounded by
+    git_timeout() — a wedged git or a blocking hook is a git failure, not a hang."""
     proc = await asyncio.create_subprocess_exec(
         "git",
         "-C",
@@ -213,7 +214,14 @@ async def _git(cwd: Path, *args: str, stdin_text: str | None = None) -> tuple[in
         stderr=asyncio.subprocess.STDOUT,
         env=git_env(),
     )
-    out, _ = await proc.communicate(stdin_text.encode() if stdin_text is not None else None)
+    try:
+        out, _ = await communicate_bounded(
+            proc,
+            stdin_text.encode() if stdin_text is not None else None,
+            label=args[0] if args else "",
+        )
+    except TimeoutError:
+        return 1, f"git {args[0] if args else 'command'} timed out"
     return proc.returncode or 0, out.decode(errors="replace")
 
 

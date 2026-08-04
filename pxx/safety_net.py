@@ -19,7 +19,7 @@ from asyncio.subprocess import PIPE
 from dataclasses import dataclass
 from pathlib import Path
 
-from .gitenv import git_env
+from .gitenv import communicate_bounded, git_env
 
 log = logging.getLogger("pxx.safety_net")
 
@@ -34,13 +34,15 @@ class SafetyNet:
 
 
 async def _git(cwd: Path, *args: str) -> str | None:
-    """Run a git command; return stdout or None when unavailable/failed."""
+    """Run a git command; return stdout or None when unavailable/failed. Bounded
+    by git_timeout(): a wedged git or a blocking hook can't hang the safety-net
+    tie (this runs at startup, before the run's own budget exists)."""
     try:
         proc = await asyncio.create_subprocess_exec(
             "git", *args, cwd=cwd, stdout=PIPE, stderr=PIPE, env=git_env()
         )
-        out, _ = await proc.communicate()
-    except OSError:
+        out, _ = await communicate_bounded(proc, label=args[0] if args else "")
+    except (OSError, TimeoutError):
         return None
     if proc.returncode != 0:
         return None

@@ -18,6 +18,7 @@ setups without any wrong-repo risk.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import math
 import os
@@ -86,13 +87,9 @@ async def communicate_bounded(
         # both kill() and wait() can hit ProcessLookupError — swallow it (the
         # process is already gone, which is the outcome we wanted) and preserve
         # the TimeoutError path.
-        try:
+        with contextlib.suppress(ProcessLookupError):
             proc.kill()
-        except ProcessLookupError:
-            pass
-        try:
+        with contextlib.suppress(ProcessLookupError):
             await proc.wait()  # reap the child; never leak the transport
-        except ProcessLookupError:
-            pass
         log.warning("git %s timed out after %.0fs — killed", label or "command", timeout)
         raise

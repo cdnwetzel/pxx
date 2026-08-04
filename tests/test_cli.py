@@ -267,12 +267,14 @@ def test_read_task_real_held_open_pipe_times_out(monkeypatch):
 
     monkeypatch.setattr(cli, "_STDIN_TASK_WAIT_SECONDS", 0.2)
     r, w = os.pipe()  # w stays open (never written) -> stdin open but data-less
+    stdin = os.fdopen(r)  # takes ownership of r; closed explicitly below
     try:
-        monkeypatch.setattr("sys.stdin", os.fdopen(r))
+        monkeypatch.setattr("sys.stdin", stdin)
         start = time.monotonic()
         assert cli._read_task(argparse.Namespace(message=None)) == ""
         assert time.monotonic() - start < 2.0  # bounded, not a hang
     finally:
+        stdin.close()  # releases r — never rely on GC for the fd
         os.close(w)
 
 

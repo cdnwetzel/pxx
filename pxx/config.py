@@ -345,7 +345,12 @@ def _settings_from_dict(
     if "sandbox_shell" in data:
         kwargs["sandbox_shell"] = bool(data["sandbox_shell"])
     if "allow_ungated_shell" in data:
-        kwargs["allow_ungated_shell"] = bool(data["allow_ungated_shell"])
+        # Strict: a security opt-in must not fail OPEN on a quoted string —
+        # bool("false") is True. Require an actual boolean (matches loop_review).
+        value = data["allow_ungated_shell"]
+        if not isinstance(value, bool):
+            raise ConfigError(f"{source}: allow_ungated_shell must be a boolean")
+        kwargs["allow_ungated_shell"] = value
     if "safety_net" in data:
         kwargs["safety_net"] = bool(data["safety_net"])
     if "auto_commit" in data:

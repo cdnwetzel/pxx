@@ -55,6 +55,13 @@ def test_allow_ungated_shell_toml_env_and_default(tmp_path, monkeypatch):
     assert load_settings(cwd=tmp_path).allow_ungated_shell is False
 
 
+def test_allow_ungated_shell_non_boolean_toml_rejected(tmp_path):
+    # A security opt-in must not fail OPEN: bool("false") is True.
+    (tmp_path / "pxx.toml").write_text('allow_ungated_shell = "false"\n')
+    with pytest.raises(ConfigError, match="allow_ungated_shell must be a boolean"):
+        load_settings(cwd=tmp_path)
+
+
 def test_loop_review_from_toml(tmp_path):
     (tmp_path / "pxx.toml").write_text("loop_review = true\n")
     assert load_settings(cwd=tmp_path).loop_review is True

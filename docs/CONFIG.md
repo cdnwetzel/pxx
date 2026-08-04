@@ -180,12 +180,16 @@ root**, not as an absolute path. A hook that enforces a path boundary MUST:
 **file** tools (it checks path targets); a shell command has no path target, so
 `scope` does **not** restrict what `run_shell` can touch. Because of that,
 `run_shell` in `edit` or `auto` mode (including unattended `pxx run`) requires an
-explicit shell safeguard, or it is denied with `HOOKS_MISSING`. Provide exactly
-one:
+explicit shell safeguard, or it is denied with `HOOKS_MISSING`. Provide at least
+one (they're additive — any one satisfies the gate):
 
-- a `PreToolUse` hook with `matcher = "run_shell"` (deterministic allow/deny per
-  command), **or**
-- `sandbox_shell = true` (contain it in sandbox-exec / bubblewrap), **or**
+- a `PreToolUse` hook that **actually fires for `run_shell`** — `matcher =
+  "run_shell"` or an empty matcher (deterministic allow/deny per command). A hook
+  scoped to another tool (e.g. `matcher = "write_file"`) does **not** count. **Or**
+- `sandbox_shell = true` — contain it in sandbox-exec (macOS) / bubblewrap
+  (Linux). This counts only when a sandboxer binary is actually present; if
+  `sandbox_shell` is set but none is installed, `run_shell` is **denied** rather
+  than run unconfined. **Or**
 - `allow_ungated_shell = true` (or `PXX_ALLOW_UNGATED_SHELL=1`) to accept an
   unhooked, unsandboxed shell **explicitly** — off by default, since it lets a
   model-authored command run unconfined.

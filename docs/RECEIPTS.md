@@ -1289,14 +1289,21 @@ safeguards. With any one of a `run_shell` hook, `sandbox_shell=true`, or
 `ScopeViolation`. Config: `allow_ungated_shell` defaults `False`, reads from TOML
 and `PXX_ALLOW_UNGATED_SHELL`, env overrides TOML.
 
+**No false safety (hardened in review).** Two ways the gate could *appear*
+closed while shell ran unconfined are explicitly denied: (a) a PreToolUse hook
+scoped to a different tool (`matcher="write_file"`) does **not** satisfy the
+shell gate — only a hook that would actually fire for `run_shell` counts
+(`HookRunner.covers_pre`); (b) `sandbox_shell=true` counts only when a sandboxer
+binary is actually present — if none is, `run_shell` is **denied**, never run
+as plain `/bin/sh` while looking sandboxed.
+
 **Boundary — explicitly not claimed.** (1) This gates *whether* shell runs, not
-*what* it can do once a safeguard is chosen — `allow_ungated_shell` deliberately
-runs it unconfined (named risk-acceptance), and `sandbox_shell` degrades to plain
-`/bin/sh` when no `sandbox-exec`/`bwrap` binary is present (containment silently
-absent — a separate follow-up). (2) The fix relaxes `edit` too: `sandbox_shell`
-now satisfies the gate there, where before only a hook did. (3) The
-firm-governed host of R-028 was never exposed by the old gap (its minted identity
-carried no shell class); this closes it for pxx-standalone unattended users.
+*what* it can do once a real safeguard is chosen — `allow_ungated_shell`
+deliberately runs it unconfined (named risk-acceptance). (2) The fix relaxes
+`edit` too: an available `sandbox_shell` now satisfies the gate there, where
+before only a hook did. (3) The firm-governed host of R-028 was never exposed by
+the old gap (its minted identity carried no shell class); this closes it for
+pxx-standalone unattended users.
 
 ---
 

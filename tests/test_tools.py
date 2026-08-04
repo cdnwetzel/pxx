@@ -368,17 +368,40 @@ def test_run_shell_auto_mode_hook_satisfies_gate(reg: ToolRegistry, tmp_path: Pa
     assert "via-hook" in call(reg, "run_shell", {"command": "echo via-hook"}, ctx)
 
 
-def test_run_shell_auto_mode_sandbox_satisfies_gate(reg: ToolRegistry, tmp_path: Path) -> None:
-    # sandbox_shell satisfies the gate (containment); _wrap_sandbox degrades to
-    # plain /bin/sh when no sandbox binary is present, so this runs cross-platform.
+def test_run_shell_auto_mode_sandbox_satisfies_gate(
+    reg: ToolRegistry, tmp_path: Path, monkeypatch
+) -> None:
+    # sandbox_shell satisfies the gate ONLY when a sandboxer is actually present.
+    # Force availability so the gate logic is exercised cross-platform; _wrap_sandbox
+    # degrades to plain /bin/sh when the (pretended) binary isn't really there.
+    import pxx.tools.shell as shellmod
+
+    monkeypatch.setattr(shellmod, "_sandbox_available", lambda: True)
     ctx = make_ctx(tmp_path, permission=PermissionMode.AUTO, sandbox_shell=True)
     assert "sandboxed" in call(reg, "run_shell", {"command": "echo sandboxed"}, ctx)
 
 
-def test_run_shell_edit_mode_sandbox_satisfies_gate(reg: ToolRegistry, tmp_path: Path) -> None:
-    # Symmetry: a contained shell no longer additionally requires a hook in EDIT.
+def test_run_shell_edit_mode_sandbox_satisfies_gate(
+    reg: ToolRegistry, tmp_path: Path, monkeypatch
+) -> None:
+    # Symmetry: an (available) contained shell no longer additionally needs a hook.
+    import pxx.tools.shell as shellmod
+
+    monkeypatch.setattr(shellmod, "_sandbox_available", lambda: True)
     ctx = make_ctx(tmp_path, permission=PermissionMode.EDIT, sandbox_shell=True)
     assert "ok" in call(reg, "run_shell", {"command": "echo ok"}, ctx)
+
+
+def test_run_shell_hook_for_other_tool_does_not_gate(reg: ToolRegistry, tmp_path: Path) -> None:
+    # A PreToolUse hook scoped to a DIFFERENT tool must not satisfy the shell gate
+    # (it would never fire for run_shell) — else it only *appears* fail-closed.
+    ctx = make_ctx(
+        tmp_path,
+        permission=PermissionMode.AUTO,
+        hooks=(Hook(event="PreToolUse", command="true", matcher="write_file"),),
+    )
+    with pytest.raises(HooksMissing, match=r"shell safeguard"):
+        call(reg, "run_shell", {"command": "echo hi"}, ctx)
 
 
 def test_run_shell_edit_mode_with_allowing_hook(reg: ToolRegistry, tmp_path: Path) -> None:
@@ -415,13 +438,15 @@ def test_seatbelt_profile_denies_writes_outside_root(tmp_path: Path) -> None:
     assert f'(subpath "{tmp_path}")' in profile
 
 
-def test_sandbox_requested_but_no_sandboxer_falls_back(
+def test_sandbox_requested_but_no_sandboxer_is_denied(
     reg: ToolRegistry, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # sandbox_shell with no sandboxer binary must FAIL CLOSED (R-029 fix) — never
+    # silently run unconfined while looking sandboxed.
     monkeypatch.setattr("pxx.tools.shell.shutil.which", lambda _name: None)
     ctx = make_ctx(tmp_path, sandbox_shell=True)
-    out = call(reg, "run_shell", {"command": "echo unsandboxed"}, ctx)
-    assert "unsandboxed" in out
+    with pytest.raises(HooksMissing, match=r"no sandbox binary is available"):
+        call(reg, "run_shell", {"command": "echo unsandboxed"}, ctx)
 
 
 @pytest.mark.skipif(

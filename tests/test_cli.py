@@ -258,6 +258,41 @@ def test_read_task_reads_when_select_ready(monkeypatch):
     assert cli._read_task(argparse.Namespace(message=None)) == "piped task"
 
 
+def test_read_task_real_held_open_pipe_times_out(monkeypatch):
+    # A REAL non-tty pipe held open with no data — the production select() path
+    # (no mock). It must return empty within the bounded window, never block.
+    import argparse
+    import os
+    import time
+
+    monkeypatch.setattr(cli, "_STDIN_TASK_WAIT_SECONDS", 0.2)
+    r, w = os.pipe()  # w stays open (never written) -> stdin open but data-less
+    try:
+        monkeypatch.setattr("sys.stdin", os.fdopen(r))
+        start = time.monotonic()
+        assert cli._read_task(argparse.Namespace(message=None)) == ""
+        assert time.monotonic() - start < 2.0  # bounded, not a hang
+    finally:
+        os.close(w)
+
+
+def test_read_task_non_selectable_stream_falls_back_to_read(monkeypatch):
+    # A stdin-like object with no fileno() makes select.select raise TypeError
+    # (not OSError/ValueError). The except must catch it and fall back to the
+    # historical blocking read rather than crash the CLI.
+    import argparse
+
+    class _NoFileno:
+        def isatty(self):
+            return False
+
+        def read(self):
+            return "fallback task\n"
+
+    monkeypatch.setattr("sys.stdin", _NoFileno())
+    assert cli._read_task(argparse.Namespace(message=None)) == "fallback task"
+
+
 def test_unknown_flag_ignored_on_native(harness, capsys):
     assert cli.main(["-m", "x", "--bogus-flag"]) == 0
     err = capsys.readouterr().err

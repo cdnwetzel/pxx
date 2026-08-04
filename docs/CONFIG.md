@@ -173,7 +173,12 @@ root**, not as an absolute path. A hook that enforces a path boundary MUST:
    `target.startswith(root.rstrip("/") + "/")` so a sibling like `/repo-evil`
    does not match the scope `/repo`.
 
-`run_shell`'s target is a command string, not a path — don't anchor it.
+`run_shell`'s target is a command string, not a path — don't anchor it. Note
+that `scope` confines only the **file** tools (it checks path targets); a shell
+command has no path target, so `scope` does **not** restrict what `run_shell`
+can touch. Gate shell separately — a `PreToolUse` hook with `matcher =
+"run_shell"` (deterministic allow/deny of the command) and/or `sandbox_shell` —
+rather than relying on `scope` to contain it.
 
 ## `[[mcp_servers]]`
 

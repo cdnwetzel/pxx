@@ -10,7 +10,7 @@ host (see R-028): a real run surfaced a startup footgun and the fix for it.
 
 ### Fixed
 
-- **`pxx run`/`ask`/`edit` no longer hang forever on an open, data-less stdin.**
+- **`pxx run`/`ask`/`edit`/`loop` no longer hang forever on an open, data-less stdin.**
   When invoked with no `-m/--message` and a non-TTY stdin that is *open but never
   delivers data* — a common headless-subprocess footgun (`subprocess.run(...)`
   without `stdin=DEVNULL`) — `_read_task` blocked `sys.stdin.read()` indefinitely,

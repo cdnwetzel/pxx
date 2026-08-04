@@ -623,11 +623,17 @@ def _read_task(args: argparse.Namespace) -> str:
 
         try:
             ready, _, _ = select.select([sys.stdin], [], [], _STDIN_TASK_WAIT_SECONDS)
-        except (OSError, ValueError):
-            # stdin has no selectable fileno (Windows, or a substituted stream in
-            # tests) — preserve the historical blocking read there.
+        except (OSError, ValueError, TypeError):
+            # stdin has no selectable fileno — Windows, or a substituted stream in
+            # tests/embedding (a bare object without fileno() makes select raise
+            # TypeError, not OSError). Preserve the historical blocking read there.
             ready = [sys.stdin]
         if ready:
+            # A real task on stdin is delimited by EOF (every normal pipe/redirect
+            # closes: `echo … | pxx`, heredocs, `< file`), so reading to EOF is the
+            # standard contract. A producer that writes data and keeps the pipe
+            # open would block here — programmatic callers should pass -m (or close
+            # stdin); the select() guard above only rescues the no-data case.
             task = sys.stdin.read().strip()
     return task or ""
 

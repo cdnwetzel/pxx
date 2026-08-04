@@ -194,7 +194,11 @@ one (they're additive — any one satisfies the gate):
   unhooked, unsandboxed shell **explicitly** — off by default, since it lets a
   model-authored command run unconfined.
 
-`ask`/`plan` never permit `run_shell` at all.
+`allow_ungated_shell` is honoured **only from user config, env, or CLI** — like
+`[[hooks]]` / `[roles.review]`, it is ignored (with a warning) from a repo-local
+`pxx.toml` / `.pxx/config.toml`, so a checked-in file in an untrusted repo can't
+disable the shell gate for anyone who runs pxx in it. `ask`/`plan` never permit
+`run_shell` at all.
 
 ## `[[mcp_servers]]`
 

@@ -1295,7 +1295,9 @@ scoped to a different tool (`matcher="write_file"`) does **not** satisfy the
 shell gate — only a hook that would actually fire for `run_shell` counts
 (`HookRunner.covers_pre`); (b) `sandbox_shell=true` counts only when a sandboxer
 binary is actually present — if none is, `run_shell` is **denied**, never run
-as plain `/bin/sh` while looking sandboxed.
+as plain `/bin/sh` while looking sandboxed. And (c) `allow_ungated_shell` is
+honoured only from user config / env / CLI — a repo-local `pxx.toml` cannot set
+it (A0b), so an untrusted repo can't disable its own shell gate.
 
 **Boundary — explicitly not claimed.** (1) This gates *whether* shell runs, not
 *what* it can do once a real safeguard is chosen — `allow_ungated_shell`

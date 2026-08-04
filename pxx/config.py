@@ -249,10 +249,13 @@ def _settings_from_dict(
     allow_exec_surfaces: bool = True,
 ) -> Settings:
     """Merge one config source. ``allow_exec_surfaces=False`` (repo-local
-    project configs) means hook commands and MCP server definitions are
-    IGNORED with a loud warning: a file inside the edit surface must not be
-    able to define the gate that guards the edit surface (A0b)."""
-    for key in ("hooks", "mcp_servers"):
+    project configs) means hook commands, MCP server definitions, and
+    ``allow_ungated_shell`` are IGNORED with a loud warning: a file inside the
+    edit surface must not be able to define — or DISABLE — the gate that guards
+    the edit surface (A0b). A checked-in ``allow_ungated_shell = true`` would let
+    an untrusted repo turn off the run_shell safeguard for anyone who runs pxx in
+    it, so it is honoured only from user config, env, or CLI."""
+    for key in ("hooks", "mcp_servers", "allow_ungated_shell"):
         if key in data and not allow_exec_surfaces:
             log.warning(
                 "ignoring %s in repo-local config %s (exec surfaces are honored "

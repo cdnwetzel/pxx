@@ -232,6 +232,69 @@ def test_task_from_stdin(harness, monkeypatch):
     assert FakeSession.instances[0].tasks == ["stdin task"]
 
 
+def test_open_silent_stdin_exits_usage_not_hang(harness, monkeypatch, capsys):
+    # No -m, stdin is a pipe (not a tty) that is OPEN but never delivers data —
+    # the subprocess footgun that made pxx block sys.stdin.read() forever (the
+    # 900s "hang"). select() reports not-ready -> fall through to the usage error.
+    class _OpenSilent:
+        def isatty(self):
+            return False
+
+        def read(self):  # pragma: no cover - reaching this is the hang we prevent
+            raise AssertionError("read() must not be called on a data-less stdin")
+
+    monkeypatch.setattr("sys.stdin", _OpenSilent())
+    monkeypatch.setattr("select.select", lambda r, w, x, timeout: ([], [], []))
+    assert cli.main(["run"]) == 64
+    assert "task is required" in capsys.readouterr().err
+
+
+def test_read_task_reads_when_select_ready(monkeypatch):
+    import argparse
+    import io
+
+    monkeypatch.setattr("sys.stdin", io.StringIO("piped task"))
+    monkeypatch.setattr("select.select", lambda r, w, x, timeout: ([object()], [], []))
+    assert cli._read_task(argparse.Namespace(message=None)) == "piped task"
+
+
+def test_read_task_real_held_open_pipe_times_out(monkeypatch):
+    # A REAL non-tty pipe held open with no data — the production select() path
+    # (no mock). It must return empty within the bounded window, never block.
+    import argparse
+    import os
+    import time
+
+    monkeypatch.setattr(cli, "_STDIN_TASK_WAIT_SECONDS", 0.2)
+    r, w = os.pipe()  # w stays open (never written) -> stdin open but data-less
+    stdin = os.fdopen(r)  # takes ownership of r; closed explicitly below
+    try:
+        monkeypatch.setattr("sys.stdin", stdin)
+        start = time.monotonic()
+        assert cli._read_task(argparse.Namespace(message=None)) == ""
+        assert time.monotonic() - start < 2.0  # bounded, not a hang
+    finally:
+        stdin.close()  # releases r — never rely on GC for the fd
+        os.close(w)
+
+
+def test_read_task_non_selectable_stream_falls_back_to_read(monkeypatch):
+    # A stdin-like object with no fileno() makes select.select raise TypeError
+    # (not OSError/ValueError). The except must catch it and fall back to the
+    # historical blocking read rather than crash the CLI.
+    import argparse
+
+    class _NoFileno:
+        def isatty(self):
+            return False
+
+        def read(self):
+            return "fallback task\n"
+
+    monkeypatch.setattr("sys.stdin", _NoFileno())
+    assert cli._read_task(argparse.Namespace(message=None)) == "fallback task"
+
+
 def test_unknown_flag_ignored_on_native(harness, capsys):
     assert cli.main(["-m", "x", "--bogus-flag"]) == 0
     err = capsys.readouterr().err

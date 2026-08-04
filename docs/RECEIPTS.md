@@ -1205,5 +1205,54 @@ Timing and endpoint reachability depend on a local Ollama being up; a cold-cache
 
 ---
 
+## R-028 — first governed production edit inside a third-party host
+
+**Claim.** `pxx run --backend native` produced a real, test-verified code edit
+while running as a governed producer inside an external autonomous-agent host:
+every model tool call passed through the host's `PreToolUse` hook, which enforced
+a separate policy kernel's veto (fail-closed) against a scoped machine identity
+limited to file read/write. The run's scope held — the in-scope write was
+allowed and every out-of-scope / symlink / `..`-traversal attempt was denied by
+the host — and the edit passed the host's own test gate.
+
+**Grade.** **Attested (2026-08-04)** — evidence relayed from the host operator's
+live production run. **Not reproduced in this repo**: the enforcement path
+requires the host's policy kernel and skill layer, a confidential third-party
+deployment, so this is not a self-contained procedure like R-001/R-027. What is
+pxx's to attest is that pxx behaved correctly *as the governed producer*.
+
+**Exact configuration (as reported).** pxx **2.3.2**, `pxx run --backend native`,
+`--provider vllm` through the host's inference router to a ~30B local coder
+model; a per-run machine identity scoped to one dev repo with action classes
+`file.read` + `file.write` (no shell); the host's `PreToolUse` hook wired via
+`[[hooks]]`, spawned per tool call, fail-closed. Budgets passed as flags
+(`--budget-rounds/-seconds/-diff-lines`).
+
+**Procedure (host-side; not runnable here).** The host's skill invokes
+`pxx run -m "<task>" --scope . --backend native --provider vllm --base-url
+<router> --model <coder> --budget-…`; pxx drives the model, and each fs tool call
+is vetoed by the hook before it executes.
+
+**Observed (as reported).** Task = implement `subtract(a, b)` in `calc.py`.
+Result: the function was written; `SkillResult success=True`, terminal
+`COMPLETED`, `files_changed=1`, `rounds=3`, `0` introduced failures; the edit
+passed the host's `assert subtract(5,3)==2` gate. The audit recorded the outer
+run-admission ALLOW and the inner `file.write` ALLOW under the minted identity;
+the boundary was independently exercised — out-of-scope write, absolute-symlink,
+relative-`..`, relative-symlink, and in-scope-symlink+`..` targets **all denied**.
+
+**Boundary — explicitly not claimed.** (1) This is host-side attestation, not a
+reproducible pxx procedure — the governance layers are the host's, not pxx's.
+(2) The task is the well-specified, self-contained class (cf. pxx tied an
+external agent 10/10 on this class in the host's pre-registered eval); it is *not*
+evidence about open-ended refactors. (3) It ran on **2.3.2**. The integration
+surfaced one pxx-side footgun — `pxx run` with no `-m` and an open, data-less
+stdin blocked indefinitely — **fixed in 2.3.4** (`_read_task` bounded wait →
+fail-fast usage error); the other findings were host-side (its skill's outcome
+schema and its hook's path resolution). (4) Firm-identifying details of the host
+are deliberately omitted.
+
+---
+
 *Convention: entries are append-only and dated; superseded claims are
 struck through with a pointer to the superseding entry, never deleted.*

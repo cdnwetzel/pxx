@@ -8,6 +8,7 @@ import asyncio
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -145,11 +146,17 @@ def test_communicate_bounded_times_out_kills_and_raises(monkeypatch):
     monkeypatch.setenv("PXX_GIT_TIMEOUT", "0.2")
 
     async def go():
+        # the Python interpreter as a guaranteed-available, killable sleeper
+        # (no reliance on a `sleep` binary — portable to Windows/minimal CI).
         proc = await asyncio.create_subprocess_exec(
-            "sleep", "10", stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+            sys.executable,
+            "-c",
+            "import time; time.sleep(10)",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
         )
         with pytest.raises(TimeoutError):
-            await communicate_bounded(proc, label="sleep")
+            await communicate_bounded(proc, label="probe")
         assert proc.returncode is not None  # reaped (killed), not left running
 
     asyncio.run(go())

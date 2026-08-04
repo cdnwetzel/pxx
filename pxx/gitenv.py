@@ -78,13 +78,21 @@ async def communicate_bounded(
     is KILLED and reaped — cancelling ``communicate()`` alone leaves the process
     running and its transport abandoned — then :class:`TimeoutError` is re-raised
     so the caller degrades (a git subprocess must not outlive the bound)."""
+    timeout = git_timeout()
     try:
-        return await asyncio.wait_for(proc.communicate(input_bytes), timeout=git_timeout())
+        return await asyncio.wait_for(proc.communicate(input_bytes), timeout=timeout)
     except TimeoutError:
-        proc.kill()
+        # kill + reap. The child may have exited between the timeout and here, so
+        # both kill() and wait() can hit ProcessLookupError — swallow it (the
+        # process is already gone, which is the outcome we wanted) and preserve
+        # the TimeoutError path.
+        try:
+            proc.kill()
+        except ProcessLookupError:
+            pass
         try:
             await proc.wait()  # reap the child; never leak the transport
         except ProcessLookupError:
             pass
-        log.warning("git %s timed out after %.0fs — killed", label or "command", git_timeout())
+        log.warning("git %s timed out after %.0fs — killed", label or "command", timeout)
         raise

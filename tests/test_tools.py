@@ -26,6 +26,7 @@ def make_ctx(
     bus: EventBus | None = None,
     memory: Any = None,
     sandbox_shell: bool = False,
+    allow_ungated_shell: bool = False,
 ) -> ToolContext:
     return ToolContext(
         scope=ScopeGate(root),
@@ -36,6 +37,7 @@ def make_ctx(
         memory=memory,
         session_id="test-session",
         sandbox_shell=sandbox_shell,
+        allow_ungated_shell=allow_ungated_shell,
     )
 
 
@@ -288,25 +290,37 @@ def test_search_files_outside_scope_raises(reg: ToolRegistry, tmp_path: Path) ->
 
 
 def test_run_shell_auto_echo_and_exit_code(reg: ToolRegistry, tmp_path: Path) -> None:
-    out = call(reg, "run_shell", {"command": "echo hello"}, make_ctx(tmp_path))
+    out = call(
+        reg, "run_shell", {"command": "echo hello"}, make_ctx(tmp_path, allow_ungated_shell=True)
+    )
     assert "hello" in out
     assert "[exit 0]" in out
 
 
 def test_run_shell_nonzero_exit_and_stderr(reg: ToolRegistry, tmp_path: Path) -> None:
-    out = call(reg, "run_shell", {"command": "echo oops >&2; exit 3"}, make_ctx(tmp_path))
+    out = call(
+        reg,
+        "run_shell",
+        {"command": "echo oops >&2; exit 3"},
+        make_ctx(tmp_path, allow_ungated_shell=True),
+    )
     assert "oops" in out  # stderr merged into stdout
     assert "[exit 3]" in out
 
 
 def test_run_shell_timeout(reg: ToolRegistry, tmp_path: Path) -> None:
-    out = call(reg, "run_shell", {"command": "sleep 5", "timeout": 1}, make_ctx(tmp_path))
+    out = call(
+        reg,
+        "run_shell",
+        {"command": "sleep 5", "timeout": 1},
+        make_ctx(tmp_path, allow_ungated_shell=True),
+    )
     assert "timed out after 1s" in out
 
 
 def test_run_shell_output_capped(reg: ToolRegistry, tmp_path: Path) -> None:
     cmd = "head -c 40000 /dev/zero | tr '\\0' x"
-    out = call(reg, "run_shell", {"command": cmd}, make_ctx(tmp_path))
+    out = call(reg, "run_shell", {"command": cmd}, make_ctx(tmp_path, allow_ungated_shell=True))
     assert "output truncated at 32768 bytes" in out
 
 
@@ -326,6 +340,45 @@ def test_run_shell_edit_mode_requires_hook(reg: ToolRegistry, tmp_path: Path) ->
             {"command": "echo hi"},
             make_ctx(tmp_path, permission=PermissionMode.EDIT),
         )
+
+
+def test_run_shell_auto_mode_requires_a_safeguard(reg: ToolRegistry, tmp_path: Path) -> None:
+    # THE FIX: unattended `pxx run` (AUTO) with no hook, no sandbox, no opt-in must
+    # NOT run shell unguarded — scope doesn't confine shell, so fail closed.
+    with pytest.raises(HooksMissing, match=r"shell safeguard.*docs/CONFIG.md"):
+        call(
+            reg,
+            "run_shell",
+            {"command": "echo hi"},
+            make_ctx(tmp_path, permission=PermissionMode.AUTO),
+        )
+
+
+def test_run_shell_auto_mode_opt_in_runs(reg: ToolRegistry, tmp_path: Path) -> None:
+    ctx = make_ctx(tmp_path, permission=PermissionMode.AUTO, allow_ungated_shell=True)
+    assert "opted-in" in call(reg, "run_shell", {"command": "echo opted-in"}, ctx)
+
+
+def test_run_shell_auto_mode_hook_satisfies_gate(reg: ToolRegistry, tmp_path: Path) -> None:
+    ctx = make_ctx(
+        tmp_path,
+        permission=PermissionMode.AUTO,
+        hooks=(Hook(event="PreToolUse", command="true", matcher="run_shell"),),
+    )
+    assert "via-hook" in call(reg, "run_shell", {"command": "echo via-hook"}, ctx)
+
+
+def test_run_shell_auto_mode_sandbox_satisfies_gate(reg: ToolRegistry, tmp_path: Path) -> None:
+    # sandbox_shell satisfies the gate (containment); _wrap_sandbox degrades to
+    # plain /bin/sh when no sandbox binary is present, so this runs cross-platform.
+    ctx = make_ctx(tmp_path, permission=PermissionMode.AUTO, sandbox_shell=True)
+    assert "sandboxed" in call(reg, "run_shell", {"command": "echo sandboxed"}, ctx)
+
+
+def test_run_shell_edit_mode_sandbox_satisfies_gate(reg: ToolRegistry, tmp_path: Path) -> None:
+    # Symmetry: a contained shell no longer additionally requires a hook in EDIT.
+    ctx = make_ctx(tmp_path, permission=PermissionMode.EDIT, sandbox_shell=True)
+    assert "ok" in call(reg, "run_shell", {"command": "echo ok"}, ctx)
 
 
 def test_run_shell_edit_mode_with_allowing_hook(reg: ToolRegistry, tmp_path: Path) -> None:
@@ -349,7 +402,7 @@ def test_run_shell_edit_mode_with_denying_hook(reg: ToolRegistry, tmp_path: Path
 
 
 def test_run_shell_runs_in_scope_root(reg: ToolRegistry, tmp_path: Path) -> None:
-    out = call(reg, "run_shell", {"command": "pwd"}, make_ctx(tmp_path))
+    out = call(reg, "run_shell", {"command": "pwd"}, make_ctx(tmp_path, allow_ungated_shell=True))
     assert str(Path(out.splitlines()[0]).resolve()) == str(tmp_path.resolve())
 
 

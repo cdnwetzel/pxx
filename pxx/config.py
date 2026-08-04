@@ -96,6 +96,11 @@ class Settings:
     #: means "auto" (the historical default).
     backend: str | None = None
     sandbox_shell: bool = False
+    #: Explicit risk-acceptance: allow ``run_shell`` in edit/auto mode with NO
+    #: PreToolUse hook and NO sandbox. Off by default (fail-closed) — shell is
+    #: unconfined by ``scope`` (it has no path target), so a write-capable run
+    #: must gate it with a hook, ``sandbox_shell``, or this explicit opt-in.
+    allow_ungated_shell: bool = False
     mcp_servers: tuple[McpServerSpec, ...] = ()
     safety_net: bool = True  # K5: stash + pxx-pre/<ts> tag on edit-capable starts
     auto_commit: bool = False  # opt-in: commit session work on COMPLETED (the undo tag still points at pre-session HEAD)
@@ -154,6 +159,7 @@ _KNOWN_KEYS = {
     "state_dir",
     "test_command",
     "sandbox_shell",
+    "allow_ungated_shell",
     "safety_net",
     "auto_commit",
     "loop_review",
@@ -338,6 +344,8 @@ def _settings_from_dict(
         kwargs["backend"] = backend
     if "sandbox_shell" in data:
         kwargs["sandbox_shell"] = bool(data["sandbox_shell"])
+    if "allow_ungated_shell" in data:
+        kwargs["allow_ungated_shell"] = bool(data["allow_ungated_shell"])
     if "safety_net" in data:
         kwargs["safety_net"] = bool(data["safety_net"])
     if "auto_commit" in data:
@@ -399,6 +407,7 @@ _ENV_MAP = {
     "PXX_PERMISSION": "permission",
     "PXX_TEST_COMMAND": "test_command",
     "PXX_SANDBOX_SHELL": "sandbox_shell",
+    "PXX_ALLOW_UNGATED_SHELL": "allow_ungated_shell",
     "PXX_AUTO_COMMIT": "auto_commit",
     "PXX_LOOP_REVIEW": "loop_review",
     "PXX_BACKEND": "backend",
@@ -424,6 +433,8 @@ def _settings_from_env(base: Settings) -> Settings:
         value = os.environ.get(env_key)
         if value:
             if cfg_key == "sandbox_shell":
+                data[cfg_key] = value.lower() in ("1", "true", "yes")
+            elif cfg_key == "allow_ungated_shell":
                 data[cfg_key] = value.lower() in ("1", "true", "yes")
             elif cfg_key == "auto_commit":
                 data[cfg_key] = value.lower() in ("1", "true", "yes")

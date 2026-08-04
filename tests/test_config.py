@@ -47,6 +47,14 @@ def test_unknown_key_rejected(tmp_path):
         load_settings(cwd=tmp_path)
 
 
+def test_allow_ungated_shell_toml_env_and_default(tmp_path, monkeypatch):
+    assert load_settings(cwd=tmp_path).allow_ungated_shell is False  # fail-closed default
+    (tmp_path / "pxx.toml").write_text("allow_ungated_shell = true\n")
+    assert load_settings(cwd=tmp_path).allow_ungated_shell is True
+    monkeypatch.setenv("PXX_ALLOW_UNGATED_SHELL", "0")  # env overrides TOML
+    assert load_settings(cwd=tmp_path).allow_ungated_shell is False
+
+
 def test_loop_review_from_toml(tmp_path):
     (tmp_path / "pxx.toml").write_text("loop_review = true\n")
     assert load_settings(cwd=tmp_path).loop_review is True

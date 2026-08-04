@@ -33,8 +33,10 @@ can delegate to [aider](https://github.com/Aider-AI/aider) as an optional edit e
   outcomes, your own `remember` notes) are stored in a local SQLite database with
   hybrid BM25 + vector search and injected deterministically at session start.
 - **Fail-closed safety**: read-only by default. Writes require `edit`/`run` mode,
-  stay inside a canonicalized scope (symlinks resolved), shell commands are gated,
-  and every run ends with a machine-readable terminal code in a hash-chained audit log.
+  stay inside a canonicalized scope (symlinks resolved), shell commands are gated
+  in every write-capable mode (a hook, sandbox, or explicit opt-in — even under
+  unattended `run`), and every run ends with a machine-readable terminal code in
+  a hash-chained audit log.
 - **Interop**: consumes MCP servers as tools, and exposes its own memory as an MCP
   server for other agents (Claude Code, goose, opencode, …).
 

@@ -3,6 +3,36 @@
 All notable changes to pxx are documented here. The 1.x series history is
 preserved in git (tag `v1.3.3` and earlier).
 
+## [2.3.5] — 2026-08-04
+
+Security: close the `run_shell` auto-mode gap surfaced while documenting the hook
+contract in 2.3.4 (see R-029). The README claimed "shell commands are gated";
+`auto` mode didn't honor it.
+
+### Security
+
+- **`run_shell` is now fail-closed in `auto` mode, matching `edit`.** `scope`
+  confines only the file tools (a shell command has no path target), so an
+  unattended `pxx run` could execute arbitrary model-authored shell with **no
+  PreToolUse hook and no sandbox** — `auto`'s profile allows the shell class and
+  only `edit` enforced the hook requirement. Now `run_shell` in **either** write-
+  capable mode requires one explicit safeguard — a `run_shell` PreToolUse hook,
+  `sandbox_shell`, or the new opt-in `allow_ungated_shell` (`PXX_ALLOW_UNGATED_SHELL`)
+  — else it is denied `HOOKS_MISSING`. `ask`/`plan` still never permit shell.
+  This also *relaxes* `edit` slightly: `sandbox_shell` (containment) now satisfies
+  the gate there too, not only a hook.
+
+### Added
+
+- **`allow_ungated_shell` config key / `PXX_ALLOW_UNGATED_SHELL`** (default
+  `false`) — explicit, named risk-acceptance for an unhooked, unsandboxed shell,
+  so the fail-closed default has a deliberate escape hatch rather than a silent one.
+
+### Changed
+
+- `README.md` truthed up: "shell commands are gated **in every write-capable
+  mode**" — the claim now holds for unattended `run`.
+
 ## [2.3.4] — 2026-08-04
 
 Hardening from pxx's first governed production integration inside a third-party

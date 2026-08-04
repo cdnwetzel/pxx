@@ -109,12 +109,22 @@ class RunShell:
         mode = ctx.permission
         if mode in (PermissionMode.ASK, PermissionMode.PLAN):
             raise ScopeViolation(f"run_shell is never allowed in permission mode '{mode}'")
-        if mode is PermissionMode.EDIT and not _has_pre_hooks(ctx):
+        # `scope` gates only the file tools (path targets); a shell command has no
+        # path target, so a write-capable run (edit/auto — including unattended
+        # `pxx run`) must gate run_shell some other way or it is unconfined. Fail
+        # closed unless one safeguard is present: a PreToolUse hook (per-command
+        # allow/deny), sandbox_shell (containment), or an explicit risk-accepting
+        # opt-in. Previously only EDIT enforced this and AUTO ran shell unguarded.
+        if mode in (PermissionMode.EDIT, PermissionMode.AUTO) and not (
+            _has_pre_hooks(ctx) or ctx.sandbox_shell or ctx.allow_ungated_shell
+        ):
             raise HooksMissing(
-                "run_shell in permission mode 'edit' requires a configured "
-                "PreToolUse hook (fail-closed); none is configured. "
-                'Add a [[hooks]] entry (event="PreToolUse", matcher="run_shell", '
-                "command=...) to pxx.toml — see docs/CONFIG.md §hooks"
+                f"run_shell in permission mode '{mode}' requires a shell safeguard "
+                "(fail-closed); none is configured. Choose one: add a PreToolUse hook "
+                '([[hooks]] event="PreToolUse", matcher="run_shell", command=...) to '
+                "approve/deny each command; set sandbox_shell=true to contain it; or "
+                "set allow_ungated_shell=true (PXX_ALLOW_UNGATED_SHELL=1) to accept an "
+                "ungated shell explicitly. See docs/CONFIG.md §hooks"
             )
 
         command = str(args.get("command", ""))

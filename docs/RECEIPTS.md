@@ -1254,5 +1254,51 @@ are deliberately omitted.
 
 ---
 
+## R-029 — `run_shell` is fail-closed in `auto` mode (closes an unguarded shell)
+
+**Claim.** `run_shell` in the unattended `auto` mode no longer executes
+model-authored shell without a safeguard. In a write-capable mode (`edit` or
+`auto`) it now requires a `run_shell` PreToolUse hook, `sandbox_shell`, or the
+explicit `allow_ungated_shell` opt-in, else it is denied `HOOKS_MISSING`.
+Previously `edit` enforced this but `auto` did not — and `scope` never confined
+shell (a command has no path target), so an unattended `pxx run` could run
+arbitrary shell unhooked and unsandboxed.
+
+**Grade.** Reproducible (unit tests) — the deny path, all three satisfy-the-gate
+paths (hook / sandbox / opt-in), and the config plumbing are covered.
+
+**Exact configuration (nothing inherits).** pxx **2.3.5**; `pxx/tools/shell.py`
+`run()` gate — `mode in (EDIT, AUTO) and not (has_pre_hooks or sandbox_shell or
+allow_ungated_shell)` → `HooksMissing`; `Settings.allow_ungated_shell` (default
+`False`) + `PXX_ALLOW_UNGATED_SHELL`, plumbed to `ToolContext` via
+`make_tool_context`. `PermissionProfile.defaults()` allows the `shell` class in
+`auto` (`broker.py`), and `run_shell` carries no path target (`broker.py`), so
+the tool-level gate is the enforcement point.
+
+**Procedure (reproduction path).**
+
+```sh
+uv run --extra dev python -m pytest tests/test_tools.py -k run_shell -q
+uv run --extra dev python -m pytest tests/test_config.py -k allow_ungated_shell -q
+```
+
+**Observed (2026-08-04).** In `auto` with no hook/sandbox/opt-in,
+`run_shell {"command": "echo hi"}` raises `HooksMissing` naming the three
+safeguards. With any one of a `run_shell` hook, `sandbox_shell=true`, or
+`allow_ungated_shell=true`, the command runs. `ask`/`plan` still raise
+`ScopeViolation`. Config: `allow_ungated_shell` defaults `False`, reads from TOML
+and `PXX_ALLOW_UNGATED_SHELL`, env overrides TOML.
+
+**Boundary — explicitly not claimed.** (1) This gates *whether* shell runs, not
+*what* it can do once a safeguard is chosen — `allow_ungated_shell` deliberately
+runs it unconfined (named risk-acceptance), and `sandbox_shell` degrades to plain
+`/bin/sh` when no `sandbox-exec`/`bwrap` binary is present (containment silently
+absent — a separate follow-up). (2) The fix relaxes `edit` too: `sandbox_shell`
+now satisfies the gate there, where before only a hook did. (3) The
+firm-governed host of R-028 was never exposed by the old gap (its minted identity
+carried no shell class); this closes it for pxx-standalone unattended users.
+
+---
+
 *Convention: entries are append-only and dated; superseded claims are
 struck through with a pointer to the superseding entry, never deleted.*

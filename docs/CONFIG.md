@@ -21,6 +21,7 @@ Precedence (highest wins): CLI flags → `PXX_*` env vars → `./pxx.toml` or
 | `state_dir` | path | `$XDG_STATE_HOME/pxx` | audit logs |
 | `test_command` | string | — | used by `pxx loop` |
 | `sandbox_shell` | bool | `false` | wrap `run_shell` in sandbox-exec/bubblewrap |
+| `allow_ungated_shell` | bool | `false` | explicitly permit `run_shell` with no hook/sandbox (see `[[hooks]]`) |
 | `safety_net` | bool | `true` | stash + `pxx-pre/<ts>` tag on edit-capable session starts (git repos) |
 | `loop_review` | bool | `false` | per-box default for the `pxx loop` model-backed review gate (see below) |
 
@@ -173,12 +174,31 @@ root**, not as an absolute path. A hook that enforces a path boundary MUST:
    `target.startswith(root.rstrip("/") + "/")` so a sibling like `/repo-evil`
    does not match the scope `/repo`.
 
-`run_shell`'s target is a command string, not a path — don't anchor it. Note
-that `scope` confines only the **file** tools (it checks path targets); a shell
-command has no path target, so `scope` does **not** restrict what `run_shell`
-can touch. Gate shell separately — a `PreToolUse` hook with `matcher =
-"run_shell"` (deterministic allow/deny of the command) and/or `sandbox_shell` —
-rather than relying on `scope` to contain it.
+`run_shell`'s target is a command string, not a path — don't anchor it.
+
+**`run_shell` is fail-closed in write-capable modes.** `scope` confines only the
+**file** tools (it checks path targets); a shell command has no path target, so
+`scope` does **not** restrict what `run_shell` can touch. Because of that,
+`run_shell` in `edit` or `auto` mode (including unattended `pxx run`) requires an
+explicit shell safeguard, or it is denied with `HOOKS_MISSING`. Provide at least
+one (they're additive — any one satisfies the gate):
+
+- a `PreToolUse` hook that **actually fires for `run_shell`** — `matcher =
+  "run_shell"` or an empty matcher (deterministic allow/deny per command). A hook
+  scoped to another tool (e.g. `matcher = "write_file"`) does **not** count. **Or**
+- `sandbox_shell = true` — contain it in sandbox-exec (macOS) / bubblewrap
+  (Linux). This counts only when a sandboxer binary is actually present; if
+  `sandbox_shell` is set but none is installed, `run_shell` is **denied** rather
+  than run unconfined. **Or**
+- `allow_ungated_shell = true` (or `PXX_ALLOW_UNGATED_SHELL=1`) to accept an
+  unhooked, unsandboxed shell **explicitly** — off by default, since it lets a
+  model-authored command run unconfined.
+
+`allow_ungated_shell` is honoured **only from user config, env, or CLI** — like
+`[[hooks]]` / `[roles.review]`, it is ignored (with a warning) from a repo-local
+`pxx.toml` / `.pxx/config.toml`, so a checked-in file in an untrusted repo can't
+disable the shell gate for anyone who runs pxx in it. `ask`/`plan` never permit
+`run_shell` at all.
 
 ## `[[mcp_servers]]`
 
@@ -189,7 +209,10 @@ its tools as `mcp__<name>__<tool>`.
 
 `PXX_MODEL`, `PXX_PROVIDER`, `PXX_BASE_URL`, `PXX_API_KEY`, `PXX_PERMISSION`,
 `PXX_BACKEND` (`native`/`aider`/`auto`),
-`PXX_TEST_COMMAND`, `PXX_SANDBOX_SHELL`, `PXX_LOOP_REVIEW` (default the `pxx loop`
+`PXX_TEST_COMMAND`, `PXX_SANDBOX_SHELL`, `PXX_ALLOW_UNGATED_SHELL`
+(`1`/`true`/`yes`/`on` or `0`/`false`/`no`/`off` — an unrecognized value is
+rejected, since it toggles a safety gate),
+`PXX_LOOP_REVIEW` (default the `pxx loop`
 review gate on for this box), `PXX_MEMORY_ENABLED`, `PXX_MEMORY_DIR`,
 `PXX_SCOPE` (comma list), `PXX_SERVER_TOKEN` (auth for `pxx serve`).
 Reviewer role overlay (see `[roles.review]`): `PXX_REVIEW_MODEL`,

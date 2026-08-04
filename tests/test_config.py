@@ -47,6 +47,50 @@ def test_unknown_key_rejected(tmp_path):
         load_settings(cwd=tmp_path)
 
 
+def test_allow_ungated_shell_default_and_trusted_sources(tmp_path, monkeypatch):
+    from pxx.config import Settings, _settings_from_dict
+
+    assert load_settings(cwd=tmp_path).allow_ungated_shell is False  # fail-closed default
+    # honoured from a TRUSTED source (user config / env / CLI)
+    trusted = _settings_from_dict(
+        {"allow_ungated_shell": True}, Settings(), "user config", allow_exec_surfaces=True
+    )
+    assert trusted.allow_ungated_shell is True
+    monkeypatch.setenv("PXX_ALLOW_UNGATED_SHELL", "1")
+    assert load_settings(cwd=tmp_path).allow_ungated_shell is True
+
+
+@pytest.mark.parametrize(
+    "raw, expected", [("1", True), ("on", True), ("false", False), ("0", False), ("OFF", False)]
+)
+def test_allow_ungated_shell_env_tokens(tmp_path, monkeypatch, raw, expected):
+    monkeypatch.setenv("PXX_ALLOW_UNGATED_SHELL", raw)
+    assert load_settings(cwd=tmp_path).allow_ungated_shell is expected
+
+
+def test_allow_ungated_shell_env_garbage_rejected(tmp_path, monkeypatch):
+    monkeypatch.setenv("PXX_ALLOW_UNGATED_SHELL", "maybe")  # typo of a safety gate → loud
+    with pytest.raises(ConfigError, match="PXX_ALLOW_UNGATED_SHELL must be a boolean"):
+        load_settings(cwd=tmp_path)
+
+
+def test_allow_ungated_shell_ignored_from_repo_local(tmp_path):
+    # A0b: a checked-in pxx.toml must NOT be able to disable the run_shell gate.
+    (tmp_path / "pxx.toml").write_text("allow_ungated_shell = true\n")
+    assert load_settings(cwd=tmp_path).allow_ungated_shell is False
+
+
+def test_allow_ungated_shell_non_boolean_rejected(tmp_path):
+    # A security opt-in must not fail OPEN: bool("false") is True. (Checked on a
+    # trusted source; repo-local strips the key before it is validated.)
+    from pxx.config import Settings, _settings_from_dict
+
+    with pytest.raises(ConfigError, match="allow_ungated_shell must be a boolean"):
+        _settings_from_dict(
+            {"allow_ungated_shell": "false"}, Settings(), "user config", allow_exec_surfaces=True
+        )
+
+
 def test_loop_review_from_toml(tmp_path):
     (tmp_path / "pxx.toml").write_text("loop_review = true\n")
     assert load_settings(cwd=tmp_path).loop_review is True

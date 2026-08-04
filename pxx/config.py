@@ -96,6 +96,11 @@ class Settings:
     #: means "auto" (the historical default).
     backend: str | None = None
     sandbox_shell: bool = False
+    #: Explicit risk-acceptance: allow ``run_shell`` in edit/auto mode with NO
+    #: PreToolUse hook and NO sandbox. Off by default (fail-closed) — shell is
+    #: unconfined by ``scope`` (it has no path target), so a write-capable run
+    #: must gate it with a hook, ``sandbox_shell``, or this explicit opt-in.
+    allow_ungated_shell: bool = False
     mcp_servers: tuple[McpServerSpec, ...] = ()
     safety_net: bool = True  # K5: stash + pxx-pre/<ts> tag on edit-capable starts
     auto_commit: bool = False  # opt-in: commit session work on COMPLETED (the undo tag still points at pre-session HEAD)
@@ -154,6 +159,7 @@ _KNOWN_KEYS = {
     "state_dir",
     "test_command",
     "sandbox_shell",
+    "allow_ungated_shell",
     "safety_net",
     "auto_commit",
     "loop_review",
@@ -243,10 +249,13 @@ def _settings_from_dict(
     allow_exec_surfaces: bool = True,
 ) -> Settings:
     """Merge one config source. ``allow_exec_surfaces=False`` (repo-local
-    project configs) means hook commands and MCP server definitions are
-    IGNORED with a loud warning: a file inside the edit surface must not be
-    able to define the gate that guards the edit surface (A0b)."""
-    for key in ("hooks", "mcp_servers"):
+    project configs) means hook commands, MCP server definitions, and
+    ``allow_ungated_shell`` are IGNORED with a loud warning: a file inside the
+    edit surface must not be able to define — or DISABLE — the gate that guards
+    the edit surface (A0b). A checked-in ``allow_ungated_shell = true`` would let
+    an untrusted repo turn off the run_shell safeguard for anyone who runs pxx in
+    it, so it is honoured only from user config, env, or CLI."""
+    for key in ("hooks", "mcp_servers", "allow_ungated_shell"):
         if key in data and not allow_exec_surfaces:
             log.warning(
                 "ignoring %s in repo-local config %s (exec surfaces are honored "
@@ -338,6 +347,13 @@ def _settings_from_dict(
         kwargs["backend"] = backend
     if "sandbox_shell" in data:
         kwargs["sandbox_shell"] = bool(data["sandbox_shell"])
+    if "allow_ungated_shell" in data:
+        # Strict: a security opt-in must not fail OPEN on a quoted string —
+        # bool("false") is True. Require an actual boolean (matches loop_review).
+        value = data["allow_ungated_shell"]
+        if not isinstance(value, bool):
+            raise ConfigError(f"{source}: allow_ungated_shell must be a boolean")
+        kwargs["allow_ungated_shell"] = value
     if "safety_net" in data:
         kwargs["safety_net"] = bool(data["safety_net"])
     if "auto_commit" in data:
@@ -399,6 +415,7 @@ _ENV_MAP = {
     "PXX_PERMISSION": "permission",
     "PXX_TEST_COMMAND": "test_command",
     "PXX_SANDBOX_SHELL": "sandbox_shell",
+    "PXX_ALLOW_UNGATED_SHELL": "allow_ungated_shell",
     "PXX_AUTO_COMMIT": "auto_commit",
     "PXX_LOOP_REVIEW": "loop_review",
     "PXX_BACKEND": "backend",
@@ -425,6 +442,19 @@ def _settings_from_env(base: Settings) -> Settings:
         if value:
             if cfg_key == "sandbox_shell":
                 data[cfg_key] = value.lower() in ("1", "true", "yes")
+            elif cfg_key == "allow_ungated_shell":
+                # Strict: this env var disables a safety gate, so a typo'd value
+                # is surfaced loudly (ConfigError) rather than silently coerced.
+                low = value.strip().lower()
+                if low in ("1", "true", "yes", "on"):
+                    data[cfg_key] = True
+                elif low in ("0", "false", "no", "off"):
+                    data[cfg_key] = False
+                else:
+                    raise ConfigError(
+                        f"{env_key} must be a boolean "
+                        "(1/true/yes/on or 0/false/no/off), got " + repr(value)
+                    )
             elif cfg_key == "auto_commit":
                 data[cfg_key] = value.lower() in ("1", "true", "yes")
             elif cfg_key == "loop_review":

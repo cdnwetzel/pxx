@@ -32,9 +32,23 @@ MAX_OUTPUT_BYTES = 32 * 1024
 DEFAULT_TIMEOUT = 60
 
 
-def _has_pre_hooks(ctx: ToolContext) -> bool:
-    """Whether any PreToolUse hook is configured (fail-closed: unknown -> False)."""
-    return bool(getattr(ctx.hooks, "has_pre_hooks", False))
+def _shell_hook_covers(ctx: ToolContext) -> bool:
+    """Whether a PreToolUse hook would actually FIRE for run_shell. A hook scoped
+    to another tool (e.g. matcher="write_file") is NOT a shell gate. Fail-closed:
+    an unexpected hooks object with no ``covers_pre`` counts as no coverage."""
+    covers = getattr(ctx.hooks, "covers_pre", None)
+    return bool(covers("run_shell")) if callable(covers) else False
+
+
+def _sandbox_available() -> bool:
+    """Whether a sandboxer binary is actually present. ``sandbox_shell`` only
+    contains anything if one exists; without it ``_wrap_sandbox`` would run plain
+    ``/bin/sh`` — so an unavailable sandbox is NOT a safeguard."""
+    if sys.platform == "darwin":
+        return shutil.which("sandbox-exec") is not None
+    if sys.platform.startswith("linux"):
+        return shutil.which("bwrap") is not None
+    return False
 
 
 def seatbelt_profile(root: Path) -> str:
@@ -109,12 +123,37 @@ class RunShell:
         mode = ctx.permission
         if mode in (PermissionMode.ASK, PermissionMode.PLAN):
             raise ScopeViolation(f"run_shell is never allowed in permission mode '{mode}'")
-        if mode is PermissionMode.EDIT and not _has_pre_hooks(ctx):
+        # sandbox honesty: if containment was requested but no sandboxer binary is
+        # present, fail closed rather than silently run plain /bin/sh (which would
+        # LOOK sandboxed but confine nothing).
+        if ctx.sandbox_shell and not _sandbox_available():
             raise HooksMissing(
-                "run_shell in permission mode 'edit' requires a configured "
-                "PreToolUse hook (fail-closed); none is configured. "
-                'Add a [[hooks]] entry (event="PreToolUse", matcher="run_shell", '
-                "command=...) to pxx.toml — see docs/CONFIG.md §hooks"
+                "sandbox_shell=true but no sandbox binary is available "
+                "(macOS: sandbox-exec; Linux: bwrap) — run_shell is denied rather "
+                "than run unconfined. Install one, or use a run_shell PreToolUse "
+                "hook / allow_ungated_shell. See docs/CONFIG.md §hooks"
+            )
+        # `scope` gates only the file tools (path targets); a shell command has no
+        # path target, so a write-capable run (edit/auto — including unattended
+        # `pxx run`) must gate run_shell some other way or it is unconfined. Fail
+        # closed unless a REAL safeguard is present: a PreToolUse hook that would
+        # actually fire for run_shell, an AVAILABLE sandbox, or an explicit opt-in.
+        # (A hook scoped to another tool, or sandbox_shell with no sandboxer, does
+        # not count — those only *appear* to gate.) Previously AUTO ran unguarded.
+        gated = (
+            _shell_hook_covers(ctx)
+            or (ctx.sandbox_shell and _sandbox_available())
+            or ctx.allow_ungated_shell
+        )
+        if mode in (PermissionMode.EDIT, PermissionMode.AUTO) and not gated:
+            raise HooksMissing(
+                f"run_shell in permission mode '{mode}' requires a shell safeguard "
+                "(fail-closed); none is configured. Choose one: add a PreToolUse hook "
+                '([[hooks]] event="PreToolUse", matcher="run_shell", command=...) that '
+                "approves/denies each command; set sandbox_shell=true (needs an "
+                "available sandboxer) to contain it; or set allow_ungated_shell=true "
+                "(PXX_ALLOW_UNGATED_SHELL=1) to accept an ungated shell explicitly. "
+                "See docs/CONFIG.md §hooks"
             )
 
         command = str(args.get("command", ""))

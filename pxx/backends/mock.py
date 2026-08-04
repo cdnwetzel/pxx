@@ -38,6 +38,7 @@ def make_tool_context(ctx: SessionContext) -> Any:
         cwd=ctx.cwd,
         session_id=ctx.session_id,
         sandbox_shell=ctx.settings.sandbox_shell,
+        allow_ungated_shell=ctx.settings.allow_ungated_shell,
         profile=ctx.profile,
     )
 

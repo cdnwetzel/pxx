@@ -64,6 +64,7 @@ class ToolContext:
     memory: MemoryStore | None = None
     session_id: str = ""
     sandbox_shell: bool = False
+    allow_ungated_shell: bool = False  # explicit opt-in to an unhooked/unsandboxed shell
     profile: Any = None  # pxx.broker.PermissionProfile (lazy to avoid cycle)
 
 

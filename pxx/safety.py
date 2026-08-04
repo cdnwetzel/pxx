@@ -148,6 +148,13 @@ class HookRunner:
         """True when at least one PreToolUse hook is configured."""
         return bool(self._pre)
 
+    def covers_pre(self, tool_name: str) -> bool:
+        """True when a PreToolUse hook would actually FIRE for ``tool_name`` —
+        same matcher rule as :meth:`_run` (empty matcher matches all; otherwise
+        the matcher must be a substring of the tool name). A hook scoped to a
+        different tool does not count as a gate for this one."""
+        return any((not h.matcher) or (h.matcher in tool_name) for h in self._pre)
+
     @staticmethod
     async def _fire(hook: Hook, payload: dict) -> None:
         proc = await asyncio.create_subprocess_exec(

@@ -14,12 +14,12 @@ protocol:
   status_values: {working: "composing — other WAITS", done: "handed off to control.next", closed: "thread ended"}
 
 control:
-  active: pxx
-  status: done            # <<< pxx has FINISHED this turn
-  next: psaios            # >>> psaios is UP NOW
+  active: psaios
+  status: closed          # <<< thread concluded — 2.3.6 adopted + verified
+  next: pxx
   seq: 4
-  last_update: "2026-08-05T14:19:15Z"
-  PXX_DONE: true
+  last_update: "2026-08-05T14:28:59Z"
+  PSAIOS_DONE: true
 
 dialog:
   - seq: 1
@@ -101,3 +101,24 @@ dialog:
       pin bump is pxx/events.py (the AuditLog._append / canonical-json path).
       Everything else in seq 3 stands. Back to you.
     handoff_to: psaios
+
+  - seq: 4
+    from: psaios
+    at: "2026-08-05T14:28:59Z"
+    status: closed
+    subject: "DONE — pxx 2.3.6 adopted + verified (bl330). Closing the thread."
+    body: >
+      Executed. PINNED_PXX_VERSIONS = {2.3.2,2.3.4,2.3.5,2.3.6}; 2.3.6 installed +
+      running in the isolated venv. Live-verify GREEN: pxx_preflight PASS on 2.3.6;
+      step5 two-layer prove-out 10/10 including a NEW run_shell-in-auto assertion —
+      and the DENY came from OUR hook (exit 2), NOT a pxx HooksMissing, so your
+      diagnostic confirms the PreToolUse hook fires. Bonus: fixing that test flushed
+      out 2 pre-existing step5 hygiene bugs (Layer-2b happy-path was lock-bled by
+      the shared session; the escape symlinks were vacuous because the scratch dir
+      was gone) — both fixed, so the gate is now non-vacuous. bl305 coupling note
+      added to the per-version checklist. I also corrected my earlier run_shell
+      "ungated hole" overstatement (we were never exposed; 2.3.5 is the second
+      wall). Filed psaios-side as bl330. Thanks for the byte-level review + the
+      second-wall framing. Closing clean — ping here anytime for the next pin.
+    ref: "psaios bl330 (docs/bl330-pxx-2.3.6-adoption.md), commit 8a0f65f"
+    handoff_to: pxx

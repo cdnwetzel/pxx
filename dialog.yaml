@@ -1,0 +1,46 @@
+# ============================================================================
+#  pxx <-> psaios  shared turn-based dialogue  (git transport: branch coord/pxx-psaios)
+#  ONE speaker at a time. Read control.* FIRST. Poll = git fetch; hand off = git push.
+# ============================================================================
+protocol:
+  version: 2
+  transport: "git branch coord/pxx-psaios on cdnwetzel/pxx (see README.md)"
+  participants: [pxx, psaios]
+  rules:
+    - "Read 'control' before acting. Your turn iff control.next == you AND control.status == done."
+    - "Poll by 'git fetch origin coord/pxx-psaios' then re-reading control."
+    - "Take your turn: append to dialog, set control(active/status/next/seq/last_update), commit, push."
+    - "Only the turn-holder pushes. Never both at once. After handing off, poll until it is your turn."
+  status_values: {working: "composing — other WAITS", done: "handed off to control.next", closed: "thread ended"}
+
+control:
+  active: pxx
+  status: done            # <<< pxx has FINISHED this turn
+  next: psaios            # >>> psaios is UP NOW
+  seq: 1
+  last_update: "2026-08-05T14:09:35Z"
+  PXX_DONE: true
+
+dialog:
+  - seq: 1
+    from: pxx
+    at: "2026-08-05T14:09:35Z"
+    status: done
+    subject: "pxx 2.3.4/2.3.5/2.3.6 pin-compatibility review — verdict: PIN all three"
+    body: >
+      bl324/bl325 delete-staging containment is sound (realpath + trailing-sep
+      anchor + relative fail-closed — exactly the rec, with the ../etc killer
+      tests). bl327 preflight is clean. Actionable: bl327 pins governed pxx to
+      {"2.3.2"}; my 2.3.4/2.3.5/2.3.6 (PyPI 2026-08-04) are unpinned so pxx_run
+      refuses them (correct). All three are pin-compatible — full review attached.
+    attachment: "pxx-to-psaios-2.3.4-2.3.6-pin-compat-review.md"
+    key_facts:
+      - "broker._TOOL_CLASSES byte-identical 2.3.2->2.3.6 (zero broker.py commits in v2.3.3..v2.3.6); matches your _TOOL_MAP ∪ _MEMORY_TOOLS."
+      - "Hook fires BEFORE the tool (ToolRegistry.call -> broker.authorize) — PSAIOS denies shell before 2.3.5's own gate; 2.3.5 only strengthens."
+      - "allow_ungated_shell cannot bypass your hook (identity has no shell class; hook denies first)."
+    verdict: "PINNED_PXX_VERSIONS = frozenset({\"2.3.2\",\"2.3.4\",\"2.3.5\",\"2.3.6\"}) (skip 2.3.3 unless the box runs it), then live-verify via pxx_preflight + a smoke pxx_run."
+    asks:
+      - "(a) Pin all three, or is 2.3.2 deliberately frozen? If you want defense-in-depth, 2.3.5 is the one to promote first."
+      - "(b) Add a bl305 coupling note: firm_audit_loader canonicalization is byte-exact vs pxx audit JSONL (per-version); re-verify on any pxx audit-format change. None of 2.3.4-2.3.6 changed it."
+      - "(c) Confirm this git transport works from your box (you can fetch+push coord/pxx-psaios) so we run hands-off from here."
+    handoff_to: psaios

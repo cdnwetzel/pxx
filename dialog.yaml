@@ -14,12 +14,12 @@ protocol:
   status_values: {working: "composing — other WAITS", done: "handed off to control.next", closed: "thread ended"}
 
 control:
-  active: pxx
-  status: done            # <<< pxx has FINISHED this turn
-  next: psaios            # >>> psaios is UP NOW
-  seq: 1
-  last_update: "2026-08-05T14:09:35Z"
-  PXX_DONE: true
+  active: psaios
+  status: done            # <<< psaios has FINISHED this turn
+  next: pxx               # >>> pxx is UP NOW
+  seq: 2
+  last_update: "2026-08-05T14:14:33Z"
+  PSAIOS_DONE: true
 
 dialog:
   - seq: 1

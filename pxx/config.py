@@ -16,7 +16,7 @@ import logging
 import math
 import os
 import tomllib
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field, fields, replace
 from pathlib import Path
 from typing import Any
 
@@ -118,6 +118,14 @@ class Settings:
     #: running to its budget (e.g. when the suite is slow enough that a mid-session
     #: probe costs more than the rounds it saves).
     done_signal: bool = True
+    #: How many hybrid-search hits session-start memory injection may include
+    #: (``pxx.memory.inject.build_context``). The default equals inject.py's
+    #: historical hardcoded ``_SEARCH_HITS``, so an unconfigured box is
+    #: byte-identical to before this key existed. Positive int only (fail-closed
+    #: on <= 0). This is also the one settings target the improve plane may
+    #: auto-derive (``pxx.improve.cycle``); a promoted stable-channel candidate
+    #: overlays it at run start (``apply_stable_overlay``).
+    memory_retrieval_limit: int = 8
 
     @property
     def effective_budgets(self) -> Budgets:
@@ -173,6 +181,7 @@ _KNOWN_KEYS = {
     "auto_commit",
     "loop_review",
     "done_signal",
+    "memory_retrieval_limit",
     "budgets",
     "hooks",
     "mcp_servers",
@@ -383,6 +392,13 @@ def _settings_from_dict(
         if not isinstance(value, bool):
             raise ConfigError(f"{source}: done_signal must be a boolean")
         kwargs["done_signal"] = value
+    if "memory_retrieval_limit" in data:
+        # Strict: positive int only. bool is an int subclass — reject it
+        # explicitly so `memory_retrieval_limit = true` can't pass as 1.
+        value = data["memory_retrieval_limit"]
+        if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+            raise ConfigError(f"{source}: memory_retrieval_limit must be a positive integer")
+        kwargs["memory_retrieval_limit"] = value
     if "budgets" in data:
         b = data["budgets"]
         unknown = set(b) - _KNOWN_BUDGET_KEYS
@@ -531,6 +547,147 @@ def load_settings(
             ),
         )
     return settings
+
+
+# -- stable-channel settings overlay (improve plane bridge) --------------------
+
+
+def _overlay_budgets(base: Budgets, value: Any) -> Budgets:
+    """Apply a promoted budgets overlay TIGHTEN-ONLY.
+
+    Mirrors ``pxx.improve.candidates._validate_budgets``: the candidate was
+    validated against the baseline Budgets it references, but the operator
+    may have tightened further since — so each field applies only when it
+    makes the CURRENT budgets stricter (never looser).
+    """
+    merged = base
+    for name, new in value.items():
+        current = getattr(base, name, None)
+        if current is None or isinstance(new, bool) or not isinstance(new, (int, float)):
+            log.warning("stable overlay: skipping unknown/non-numeric budget %r", name)
+            continue
+        if new > current:
+            log.warning(
+                "stable overlay: budget %s=%s would LOOSEN the current %s — skipped "
+                "(promoted budgets apply tighten-only)",
+                name,
+                new,
+                current,
+            )
+            continue
+        merged = replace(merged, **{name: new})
+    return merged
+
+
+def _apply_settings_candidate(
+    settings: Settings, candidate: Any, pinned: frozenset[str]
+) -> Settings:
+    """Map one validated settings candidate onto ``settings``.
+
+    Only keys that already exist on :class:`Settings` are applied — a valid
+    candidate target with no Settings field (``review_mode``: per-invocation
+    on ``Session``) is skipped loudly, never silently invented. Value shapes
+    were already enforced by ``validate_candidate``; anything that still
+    fails to apply degrades to base settings with a warning.
+    """
+    target = str(candidate.target)
+    if target in pinned:
+        log.info("stable overlay: %s is operator-pinned (CLI wins) — skipped", target)
+        return settings
+    if target not in {f.name for f in fields(Settings)}:
+        log.warning(
+            "stable overlay: target %r has no Settings field — skipped (not applied)",
+            target,
+        )
+        return settings
+    value = candidate.value
+    try:
+        if target == "memory_retrieval_limit":
+            return replace(settings, memory_retrieval_limit=int(value))
+        if target == "budgets":
+            return replace(settings, budgets=_overlay_budgets(settings.budgets, value))
+        if target == "model":
+            entry = value if isinstance(value, dict) else {"model": str(value)}
+            provider = entry.get("provider")
+            if provider is not None and str(provider) not in _PROVIDERS:
+                log.warning("stable overlay: unknown provider %r — model target skipped", provider)
+                return settings
+            merged = _merge_model_ref(
+                settings.model, {k: str(v) for k, v in entry.items()}, "stable overlay"
+            )
+            return replace(settings, model=merged)
+        if target == "fallback_models":
+            refs = tuple(
+                ModelRef(
+                    provider=str(m.get("provider", "ollama")),
+                    model=str(m["model"]),
+                    base_url=m.get("base_url"),
+                    api_key=m.get("api_key"),
+                )
+                if isinstance(m, dict)
+                else ModelRef(model=str(m))
+                for m in value
+            )
+            return replace(settings, fallback_models=refs)
+    except Exception:
+        log.warning(
+            "stable overlay: applying %s failed — using base settings", target, exc_info=True
+        )
+    return settings
+
+
+def apply_stable_overlay(
+    settings: Settings,
+    state_dir: Path | str | None = None,
+    *,
+    pinned: frozenset[str] = frozenset(),
+) -> Settings:
+    """Apply the STABLE channel's settings candidate, when one is promoted.
+
+    The improve plane (``pxx improve`` / ``pxx promote`` / ``pxx agent
+    activate stable``) promotes candidates to the stable channel as agent
+    version ids; a promoted candidate id maps to
+    ``<state_dir>/candidates/<id>/candidate.json`` (the same record
+    ``_cmd_promote`` validates). This closes the loop: the stable channel's
+    settings overlay is applied to the settings an actual run starts with.
+
+    Fail-closed but never bricking: no stable assignment, a stable id that
+    is not a promoted candidate (e.g. a base version string), an unreadable
+    or tampered candidate (``validate_candidate`` re-checks the content
+    hash), or a non-settings candidate all return ``settings`` unchanged —
+    a broken optimizer artifact must never break every run. ``pinned``
+    names config keys the operator set explicitly (CLI overrides): the
+    overlay never touches them, so the CLI always wins.
+    """
+    from .improve.candidates import CandidateClass, read_candidate, validate_candidate
+    from .improve.channels import Channel, ChannelManager
+
+    try:
+        manager = ChannelManager(state_dir if state_dir is not None else settings.state_dir)
+        version_id = manager.current(Channel.STABLE)
+    except Exception:
+        log.warning("stable overlay: channel state unreadable — using base settings", exc_info=True)
+        return settings
+    if not version_id:
+        return settings
+    candidate_dir = manager.state_dir / "candidates" / version_id
+    if not (candidate_dir / "candidate.json").is_file():
+        # Stable is a base/agent version id, not a promoted candidate:
+        # there is no settings overlay to apply.
+        return settings
+    try:
+        candidate = read_candidate(candidate_dir)
+        validate_candidate(candidate)  # re-verifies the content hash (tamper check)
+    except Exception as exc:
+        log.warning(
+            "stable overlay: candidate %s unreadable/invalid (%s) — using base settings",
+            version_id,
+            exc,
+        )
+        return settings
+    if str(candidate.change_class) != str(CandidateClass.SETTINGS):
+        return settings  # content/skill/fewshot/... candidates are not settings overlays
+    return _apply_settings_candidate(settings, candidate, pinned)
 
 
 def _timeout_from_env(names: tuple[str, ...], default: float) -> float:

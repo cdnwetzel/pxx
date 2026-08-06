@@ -152,7 +152,11 @@ class Session:
             try:
                 memory = MemoryStore(settings.memory_dir / "memory.db")
                 memory_context = await build_context(
-                    memory, self.project, task, collect_ids=injected_ids
+                    memory,
+                    self.project,
+                    task,
+                    collect_ids=injected_ids,
+                    limit=settings.memory_retrieval_limit,
                 )
             except Exception:
                 log.exception("memory unavailable; continuing without it")

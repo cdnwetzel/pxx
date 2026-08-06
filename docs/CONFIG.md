@@ -25,6 +25,16 @@ Precedence (highest wins): CLI flags → `PXX_*` env vars → `./pxx.toml` or
 | `safety_net` | bool | `true` | stash + `pxx-pre/<ts>` tag on edit-capable session starts (git repos) |
 | `loop_review` | bool | `false` | per-box default for the `pxx loop` model-backed review gate (see below) |
 | `done_signal` | bool | `true` | in `pxx loop`, stop a coder session once its edit passes the objective gates (scope/diff/lint/tests) instead of running to the budget cap; set `false` for slow suites (`PXX_DONE_SIGNAL`) |
+| `memory_retrieval_limit` | int | `8` | how many hybrid-search hits session-start memory injection may include (positive int; `<= 0` is a `ConfigError`) |
+
+**Promoted stable-channel overlay.** `pxx improve` promotes validated settings
+candidates (`memory_retrieval_limit`, tighten-only `budgets`, `model`,
+`fallback_models`) to the stable channel; `pxx run` / `pxx loop` / `pxx chat`
+apply the stable candidate's overlay at session start, after the normal config
+layers. CLI flags always win — an operator-pinned key is never overlaid — and a
+missing/invalid/tampered candidate is ignored with a warning (the run proceeds
+on base settings). Budgets apply tighten-only: a candidate that would loosen
+the budgets you currently run is skipped.
 
 **Tool calling.** The native backend (and therefore every `pxx loop` run, and
 `pxx run` by default) needs an endpoint that accepts tool calls. Ollama

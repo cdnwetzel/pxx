@@ -207,6 +207,40 @@ def test_build_context_excludes_archived(tmp_path):
     store.close()
 
 
+def test_build_context_honors_explicit_limit(tmp_path, monkeypatch):
+    """An explicit ``limit`` is threaded to store.search as ``k``."""
+    store = make_store(tmp_path)
+    seen: dict[str, int] = {}
+
+    async def fake_search(project, query, *, k):
+        seen["k"] = k
+        return []
+
+    monkeypatch.setattr(store, "search", fake_search)
+    run(store.add("proj", "note", "trivia about rutabaga"))
+    run(build_context(store, "proj", "trivia", limit=3))
+    assert seen["k"] == 3
+    store.close()
+
+
+def test_build_context_default_limit_is_search_hits(tmp_path, monkeypatch):
+    """No limit -> the historical _SEARCH_HITS default (unchanged behavior)."""
+    from pxx.memory import inject
+
+    store = make_store(tmp_path)
+    seen: dict[str, int] = {}
+
+    async def fake_search(project, query, *, k):
+        seen["k"] = k
+        return []
+
+    monkeypatch.setattr(store, "search", fake_search)
+    run(store.add("proj", "note", "trivia about rutabaga"))
+    run(build_context(store, "proj", "trivia"))
+    assert seen["k"] == inject._SEARCH_HITS == 8
+    store.close()
+
+
 def test_new_observation_defaults():
     obs = NewObservation(kind="note", content="hello")
     assert obs.tags == ()

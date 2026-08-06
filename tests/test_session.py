@@ -291,6 +291,24 @@ def test_session_memory_injected_into_context(tmp_path):
     assert "ruff" in seen["memory_context"]
 
 
+def test_session_threads_memory_retrieval_limit(tmp_path, monkeypatch):
+    """settings.memory_retrieval_limit reaches build_context as ``limit``."""
+    from pxx.memory import inject as inject_mod
+
+    seen = {}
+
+    async def fake_build_context(store, project, task, **kwargs):
+        seen.update(kwargs)
+        return ""
+
+    monkeypatch.setattr(inject_mod, "build_context", fake_build_context)
+    backend = MockBackend([{"done": "ok"}])
+    session = Session(_settings(tmp_path, memory_retrieval_limit=5), backend, cwd=tmp_path)
+    outcome = run(session.run("hi"))
+    assert outcome.code is TerminalCode.COMPLETED
+    assert seen.get("limit") == 5
+
+
 # --- M0 regression: L1 (MCP clients closed) + L2 (SIGINT handler removed) -------
 
 

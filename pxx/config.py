@@ -741,10 +741,21 @@ def apply_stable_overlay(
     # inside the resolved candidates root, else a hash-valid EXTERNAL candidate
     # could be read (CodeRabbit, security).
     try:
+        state_real = canonicalize(manager.state_dir)
         root_real = canonicalize(candidates_root)
         json_real = canonicalize(candidate_json)
     except Exception:
         log.warning("stable overlay: candidate path unresolvable — using base settings")
+        return settings
+    # Anchor the trust boundary at the canonical STATE dir (operator config), not
+    # at candidates/ — if candidates/ is ITSELF a symlink outside state_dir, then
+    # root_real would be the external dir and json_real.is_relative_to(root_real)
+    # would vacuously pass. Reject an escaped root first (CodeRabbit, security).
+    if not root_real.is_relative_to(state_real):
+        log.warning(
+            "stable overlay: candidates root resolves outside the state directory — "
+            "using base settings"
+        )
         return settings
     if not json_real.is_relative_to(root_real):
         log.warning(

@@ -624,6 +624,25 @@ def test_stable_overlay_symlink_escape_is_refused(tmp_path, caplog):
     assert "symlink escape" in caplog.text or "outside the candidates root" in caplog.text
 
 
+def test_stable_overlay_candidates_root_symlink_escape_is_refused(tmp_path, caplog):
+    """If the candidates ROOT itself is a symlink outside state_dir, the per-candidate
+    containment anchor is already compromised — reject when candidates/ resolves
+    outside the canonical state dir (CodeRabbit, security)."""
+    from pxx.improve.channels import Channel, ChannelManager
+
+    state = tmp_path / "state"
+    state.mkdir()
+    external_root = tmp_path / "external-candidates"  # outside state
+    (external_root / "c1").mkdir(parents=True)
+    (external_root / "c1" / "candidate.json").write_text("{}")
+    (state / "candidates").symlink_to(external_root)  # the whole ROOT is a symlink escape
+    ChannelManager(state).activate(Channel.STABLE, "c1")
+    settings = Settings(state_dir=state)
+    with caplog.at_level(logging.WARNING, logger="pxx.config"):
+        assert apply_stable_overlay(settings, state) == settings
+    assert "outside the state directory" in caplog.text
+
+
 def test_stable_overlay_model_candidate_reresolves_review_model(tmp_path):
     """A promoted `model` overlay must re-flow into a SPARSE reviewer overlay —
     load_settings resolved review_model against the old model, so without a

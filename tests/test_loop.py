@@ -1066,6 +1066,90 @@ def test_overwork_not_salvaged_when_lint_fails(tmp_path: Path) -> None:
     assert outcome.code is TerminalCode.BUDGET_EXCEEDED
 
 
+# --- done-signal early-exit: the loop supplies the objective done oracle ------
+
+
+class DoneCheckBackend(ScriptedBackend):
+    """Applies edits, then consults ``ctx.done_check`` like the native backend:
+    if the injected oracle says the edit is objectively done, COMPLETE early;
+    otherwise report session-level over-work (BUDGET_EXCEEDED). Records what the
+    loop handed it so a test can assert the oracle was (or wasn't) wired."""
+
+    def __init__(self, edits: dict[str, str] | None = None) -> None:
+        super().__init__(edits=edits if edits is not None else {"calc.py": "x = 2\n"})
+        self.seen_done_check: object = "unset"
+        self.oracle_result: bool | None = None
+
+    async def run(self, task: str, ctx: object) -> RunOutcome:
+        await asyncio.sleep(0)
+        for rel, content in self.edits.items():
+            path = Path(ctx.cwd) / rel  # type: ignore[attr-defined]
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content)
+        self.seen_done_check = ctx.done_check  # type: ignore[attr-defined]
+        if self.seen_done_check is not None:
+            self.oracle_result = await self.seen_done_check()  # type: ignore[operator]
+            if self.oracle_result:
+                return RunOutcome(code=TerminalCode.COMPLETED, summary="done-signal", tokens=5)
+        return RunOutcome(code=TerminalCode.BUDGET_EXCEEDED, summary="over-work", tokens=50)
+
+
+@needs_git
+def test_done_signal_oracle_true_when_edit_passes_tests(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_repo(repo, files={"calc.py": "x = 1\n"})
+    settings = _settings(tmp_path, test_command="true")  # objective signal passes
+    backend = DoneCheckBackend()
+    outcome = asyncio.run(run_loop("task", settings, cwd=repo, backend_factory=Factory([backend])))
+    assert backend.seen_done_check is not None  # loop wired the oracle
+    assert backend.oracle_result is True  # real _edit_objectively_done said done
+    assert outcome.code is TerminalCode.COMPLETED
+
+
+@needs_git
+def test_done_signal_oracle_false_when_tests_fail(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_repo(repo, files={"calc.py": "x = 1\n"})
+    settings = _settings(tmp_path, test_command="false")  # objective signal fails
+    backend = DoneCheckBackend()
+    outcome = asyncio.run(run_loop("task", settings, cwd=repo, backend_factory=Factory([backend])))
+    assert backend.oracle_result is False
+    assert outcome.code is TerminalCode.BUDGET_EXCEEDED  # not done, over-work stands
+
+
+@needs_git
+def test_done_signal_disabled_leaves_oracle_unset(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_repo(repo, files={"calc.py": "x = 1\n"})
+    settings = _settings(tmp_path, test_command="true", done_signal=False)
+    backend = DoneCheckBackend()
+    asyncio.run(run_loop("task", settings, cwd=repo, backend_factory=Factory([backend])))
+    assert backend.seen_done_check is None  # off -> no oracle injected
+
+
+@needs_git
+def test_done_signal_needs_a_test_command(tmp_path: Path) -> None:
+    # No test command -> no objective completion signal -> no oracle wired.
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_repo(repo, files={"calc.py": "x = 1\n"})
+    backend = DoneCheckBackend()
+    asyncio.run(run_loop("task", _settings(tmp_path), cwd=repo, backend_factory=Factory([backend])))
+    assert backend.seen_done_check is None
+
+
+def test_done_signal_not_wired_without_repo(tmp_path: Path) -> None:
+    work = tmp_path / "work"
+    work.mkdir()
+    settings = _settings(tmp_path, test_command="true")
+    backend = DoneCheckBackend(edits={"out.txt": "hi\n"})
+    asyncio.run(run_loop("task", settings, cwd=work, backend_factory=Factory([backend])))
+    assert backend.seen_done_check is None  # no git repo -> no diff/scope basis
+
+
 # --- generated-artifact filtering in _changed_paths (scope-noise) -----------
 
 

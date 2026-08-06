@@ -1346,6 +1346,65 @@ timeout the run proceeds **without** the undo tag (degrade + warning), since a
 wedged git can't establish one — the working tree is not modified by the failed
 tie. (3) The `pxx upgrade` git/pip calls are outside the run path and unchanged.
 
+## R-031 — done-signal early-exit: a session stops when its edit is verified, not at the budget cap
+
+**Claim.** In `pxx loop`, a per-round coder session that has produced a diff
+whose objective gates already pass (scope + diff-cap + lint + tests) stops
+mid-session and reports `COMPLETED` — instead of the coder continuing to call
+tools until it exhausts its per-turn budget (the over-work that R-017 could only
+*relabel* after the fact). This completes the "clean loop termination" roadmap
+item: R-017 fixed the terminal *code* of an over-worked run; R-031 stops the
+over-work itself. The loop's own review gate still runs on the `COMPLETED`
+result — the early exit only ends a run that is objectively done. Off by default
+outside a loop; single-shot `pxx run` is byte-identical.
+
+**Grade.** Reproducible (unit tests: native-backend early-exit + non-trigger on
+read-only turns + `None`-oracle byte-identity; loop wires the real
+`_edit_objectively_done` oracle only when `done_signal` + a test command + a git
+repo; config default/toggle/strict-bool). Attested pending a two-box before/after
+(same R-015 task, rounds-saved measurement) — to be appended when run.
+
+**Exact configuration (nothing inherits).** pxx **2.3.7**. A `DoneCheck` oracle
+(`backends/base.py`) injected by `run_loop` onto `SessionContext.done_check`; the
+native backend awaits it after any `write_file`/`edit_file` turn and returns
+`COMPLETED` early on True (emitting a `gate_decision` `done_signal` event). The
+oracle is `loop._edit_objectively_done` — the over-work salvage's objective gates
+(scope/diff/lint/tests) *minus* review, which `_overwork_salvageable` now also
+delegates to (shared contract). Gated on `settings.done_signal` (default True;
+`PXX_DONE_SIGNAL`), `in_repo`, and a configured test command. **No model-visible
+tool was added** — the tool surface (`broker._TOOL_CLASSES`) is unchanged, so a
+governed integrator that pins pxx by tool surface needs no re-review.
+
+**Procedure (reproduction path).**
+
+```sh
+uv run --extra dev --extra server python -m pytest \
+  tests/test_backends_native.py -k done_signal \
+  tests/test_loop.py -k done_signal \
+  tests/test_config.py -k done_signal -q
+```
+
+**Observed (2026-08-05).** A native backend whose endpoint returns an `edit_file`
+call every turn (a coder that never stops on its own) exits after the **first**
+edit turn with `COMPLETED`, summary "done-signal: verified edit — exited before
+budget exhaustion", one model request made (not the unbounded stream), and a
+`done_signal` gate event. With the oracle returning False it runs on to a natural
+completion; after a read-only (`read_file`) turn it is never probed (nothing
+changed on disk). In a real loop, `_edit_objectively_done` returns True for an
+in-scope edit under a passing `test_command` and False under a failing one. All
+26 new tests pass; the full suite is 1184 passed / 2 skipped.
+
+**Boundary — explicitly not claimed.** (1) The oracle runs the test command
+mid-session (inside the session's wall-clock budget), so it trades one extra test
+run per edit-state for skipping the wasted turns after — a net win when the suite
+is fast; `done_signal=false` (or `PXX_DONE_SIGNAL=0`) keeps every session running
+to its cap for a suite slow enough that the probe costs more than it saves. (2)
+It does not make the coder *converge* faster within a turn; it ends the run at the
+first objectively-complete edit-state. (3) Review is intentionally excluded from
+the mid-session oracle — the loop's Guard-4 review still runs on the `COMPLETED`
+result, so a blocking judge can still `REVISE`. (4) Only the native backend
+consults the oracle; aider/mock/replay ignore it.
+
 ---
 
 *Convention: entries are append-only and dated; superseded claims are

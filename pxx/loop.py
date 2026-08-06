@@ -26,7 +26,7 @@ from collections.abc import Callable
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path, PurePosixPath
 
-from .backends.base import AgentBackend
+from .backends.base import AgentBackend, DoneCheck
 from .config import Settings
 from .errors import BudgetExceeded
 from .events import Event, EventBus
@@ -201,6 +201,40 @@ async def _run_tests(root: Path, command: str) -> tuple[bool, set[str], str]:
     return proc.returncode == 0, failing, text.strip()[-1500:]
 
 
+async def _edit_objectively_done(
+    *,
+    root: Path,
+    pre_sha: str | None,
+    diff: str,
+    scope: ScopeGate,
+    max_diff_lines: int,
+    command: str | None,
+    lint_command: str | None,
+) -> bool:
+    """Whether the current on-disk edit passes every OBJECTIVE mandatory gate a
+    completing round enforces — scope, diff budget, lint, tests — i.e. everything
+    except the model-backed review gate. Fail-closed: no test command (no
+    objective completion signal), an empty diff, or any red gate => False. Shared
+    by the done-signal early-exit (mid-session, proactive) and the over-work
+    salvage (post-BUDGET_EXCEEDED), so both honour identical guards.
+    """
+    if not command:
+        return False  # no objective signal that the edit is complete
+    if not diff.strip():
+        return False  # nothing produced yet
+    changed = await _changed_paths(root, pre_sha)
+    if any(not scope.in_scope(root / p) for p in changed):
+        return False  # would be OUT_OF_SCOPE
+    if _diff_line_count(diff) > max_diff_lines:
+        return False  # would be DIFF_CAP
+    if lint_command:
+        lint_ok, _ = await _run_lint(root, lint_command)
+        if not lint_ok:
+            return False  # would be LINT_BLOCKED
+    passed, _failing, _tail = await _run_tests(root, command)
+    return passed
+
+
 async def _overwork_salvageable(
     *,
     root: Path,
@@ -217,30 +251,19 @@ async def _overwork_salvageable(
     """Whether an over-worked run's diff is complete AND passes every mandatory
     guard, so a session that ran out of its per-turn budget (BUDGET_EXCEEDED) can
     be reported as COMPLETED instead. Enforces the SAME gates a normal round
-    would before completing — a salvage must never wave a diff past a gate:
-
-    - scope: no changed path outside the declared scope,
-    - diff budget: the diff is within ``max_diff_lines``,
-    - lint: the lint gate (when configured) passes,
-    - tests: a configured test command PASSES — and without a test command there
-      is no objective signal, so the run is NOT salvaged (fail-closed),
-    - review: when a reviewer is set, the gate does not block.
-
+    would before completing — the objective gates (scope/diff/lint/tests) via
+    :func:`_edit_objectively_done`, plus the review gate when a reviewer is set.
     Never heals; never rescues a run any gate would fail.
     """
-    if not command:
-        return False  # no objective signal that the over-worked edit is complete
-    changed = await _changed_paths(root, pre_sha)
-    if any(not scope.in_scope(root / p) for p in changed):
-        return False  # would be OUT_OF_SCOPE
-    if _diff_line_count(diff) > max_diff_lines:
-        return False  # would be DIFF_CAP
-    if lint_command:
-        lint_ok, _ = await _run_lint(root, lint_command)
-        if not lint_ok:
-            return False  # would be LINT_BLOCKED
-    passed, _failing, _tail = await _run_tests(root, command)
-    if not passed:
+    if not await _edit_objectively_done(
+        root=root,
+        pre_sha=pre_sha,
+        diff=diff,
+        scope=scope,
+        max_diff_lines=max_diff_lines,
+        command=command,
+        lint_command=lint_command,
+    ):
         return False
     if reviewer is not None:
         result = await review_changes(diff, task, reviewer, review_mode)
@@ -350,6 +373,32 @@ async def run_loop(
     # Per-round sessions never commit mid-loop: auto_commit fires ONCE at the
     # end of a completed loop (B1.4), not per round.
     round_settings = replace(settings, auto_commit=False)
+
+    # Done-signal early-exit oracle: when enabled, each per-round coder session
+    # gets an objective "already done?" check. A local coder often keeps calling
+    # tools past a passing solution and exhausts its per-turn budget (over-work,
+    # R-014/R-015); the salvage below only relabels the terminal AFTER the budget
+    # is spent. This lets the session STOP as soon as the on-disk edit passes the
+    # objective gates (scope/diff/lint/tests), saving the wasted rounds. Review is
+    # deliberately excluded here — the loop's own Guard 4 review still runs on the
+    # COMPLETED result. Only active in a git repo with a test command (the sole
+    # objective completion signal); single-shot ``pxx run`` never sets it.
+    done_check: DoneCheck | None = None
+    if in_repo and command and settings.done_signal:
+
+        async def _run_done_check() -> bool:
+            diff_now = await _diff_since(root, pre_sha)
+            return await _edit_objectively_done(
+                root=root,
+                pre_sha=pre_sha,
+                diff=diff_now,
+                scope=scope,
+                max_diff_lines=settings.budgets.max_diff_lines,
+                command=command,
+                lint_command=lint_command,
+            )
+
+        done_check = _run_done_check
 
     async def _complete(outcome: RunOutcome) -> RunOutcome:
         """End-of-loop commit when --commit is on (once per completed loop)."""
@@ -490,7 +539,7 @@ async def run_loop(
         edit_start = time.monotonic()
         outcome = await Session(
             round_settings, backend, cwd=root, bus=session_bus, safety_net=False
-        ).run(prompt, check_clarity=round_no == 1)
+        ).run(prompt, check_clarity=round_no == 1, done_check=done_check)
         legs["edit_seconds"] += time.monotonic() - edit_start
         tokens += outcome.tokens
         if outcome.code is not TerminalCode.COMPLETED:

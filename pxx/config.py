@@ -109,6 +109,15 @@ class Settings:
     #: the default to ON for this box, and ``--no-review`` still turns it off for
     #: a single run. A ``--review``/``--no-review`` flag always wins over this.
     loop_review: bool = False
+    #: ``pxx loop`` done-signal early-exit. When ON (the default), a per-round
+    #: coder session that has produced a diff whose objective gates already pass
+    #: (tests + scope + diff-cap + lint) stops mid-session instead of burning the
+    #: rest of its per-turn budget — the loop's own review gate still runs on the
+    #: result. Only ever fires inside ``run_loop`` with a configured test command
+    #: (single-shot ``pxx run`` is unaffected); set false to keep every session
+    #: running to its budget (e.g. when the suite is slow enough that a mid-session
+    #: probe costs more than the rounds it saves).
+    done_signal: bool = True
 
     @property
     def effective_budgets(self) -> Budgets:
@@ -163,6 +172,7 @@ _KNOWN_KEYS = {
     "safety_net",
     "auto_commit",
     "loop_review",
+    "done_signal",
     "budgets",
     "hooks",
     "mcp_servers",
@@ -366,6 +376,13 @@ def _settings_from_dict(
         if not isinstance(value, bool):
             raise ConfigError(f"{source}: loop_review must be a boolean")
         kwargs["loop_review"] = value
+    if "done_signal" in data:
+        # Strict boolean (same fail-open reasoning as loop_review): a quoted
+        # "false" must not silently truthy-coerce to True.
+        value = data["done_signal"]
+        if not isinstance(value, bool):
+            raise ConfigError(f"{source}: done_signal must be a boolean")
+        kwargs["done_signal"] = value
     if "budgets" in data:
         b = data["budgets"]
         unknown = set(b) - _KNOWN_BUDGET_KEYS
@@ -418,6 +435,7 @@ _ENV_MAP = {
     "PXX_ALLOW_UNGATED_SHELL": "allow_ungated_shell",
     "PXX_AUTO_COMMIT": "auto_commit",
     "PXX_LOOP_REVIEW": "loop_review",
+    "PXX_DONE_SIGNAL": "done_signal",
     "PXX_BACKEND": "backend",
     # 1.x compat
     "PXX_OLLAMA_BASE": "base_url",
@@ -459,6 +477,10 @@ def _settings_from_env(base: Settings) -> Settings:
                 data[cfg_key] = value.lower() in ("1", "true", "yes")
             elif cfg_key == "loop_review":
                 data[cfg_key] = value.lower() in ("1", "true", "yes")
+            elif cfg_key == "done_signal":
+                # Default-on: an explicit env value toggles it (e.g.
+                # PXX_DONE_SIGNAL=0 turns the early-exit off for this box).
+                data[cfg_key] = value.lower() in ("1", "true", "yes", "on")
             else:
                 data[cfg_key] = value
     if os.environ.get("PXX_MEMORY_ENABLED", "").lower() in ("0", "false", "no"):

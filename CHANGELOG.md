@@ -3,6 +3,29 @@
 All notable changes to pxx are documented here. The 1.x series history is
 preserved in git (tag `v1.3.3` and earlier).
 
+## [2.3.7] — 2026-08-05
+
+Done-signal early-exit — the second half of "clean loop termination". 2.3.6's
+predecessor R-017 salvaged an over-worked run's *terminal code* (report
+`COMPLETED`, not `BUDGET_EXCEEDED`) but left the over-work itself: a local coder
+keeps calling tools past a passing solution until its per-turn budget is spent.
+This stops it at the first objectively-complete edit-state.
+
+### Added
+
+- **`pxx loop` done-signal early-exit** (R-031): a per-round coder session whose
+  on-disk diff already passes the objective gates (scope + diff-cap + lint +
+  tests) stops mid-session and reports `COMPLETED`, instead of burning the rest
+  of its budget. Implemented as an injected oracle (`SessionContext.done_check`,
+  built by `run_loop`, consulted by the native backend after each edit turn) —
+  **no model-visible tool was added, so the tool surface is unchanged**. The
+  loop's own review gate still runs on the result. `_edit_objectively_done` is
+  shared with the over-work salvage (`_overwork_salvageable` now delegates to it).
+- **`done_signal` setting** (default **on**; `PXX_DONE_SIGNAL`, TOML strict
+  boolean): turn the early-exit off for a suite slow enough that a mid-session
+  test run costs more than the rounds it saves. Only ever fires inside `run_loop`
+  with a configured test command; single-shot `pxx run` is byte-identical.
+
 ## [2.3.6] — 2026-08-04
 
 The "init-watchdog" follow-up, re-scoped by the evidence: the pre-loop network

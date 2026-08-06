@@ -267,6 +267,31 @@ def test_run_cli_override_beats_stable_overlay(harness, monkeypatch):
     assert FakeSession.instances[0].settings.model.model == "operator-model:latest"
 
 
+def test_run_provider_flag_pins_model_overlay_target(harness, monkeypatch):
+    """--provider (and --base-url/--api-key) fold into Settings.model, so they
+    must pin the `model` overlay target — a promoted `model` candidate cannot
+    override an operator's --provider (CLI always wins; the endpoint is a
+    data-egress surface). Regression for the pinned-key mapping (CodeRabbit)."""
+    from pxx.config import _settings_from_dict
+
+    def load_with_overrides(cwd=None, overrides=None):
+        base = Settings(
+            memory_dir=harness["tmp_path"] / "mem", state_dir=harness["tmp_path"] / "state"
+        )
+        if overrides:
+            base = _settings_from_dict(
+                {k: v for k, v in overrides.items() if v is not None}, base, "CLI"
+            )
+        return base
+
+    monkeypatch.setattr(cli, "load_settings", load_with_overrides)
+    state = harness["tmp_path"] / "state"
+    _promote_settings_candidate(state, "c-model", "model", "overlay-model:latest")
+    # operator pins ONLY --provider (not --model); the whole model field is pinned
+    assert cli.main(["run", "-m", "x", "--provider", "ollama"]) == 0
+    assert FakeSession.instances[0].settings.model.model != "overlay-model:latest"
+
+
 def test_run_tampered_overlay_falls_back_to_base_settings(harness, caplog):
     """A tampered optimizer artifact must never break — or even reach — a run."""
     state = harness["tmp_path"] / "state"

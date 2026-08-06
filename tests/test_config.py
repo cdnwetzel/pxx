@@ -592,6 +592,19 @@ def test_stable_overlay_tampered_hash_is_ignored(tmp_path, caplog):
     assert "c-mem" in caplog.text
 
 
+def test_stable_overlay_unsafe_stable_id_is_refused(tmp_path, caplog):
+    """Fail-closed: a traversal/separatored stable id must be refused BEFORE it
+    builds a path or `is_file()`s, so it can never load a (hash-valid) candidate
+    from outside the candidates root (CodeRabbit, security)."""
+    from pxx.improve.channels import Channel, ChannelManager
+
+    ChannelManager(tmp_path).activate(Channel.STABLE, "../../elsewhere")
+    settings = Settings(state_dir=tmp_path)
+    with caplog.at_level(logging.WARNING, logger="pxx.config"):
+        assert apply_stable_overlay(settings, tmp_path) == settings
+    assert "unsafe stable id" in caplog.text
+
+
 def test_stable_overlay_target_without_settings_field_is_skipped(tmp_path, caplog):
     """review_mode is a valid candidate target but has no Settings field:
     skipped loudly, never invented."""

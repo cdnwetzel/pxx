@@ -671,7 +671,13 @@ def _run_settings(args: argparse.Namespace, mode):
     """
     overrides = _cli_overrides(args, mode)
     settings = load_settings(Path.cwd(), overrides)
-    pinned = frozenset(k for k, v in overrides.items() if v is not None)
+    # Overlay targets are Settings FIELD names, but several CLI override keys fold
+    # into one field: provider/base_url/api_key all land on Settings.model via
+    # _merge_model_ref. Pin the field they affect, not the raw key, so a promoted
+    # `model` candidate can't overwrite an operator's --provider/--base-url/--api-key
+    # (a data-egress surface) — "CLI always wins" (CodeRabbit).
+    _TARGET_BY_OVERRIDE = {"provider": "model", "base_url": "model", "api_key": "model"}
+    pinned = frozenset(_TARGET_BY_OVERRIDE.get(k, k) for k, v in overrides.items() if v is not None)
     return apply_stable_overlay(settings, settings.state_dir, pinned=pinned)
 
 

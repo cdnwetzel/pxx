@@ -15,6 +15,7 @@ from __future__ import annotations
 import logging
 import math
 import os
+import re
 import tomllib
 from dataclasses import dataclass, field, fields, replace
 from pathlib import Path
@@ -551,6 +552,11 @@ def load_settings(
 
 # -- stable-channel settings overlay (improve plane bridge) --------------------
 
+#: A stable channel id is used to build a filesystem path, so it must be a bare,
+#: traversal-free name. Mirrors ``pxx.improve.candidates._ID_RE`` — the contract
+#: ``validate_candidate`` already enforces on a candidate's own id.
+_STABLE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+
 
 def _overlay_budgets(base: Budgets, value: Any) -> Budgets:
     """Apply a promoted budgets overlay TIGHTEN-ONLY.
@@ -633,6 +639,11 @@ def _apply_settings_candidate(
         log.warning(
             "stable overlay: applying %s failed — using base settings", target, exc_info=True
         )
+        return settings
+    # Reached only when `target` IS a Settings field but has no branch above
+    # (e.g. `permission`, `test_command`): surface it so an operator isn't left
+    # with a promoted candidate that silently never takes effect (CodeRabbit).
+    log.warning("stable overlay: target %r has no overlay mapping — skipped (not applied)", target)
     return settings
 
 
@@ -669,6 +680,19 @@ def apply_stable_overlay(
         log.warning("stable overlay: channel state unreadable — using base settings", exc_info=True)
         return settings
     if not version_id:
+        return settings
+    # Fail-closed: the id is interpolated into a filesystem path below, so reject
+    # anything that isn't a bare candidate id BEFORE touching the filesystem — a
+    # crafted id (``../../elsewhere``, an absolute path, a separatored name) could
+    # otherwise `is_file()`/load a hash-valid candidate from outside the candidates
+    # root (CodeRabbit, security). validate_candidate re-checks the *content* hash;
+    # this guards the *path* the same way improve.candidates guards a candidate id.
+    if ".." in version_id or not _STABLE_ID_RE.match(version_id):
+        log.warning(
+            "stable overlay: refusing unsafe stable id %r (not a bare candidate id) — "
+            "using base settings",
+            version_id,
+        )
         return settings
     candidate_dir = manager.state_dir / "candidates" / version_id
     if not (candidate_dir / "candidate.json").is_file():

@@ -605,6 +605,47 @@ def test_stable_overlay_unsafe_stable_id_is_refused(tmp_path, caplog):
     assert "unsafe stable id" in caplog.text
 
 
+def test_stable_overlay_model_candidate_reresolves_review_model(tmp_path):
+    """A promoted `model` overlay must re-flow into a SPARSE reviewer overlay —
+    load_settings resolved review_model against the old model, so without a
+    re-resolve the reviewer keeps the stale model (CodeRabbit)."""
+    from dataclasses import replace
+
+    from pxx.config import ModelRef
+
+    _promote(tmp_path, "c-model", "model", "qwen3:8b")
+    base = replace(
+        Settings(state_dir=tmp_path),
+        review_overlay=(("provider", "ollama"),),  # sparse: only provider pinned
+        review_model=ModelRef(provider="ollama", model="stale-coder:latest"),
+    )
+    overlaid = apply_stable_overlay(base, tmp_path)
+    assert overlaid.model.model == "qwen3:8b"
+    assert overlaid.review_model.model == "qwen3:8b"  # re-resolved from the new model
+
+
+def test_stable_overlay_fallback_models_rejects_unknown_provider(tmp_path, caplog):
+    """A fallback_models candidate with an unsupported provider is skipped — parity
+    with the model branch, not silently pointed at localhost (CodeRabbit)."""
+    _promote(tmp_path, "c-fb", "fallback_models", [{"provider": "bogus", "model": "x"}])
+    settings = Settings(state_dir=tmp_path)
+    with caplog.at_level(logging.WARNING, logger="pxx.config"):
+        assert apply_stable_overlay(settings, tmp_path) == settings
+    assert "unknown provider" in caplog.text
+
+
+def test_stable_overlay_rejects_non_positive_budget(tmp_path, caplog):
+    """A non-positive/non-finite budget must not be applied (a NaN passes
+    `> current` as False and would then break every budget comparison; a negative
+    limit would fail every run) (CodeRabbit)."""
+    _promote(tmp_path, "c-bud", "budgets", {"max_rounds": -5}, baseline_budgets={"max_rounds": 25})
+    settings = Settings(state_dir=tmp_path)
+    with caplog.at_level(logging.WARNING, logger="pxx.config"):
+        overlaid = apply_stable_overlay(settings, tmp_path)
+    assert overlaid.budgets.max_rounds == settings.budgets.max_rounds  # unchanged
+    assert "non-finite/non-positive" in caplog.text
+
+
 def test_stable_overlay_target_without_settings_field_is_skipped(tmp_path, caplog):
     """review_mode is a valid candidate target but has no Settings field:
     skipped loudly, never invented."""

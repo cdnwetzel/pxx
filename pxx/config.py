@@ -572,6 +572,13 @@ def _overlay_budgets(base: Budgets, value: Any) -> Budgets:
         if current is None or isinstance(new, bool) or not isinstance(new, (int, float)):
             log.warning("stable overlay: skipping unknown/non-numeric budget %r", name)
             continue
+        # A budget limit must be finite and positive: NaN passes `NaN > current`
+        # as False (so it would apply and then break every budget comparison), and
+        # a negative/zero limit would fail every run. Skip it, same fail-soft
+        # posture as a loosening value (CodeRabbit).
+        if not math.isfinite(new) or new <= 0:
+            log.warning("stable overlay: skipping non-finite/non-positive budget %s=%r", name, new)
+            continue
         if new > current:
             log.warning(
                 "stable overlay: budget %s=%s would LOOSEN the current %s — skipped "
@@ -621,20 +628,45 @@ def _apply_settings_candidate(
             merged = _merge_model_ref(
                 settings.model, {k: str(v) for k, v in entry.items()}, "stable overlay"
             )
-            return replace(settings, model=merged)
-        if target == "fallback_models":
-            refs = tuple(
-                ModelRef(
-                    provider=str(m.get("provider", "ollama")),
-                    model=str(m["model"]),
-                    base_url=m.get("base_url"),
-                    api_key=m.get("api_key"),
+            updated = replace(settings, model=merged)
+            # A changed coder model must re-flow into a SPARSE reviewer overlay:
+            # load_settings resolved review_model against the OLD model before this
+            # overlay ran, so a partial [roles.review] overlay would otherwise keep
+            # the stale model/provider/base_url. Re-resolve it here; no overlay = no-op
+            # (byte-identical to before). (CodeRabbit — data integrity.)
+            if updated.review_overlay:
+                updated = replace(
+                    updated,
+                    review_model=_merge_model_ref(
+                        updated.model, dict(updated.review_overlay), "roles.review"
+                    ),
                 )
-                if isinstance(m, dict)
-                else ModelRef(model=str(m))
-                for m in value
-            )
-            return replace(settings, fallback_models=refs)
+            return updated
+        if target == "fallback_models":
+            refs = []
+            for m in value:
+                if isinstance(m, dict):
+                    prov = str(m.get("provider", "ollama"))
+                    # Same allowlist the `model` branch enforces — else an unknown
+                    # provider silently falls back to the localhost endpoint
+                    # (ModelRef.endpoint) with no base_url (CodeRabbit).
+                    if prov not in _PROVIDERS:
+                        log.warning(
+                            "stable overlay: unknown provider %r in fallback_models — skipped",
+                            prov,
+                        )
+                        return settings
+                    refs.append(
+                        ModelRef(
+                            provider=prov,
+                            model=str(m["model"]),
+                            base_url=m.get("base_url"),
+                            api_key=m.get("api_key"),
+                        )
+                    )
+                else:
+                    refs.append(ModelRef(model=str(m)))
+            return replace(settings, fallback_models=tuple(refs))
     except Exception:
         log.warning(
             "stable overlay: applying %s failed — using base settings", target, exc_info=True
@@ -689,8 +721,10 @@ def apply_stable_overlay(
     # path separators, so no traversal is expressible: `..`/`../x`/`/etc` all fail
     # the regex. Consecutive dots WITHOUT a separator (``settings..v1``) are a single,
     # in-root component and stay allowed. validate_candidate re-checks the *content*
-    # hash; this guards the *path*.
-    if not _STABLE_ID_RE.match(version_id):
+    # hash; this guards the *path*. `isinstance` first: a corrupted state file
+    # could yield a non-str, and `_STABLE_ID_RE.match(non_str)` would TypeError
+    # here, OUTSIDE the try above — abort a run instead of failing to base (CodeRabbit).
+    if not isinstance(version_id, str) or not _STABLE_ID_RE.match(version_id):
         log.warning(
             "stable overlay: refusing unsafe stable id %r (not a bare candidate id) — "
             "using base settings",

@@ -685,9 +685,12 @@ def apply_stable_overlay(
     # anything that isn't a bare candidate id BEFORE touching the filesystem — a
     # crafted id (``../../elsewhere``, an absolute path, a separatored name) could
     # otherwise `is_file()`/load a hash-valid candidate from outside the candidates
-    # root (CodeRabbit, security). validate_candidate re-checks the *content* hash;
-    # this guards the *path* the same way improve.candidates guards a candidate id.
-    if ".." in version_id or not _STABLE_ID_RE.match(version_id):
+    # root (CodeRabbit, security). _STABLE_ID_RE requires an alnum start and forbids
+    # path separators, so no traversal is expressible: `..`/`../x`/`/etc` all fail
+    # the regex. Consecutive dots WITHOUT a separator (``settings..v1``) are a single,
+    # in-root component and stay allowed. validate_candidate re-checks the *content*
+    # hash; this guards the *path*.
+    if not _STABLE_ID_RE.match(version_id):
         log.warning(
             "stable overlay: refusing unsafe stable id %r (not a bare candidate id) — "
             "using base settings",

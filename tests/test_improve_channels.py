@@ -5,11 +5,14 @@ circuit breakers (immediate retire + best-effort audit)."""
 from __future__ import annotations
 
 import json
+import shutil
+import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 
+from pxx.improve import channels
 from pxx.improve.channels import (
     Breaker,
     CandidateRunSignals,
@@ -137,6 +140,28 @@ def test_shadow_run_candidate_isolated_never_merged(tmp_path):
     # main worktree otherwise untouched (only stable's own change added)
     after = _tree_snapshot(worktree)
     assert after == {**before, "stable_out.txt": "stable was here\n"}
+
+
+def test_isolate_worktree_git_timeout_falls_back_to_copy(tmp_path, monkeypatch):
+    """A hung ``git worktree add`` (TimeoutExpired) falls back to the copy
+    path — same as a failed worktree add, never a hang."""
+    worktree = tmp_path / "repo"
+    worktree.mkdir()
+    (worktree / ".git").mkdir()
+    (worktree / "app.py").write_text("original\n")
+    sandbox = tmp_path / "sandbox"
+    sandbox.mkdir()
+
+    def hang(*args, **kwargs):
+        assert kwargs.get("timeout") == 30  # bounded, matching the rest of pxx
+        raise subprocess.TimeoutExpired(cmd="git worktree add", timeout=30)
+
+    monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/git")
+    monkeypatch.setattr(subprocess, "run", hang)
+    dest = channels._isolate_worktree(worktree, sandbox)
+    assert dest == sandbox / "candidate-worktree"
+    assert (dest / "app.py").read_text() == "original\n"
+    assert not (dest / ".git").exists()  # copy path excludes .git
 
 
 def test_shadow_run_candidate_error_scores_zero(tmp_path):

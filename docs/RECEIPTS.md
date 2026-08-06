@@ -1345,6 +1345,18 @@ completes normally; only a genuine wedge/hang is cut. (2) On a safety-net tie
 timeout the run proceeds **without** the undo tag (degrade + warning), since a
 wedged git can't establish one — the working tree is not modified by the failed
 tie. (3) The `pxx upgrade` git/pip calls are outside the run path and unchanged.
+(4) **Scope correction (2026-08-06, W1.2 / Kimi K3 Swarm audit).** This receipt
+enumerated the *core run-path* git callers (the three `_git` helpers + the
+already-bounded `worktree._git` / shells). It did **not** cover the **improve
+plane's** two direct `git worktree add` subprocesses —
+`improve/channels.py:_isolate_worktree` and `improve/scheduler.py:candidate_worktree`
+— which called `subprocess.run(...)` with no `timeout=`, so a wedged git there
+could hang a shadow run or the improve daemon indefinitely. The spirit of this
+receipt ("no git subprocess hangs") therefore had a gap. Closed in W1.2: both
+sites now pass `timeout=30` and catch `subprocess.TimeoutExpired`, degrading to
+the proven copy-fallback path (same as any worktree-add failure); regression
+tests monkeypatch a hang and assert the fallback. See `pxx/improve/channels.py`,
+`pxx/improve/scheduler.py`.
 
 ## R-031 — done-signal early-exit: a session stops when its edit is verified, not at the budget cap
 

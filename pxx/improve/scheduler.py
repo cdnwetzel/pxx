@@ -122,10 +122,11 @@ def candidate_worktree(root: Path | str, name: str) -> Path:
                 check=True,
                 capture_output=True,
                 text=True,
+                timeout=30,
                 env=git_env(),
             )
             return dest
-        except (OSError, subprocess.CalledProcessError):
+        except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
             log.warning("git worktree add failed; copying instead", exc_info=True)
     shutil.copytree(root, dest, ignore=shutil.ignore_patterns(".git", ".pxx"))
     return dest

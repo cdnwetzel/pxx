@@ -70,6 +70,23 @@ def test_memory_retrieval_limit_rejects_non_positive_int(tmp_path, bad):
         load_settings(cwd=tmp_path)
 
 
+def test_memory_capture_successes_default_off(tmp_path):
+    """Phase 20.5 preserved: success exemplars are opt-in, default OFF."""
+    assert load_settings(cwd=tmp_path).memory_capture_successes is False
+
+
+def test_memory_capture_successes_parses(tmp_path):
+    (tmp_path / "pxx.toml").write_text("memory_capture_successes = true\n")
+    assert load_settings(cwd=tmp_path).memory_capture_successes is True
+
+
+def test_memory_capture_successes_strict_bool(tmp_path):
+    """A quoted string must not truthy-coerce (bool('false') is True)."""
+    (tmp_path / "pxx.toml").write_text('memory_capture_successes = "false"\n')
+    with pytest.raises(ConfigError, match="memory_capture_successes must be a boolean"):
+        load_settings(cwd=tmp_path)
+
+
 def test_allow_ungated_shell_default_and_trusted_sources(tmp_path, monkeypatch):
     from pxx.config import Settings, _settings_from_dict
 

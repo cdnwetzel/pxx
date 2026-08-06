@@ -127,6 +127,15 @@ class Settings:
     #: auto-derive (``pxx.improve.cycle``); a promoted stable-channel candidate
     #: overlays it at run start (``apply_stable_overlay``).
     memory_retrieval_limit: int = 8
+    #: Opt-in success-exemplar capture (a narrow Phase 20.5 amendment). The
+    #: shipped default is OFF, preserving Phase 20.5 verbatim: COMPLETED
+    #: sessions write NOTHING automatically (no silent success-to-knowledge
+    #: conversion). When true, a COMPLETED session writes EXACTLY ONE compact
+    #: episodic ``session_outcome`` observation (see
+    #: ``pxx.memory.capture.record_observations``), so the store's
+    #: skill/playbook graduation ladder can also learn from gate-verified
+    #: successes. Failed-session capture is unaffected either way.
+    memory_capture_successes: bool = False
 
     @property
     def effective_budgets(self) -> Budgets:
@@ -183,6 +192,7 @@ _KNOWN_KEYS = {
     "loop_review",
     "done_signal",
     "memory_retrieval_limit",
+    "memory_capture_successes",
     "budgets",
     "hooks",
     "mcp_servers",
@@ -400,6 +410,13 @@ def _settings_from_dict(
         if isinstance(value, bool) or not isinstance(value, int) or value < 1:
             raise ConfigError(f"{source}: memory_retrieval_limit must be a positive integer")
         kwargs["memory_retrieval_limit"] = value
+    if "memory_capture_successes" in data:
+        # Strict boolean (same fail-open reasoning as loop_review): a quoted
+        # "false" must not silently truthy-coerce to True.
+        value = data["memory_capture_successes"]
+        if not isinstance(value, bool):
+            raise ConfigError(f"{source}: memory_capture_successes must be a boolean")
+        kwargs["memory_capture_successes"] = value
     if "budgets" in data:
         b = data["budgets"]
         unknown = set(b) - _KNOWN_BUDGET_KEYS

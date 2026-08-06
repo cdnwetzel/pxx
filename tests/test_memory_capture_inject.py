@@ -119,6 +119,78 @@ def test_record_observations_failed_session_writes_episodic_low_trust(tmp_path):
     store.close()
 
 
+def test_record_observations_success_opt_in_writes_one_exemplar(tmp_path):
+    """Opt-in (memory_capture_successes): a COMPLETED session writes EXACTLY
+    ONE compact session_outcome exemplar with gate-verified trust fields."""
+    store = MemoryStore(tmp_path / "memory.db")
+    store.set_embedder(HashEmbedder())
+    events = [
+        ev("run_created", task_preview="fix the flaky test\nsecond line ignored"),
+        ev("session_start", agent_version_id="agent-y"),
+        ev("tool_call", tool="read_file"),
+        ev("tool_call", tool="write_file"),
+        ev("file_changed", path="a.py"),
+        ev("gate_decision", gate="review", verdict="APPROVE"),
+        ev("session_end", code="COMPLETED"),
+    ]
+    written = run(record_observations(store, "proj", "s1", events, capture_successes=True))
+    assert written == 1
+    rows = store.list("proj")
+    assert len(rows) == 1
+    obs = rows[0]
+    assert obs.kind == "session_outcome"
+    assert obs.source == "completed_run"
+    # one compact line: first-line task preview + files/tool-call counts
+    assert obs.content == "completed: fix the flaky test — 1 file(s) changed, 2 tool call(s)"
+    assert obs.confidence == 0.6  # above failed_run_inference's 0.2 rank
+    assert obs.contamination_risk == 0.3  # below the 0.7 auto-quarantine threshold
+    assert obs.outcome == "COMPLETED"
+    assert obs.layer == "episodic"
+    assert obs.session_id == "s1"
+    assert obs.agent_version_id == "agent-y"
+    # completed runs map to the ladder's reviewer_agreement entry (review APPROVE)
+    assert obs.provenance == "reviewer_agreement"
+    assert obs.evidence_confidence == 0.7
+    store.close()
+
+
+def test_record_observations_success_opt_in_dedupes_across_sessions(tmp_path):
+    """The exemplar content carries NO session id: identical verified
+    successes in different sessions dedupe into one row and grow seen_count
+    (the recurrence signal the graduation ladder consumes)."""
+    store = MemoryStore(tmp_path / "memory.db")
+    store.set_embedder(HashEmbedder())
+    events = [
+        ev("run_created", task_preview="same task"),
+        ev("file_changed", path="a.py"),
+        ev("session_end", code="COMPLETED"),
+    ]
+    assert run(record_observations(store, "proj", "s1", events, capture_successes=True)) == 1
+    assert run(record_observations(store, "proj", "s2", events, capture_successes=True)) == 1
+    rows = store.list("proj")
+    assert len(rows) == 1
+    assert rows[0].seen_count == 2
+    store.close()
+
+
+def test_record_observations_success_opt_in_failed_path_unchanged(tmp_path):
+    """Flag on + FAILED: the failure capture path is byte-identical."""
+    store = MemoryStore(tmp_path / "memory.db")
+    store.set_embedder(HashEmbedder())
+    events = [
+        ev("tool_result", tool="run_shell", result="boom"),
+        ev("file_changed", path="a.py"),
+        ev("session_end", code="TEST_REGRESSION"),
+    ]
+    written = run(record_observations(store, "proj", "s1", events, capture_successes=True))
+    assert written == 2
+    rows = store.list("proj")
+    assert all(o.provenance == "failed_run_inference" for o in rows)
+    assert all(o.contamination_risk == 0.5 for o in rows)
+    assert all(o.kind != "session_outcome" for o in rows)
+    store.close()
+
+
 def test_record_observations_never_raises(tmp_path):
     class BrokenStore:
         async def add(self, *args, **kwargs):

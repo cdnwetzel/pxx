@@ -395,7 +395,11 @@ class Session:
             if memory is not None:
                 try:
                     await record_observations(
-                        memory, self.project, self.session_id, self.bus.history
+                        memory,
+                        self.project,
+                        self.session_id,
+                        self.bus.history,
+                        capture_successes=settings.memory_capture_successes,
                     )
                 except Exception:
                     log.exception("memory capture failed (best-effort)")

@@ -26,6 +26,7 @@ Precedence (highest wins): CLI flags → `PXX_*` env vars → `./pxx.toml` or
 | `loop_review` | bool | `false` | per-box default for the `pxx loop` model-backed review gate (see below) |
 | `done_signal` | bool | `true` | in `pxx loop`, stop a coder session once its edit passes the objective gates (scope/diff/lint/tests) instead of running to the budget cap; set `false` for slow suites (`PXX_DONE_SIGNAL`) |
 | `memory_retrieval_limit` | int | `8` | how many hybrid-search hits session-start memory injection may include (positive int; `<= 0` is a `ConfigError`) |
+| `memory_capture_successes` | bool | `false` | opt-in: COMPLETED sessions write exactly one compact `session_outcome` exemplar to episodic memory (see below) |
 
 **Promoted stable-channel overlay.** `pxx improve` promotes validated settings
 candidates (`memory_retrieval_limit`, tighten-only `budgets`, `model`,
@@ -55,6 +56,17 @@ can flip the default with `loop_review = true` (or `PXX_LOOP_REVIEW=1`); the
 shipped default stays off. Precedence is the usual layering — an explicit
 `--review` / `--no-review` on the command always wins over `loop_review`, so
 `--no-review` turns the gate off for a single run even when the setting is on.
+
+**Success-exemplar capture.** By default pxx's memory learns only from
+failures: a COMPLETED session writes nothing automatically (a success may be
+right for the wrong reason). Setting `memory_capture_successes = true` opts the
+box into one extra write per completed session: a single one-line
+`session_outcome` observation (task preview + files-changed/tool-call counts),
+marked `completed_run` provenance with gate-verified evidence rank and lower
+contamination than a failure inference. Repeats of the same verified summary
+dedupe into one row whose recurrence count grows — the signal the
+episodic→skill graduation ladder consumes. Capture stays best-effort
+telemetry: it is context for future prompts, never policy.
 
 ## `[budgets]`
 

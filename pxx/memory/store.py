@@ -353,11 +353,27 @@ class MemoryStore:
         if cur.rowcount:
             self._db.commit()
             return int(cur.lastrowid)
-        # recurrence: increment seen_count and keep the strongest provenance
+        # recurrence: increment seen_count and keep the strongest provenance.
+        # MAX() alone upgraded only the numeric evidence_confidence, leaving the
+        # provenance/validation LABELS stale — an unreviewed model_claim stored
+        # first would keep that label even after an identical reviewer_agreement
+        # run bumps the confidence. When the incoming evidence is strictly
+        # stronger, adopt its labels too (CodeRabbit). SQLite reads the OLD row
+        # values for every RHS, so the CASE compares against the pre-update
+        # evidence_confidence regardless of clause order.
         self._db.execute(
             "UPDATE observations SET seen_count = seen_count + 1,"
+            " provenance = CASE WHEN ? > evidence_confidence THEN ? ELSE provenance END,"
+            " validation = CASE WHEN ? > evidence_confidence THEN ? ELSE validation END,"
             " evidence_confidence = MAX(evidence_confidence, ?) WHERE hash = ?",
-            (evidence_confidence, digest),
+            (
+                evidence_confidence,
+                provenance,
+                evidence_confidence,
+                validation,
+                evidence_confidence,
+                digest,
+            ),
         )
         self._db.commit()
         row = self._db.execute("SELECT id FROM observations WHERE hash = ?", (digest,)).fetchone()

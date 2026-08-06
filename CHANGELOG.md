@@ -26,11 +26,17 @@ venv → PR → CI + CodeRabbit). Notably, the Wave 1 memory-capture fix was aut
   base settings + a warning). This unblocks live (model-scored) eval arms.
 - **Opt-in success-exemplar capture** `memory_capture_successes` (Wave 3, default
   **off**, byte-identical when off): a COMPLETED run writes exactly one compact
-  `session_outcome` exemplar (`contamination_risk` below auto-quarantine;
-  provenance from the completed-run ladder), whose content excludes the session id
-  so identical verified successes dedupe and grow `seen_count` — the recurrence
-  signal the graduation ladder consumes. Preserves the Phase 20.5 "no silent
-  success-to-knowledge" default.
+  `session_outcome` exemplar of **bounded shape metadata only** (files-changed /
+  tool-call counts — the raw task prompt is not persisted, since this durable row
+  later becomes prompt context), `contamination_risk` below auto-quarantine,
+  provenance from the completed-run ladder, deduped so identical verified shapes
+  grow `seen_count` — the recurrence signal the graduation ladder consumes.
+  Enabling it turns on persistent memory writes, so the key is honoured only from
+  a trusted source (user config / `PXX_MEMORY_CAPTURE_SUCCESSES` / CLI — never a
+  repo-local `pxx.toml`, A0b). Preserves the Phase 20.5 "no silent
+  success-to-knowledge" default. Also: `MemoryStore` dedup now upgrades an
+  observation's provenance *label* (not only its numeric confidence) when a
+  stronger-evidence recurrence arrives.
 
 ### Fixed
 

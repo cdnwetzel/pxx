@@ -61,12 +61,19 @@ shipped default stays off. Precedence is the usual layering — an explicit
 failures: a COMPLETED session writes nothing automatically (a success may be
 right for the wrong reason). Setting `memory_capture_successes = true` opts the
 box into one extra write per completed session: a single one-line
-`session_outcome` observation (task preview + files-changed/tool-call counts),
-marked `completed_run` provenance with gate-verified evidence rank and lower
-contamination than a failure inference. Repeats of the same verified summary
-dedupe into one row whose recurrence count grows — the signal the
-episodic→skill graduation ladder consumes. Capture stays best-effort
+`session_outcome` observation recording **bounded shape metadata only** —
+files-changed and tool-call counts — marked `completed_run` provenance with
+gate-verified evidence rank and lower contamination than a failure inference.
+The **raw task prompt is deliberately not stored**: this row is durable memory
+that later becomes prompt context, and prompt text can carry secrets. Repeats of
+the same verified shape dedupe into one row whose recurrence count grows — the
+signal the episodic→skill graduation ladder consumes. Capture stays best-effort
 telemetry: it is context for future prompts, never policy.
+
+Because enabling it turns on **persistent memory writes**, the key is honoured
+only from a trusted source — user config (`~/.config/pxx/config.toml`),
+`PXX_MEMORY_CAPTURE_SUCCESSES`, or CLI — **never a repo-local `pxx.toml`** (A0b:
+a model that edits the repo must not be able to seed a later session's context).
 
 ## `[budgets]`
 

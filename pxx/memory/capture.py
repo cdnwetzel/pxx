@@ -250,31 +250,27 @@ def _failure_provenance(events: list[Event], terminal: str) -> tuple[str, str]:
 def _success_exemplar(events: list[Event]) -> NewObservation:
     """The ONE compact observation an opt-in COMPLETED session writes.
 
-    One line: task preview (first line of the recorded ``run_created``
-    preview, capped like every other observation), files-changed count
-    (``file_changed`` events) and tool-call count. The session id is
-    deliberately NOT part of the content: the store dedupes on
-    ``sha256(project + content)`` and a repeat increments ``seen_count``
-    (store.py recurrence), so identical verified-success summaries across
-    sessions collapse into one row whose recurrence grows — the exact
-    signal the episodic→skill graduation ladder consumes. The session id
-    is still recorded in its own column.
+    Bounded, non-sensitive SHAPE metadata only — files-changed count
+    (``file_changed`` events) and tool-call count. The raw task preview is
+    deliberately NOT stored: it is free-form user-prompt text (truncation does
+    not remove secrets), and this row is DURABLE memory that later becomes
+    prompt context, so persisting it would be a data-exposure vector
+    (CodeRabbit). The session id is likewise not part of the content: the store
+    dedupes on ``sha256(project + content)`` and a repeat increments
+    ``seen_count`` (store.py recurrence), so identical verified-success shapes
+    across sessions collapse into one row whose recurrence grows — the signal
+    the episodic→skill graduation ladder consumes. The session id is still
+    recorded in its own column.
     """
-    preview = ""
     files = 0
     calls = 0
     for event in events:
         kind = getattr(event, "kind", "")
-        if kind == "run_created" and not preview:
-            raw = str(_data(event).get("task_preview") or "").strip()
-            if raw:
-                preview = raw.splitlines()[0]
-        elif kind == "file_changed":
+        if kind == "file_changed":
             files += 1
         elif kind == "tool_call":
             calls += 1
-    task = preview or "(task not recorded)"
-    content = _cap(f"completed: {task} — {files} file(s) changed, {calls} tool call(s)")
+    content = _cap(f"completed run: {files} file(s) changed, {calls} tool call(s)")
     return NewObservation(
         kind="session_outcome",
         content=content,

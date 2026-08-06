@@ -279,13 +279,16 @@ def _settings_from_dict(
     allow_exec_surfaces: bool = True,
 ) -> Settings:
     """Merge one config source. ``allow_exec_surfaces=False`` (repo-local
-    project configs) means hook commands, MCP server definitions, and
-    ``allow_ungated_shell`` are IGNORED with a loud warning: a file inside the
-    edit surface must not be able to define — or DISABLE — the gate that guards
-    the edit surface (A0b). A checked-in ``allow_ungated_shell = true`` would let
-    an untrusted repo turn off the run_shell safeguard for anyone who runs pxx in
-    it, so it is honoured only from user config, env, or CLI."""
-    for key in ("hooks", "mcp_servers", "allow_ungated_shell"):
+    project configs) means hook commands, MCP server definitions,
+    ``allow_ungated_shell``, and ``memory_capture_successes`` are IGNORED with a
+    loud warning: a file inside the edit surface must not be able to define — or
+    DISABLE — the gate that guards the edit surface (A0b). A checked-in
+    ``allow_ungated_shell = true`` would let an untrusted repo turn off the
+    run_shell safeguard; a checked-in ``memory_capture_successes = true`` would
+    let it enable persistent memory writes (a model that edits the repo could
+    seed later sessions' context) — so both are honoured only from user config,
+    env, or CLI."""
+    for key in ("hooks", "mcp_servers", "allow_ungated_shell", "memory_capture_successes"):
         if key in data and not allow_exec_surfaces:
             log.warning(
                 "ignoring %s in repo-local config %s (exec surfaces are honored "
@@ -470,6 +473,7 @@ _ENV_MAP = {
     "PXX_AUTO_COMMIT": "auto_commit",
     "PXX_LOOP_REVIEW": "loop_review",
     "PXX_DONE_SIGNAL": "done_signal",
+    "PXX_MEMORY_CAPTURE_SUCCESSES": "memory_capture_successes",
     "PXX_BACKEND": "backend",
     # 1.x compat
     "PXX_OLLAMA_BASE": "base_url",
@@ -515,6 +519,20 @@ def _settings_from_env(base: Settings) -> Settings:
                 # Default-on: an explicit env value toggles it (e.g.
                 # PXX_DONE_SIGNAL=0 turns the early-exit off for this box).
                 data[cfg_key] = value.lower() in ("1", "true", "yes", "on")
+            elif cfg_key == "memory_capture_successes":
+                # Strict (enables a durable-memory persistence surface; a typo
+                # must be loud, not silently coerced). Env is a trusted source,
+                # so unlike repo-local TOML this IS honoured.
+                low = value.strip().lower()
+                if low in ("1", "true", "yes", "on"):
+                    data[cfg_key] = True
+                elif low in ("0", "false", "no", "off"):
+                    data[cfg_key] = False
+                else:
+                    raise ConfigError(
+                        f"{env_key} must be a boolean "
+                        "(1/true/yes/on or 0/false/no/off), got " + repr(value)
+                    )
             else:
                 data[cfg_key] = value
     if os.environ.get("PXX_MEMORY_ENABLED", "").lower() in ("0", "false", "no"):

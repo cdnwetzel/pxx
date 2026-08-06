@@ -140,8 +140,10 @@ def test_record_observations_success_opt_in_writes_one_exemplar(tmp_path):
     obs = rows[0]
     assert obs.kind == "session_outcome"
     assert obs.source == "completed_run"
-    # one compact line: first-line task preview + files/tool-call counts
-    assert obs.content == "completed: fix the flaky test — 1 file(s) changed, 2 tool call(s)"
+    # bounded SHAPE metadata only — the raw task preview is NOT persisted (this is
+    # durable memory that later becomes prompt context; prompt text can carry secrets)
+    assert obs.content == "completed run: 1 file(s) changed, 2 tool call(s)"
+    assert "fix the flaky test" not in obs.content
     assert obs.confidence == 0.6  # above failed_run_inference's 0.2 rank
     assert obs.contamination_risk == 0.3  # below the 0.7 auto-quarantine threshold
     assert obs.outcome == "COMPLETED"

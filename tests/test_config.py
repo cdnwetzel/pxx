@@ -75,15 +75,38 @@ def test_memory_capture_successes_default_off(tmp_path):
     assert load_settings(cwd=tmp_path).memory_capture_successes is False
 
 
-def test_memory_capture_successes_parses(tmp_path):
-    (tmp_path / "pxx.toml").write_text("memory_capture_successes = true\n")
+def test_memory_capture_successes_parses_from_env(tmp_path, monkeypatch):
+    """Enabled from a TRUSTED source (env). Repo-local pxx.toml cannot — it is a
+    durable-memory persistence surface (A0b), see the ignored-from-repo test."""
+    monkeypatch.setenv("PXX_MEMORY_CAPTURE_SUCCESSES", "true")
     assert load_settings(cwd=tmp_path).memory_capture_successes is True
 
 
+def test_memory_capture_successes_ignored_from_repo_local(tmp_path):
+    """A0b: a checked-in pxx.toml must NOT be able to enable persistent memory
+    writes — a model that edits the repo could otherwise seed a later session's
+    context. Honoured only from user config / env / CLI."""
+    (tmp_path / "pxx.toml").write_text("memory_capture_successes = true\n")
+    assert load_settings(cwd=tmp_path).memory_capture_successes is False
+
+
 def test_memory_capture_successes_strict_bool(tmp_path):
-    """A quoted string must not truthy-coerce (bool('false') is True)."""
-    (tmp_path / "pxx.toml").write_text('memory_capture_successes = "false"\n')
+    """A quoted string must not truthy-coerce (bool('false') is True) — checked on
+    a TRUSTED source (repo-local strips the key before it is validated)."""
+    from pxx.config import Settings, _settings_from_dict
+
     with pytest.raises(ConfigError, match="memory_capture_successes must be a boolean"):
+        _settings_from_dict(
+            {"memory_capture_successes": "false"},
+            Settings(),
+            "user config",
+            allow_exec_surfaces=True,
+        )
+
+
+def test_memory_capture_successes_env_garbage_rejected(tmp_path, monkeypatch):
+    monkeypatch.setenv("PXX_MEMORY_CAPTURE_SUCCESSES", "maybe")  # typo of a persistence gate
+    with pytest.raises(ConfigError, match="PXX_MEMORY_CAPTURE_SUCCESSES must be a boolean"):
         load_settings(cwd=tmp_path)
 
 

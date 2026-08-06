@@ -1361,8 +1361,9 @@ outside a loop; single-shot `pxx run` is byte-identical.
 **Grade.** Reproducible (unit tests: native-backend early-exit + non-trigger on
 read-only turns + `None`-oracle byte-identity; loop wires the real
 `_edit_objectively_done` oracle only when `done_signal` + a test command + a git
-repo; config default/toggle/strict-bool). Attested pending a two-box before/after
-(same R-015 task, rounds-saved measurement) — to be appended when run.
+repo; config default/toggle/strict-bool) **+ Attested** (2026-08-06, a fully-local
+A/B on a real codebase across two hardware/serving configs — see the measurement
+below).
 
 **Exact configuration (nothing inherits).** pxx **2.3.7**. A `DoneCheck` oracle
 (`backends/base.py`) injected by `run_loop` onto `SessionContext.done_check`; the
@@ -1404,6 +1405,50 @@ first objectively-complete edit-state. (3) Review is intentionally excluded from
 the mid-session oracle — the loop's Guard-4 review still runs on the `COMPLETED`
 result, so a blocking judge can still `REVISE`. (4) Only the native backend
 consults the oracle; aider/mock/replay ignore it.
+
+**Attested measurement (2026-08-06) — fully-local A/B on a real codebase.**
+Target: `Workorder_Wizard` (the R-015/R-017 codebase). Real task: implement
+`get_plan_limits_summary(db, tenant)` in `src/backend/utils/plan_limits.py` — a
+usage-vs-limits snapshot helper that was absent from `master`. A fixed 4-case
+pytest spec (authored by the reviewer, committed as the immovable baseline; the
+coder's `scope` excludes it) was the only human-provided artifact; the **local
+coder wrote 100% of the implementation and iteration** — no assistance. 3 trials
+× {done_signal on, off} × two coder nodes. Coder A: `qwen3-coder:30b` over ollama
+on the asrock RTX 5060 Ti (Blackwell, 16 GB, partial CPU offload). Coder B:
+`Qwen3-Coder` over vLLM on the T5810 dual-A4500 (Ampere, 40 GB). Mac mini =
+orchestrator. Per-cell medians (all 12 runs `COMPLETED` with a correct, tests-
+passing implementation):
+
+| cell | med turns | med tokens | `done_signal` fired |
+|---|---|---|---|
+| asrock **on**  | **3** | **12,118** | 3/3 |
+| asrock off     | 6 | 31,239 | 0/3 |
+| T5810 **on**   | **4** | **22,401** | 3/3 |
+| T5810 off      | 6 | 29,384 | 0/3 |
+
+Savings from the early-exit: asrock **50 % fewer coder turns / 61 % fewer
+tokens**; T5810 **33 % / 24 %**. The toggle is clean — `done_signal` fired in
+**6/6** `on` runs and **0/6** `off` runs; the terminal was `COMPLETED` in all 12.
+The effect holds across *both* silicon generations and serving stacks (Blackwell/
+ollama and Ampere/vLLM), consistent with the "re-verify on the actual hardware"
+discipline.
+
+**Boundary on the measurement — explicitly not claimed.** (a) **No `BUDGET_EXCEEDED`
+/ salvage occurred in any of the 12 runs** — on this task the coder completes and
+stops on its own, so here `done_signal` trims the *post-solution tail* (the extra
+confirm/re-read/verify turns before a voluntary stop), NOT a runaway to the cap;
+the runaway case is the one the unit test exercises (round 1 with the oracle vs
+round 25 without) and the one R-017 salvages. (b) The early-exit only cuts the
+tail *after* the first passing edit — it cannot shorten pre-solution exploration,
+which varies run-to-run (one T5810 `on` trial spent 7 turns / 68 k tokens
+exploring before its passing edit; `done_signal` cannot help there). (c) The A/B
+enabled `allow_ungated_shell` so the coder could self-verify with `pytest` — a
+controlled-run convenience, not the governed default (which fail-closes shell,
+R-029; that gate fired correctly and had to be explicitly relaxed here). (d) The
+asrock-vs-T5810 comparison confounds silicon *and* serving stack; it is a real
+cross-config result, not a pure-silicon A/B. (e) N=3 per cell — small; the
+direction (on ≤ off in turns and tokens) is consistent, the magnitude is
+approximate.
 
 ---
 

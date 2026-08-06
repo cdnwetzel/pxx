@@ -77,6 +77,46 @@ def test_preview_sanitized_and_truncated(tmp_path: Path) -> None:
     assert sha
 
 
+@needs_git
+def test_commit_blocked_when_staged_delta_contains_secret(tmp_path: Path) -> None:
+    """Fail-closed secrets gate: a staged secret pattern means NO commit —
+    the work stays in the tree for the user to fix (fail-soft on the session)."""
+    repo = tmp_path / "repo"
+    _init_repo(repo, files={"a.py": "x = 1\n"})
+    before = _git(repo, "rev-parse", "HEAD")
+    # Construct the AKIA sample by concatenation so the literal secret never
+    # appears in this source file (which pxx's OWN governance scan reads in CI) —
+    # the assembled 20-char value IS written to the staged tree, which is exactly
+    # what scan_staged (the gate under test) inspects. Mirrors test_governance.py.
+    secret_line = 'AWS_KEY = "' + "AKIA" + "IOSFODNN7EXAMPLE" + '"\n'
+    (repo / "a.py").write_text(secret_line)
+    assert run(commit_session_work(repo, task_preview="add key", net_tag=None)) is None
+    assert _git(repo, "rev-parse", "HEAD") == before  # no commit happened
+    # the work itself is untouched, still in the tree (staged) for the user
+    assert (repo / "a.py").read_text() == secret_line
+
+
+@needs_git
+def test_commit_blocked_when_scan_indeterminable(tmp_path: Path, monkeypatch) -> None:
+    """A scan that cannot run is NOT a clean scan (governance doctrine):
+    PxxError from scan_staged also skips the commit and keeps the work."""
+    import pxx.governance
+    from pxx.errors import PxxError
+
+    repo = tmp_path / "repo"
+    _init_repo(repo, files={"a.py": "x = 1\n"})
+    before = _git(repo, "rev-parse", "HEAD")
+    (repo / "a.py").write_text("x = 2\n")
+
+    def boom(*, cwd, denylist):
+        raise PxxError("governance: cannot scan staged files: simulated index lock")
+
+    monkeypatch.setattr(pxx.governance, "scan_staged", boom)
+    assert run(commit_session_work(repo, task_preview="x", net_tag=None)) is None
+    assert _git(repo, "rev-parse", "HEAD") == before  # no commit happened
+    assert (repo / "a.py").read_text() == "x = 2\n"  # work remains
+
+
 # --- K5 net behavior (restored from the k5 workstream — deleted by mistake in 2.0.1-B) ---
 
 

@@ -19,6 +19,7 @@ from asyncio.subprocess import PIPE
 from dataclasses import dataclass
 from pathlib import Path
 
+from .errors import PxxError
 from .gitenv import communicate_bounded, git_env
 
 log = logging.getLogger("pxx.safety_net")
@@ -154,6 +155,13 @@ async def commit_session_work(
     is never swept in when the tree wasn't stashed first (``safety_net=false``
     or the stash fail-soft path). ``only=None`` stages everything (direct
     callers/tests only).
+
+    Fail-closed secrets gate: after staging and before committing, the staged
+    delta is scanned with :func:`pxx.governance.scan_staged`. ANY finding —
+    or a scan that cannot run (``PxxError``; per governance doctrine a scan
+    that can't run is NOT a clean scan) — skips the commit and returns None:
+    the work stays in the tree, fail-closed on the commit, fail-soft on the
+    session (the function's contract above).
     """
     if only is not None and not only:
         return None  # the session changed nothing
@@ -172,6 +180,25 @@ async def commit_session_work(
         if await _git(cwd, "add", "-A") is None:
             log.warning("auto-commit: git add failed; leaving work uncommitted")
             return None
+    # Fail-closed secrets gate (staged delta, before commit). Lazy import to
+    # avoid an import cycle (session.py imports this module lazily too).
+    from .governance import load_denylist, scan_staged
+
+    try:
+        findings = scan_staged(cwd=cwd, denylist=load_denylist())
+    except PxxError as exc:
+        # A scan that cannot run is NOT a clean scan — skip the commit.
+        log.warning("auto-commit: governance scan could not run (%s); not committing", exc)
+        return None
+    if findings:
+        detail = "; ".join(f"{f.rule} at {f.path}:{f.line} [{f.preview}]" for f in findings)
+        log.warning(
+            "auto-commit: BLOCKED by governance — %d finding(s) in the staged delta; "
+            "not committing, work left in the tree: %s",
+            len(findings),
+            detail,
+        )
+        return None
     preview = " ".join(task_preview.split())[:72] or "session work"
     message = f"pxx: {preview}" + (f" [net: {net_tag}]" if net_tag else "")
     # CI runners (and some sandboxes) have no git identity configured; use

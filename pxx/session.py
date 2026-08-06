@@ -24,7 +24,7 @@ import uuid
 from dataclasses import replace
 from pathlib import Path
 
-from .backends.base import AgentBackend, SessionContext
+from .backends.base import AgentBackend, DoneCheck, SessionContext
 from .config import Settings
 from .errors import (
     BackendError,
@@ -86,7 +86,13 @@ class Session:
         self.repository_fingerprint = ""
         self.starting_commit = ""
 
-    async def run(self, task: str, *, check_clarity: bool = True) -> RunOutcome:
+    async def run(
+        self,
+        task: str,
+        *,
+        check_clarity: bool = True,
+        done_check: DoneCheck | None = None,
+    ) -> RunOutcome:
         from .memory.capture import record_observations
         from .memory.inject import build_context
         from .memory.store import MemoryStore
@@ -169,6 +175,7 @@ class Session:
             cancel_event=cancel_event,
             memory_context=memory_context,
             profile=self._profile,
+            done_check=done_check,
         )
 
         self._install_sigint(cancel_event)

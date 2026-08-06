@@ -98,6 +98,11 @@ def _system_message(ctx: SessionContext) -> str:
 _PROSE_TOOL_CALL_RE = re.compile(r"<tool_call>\s*(\{.*?\})\s*</tool_call>", re.DOTALL)
 _PROSE_NUDGE_LIMIT = 2
 
+#: Tools that mutate the working tree — the only turns worth a done-signal probe
+#: (nothing changed on-disk otherwise, so the oracle's verdict cannot have moved).
+#: Mirrors the WRITE class in ``broker._TOOL_CLASSES``.
+_EDIT_TOOLS = frozenset({"write_file", "edit_file"})
+
 
 def _prose_tool_call(content: str, tool_names: frozenset[str] = frozenset()) -> bool:
     """True only for a *well-formed* call — prose that merely mentions the
@@ -388,6 +393,7 @@ class NativeBackend:
                     cost_usd=cost,
                     session_id=ctx.session_id,
                 )
+            edited = False
             for call in tool_calls:
                 fn = call.get("function") or {}
                 name = str(fn.get("name") or "")
@@ -406,10 +412,34 @@ class NativeBackend:
                     except Exception as exc:  # tool runtime error: let the model recover
                         log.warning("tool %s failed: %s", name, exc)
                         result = f"error: {type(exc).__name__}: {exc}"
+                if name in _EDIT_TOOLS and not str(result).startswith("error:"):
+                    edited = True
                 messages.append(
                     {
                         "role": "tool",
                         "tool_call_id": call.get("id", ""),
                         "content": str(result),
                     }
+                )
+
+            # Done-signal early-exit: this turn changed files, so ask the injected
+            # oracle whether the on-disk edit already passes every mandatory gate
+            # the driving loop would enforce. If it does, stop now instead of
+            # burning the rest of the per-turn budget — the coder often keeps
+            # calling tools past a finished solution (over-work, R-014/R-015). The
+            # loop re-verifies and runs its own review gate on this COMPLETED
+            # result, so this only ever ends a run that is objectively done.
+            if edited and ctx.done_check is not None and await ctx.done_check():
+                await ctx.bus.emit(
+                    "gate_decision",
+                    {"gate": "done_signal", "round": rounds, "allowed": True},
+                    session_id=ctx.session_id,
+                )
+                return RunOutcome(
+                    code=TerminalCode.COMPLETED,
+                    summary="done-signal: verified edit — exited before budget exhaustion",
+                    rounds=rounds,
+                    tokens=tokens,
+                    cost_usd=cost,
+                    session_id=ctx.session_id,
                 )

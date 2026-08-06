@@ -24,6 +24,7 @@ Precedence (highest wins): CLI flags → `PXX_*` env vars → `./pxx.toml` or
 | `allow_ungated_shell` | bool | `false` | explicitly permit `run_shell` with no hook/sandbox (see `[[hooks]]`) |
 | `safety_net` | bool | `true` | stash + `pxx-pre/<ts>` tag on edit-capable session starts (git repos) |
 | `loop_review` | bool | `false` | per-box default for the `pxx loop` model-backed review gate (see below) |
+| `done_signal` | bool | `true` | in `pxx loop`, stop a coder session once its edit passes the objective gates (scope/diff/lint/tests) instead of running to the budget cap; set `false` for slow suites (`PXX_DONE_SIGNAL`) |
 
 **Tool calling.** The native backend (and therefore every `pxx loop` run, and
 `pxx run` by default) needs an endpoint that accepts tool calls. Ollama
@@ -213,7 +214,9 @@ its tools as `mcp__<name>__<tool>`.
 (`1`/`true`/`yes`/`on` or `0`/`false`/`no`/`off` — an unrecognized value is
 rejected, since it toggles a safety gate),
 `PXX_LOOP_REVIEW` (default the `pxx loop`
-review gate on for this box), `PXX_MEMORY_ENABLED`, `PXX_MEMORY_DIR`,
+review gate on for this box), `PXX_DONE_SIGNAL` (`0` to disable the `pxx loop`
+done-signal early-exit for a slow suite; default on),
+`PXX_MEMORY_ENABLED`, `PXX_MEMORY_DIR`,
 `PXX_SCOPE` (comma list), `PXX_SERVER_TOKEN` (auth for `pxx serve`),
 `PXX_GIT_TIMEOUT` (seconds; default 60 — the wall-clock bound on any single git
 subprocess, so a wedged git or a blocking git hook can't hang a run).

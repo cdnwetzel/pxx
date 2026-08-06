@@ -134,6 +134,102 @@ def test_tool_call_round_trip(tmp_path):
     assert requests[1]["messages"][2]["tool_calls"][0]["id"] == "c1"
 
 
+def _edit_call(call_id: str, path: str = "a.py") -> dict:
+    return tool_call_round(call_id, "edit_file", json.dumps({"path": path, "content": "x = 2\n"}))
+
+
+def test_done_signal_exits_early_on_verified_edit(tmp_path):
+    """After an edit turn, a True done-oracle stops the session immediately —
+    the model would otherwise keep editing forever (over-work)."""
+    requests: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(json.loads(request.content))
+        return httpx.Response(200, json=_edit_call(f"c{len(requests)}"))  # never stops on its own
+
+    probes = {"n": 0}
+
+    async def done_check() -> bool:
+        probes["n"] += 1
+        return True
+
+    ctx = make_ctx(tmp_path)
+    ctx.done_check = done_check
+    outcome = asyncio.run(make_backend(handler).run("do it", ctx))
+    assert outcome.code is TerminalCode.COMPLETED
+    assert "done-signal" in outcome.summary
+    assert len(requests) == 1  # stopped after the first edit turn — no wasted rounds
+    assert probes["n"] == 1
+    ev = [
+        e.data
+        for e in ctx.bus.history
+        if e.kind == "gate_decision" and e.data.get("gate") == "done_signal"
+    ]
+    assert ev and ev[0]["allowed"]
+
+
+def test_done_signal_does_not_exit_when_oracle_false(tmp_path):
+    requests: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(json.loads(request.content))
+        if len(requests) == 1:
+            return httpx.Response(200, json=_edit_call("c1"))
+        return httpx.Response(200, json=completion("done normally"))
+
+    async def done_check() -> bool:
+        return False
+
+    ctx = make_ctx(tmp_path)
+    ctx.done_check = done_check
+    outcome = asyncio.run(make_backend(handler).run("do it", ctx))
+    assert outcome.code is TerminalCode.COMPLETED
+    assert outcome.summary == "done normally"
+    assert len(requests) == 2  # continued past the edit — no early exit
+
+
+def test_done_signal_not_probed_after_non_edit_turn(tmp_path):
+    """A read-only turn must not trigger the probe — nothing changed on disk, so
+    the oracle's verdict cannot have moved (and the test run would be wasted)."""
+    requests: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(json.loads(request.content))
+        if len(requests) == 1:
+            return httpx.Response(200, json=tool_call_round("c1", "read_file", '{"path": "x.py"}'))
+        return httpx.Response(200, json=completion("done"))
+
+    probes = {"n": 0}
+
+    async def done_check() -> bool:
+        probes["n"] += 1
+        return True
+
+    ctx = make_ctx(tmp_path)
+    ctx.done_check = done_check
+    outcome = asyncio.run(make_backend(handler).run("do it", ctx))
+    assert outcome.code is TerminalCode.COMPLETED
+    assert probes["n"] == 0  # never probed after a non-edit turn
+    assert len(requests) == 2
+
+
+def test_no_done_check_is_byte_identical(tmp_path):
+    """Default ctx.done_check is None -> the loop never fires; a run is unchanged."""
+    requests: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(json.loads(request.content))
+        if len(requests) == 1:
+            return httpx.Response(200, json=_edit_call("c1"))
+        return httpx.Response(200, json=completion("done"))
+
+    ctx = make_ctx(tmp_path)
+    assert ctx.done_check is None
+    outcome = asyncio.run(make_backend(handler).run("do it", ctx))
+    assert outcome.code is TerminalCode.COMPLETED
+    assert len(requests) == 2  # ran to a natural no-tool-call completion
+
+
 def test_invalid_tool_arguments_are_fed_back_not_fatal(tmp_path):
     requests: list[dict] = []
 

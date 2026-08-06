@@ -143,17 +143,22 @@ milestone reviewer-verified by execution):
   SSH-tunnelled two-box lane (R-011) now provide the real endpoints this
   needs; the `ArmRunner` seam (`improve/candidate_eval.py`) is the documented
   injection point.
-- **Clean loop termination (over-work).** On real tasks the loop reproducibly
+- ~~**Clean loop termination (over-work).** On real tasks the loop reproducibly
   hits `BUDGET_EXCEEDED` — the coder keeps making tool calls past a passing
   solution instead of signalling done — observed on two independent codebases
-  (R-014, pxx phase-2; R-015, a live SaaS backend). The runs still land correct
-  code, but they waste rounds and never cleanly `COMPLETED`. The improve cycle
-  independently mined `budgets:tighten_budget` from these (R-013), but tightening
-  the budget only cuts it off sooner. The real fix is a done-signal / early-exit:
-  when tests pass (and, in `--review`, the gate approves), the loop should
-  terminate `COMPLETED` rather than burn rounds to the cap. Highest immediate
-  quality lever — it affects every autonomous run — and reproducible on the
-  two-box rig.
+  (R-014, pxx phase-2; R-015, a live SaaS backend).~~ **Shipped in two halves:**
+  - **Terminal-code salvage (2.2.0, PR #12, R-017):** an over-worked run that
+    *did* leave a verified, in-scope edit (tests pass, review doesn't block) is
+    relabeled `COMPLETED` instead of `BUDGET_EXCEEDED`. Corrected the reporting,
+    but the coder still burned the rounds (R-017's own boundary said so).
+  - **Done-signal early-exit (2.3.7, R-031):** the fix for the waste itself. The
+    coder now stops at the first objectively-complete edit-state (scope + diff +
+    lint + tests pass) instead of running to the budget cap — an injected oracle
+    (`SessionContext.done_check`, no new model-visible tool) the native backend
+    consults after each edit turn; the loop's review gate still runs on the
+    result. `budgets:tighten_budget` (R-013) only cut it off sooner; this ends it
+    when it is actually done. Off-switch: `done_signal=false` / `PXX_DONE_SIGNAL=0`
+    for slow suites. Attested two-box rounds-saved measurement pending.
 - ~~Reliable reasoning judges for the *blocking* review gate. R-012 found a
   reasoning judge (qwen3.5) intermittently emits no parseable `VERDICT:` line…~~
   **Shipped (2026-08-01, R-019):** the reviewer sends a grammar-constrained

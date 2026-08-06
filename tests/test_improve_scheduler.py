@@ -111,6 +111,26 @@ def test_candidate_worktree_isolation(tmp_path):
     assert candidate_worktree(repo, "cand-1") == worktree
 
 
+@needs_git
+def test_candidate_worktree_git_timeout_falls_back_to_copy(tmp_path, monkeypatch):
+    """A hung ``git worktree add`` (TimeoutExpired) degrades to the copy path,
+    same as any other worktree-add failure — it must never hang the daemon."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / ".git").mkdir()
+    (repo / "a.py").write_text("x = 1\n")
+
+    def hang(*args, **kwargs):
+        assert kwargs.get("timeout") == 30  # bounded, matching the rest of pxx
+        raise subprocess.TimeoutExpired(cmd="git worktree add", timeout=30)
+
+    monkeypatch.setattr(subprocess, "run", hang)
+    worktree = candidate_worktree(repo, "cand-timeout")
+    assert worktree == repo / ".pxx" / "worktrees" / "cand-timeout"
+    assert (worktree / "a.py").read_text() == "x = 1\n"
+    assert not (worktree / ".git").exists()  # copy path excludes .git
+
+
 def test_candidate_worktree_rejects_unsafe_name(tmp_path):
     with pytest.raises(PxxError, match="unsafe"):
         candidate_worktree(tmp_path, "../escape")

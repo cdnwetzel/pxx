@@ -344,10 +344,11 @@ def _isolate_worktree(worktree: Path, sandbox: Path) -> Path:
                 check=True,
                 capture_output=True,
                 text=True,
+                timeout=30,
                 env=git_env(),
             )
             return dest
-        except (OSError, subprocess.CalledProcessError):
+        except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
             log.warning("git worktree add failed; falling back to a copy", exc_info=True)
     shutil.copytree(worktree, dest, ignore=shutil.ignore_patterns(".git"))
     return dest

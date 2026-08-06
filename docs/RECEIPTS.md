@@ -1452,15 +1452,18 @@ approximate.
 
 ---
 
-## R-032 — an autonomous local loop ships a real feature to a live production server (and a consistent release, in one pass)
+## R-032 — an autonomous local loop builds a real feature that lands on a live production server
 
 **Claim.** Driven only by a human-authored spec, pxx's `run_loop` — with a local
 model as the coder — **autonomously authored a complete, secure, mergeable
-feature and a consistent version release**, verified green by its own test gate,
-which then **landed on a live production install through the app's real upgrader
-and serves in production**. No human wrote implementation code; the human authored
-the spec tests and audited. This is the project's first receipt of an autonomous
-local build reaching *production*, not a bench.
+feature**, verified green by its own test gate, which then **landed on a live
+production install through the app's real upgrader and serves in production**. A
+**separate** follow-up autonomous pass produced a fully version-consistent release
+(mergeable, PR #15) — this second pass was **not itself redeployed**; the
+production landing is of the feature from the first pass. No human wrote
+implementation code; the human authored the spec tests and audited. This is the
+project's first receipt of an autonomous local build reaching *production*, not a
+bench.
 
 **Grade.** Attested (2026-08-06, real production landing on the maintainer's live
 Workorder_Wizard install) + Reproducible (the spec tests, the consistency guard,

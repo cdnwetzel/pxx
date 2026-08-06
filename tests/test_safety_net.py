@@ -77,6 +77,41 @@ def test_preview_sanitized_and_truncated(tmp_path: Path) -> None:
     assert sha
 
 
+@needs_git
+def test_commit_blocked_when_staged_delta_contains_secret(tmp_path: Path) -> None:
+    """Fail-closed secrets gate: a staged secret pattern means NO commit —
+    the work stays in the tree for the user to fix (fail-soft on the session)."""
+    repo = tmp_path / "repo"
+    _init_repo(repo, files={"a.py": "x = 1\n"})
+    before = _git(repo, "rev-parse", "HEAD")
+    (repo / "a.py").write_text('AWS_KEY = "AKIAIOSFODNN7EXAMPLE"\n')  # AKIA + 16 alnum
+    assert run(commit_session_work(repo, task_preview="add key", net_tag=None)) is None
+    assert _git(repo, "rev-parse", "HEAD") == before  # no commit happened
+    # the work itself is untouched, still in the tree (staged) for the user
+    assert (repo / "a.py").read_text() == 'AWS_KEY = "AKIAIOSFODNN7EXAMPLE"\n'
+
+
+@needs_git
+def test_commit_blocked_when_scan_indeterminable(tmp_path: Path, monkeypatch) -> None:
+    """A scan that cannot run is NOT a clean scan (governance doctrine):
+    PxxError from scan_staged also skips the commit and keeps the work."""
+    import pxx.governance
+    from pxx.errors import PxxError
+
+    repo = tmp_path / "repo"
+    _init_repo(repo, files={"a.py": "x = 1\n"})
+    before = _git(repo, "rev-parse", "HEAD")
+    (repo / "a.py").write_text("x = 2\n")
+
+    def boom(*, cwd, denylist):
+        raise PxxError("governance: cannot scan staged files: simulated index lock")
+
+    monkeypatch.setattr(pxx.governance, "scan_staged", boom)
+    assert run(commit_session_work(repo, task_preview="x", net_tag=None)) is None
+    assert _git(repo, "rev-parse", "HEAD") == before  # no commit happened
+    assert (repo / "a.py").read_text() == "x = 2\n"  # work remains
+
+
 # --- K5 net behavior (restored from the k5 workstream — deleted by mistake in 2.0.1-B) ---
 
 

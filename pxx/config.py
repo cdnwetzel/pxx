@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from .errors import ConfigError
-from .safety import Budgets, Hook, PermissionMode
+from .safety import Budgets, Hook, PermissionMode, canonicalize
 
 # Providers that run on the operator's own hardware, where a token has no
 # marginal cost. For these the max_tokens ceiling is pure friction — a run that
@@ -731,8 +731,29 @@ def apply_stable_overlay(
             version_id,
         )
         return settings
-    candidate_dir = manager.state_dir / "candidates" / version_id
-    if not (candidate_dir / "candidate.json").is_file():
+    candidates_root = manager.state_dir / "candidates"
+    candidate_dir = candidates_root / version_id
+    candidate_json = candidate_dir / "candidate.json"
+    # Symlink-safe containment BEFORE is_file()/read_candidate: the id regex blocks
+    # LEXICAL traversal but not a symlink at candidates/<id> pointing outside the
+    # state dir. Per the path-gate contract, canonicalize (realpath — resolves
+    # symlinks, never normpath-first) and require the resolved candidate to live
+    # inside the resolved candidates root, else a hash-valid EXTERNAL candidate
+    # could be read (CodeRabbit, security).
+    try:
+        root_real = canonicalize(candidates_root)
+        json_real = canonicalize(candidate_json)
+    except Exception:
+        log.warning("stable overlay: candidate path unresolvable — using base settings")
+        return settings
+    if not json_real.is_relative_to(root_real):
+        log.warning(
+            "stable overlay: candidate %r resolves outside the candidates root "
+            "(symlink escape) — using base settings",
+            version_id,
+        )
+        return settings
+    if not candidate_json.is_file():
         # Stable is a base/agent version id, not a promoted candidate:
         # there is no settings overlay to apply.
         return settings

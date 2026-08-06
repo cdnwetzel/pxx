@@ -605,6 +605,25 @@ def test_stable_overlay_unsafe_stable_id_is_refused(tmp_path, caplog):
     assert "unsafe stable id" in caplog.text
 
 
+def test_stable_overlay_symlink_escape_is_refused(tmp_path, caplog):
+    """A symlink at candidates/<id> pointing OUTSIDE the state dir must be refused
+    before the file is read — the id regex blocks lexical traversal but not a
+    symlink; canonicalize + containment catches it (CodeRabbit, security)."""
+    from pxx.improve.channels import Channel, ChannelManager
+
+    state = tmp_path / "state"
+    (state / "candidates").mkdir(parents=True)
+    external = tmp_path / "external"  # sibling of state, outside the candidates root
+    external.mkdir()
+    (external / "candidate.json").write_text("{}")  # a would-be candidate, out of root
+    (state / "candidates" / "escape").symlink_to(external)  # safe-looking id, symlink escape
+    ChannelManager(state).activate(Channel.STABLE, "escape")
+    settings = Settings(state_dir=state)
+    with caplog.at_level(logging.WARNING, logger="pxx.config"):
+        assert apply_stable_overlay(settings, state) == settings
+    assert "symlink escape" in caplog.text or "outside the candidates root" in caplog.text
+
+
 def test_stable_overlay_model_candidate_reresolves_review_model(tmp_path):
     """A promoted `model` overlay must re-flow into a SPARSE reviewer overlay —
     load_settings resolved review_model against the old model, so without a

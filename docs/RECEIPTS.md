@@ -1452,5 +1452,79 @@ approximate.
 
 ---
 
+## R-032 — an autonomous local loop ships a real feature to a live production server (and a consistent release, in one pass)
+
+**Claim.** Driven only by a human-authored spec, pxx's `run_loop` — with a local
+model as the coder — **autonomously authored a complete, secure, mergeable
+feature and a consistent version release**, verified green by its own test gate,
+which then **landed on a live production install through the app's real upgrader
+and serves in production**. No human wrote implementation code; the human authored
+the spec tests and audited. This is the project's first receipt of an autonomous
+local build reaching *production*, not a bench.
+
+**Grade.** Attested (2026-08-06, real production landing on the maintainer's live
+Workorder_Wizard install) + Reproducible (the spec tests, the consistency guard,
+and the observer harness are committed).
+
+**Exact configuration (nothing inherits).** Coder = `Qwen3-Coder` via vLLM on the
+T5810 (2×A4500, 64k context); pxx **2.3.7** `run_loop` (native backend, done-signal
+on, `allow_ungated_shell` on so the coder could self-verify — the governed default
+fail-closes shell, R-029); Mac mini = orchestrator. Target = `Workorder_Wizard`
+(the R-015/R-017 codebase). Feature = `GET /api/billing/usage` (current tenant's
+usage vs plan limits) + its `get_plan_limits_summary` helper. Landing =
+`upgrade_simple.sh` onto `/opt/workorder` (gunicorn `main:app`, 4 workers). The
+human-authored artifacts: `tests/test_billing_usage_endpoint.py` (feature spec),
+`tests/test_release_consistency.py` (a version-agnostic guard), `docs/RELEASING.md`
+— all scoped OUT of the coder's edit surface.
+
+**Procedure (reproduction path).** Baseline branch = spec tests present, feature
+absent, versions consistent at the prior release → `run_loop` autonomous (coder
+edits only the scoped source files) → loop's test gate must go green → human audit
+(security/perf/regression) → push + PR → `sudo ./upgrade_simple.sh` on the live
+host → runtime verification against the running app.
+
+**Observed (2026-08-06).**
+- *Feature build + production landing.* The loop autonomously wrote the helper +
+  the route (auth via `Depends(get_current_user)`, tenant resolved from the JWT
+  user — no cross-tenant exposure), self-verified to `COMPLETED` (done-signal,
+  5/5 spec). Audited: no N+1, full backend suite **green, no regression**. Landed
+  via the real upgrader in 27 s (backup taken; **no migration — the change adds no
+  schema**, `alembic upgrade head` was a no-op; VERSION written 2.5.15; service
+  restarted). Runtime proof, no credentials: on the running gunicorn app
+  `GET /api/billing/usage` → **401** (registered + auth-enforced) with the app's
+  own `{"detail":"Not authenticated"}` body, vs **404** for non-existent control
+  routes — i.e. it behaves exactly like existing registered routes and nothing
+  like a missing one. Pre-upgrade that path was 404.
+- *Release-consistency, in a second pass.* The first pass shipped correct code but
+  left `frontend/package.json` and the changelog at the prior version — root
+  VERSION alone is what the upgrader reads, so it still landed, but the release
+  artifacts drifted. A **version-agnostic consistency guard** was added to the
+  spec (reads root VERSION; fails unless `package.json` and a `## [<version>]`
+  changelog section match). The loop then produced a **fully-consistent release in
+  one pass** — root VERSION, frontend package.json, and a versioned changelog
+  section all moved together; done-signal `COMPLETED`, backend suite 438 passed.
+  The model's feature code was identical across both passes: the gap was
+  spec-completeness, not model capability.
+
+**Boundary — explicitly not claimed.** (a) **"No human implementation code," not
+"no human involvement":** the human authored the spec + the consistency guard
+(the objective contract, scoped out of the coder's reach) and audited; the model
+wrote 100% of the implementation. (b) **Two spec errors were mine and are
+disclosed:** an over-strict "literal version string in the changelog" assertion
+(a correct Keep-a-Changelog entry uses `[Unreleased]`) was relaxed to intent; and
+a 75k-token *generated* `openapi.json` snapshot was wrongly placed in a *hand-edit*
+guard — it blew the coder's 64k context and was removed (generated artifacts are
+regenerated at release, not hand-versioned; see `docs/RELEASING.md`). Both were
+corrected in the human spec, never in the model's code. (c) The authed-response
+JSON (real usage data) was **not** captured — production credentials were
+deliberately not handled; the 401-vs-404 runtime control + the app's auth-error
+body prove registration and auth enforcement without any credential. (d) One
+production install (`upgrade_simple.sh`), not a fleet rollout. (e) The consistency
+polish (pass 2, PR #15) supersedes the first PR but was not re-deployed — the
+backend feature is already live; the landing proof rests on the backend feature,
+which is in production and serving.
+
+---
+
 *Convention: entries are append-only and dated; superseded claims are
 struck through with a pointer to the superseding entry, never deleted.*

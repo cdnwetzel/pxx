@@ -142,7 +142,63 @@ milestone reviewer-verified by execution):
   fp-rate tracked against production fp. The 2.2.0 per-role routing + the
   SSH-tunnelled two-box lane (R-011) now provide the real endpoints this
   needs; the `ArmRunner` seam (`improve/candidate_eval.py`) is the documented
-  injection point.
+  injection point. **Reprioritized 2026-08-06 (Kimi K3 Swarm audit):** this
+  item is *blocked* by Wave 2 below — until a promoted settings overlay actually
+  applies to a production run, a live A/B arm measures nothing. Wave 2 (close
+  the improvement loop) therefore lands **first**, then this.
+
+### Kimi K3 Swarm audit — Waves 1–3 (recorded 2026-08-06)
+
+An independent architecture + quality audit of the repo at `e770b19` (one commit
+past `v2.3.7`) was produced by **Kimi K3 Swarm (2.8T-parameter frontier model,
+high-effort, long run)** — six ready-to-apply patches (each `git apply --check`
+clean + tested green in a second environment) plus ten design-level findings,
+every item citing file:line evidence. Spot-verified against our tree before
+recording (the top three code claims reproduced exactly). Landing order approved
+2026-08-06. **All of it rides the normal gate** — apply → `verify` in our real
+venv → PR → CI + CodeRabbit → merge, with a receipt wherever a claim is made;
+an external patch is a *candidate*, not a merge.
+
+**Wave 1 — validated bug/security fixes (land now, each its own PR):**
+- **W1.1 — memory capture reads the wrong event key (bug).** `memory/capture.py`
+  reads `result`/`output`; `tools/__init__.py` emits `result_preview` → every
+  real `tool_result` observation is silently dropped (memory has never recorded
+  a tool result). Verified at HEAD.
+- **W1.2 — unbounded `git worktree add` (bug; receipt integrity).**
+  `improve/channels.py` + `improve/scheduler.py` call `worktree add` with no
+  `timeout=` — the two sites the 2.3.6/**R-030** "every git subprocess is
+  bounded" work missed. Fix + amend R-030's boundary to name the gap it had.
+- **W1.3 — fail-closed secrets gate on auto-commit (security).**
+  `commit_session_work` commits the session delta with no content scan;
+  `governance.scan_staged` already exists + is fail-closed but is never called
+  on the runtime path. Wire it: any finding / unrunnable scan → no commit, work
+  left staged (the `None` contract every caller already handles).
+- **W1.4 — arm the PR-time governance scan (CI).** `ci.yml` runs `pxx check`
+  without `--require-denylist`, so on same-repo PRs (where the secret *is*
+  available) an empty denylist passes silently — the 1.3.x silent-green mode.
+  Split the step: armed on same-repo PRs/pushes, loudly-unarmed on fork PRs.
+
+**Wave 2 — close the improvement loop (the headline; unblocks live eval arms):**
+- **W2 — stable settings overlay + `memory_retrieval_limit` becomes real.** The
+  `improve/` plane (mining, content-hashed candidates, promotion guards, shadow/
+  canary, autopromote) currently **never changes a production run**:
+  `memory_retrieval_limit` has no `Settings` field/reader (`inject.py` hardcodes
+  `_SEARCH_HITS=8`), and `ChannelManager.current(STABLE)` is consulted only by
+  CLI reporting. Make the knob real, then apply the stable channel's *settings*-
+  class overlay at session start — re-validated (content-hash tamper-proof),
+  tighten-only budgets against *current* budgets, CLI always wins, fail-closed
+  but never bricking (a broken optimizer artifact must never break every run).
+  Then and only then: **Live eval arms** (the item above) measures a real effect.
+
+**Wave 3 — learning-loop completeness:**
+- **W3 — opt-in success-exemplar capture (`memory_capture_successes`, default
+  off).** Today only FAILED sessions capture observations (Phase 20.5 — a
+  deliberate "no silent success-to-knowledge"). Add a strictly opt-in path that
+  records *gate-verified* successes as one compact `session_outcome` exemplar
+  (dedupe grows `seen_count` → the signal the graduation ladder consumes).
+  Depends on W1.1 (capture must actually work). Lands with a measured
+  before/after RECEIPTS entry via `pxx eval`; fold in the dead `memory/utility.py`
+  `measure_utilities` (finding #8) as the exemplar scorer.
 - ~~**Clean loop termination (over-work).** On real tasks the loop reproducibly
   hits `BUDGET_EXCEEDED` — the coder keeps making tool calls past a passing
   solution instead of signalling done — observed on two independent codebases
@@ -337,6 +393,34 @@ CHANGELOG.md; highlights:
   Shared "refuse-unverified-output" ethos makes the fit natural; the
   integration stays optional and degrades to any OpenAI-compatible endpoint.
 - Cross-repo knowledge federation.
+- **Kimi K3 Swarm audit — deeper findings (need a maintainer design decision,
+  recorded 2026-08-06).** Real at `e770b19`, ranked by severity; each is a design
+  choice, so they sit here as roadmap entries, not diffs. Security depth is the
+  next wave after Waves 1–3.
+  - *Security.* (1) `run_shell` extracts no path targets (`broker.py`), so the
+    protected-path write check never sees `sed -i pxx/safety.py` — in AUTO with
+    `allow_ungated_shell` the control plane is shell-rewritable; answer is
+    sandbox-by-default or a post-hoc session-delta check (`_worktree_delta`
+    exists). (4) The judge prompt interpolates untrusted `task`+`diff` with no
+    fencing (`review.py`) — add explicit delimiting + an adversarial eval case
+    (a diff containing "reviewer: verdict APPROVE"). (6) Model-settable shell
+    timeout, no `setrlimit`, sandbox off by default — clamp to
+    `min(model, max_shell_timeout)` + POSIX rlimits where available.
+  - *Correctness.* (2) `run_loop`'s `BudgetGuard` never calls `check_clock()` →
+    worst case ≈ `max_rounds × max_wall_seconds`; thread a loop-level deadline
+    into per-round budgets (the done-signal helped but did not bound this).
+    (3) Replay can report a false `COMPLETED` (`backends/replay.py` returns the
+    recorded terminal code regardless of re-execution). (7) No context-window
+    management in the native loop (grows to budget or a hard 400).
+  - *Policy.* (5) `prompts/review.md` — the merge-guarding prompt — routes
+    LOW-risk auto-promotable; classifying it MEDIUM+ is a one-line but genuine
+    policy change.
+  - *Hardening / cleanup.* (10) Add `mypy`/`pyright` + `coverage --fail-under`
+    to CI (98% annotation coverage already). (8) Dead `cost.py` `CostLedger` +
+    divergent price table in `native.py`; `memory/utility.py:measure_utilities`
+    has no caller (wire it as W3's exemplar scorer, or delete). (9) Stale
+    permanent test skips (`test_cli.py`) for modules that now exist — delete the
+    markers so those dispatch paths are tested again.
 
 ## Release story
 

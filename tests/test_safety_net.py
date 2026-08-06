@@ -84,11 +84,16 @@ def test_commit_blocked_when_staged_delta_contains_secret(tmp_path: Path) -> Non
     repo = tmp_path / "repo"
     _init_repo(repo, files={"a.py": "x = 1\n"})
     before = _git(repo, "rev-parse", "HEAD")
-    (repo / "a.py").write_text('AWS_KEY = "AKIAIOSFODNN7EXAMPLE"\n')  # AKIA + 16 alnum
+    # Construct the AKIA sample by concatenation so the literal secret never
+    # appears in this source file (which pxx's OWN governance scan reads in CI) —
+    # the assembled 20-char value IS written to the staged tree, which is exactly
+    # what scan_staged (the gate under test) inspects. Mirrors test_governance.py.
+    secret_line = 'AWS_KEY = "' + "AKIA" + "IOSFODNN7EXAMPLE" + '"\n'
+    (repo / "a.py").write_text(secret_line)
     assert run(commit_session_work(repo, task_preview="add key", net_tag=None)) is None
     assert _git(repo, "rev-parse", "HEAD") == before  # no commit happened
     # the work itself is untouched, still in the tree (staged) for the user
-    assert (repo / "a.py").read_text() == 'AWS_KEY = "AKIAIOSFODNN7EXAMPLE"\n'
+    assert (repo / "a.py").read_text() == secret_line
 
 
 @needs_git

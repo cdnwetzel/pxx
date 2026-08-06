@@ -17,6 +17,23 @@ You start at **0 / 6 tests passing**. Each level teaches one pxx skill *and* mov
 ~25 minutes. By the end you'll have built a working tool — and trust that the agent never got out of
 your control.
 
+> **The one thing that makes this repeatable — and it's on you.** Notice your target is a *test*
+> (`pytest -q`, six specific assertions), not a wish. That's the whole trick to getting quality out of
+> any AI agent: **you define "done" as something a machine can check; pxx does the rest — the same way
+> every time.** The split never changes through this tutorial:
+>
+> - **Your job — the spec:** say *what* "done" means so it's **verifiable** — a failing test, a
+>   `pytest -q` command, precise acceptance criteria. This is the lever that drives the quality of what
+>   you get back.
+> - **pxx's job — identical whether it's a toy or a production app:** run the agent loop, gate it
+>   read-only / in-scope, net your work, and **verify the result against your spec** before it says
+>   `COMPLETED`.
+>
+> A vague ask gets a vague result you have to babysit; a checkable spec gets a *verified* one. The
+> converter is small, but the workflow is exactly the one that shipped a real feature to a live
+> production server autonomously ([receipt R-032](RECEIPTS.md)) — because "done" there was a test the
+> loop had to pass, not a prompt anyone had to trust.
+
 > **How to read this.** Follow the levels in order on the sandbox we scaffold in Level 0. Skippable
 > callouts let you go as deep as you want: 🟢 **New to this** · 🔵 **From aider** · 🟣 **Go deeper** ·
 > ⚠️ **Safety** (read these).
@@ -294,6 +311,63 @@ Safe to skip on day one.
 
 ---
 
+## Take it to real code — the part that's on you
+
+Everything above works the same on a real repo. The mechanics — loop, gates, net,
+verification — are pxx's, and they don't change from a toy to a production app.
+What changes the *quality* of the result is the one thing that's yours: **how
+checkable you make "done."**
+
+We measured this (receipt [R-033](RECEIPTS.md)): the *same* real task, asked three
+ways, each result judged by a held-out acceptance test:
+
+| How you asked | pxx said | Actually correct? |
+|---|---|---|
+| **Vague** — "add a function to get the plan display name" | `COMPLETED` | **No** — confident and wrong; pxx had nothing to check |
+| **Precise contract** — exact signature, outputs, edge cases (no test) | `COMPLETED` | Yes — but *unverified*; you're trusting the model got it right |
+| **Contract + a gate** — same, plus a test the loop must pass | `COMPLETED` | **Yes, and proven** — `COMPLETED` means the test passed |
+
+Two independent levers, and you own both:
+
+- **Precision** (a behavioral contract: inputs, outputs, shape, auth, error cases)
+  is what makes the result *correct*. Vague in, wrong out.
+- **A gate** (a test, or `PXX_TEST_COMMAND`) is what makes it *verified* — the
+  difference between "the model says it's done" and "it demonstrably is." This is
+  what makes the outcome **repeatable for anyone**, not dependent on model luck.
+
+So the same feature, at the production bar:
+
+```sh
+# 1. Make "done" checkable — write the acceptance test first (or point at existing ones).
+# 2. Fence it.   3. Give pxx the command that proves it.
+PXX_TEST_COMMAND="pytest -q tests/test_usage.py" \
+  pxx loop --scope src/api -m "Add GET /billing/usage returning {used, limit} for the \
+current tenant, auth-required, mirroring the existing /subscription route. Make \
+tests/test_usage.py pass."
+```
+
+pxx will edit → run *your* test → heal → and only report `COMPLETED` when your
+criteria pass. The result is exactly as good as your spec — which is what makes it
+yours to reproduce.
+
+> **The prompt→spec checklist** (what turns "an ask" into a spec that lands):
+> - **Scope** — which file(s)/dir may change (`--scope`); everything else is refused.
+> - **Behavior** — the exact contract: inputs, outputs, shape, auth, error/edge cases.
+> - **A gate** — a test (or `PXX_TEST_COMMAND`) that's red now and green when done.
+>   *If you can't say how you'd check it, pxx can't either* — and `COMPLETED` will
+>   mean nothing.
+> - **Resolvable paths** — reference files as they exist from the repo root; pxx
+>   *refuses* (asks you to clarify) rather than guess at a path that doesn't resolve.
+> - **Anchors** — "mirror the existing X" points the model at your conventions.
+> - **Releases** — say what else must move (versions, changelog); a consistency
+>   test makes it automatic (see `docs/RELEASING.md` in your project).
+>
+> This is precisely how a real feature reached a live production server autonomously
+> (R-032): a local model, given a test-backed spec, had an objective gate to verify
+> against — not a vibe to guess at.
+
+---
+
 ## 🏁 You shipped it — now do one on your own (capstone)
 
 You built a tested converter CLI with an AI agent you kept on a leash the entire time: read-only by
@@ -319,6 +393,10 @@ default, fenced by scope, undoable via the tag. Now cement it with **less hand-h
 
 **The model in one line:** *pxx picks your local model, gates on permission + scope, nets your work,
 runs its own tool-calling agent loop — read-only until you opt in.*
+
+**The quality rule in one line:** *the result is only as good as your definition of "done" — give
+pxx a **checkable spec** (a precise contract + a test it must pass), and `COMPLETED` means verified,
+not hoped. That part is yours; everything else pxx does the same way every time (measured: R-033).*
 
 ---
 

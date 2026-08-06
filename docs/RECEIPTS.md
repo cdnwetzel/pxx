@@ -1529,5 +1529,67 @@ which is in production and serving.
 
 ---
 
+## R-033 — the prompt-quality bar: precision makes a result correct, a gate makes it verified
+
+**Claim.** For a pxx-driven change to land at production quality, two independent,
+user-owned levers matter, and they were measured. **Precision** — a behavioral
+contract (signature, outputs, edge cases) — is what makes the result *correct*.
+**A gate** — a test / `PXX_TEST_COMMAND` the loop must pass — is what makes
+`COMPLETED` *mean verified* rather than "the model stopped." A vague prompt
+produces a confident-but-wrong `COMPLETED`; a precise contract with no gate
+produces a correct-but-**unverified** result (right only if the model happened to
+get it right); a precise contract **plus** a gate produces a verified-correct
+result by construction. The gate is the threshold from "trust the model" to
+"proven."
+
+**Grade.** Reproducible (the probe harness + the held-out acceptance test are
+kept) + Attested (2026-08-06, real runs on Workorder_Wizard via a local model).
+
+**Exact configuration (nothing inherits).** Coder = `Qwen3-Coder` via vLLM on the
+T5810; pxx **2.3.7** `run_loop`. Task = add `plan_display_name(db, tenant) -> str`
+to Workorder_Wizard (`trial`/None/unknown-slug → "Trial", else the plan's `.name`).
+Objective judge = a **held-out** 4-case acceptance test, run against every result
+regardless of whether the model saw it. Three prompt conditions × 2 trials, same
+model/task/scope, the only variable being the prompt:
+- **A (vague):** "Add a function to get the plan display name for a tenant."
+- **B (precise contract, no gate):** exact signature + return values + all edge
+  cases + scope; `test_command=None`.
+- **C (contract + gate):** B's contract + "the test … must pass", with
+  `PXX_TEST_COMMAND` set to the held-out test.
+
+**Procedure (reproduction path).** Two baselines (A/B from a tree without the
+held-out test so the model is blind to it; C from a tree with it committed) →
+`run_loop` per condition → run the held-out test against the on-disk result →
+record `{pxx terminal, had-gate, held-out PASS/FAIL}`.
+
+**Observed (2026-08-06).**
+
+| Condition | pxx terminal | Held-out truth |
+|---|---|---|
+| A — vague (no gate) | `COMPLETED` ×2 | **FAIL ×2** — the expected function wasn't even produced |
+| B — precise contract (no gate) | `COMPLETED` ×2 | PASS ×2 — correct, but pxx verified nothing |
+| C — contract + gate | `COMPLETED` ×2 | **PASS ×2** — `COMPLETED` ⟺ the test passed |
+
+A sub-finding: a first C run whose prompt referenced the test by a path that does
+not resolve from the repo root (`tests/…` vs the real `src/backend/tests/…`)
+returned **`CLARIFICATION_REQUIRED`** and built nothing — pxx's ambiguity gate
+correctly refused to guess at an unresolvable path rather than proceed. Fixing the
+path to be repo-root-relative made C proceed and pass.
+
+**Boundary — explicitly not claimed.** (a) One task, one model, N=2 per cell — the
+*direction* is structural (a gate is required for `COMPLETED` to imply correct),
+the specific pass/fail counts are a small sample. (b) **B's correctness is not a
+general result:** a precise contract sufficed *on this task with this model*; on a
+harder task or a weaker model B degrades toward A (correct-looking, unverified,
+sometimes wrong) — and, decisively, **pxx cannot tell B from a silent failure
+without a gate**. That is the whole point: the gate removes the dependence on model
+luck. (c) The held-out test is the arbiter of "correct" here; a different contract
+would move the bar. (d) The clarity-gate result is *correct behavior*, not a
+defect — it is evidence that resolvable paths + explicit scope are part of the bar.
+(e) `allow_ungated_shell` was on for coder self-verify (not the governed default,
+R-029).
+
+---
+
 *Convention: entries are append-only and dated; superseded claims are
 struck through with a pointer to the superseding entry, never deleted.*

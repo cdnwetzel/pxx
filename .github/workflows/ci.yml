@@ -22,8 +22,26 @@ jobs:
           .venv/bin/ruff format --check pxx tests
       - name: Test (no network, no Ollama, no aider required)
         run: .venv/bin/python -m pytest
-      - name: "Governance scan (secret/PII patterns; fork-safe: unarmed denylist)"
-        run: .venv/bin/pxx check --all-files
+      # Same-repo PRs and pushes DO have secret access: arm the gate exactly
+      # like release.yml so an empty/missing denylist fails loudly instead of
+      # passing silently (the 1.3.x silent-green failure mode).
+      - name: "Governance scan (secret/PII patterns; ARMED denylist)"
+        if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          PXX_CONTENT_DENYLIST: ${{ secrets.PXX_CONTENT_DENYLIST }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.config/pxx
+          printf '%s\n' "${PXX_CONTENT_DENYLIST:-}" > ~/.config/pxx/public-denylist
+          # --require-denylist: the gate FAILS when the denylist loads empty.
+          .venv/bin/pxx check --all-files --require-denylist
+      # Fork PRs have no secret access, so the denylist cannot be armed there;
+      # keep the scan (it still catches built-in patterns) but say so loudly.
+      - name: "Governance scan (secret/PII patterns; UNARMED denylist on fork PRs)"
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository
+        run: |
+          echo "::warning::governance scan is UNARMED on fork PRs (no secret access); same-repo PRs and pushes run with --require-denylist"
+          .venv/bin/pxx check --all-files
       - name: Legibility gates (workflow contract, context audit, docs check)
         run: |
           .venv/bin/pxx workflow validate

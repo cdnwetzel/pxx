@@ -323,7 +323,7 @@ verdict, on dated tunnelled hardware).
 flag hands it no reviewer (the gate stays skipped — unchanged default).
 
 **Real-hardware judge — Attested (2026-08-01).** Over an SSH tunnel
-(`ssh -L 11435:127.0.0.1:11434 asrock`) to a Ryzen 9 5950X + RTX 5060 Ti
+(`ssh -L 11435:127.0.0.1:11434 <coder-host>`) to a Ryzen 9 5950X + RTX 5060 Ti
 16 GB box (Gentoo, Ollama 0.30.5), `pxx review` with
 `PXX_REVIEW_MODEL=gemma2:9b` (`PXX_BASE_URL` on the tunnel) reviewed a real
 4-line diff and returned `verdict: APPROVE` — a real local model driving the
@@ -1426,20 +1426,20 @@ pytest spec (authored by the reviewer, committed as the immovable baseline; the
 coder's `scope` excludes it) was the only human-provided artifact; the **local
 coder wrote 100% of the implementation and iteration** — no assistance. 3 trials
 × {done_signal on, off} × two coder nodes. Coder A: `qwen3-coder:30b` over ollama
-on the asrock RTX 5060 Ti (Blackwell, 16 GB, partial CPU offload). Coder B:
-`Qwen3-Coder` over vLLM on the T5810 dual-A4500 (Ampere, 40 GB). Mac mini =
+on the RTX-5060Ti box (Blackwell, 16 GB, partial CPU offload). Coder B:
+`Qwen3-Coder` over vLLM on the dual-A4500 box (Ampere, 40 GB). Mac mini =
 orchestrator. Per-cell medians (all 12 runs `COMPLETED` with an implementation
 passing the fixed four-case spec):
 
 | cell | med turns | med tokens | `done_signal` fired |
 |---|---|---|---|
-| asrock **on**  | **3** | **12,118** | 3/3 |
-| asrock off     | 6 | 31,239 | 0/3 |
-| T5810 **on**   | **4** | **22,401** | 3/3 |
-| T5810 off      | 6 | 29,384 | 0/3 |
+| RTX-5060Ti **on**  | **3** | **12,118** | 3/3 |
+| RTX-5060Ti off     | 6 | 31,239 | 0/3 |
+| dual-A4500 **on**  | **4** | **22,401** | 3/3 |
+| dual-A4500 off     | 6 | 29,384 | 0/3 |
 
-Savings from the early-exit: asrock **50 % fewer coder turns / 61 % fewer
-tokens**; T5810 **33 % / 24 %**. The toggle is clean — `done_signal` fired in
+Savings from the early-exit: the RTX-5060Ti box **50 % fewer coder turns / 61 % fewer
+tokens**; the dual-A4500 box **33 % / 24 %**. The toggle is clean — `done_signal` fired in
 **6/6** `on` runs and **0/6** `off` runs; the terminal was `COMPLETED` in all 12.
 The effect holds across *both* silicon generations and serving stacks (Blackwell/
 ollama and Ampere/vLLM), consistent with the "re-verify on the actual hardware"
@@ -1452,12 +1452,12 @@ confirm/re-read/verify turns before a voluntary stop), NOT a runaway to the cap;
 the runaway case is the one the unit test exercises (round 1 with the oracle vs
 round 25 without) and the one R-017 salvages. (b) The early-exit only cuts the
 tail *after* the first passing edit — it cannot shorten pre-solution exploration,
-which varies run-to-run (one T5810 `on` trial spent 7 turns / 68 k tokens
+which varies run-to-run (one dual-A4500 `on` trial spent 7 turns / 68 k tokens
 exploring before its passing edit; `done_signal` cannot help there). (c) The A/B
 enabled `allow_ungated_shell` so the coder could self-verify with `pytest` — a
 controlled-run convenience, not the governed default (which fail-closes shell,
 R-029; that gate fired correctly and had to be explicitly relaxed here). (d) The
-asrock-vs-T5810 comparison confounds silicon *and* serving stack; it is a real
+RTX-5060Ti-vs-A4500 comparison confounds silicon *and* serving stack; it is a real
 cross-config result, not a pure-silicon A/B. (e) N=3 per cell — small; the
 direction (on ≤ off in turns and tokens) is consistent, the magnitude is
 approximate.
@@ -1482,7 +1482,7 @@ Workorder_Wizard install) + Reproducible (the spec tests, the consistency guard,
 and the observer harness are committed).
 
 **Exact configuration (nothing inherits).** Coder = `Qwen3-Coder` via vLLM on the
-T5810 (2×A4500, 64k context); pxx **2.3.7** `run_loop` (native backend, done-signal
+the dual-A4500 box (2×A4500, 64k context); pxx **2.3.7** `run_loop` (native backend, done-signal
 on, `allow_ungated_shell` on so the coder could self-verify — the governed default
 fail-closes shell, R-029); Mac mini = orchestrator. Target = `Workorder_Wizard`
 (the R-015/R-017 codebase). Feature = `GET /api/billing/usage` (current tenant's
@@ -1558,7 +1558,7 @@ result by construction. The gate is the threshold from "trust the model" to
 kept) + Attested (2026-08-06, real runs on Workorder_Wizard via a local model).
 
 **Exact configuration (nothing inherits).** Coder = `Qwen3-Coder` via vLLM on the
-T5810; pxx **2.3.7** `run_loop`. Task = add `plan_display_name(db, tenant) -> str`
+the dual-A4500 box; pxx **2.3.7** `run_loop`. Task = add `plan_display_name(db, tenant) -> str`
 to Workorder_Wizard (`trial`/None/unknown-slug → "Trial", else the plan's `.name`).
 Objective judge = a **held-out** 4-case acceptance test, run against every result
 regardless of whether the model saw it. Three prompt conditions × 2 trials, same
@@ -1625,7 +1625,7 @@ by the **Kimi K3 Swarm** audit (2.8T-param frontier model, high-effort); the two
 regression tests are Kimi's. The *fix* was authored by pxx.
 
 **Exact configuration (nothing inherits).** Coder = `Qwen3-Coder` via vLLM on the
-T5810 (dual A4500, 64k ctx); orchestrator = pxx **2.3.7** `pxx loop`; `--scope
+the dual-A4500 box (Ampere, 64k ctx); orchestrator = pxx **2.3.7** `pxx loop`; `--scope
 pxx/memory/capture.py`; `--provider vllm --base-url http://localhost:8001`;
 `--no-review`; budgets rounds 6 / 480 s; gate = `PXX_TEST_COMMAND` running
 `tests/test_memory_capture_inject.py` (the two new cases **FAIL** on the unfixed

@@ -1591,5 +1591,77 @@ R-029).
 
 ---
 
+## R-034 — pxx fixes a bug in its own source: a fully-local autonomous edit, ended by its own done-signal
+
+**Claim.** pxx **2.3.7**, running entirely on local hardware, autonomously wrote
+the fix for a real correctness bug **in its own codebase** — the memory-capture
+wrong-key bug (W1.1) — under a regression-test gate that *fails on the unfixed
+code*, and terminated on its **own done-signal** (R-031) at the first verified
+edit-state rather than at the budget cap. This is the dogfood closing on itself:
+pxx-the-runtime repairing pxx-the-source, self-verified, no cloud model involved.
+
+**Grade.** Attested (2026-08-06, one real local run) + Reproducible (the branch
+`fix/capture-result-preview`, the gate tests, the imperative task, and the run's
+`outcome.json` are all kept).
+
+**The bug (independently found).** `pxx/memory/capture.py` read
+`data.get("result", data.get("output", ""))`, but the tool bus
+(`pxx/tools/__init__.py`) emits `tool_result` events keyed `result_preview` — so
+`result_text` was always empty and **every real `tool_result` observation was
+silently dropped** (post-session memory never recorded a tool result). Surfaced
+by the **Kimi K3 Swarm** audit (2.8T-param frontier model, high-effort); the two
+regression tests are Kimi's. The *fix* was authored by pxx.
+
+**Exact configuration (nothing inherits).** Coder = `Qwen3-Coder` via vLLM on the
+T5810 (dual A4500, 64k ctx); orchestrator = pxx **2.3.7** `pxx loop`; `--scope
+pxx/memory/capture.py`; `--provider vllm --base-url http://localhost:8001`;
+`--no-review`; budgets rounds 6 / 480 s; gate = `PXX_TEST_COMMAND` running
+`tests/test_memory_capture_inject.py` (the two new cases **FAIL** on the unfixed
+tree — verified before the run). `PXX_ALLOW_UNGATED_SHELL=1` for coder self-verify
+(a controlled local run via env, not the governed default — R-029).
+
+**Procedure (reproduction path).** Apply Kimi's patch, `git checkout --
+pxx/memory/capture.py` to keep only the *tests* (the gate) with the source still
+buggy → confirm the gate fails (`assert 0 == 1`) → `pxx loop` with the finding as
+an **imperative** spec (exact old→new strings) → pxx edits `capture.py` → the
+done-signal gate consults scope+diff+lint+tests → `COMPLETED` → full suite.
+
+**Observed (2026-08-06, from `outcome.json` + the event log).**
+
+| Field | Value |
+|---|---|
+| terminal `code` | `COMPLETED` |
+| `summary` | "done-signal: verified edit — exited before budget exhaustion" |
+| `gate_decision` event | `{"gate": "done_signal", "allowed": true, "round": 3}` |
+| rounds / tokens | 3 / 10 851 |
+| diff / files | 4 lines / 1 file | 
+| `edit_seconds` | 13.4 |
+| `introduced_failures` / `lint_errors` | 0 / 0 |
+| budget left | 466 s of 480 |
+| full suite after | **1186 passed, 0 failed** (`--extra dev --extra server`) |
+
+The edit pxx wrote (`result_preview` first; inline `confidence=(0.3 if
+data.get("error") else 0.6)`) is functionally equivalent to — and one line
+tighter than — the audit's proposed patch.
+
+**Precision lever, live again (ties to R-033).** The *first* attempt used a
+descriptive prompt ("the code reads the wrong key … fix it to read
+result_preview"): the local model spent five rounds calling only `read_file` /
+`list_files`, never once proposed an edit, and hit `BUDGET_EXCEEDED`. Re-running
+with an **imperative** prompt naming the exact old→new strings produced the edit
+in a single edit-round. Same model, task, scope, gate — the only variable was
+prompt precision, exactly R-033's finding, this time on pxx's own code.
+
+**Boundary / non-claims.** This attests that pxx's *runtime* can apply,
+self-verify, and cleanly terminate a well-specified fix on its own source with a
+fully-local model — **not** that the local model diagnosed the bug unaided: the
+diagnosis and the gate tests came from the Kimi K3 Swarm audit, and the winning
+prompt named the exact strings. What is un-gameable here is the *loop*: a gate
+that provably fails on the unfixed tree, a local model that produced the passing
+edit, pxx's own done-signal ending the run at round 3 with budget to spare, and a
+green full suite. The specification-vs-execution split is the honest line.
+
+---
+
 *Convention: entries are append-only and dated; superseded claims are
 struck through with a pointer to the superseding entry, never deleted.*

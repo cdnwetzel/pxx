@@ -1416,8 +1416,8 @@ coder wrote 100% of the implementation and iteration** — no assistance. 3 tria
 × {done_signal on, off} × two coder nodes. Coder A: `qwen3-coder:30b` over ollama
 on the asrock RTX 5060 Ti (Blackwell, 16 GB, partial CPU offload). Coder B:
 `Qwen3-Coder` over vLLM on the T5810 dual-A4500 (Ampere, 40 GB). Mac mini =
-orchestrator. Per-cell medians (all 12 runs `COMPLETED` with a correct, tests-
-passing implementation):
+orchestrator. Per-cell medians (all 12 runs `COMPLETED` with an implementation
+passing the fixed four-case spec):
 
 | cell | med turns | med tokens | `done_signal` fired |
 |---|---|---|---|

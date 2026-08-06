@@ -26,7 +26,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import __version__
-from .config import load_settings
+from .config import apply_stable_overlay, load_settings
 from .errors import PxxError
 from .events import AuditLog, Event
 from .gitenv import git_env
@@ -660,6 +660,27 @@ def _run_session(settings, backend, task: str) -> RunOutcome:
     return asyncio.run(session.run(task))
 
 
+def _run_settings(args: argparse.Namespace, mode):
+    """Settings for an actual run: layered config + promoted stable overlay.
+
+    The stable-channel overlay (a promoted ``pxx improve`` settings
+    candidate) is applied AFTER ``load_settings`` — but keys the operator
+    pinned via CLI overrides are marked ``pinned`` so the overlay never
+    touches them: CLI always wins. A broken/tampered optimizer artifact
+    degrades to base settings with a warning, never a failed run.
+    """
+    overrides = _cli_overrides(args, mode)
+    settings = load_settings(Path.cwd(), overrides)
+    # Overlay targets are Settings FIELD names, but several CLI override keys fold
+    # into one field: provider/base_url/api_key all land on Settings.model via
+    # _merge_model_ref. Pin the field they affect, not the raw key, so a promoted
+    # `model` candidate can't overwrite an operator's --provider/--base-url/--api-key
+    # (a data-egress surface) — "CLI always wins" (CodeRabbit).
+    _TARGET_BY_OVERRIDE = {"provider": "model", "base_url": "model", "api_key": "model"}
+    pinned = frozenset(_TARGET_BY_OVERRIDE.get(k, k) for k, v in overrides.items() if v is not None)
+    return apply_stable_overlay(settings, settings.state_dir, pinned=pinned)
+
+
 def _cmd_run_like(args: argparse.Namespace, unknown: list[str]) -> int:
     task = _read_task(args)
     if getattr(args, "files", None):
@@ -669,7 +690,7 @@ def _cmd_run_like(args: argparse.Namespace, unknown: list[str]) -> int:
         # config errors/warnings).
         print("pxx: usage: a task is required (-m/--message or stdin)", file=sys.stderr)
         return EXIT_USAGE
-    settings = load_settings(Path.cwd(), _cli_overrides(args, _MODE_BY_COMMAND[args.command]))
+    settings = _run_settings(args, _MODE_BY_COMMAND[args.command])
     backend_name = _resolve_backend_name(args.command, args.backend, settings)
     task += _handle_unknown_flags(unknown, backend_name)
     backend = _make_backend(backend_name, settings)
@@ -701,7 +722,7 @@ def _cmd_loop(args: argparse.Namespace, unknown: list[str]) -> int:
     if not task.strip():
         print("pxx: usage: a task is required (-m/--message or stdin)", file=sys.stderr)
         return EXIT_USAGE
-    settings = load_settings(Path.cwd(), _cli_overrides(args, PermissionMode.AUTO))
+    settings = _run_settings(args, PermissionMode.AUTO)
     lint_command = None
     workflow_test = None
     if (Path.cwd() / "WORKFLOW.md").is_file():
@@ -763,7 +784,7 @@ async def _chat_printer(event: Event) -> None:
 
 def _cmd_chat(args: argparse.Namespace, unknown: list[str]) -> int:
     _handle_unknown_flags(unknown, "native")
-    settings = load_settings(Path.cwd(), _cli_overrides(args, PermissionMode.EDIT))
+    settings = _run_settings(args, PermissionMode.EDIT)
     backend = _make_backend("native" if args.backend in (None, "auto") else args.backend, settings)
     session = Session(settings, backend, cwd=Path.cwd())
     session.bus.subscribe(_chat_printer)

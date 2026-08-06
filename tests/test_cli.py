@@ -224,6 +224,105 @@ def test_missing_task_exit_usage(harness, monkeypatch, capsys):
     assert "task is required" in capsys.readouterr().err
 
 
+# --- stable-channel settings overlay wiring -------------------------------------
+
+
+def _promote_settings_candidate(state, candidate_id, target, value, **kwargs):
+    from pxx.improve.candidates import make_candidate, write_candidate
+    from pxx.improve.channels import Channel, ChannelManager
+
+    candidate = make_candidate(
+        candidate_id, "settings", target, value, "measured win", ("run-1",), **kwargs
+    )
+    write_candidate(candidate, state)
+    ChannelManager(state).activate(Channel.STABLE, candidate_id)
+
+
+def test_run_applies_stable_settings_overlay(harness):
+    """A promoted stable-channel settings candidate reaches the run's Settings."""
+    state = harness["tmp_path"] / "state"
+    _promote_settings_candidate(state, "c-mem", "memory_retrieval_limit", 4)
+    assert cli.main(["run", "-m", "x"]) == 0
+    assert FakeSession.instances[0].settings.memory_retrieval_limit == 4
+
+
+def test_run_cli_override_beats_stable_overlay(harness, monkeypatch):
+    """CLI overrides always win over the promoted overlay."""
+    from pxx.config import _settings_from_dict
+
+    def load_with_overrides(cwd=None, overrides=None):
+        base = Settings(
+            memory_dir=harness["tmp_path"] / "mem", state_dir=harness["tmp_path"] / "state"
+        )
+        if overrides:
+            base = _settings_from_dict(
+                {k: v for k, v in overrides.items() if v is not None}, base, "CLI"
+            )
+        return base
+
+    monkeypatch.setattr(cli, "load_settings", load_with_overrides)
+    state = harness["tmp_path"] / "state"
+    _promote_settings_candidate(state, "c-model", "model", "overlay-model:latest")
+    assert cli.main(["run", "-m", "x", "--model", "operator-model:latest"]) == 0
+    assert FakeSession.instances[0].settings.model.model == "operator-model:latest"
+
+
+def test_run_provider_flag_pins_model_overlay_target(harness, monkeypatch):
+    """--provider (and --base-url/--api-key) fold into Settings.model, so they
+    must pin the `model` overlay target — a promoted `model` candidate cannot
+    override an operator's --provider (CLI always wins; the endpoint is a
+    data-egress surface). Regression for the pinned-key mapping (CodeRabbit)."""
+    from pxx.config import _settings_from_dict
+
+    def load_with_overrides(cwd=None, overrides=None):
+        base = Settings(
+            memory_dir=harness["tmp_path"] / "mem", state_dir=harness["tmp_path"] / "state"
+        )
+        if overrides:
+            base = _settings_from_dict(
+                {k: v for k, v in overrides.items() if v is not None}, base, "CLI"
+            )
+        return base
+
+    monkeypatch.setattr(cli, "load_settings", load_with_overrides)
+    state = harness["tmp_path"] / "state"
+    _promote_settings_candidate(state, "c-model", "model", "overlay-model:latest")
+    # operator pins ONLY --provider (not --model); the whole model field is pinned
+    assert cli.main(["run", "-m", "x", "--provider", "ollama"]) == 0
+    assert FakeSession.instances[0].settings.model.model != "overlay-model:latest"
+
+
+def test_run_tampered_overlay_falls_back_to_base_settings(harness, caplog):
+    """A tampered optimizer artifact must never break — or even reach — a run."""
+    state = harness["tmp_path"] / "state"
+    _promote_settings_candidate(state, "c-mem", "memory_retrieval_limit", 4)
+    path = state / "candidates" / "c-mem" / "candidate.json"
+    payload = json.loads(path.read_text())
+    payload["value"] = 100  # tamper: content_hash no longer matches
+    path.write_text(json.dumps(payload))
+    assert cli.main(["run", "-m", "x"]) == 0
+    assert FakeSession.instances[0].settings.memory_retrieval_limit == 8
+    assert "stable overlay" in caplog.text
+
+
+def test_loop_applies_stable_settings_overlay(harness, monkeypatch):
+    """The loop entry point is wired the same way."""
+    import sys
+    import types
+
+    seen = {}
+
+    async def fake_run_loop(task, settings, **kwargs):
+        seen["limit"] = settings.memory_retrieval_limit
+        return RunOutcome(code=TerminalCode.COMPLETED, summary="looped")
+
+    monkeypatch.setitem(sys.modules, "pxx.loop", types.SimpleNamespace(run_loop=fake_run_loop))
+    state = harness["tmp_path"] / "state"
+    _promote_settings_candidate(state, "c-mem", "memory_retrieval_limit", 3)
+    assert cli.main(["loop", "-m", "x"]) == 0
+    assert seen["limit"] == 3
+
+
 def test_task_from_stdin(harness, monkeypatch):
     import io
 

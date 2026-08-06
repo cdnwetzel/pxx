@@ -50,12 +50,17 @@ async def build_context(
     task_hint: str,
     budget_tokens: int = 1500,
     collect_ids: list[str] | None = None,
+    limit: int | None = None,
 ) -> str:
     """Markdown memory context for ``project``; ``''`` when there is nothing useful.
 
     When ``collect_ids`` is provided, the ids of the observations actually
     injected are appended to it (Phase 12.1: the run records exactly which
     memories it saw).
+
+    ``limit`` caps the hybrid-search hits; ``None`` falls back to
+    ``_SEARCH_HITS`` (the historical default), so callers that don't pass it
+    are byte-identical to before this parameter existed.
     """
     observations = store.list(project, limit=_LIST_LIMIT)
     if not observations:
@@ -68,7 +73,9 @@ async def build_context(
     )
     hits: list[Observation] = []
     if task_hint.strip():
-        hits = await store.search(project, task_hint, k=_SEARCH_HITS)
+        hits = await store.search(
+            project, task_hint, k=limit if limit is not None else _SEARCH_HITS
+        )
     seen = {o.id for o in pinned} | {o.id for o in layered}
     ordered = pinned + layered + [h for h in hits if h.id not in seen]
 

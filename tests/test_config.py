@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import json
+import logging
+
 import pytest
 
-from pxx.config import Settings, load_settings
+from pxx.config import Settings, apply_stable_overlay, load_settings
 from pxx.errors import ConfigError
 from pxx.safety import PermissionMode
 
@@ -44,6 +47,26 @@ def test_project_toml_applies(tmp_path):
 def test_unknown_key_rejected(tmp_path):
     (tmp_path / "pxx.toml").write_text('modle = "typo"\n')
     with pytest.raises(ConfigError, match="unknown config keys"):
+        load_settings(cwd=tmp_path)
+
+
+def test_memory_retrieval_limit_default_matches_inject(tmp_path):
+    """The shipped default equals inject.py's hardcoded _SEARCH_HITS, so an
+    unconfigured box is byte-identical to before the key existed."""
+    from pxx.memory import inject
+
+    assert load_settings(cwd=tmp_path).memory_retrieval_limit == inject._SEARCH_HITS == 8
+
+
+def test_memory_retrieval_limit_parses(tmp_path):
+    (tmp_path / "pxx.toml").write_text("memory_retrieval_limit = 3\n")
+    assert load_settings(cwd=tmp_path).memory_retrieval_limit == 3
+
+
+@pytest.mark.parametrize("bad", ["0", "-1", '"3"', "true", "1.5"])
+def test_memory_retrieval_limit_rejects_non_positive_int(tmp_path, bad):
+    (tmp_path / "pxx.toml").write_text(f"memory_retrieval_limit = {bad}\n")
+    with pytest.raises(ConfigError, match="memory_retrieval_limit must be a positive integer"):
         load_settings(cwd=tmp_path)
 
 
@@ -515,3 +538,221 @@ def test_review_env_vars_are_consumed_no_typo_warning(monkeypatch, caplog):
         config.warn_unconsumed_env()
     assert "PXX_REVIEW_MODEL" not in caplog.text
     assert "PXX_REVIEW_BASE_URL" not in caplog.text
+
+
+# --- stable-channel settings overlay (improve plane bridge) --------------------
+
+
+def _promote(state_dir, candidate_id, target, value, **kwargs):
+    """Write a settings candidate and activate it on the stable channel."""
+    from pxx.improve.candidates import make_candidate, write_candidate
+    from pxx.improve.channels import Channel, ChannelManager
+
+    candidate = make_candidate(
+        candidate_id, "settings", target, value, "measured win", ("run-1",), **kwargs
+    )
+    write_candidate(candidate, state_dir)
+    ChannelManager(state_dir).activate(Channel.STABLE, candidate_id)
+
+
+def test_stable_overlay_no_stable_is_unchanged(tmp_path):
+    settings = Settings(state_dir=tmp_path)
+    assert apply_stable_overlay(settings, tmp_path) == settings
+
+
+def test_stable_overlay_non_candidate_stable_is_unchanged(tmp_path):
+    """A stable id that is not a promoted candidate (a base version) carries
+    no overlay."""
+    from pxx.improve.channels import Channel, ChannelManager
+
+    ChannelManager(tmp_path).activate(Channel.STABLE, "base-v2.3.6")
+    settings = Settings(state_dir=tmp_path)
+    assert apply_stable_overlay(settings, tmp_path) == settings
+
+
+def test_stable_overlay_applies_memory_retrieval_limit(tmp_path):
+    _promote(tmp_path, "c-mem", "memory_retrieval_limit", 4)
+    base = Settings(state_dir=tmp_path)
+    overlaid = apply_stable_overlay(base, tmp_path)
+    assert overlaid.memory_retrieval_limit == 4
+    assert base.memory_retrieval_limit == 8  # base Settings untouched (frozen)
+
+
+def test_stable_overlay_tampered_hash_is_ignored(tmp_path, caplog):
+    """A tampered candidate must never reach production: unchanged + warning."""
+    _promote(tmp_path, "c-mem", "memory_retrieval_limit", 4)
+    path = tmp_path / "candidates" / "c-mem" / "candidate.json"
+    payload = json.loads(path.read_text())
+    payload["value"] = 100  # tamper: content_hash no longer matches
+    path.write_text(json.dumps(payload))
+    settings = Settings(state_dir=tmp_path)
+    with caplog.at_level(logging.WARNING, logger="pxx.config"):
+        assert apply_stable_overlay(settings, tmp_path) == settings
+    assert "stable overlay" in caplog.text
+    assert "c-mem" in caplog.text
+
+
+def test_stable_overlay_unsafe_stable_id_is_refused(tmp_path, caplog):
+    """Fail-closed: a traversal/separatored stable id must be refused BEFORE it
+    builds a path or `is_file()`s, so it can never load a (hash-valid) candidate
+    from outside the candidates root (CodeRabbit, security)."""
+    from pxx.improve.channels import Channel, ChannelManager
+
+    ChannelManager(tmp_path).activate(Channel.STABLE, "../../elsewhere")
+    settings = Settings(state_dir=tmp_path)
+    with caplog.at_level(logging.WARNING, logger="pxx.config"):
+        assert apply_stable_overlay(settings, tmp_path) == settings
+    assert "unsafe stable id" in caplog.text
+
+
+def test_stable_overlay_symlink_escape_is_refused(tmp_path, caplog):
+    """A symlink at candidates/<id> pointing OUTSIDE the state dir must be refused
+    before the file is read — the id regex blocks lexical traversal but not a
+    symlink; canonicalize + containment catches it (CodeRabbit, security)."""
+    from pxx.improve.channels import Channel, ChannelManager
+
+    state = tmp_path / "state"
+    (state / "candidates").mkdir(parents=True)
+    external = tmp_path / "external"  # sibling of state, outside the candidates root
+    external.mkdir()
+    (external / "candidate.json").write_text("{}")  # a would-be candidate, out of root
+    (state / "candidates" / "escape").symlink_to(external)  # safe-looking id, symlink escape
+    ChannelManager(state).activate(Channel.STABLE, "escape")
+    settings = Settings(state_dir=state)
+    with caplog.at_level(logging.WARNING, logger="pxx.config"):
+        assert apply_stable_overlay(settings, state) == settings
+    assert "symlink escape" in caplog.text or "outside the candidates root" in caplog.text
+
+
+def test_stable_overlay_candidates_root_symlink_escape_is_refused(tmp_path, caplog):
+    """If the candidates ROOT itself is a symlink outside state_dir, the per-candidate
+    containment anchor is already compromised — reject when candidates/ resolves
+    outside the canonical state dir (CodeRabbit, security)."""
+    from pxx.improve.channels import Channel, ChannelManager
+
+    state = tmp_path / "state"
+    state.mkdir()
+    external_root = tmp_path / "external-candidates"  # outside state
+    (external_root / "c1").mkdir(parents=True)
+    (external_root / "c1" / "candidate.json").write_text("{}")
+    (state / "candidates").symlink_to(external_root)  # the whole ROOT is a symlink escape
+    ChannelManager(state).activate(Channel.STABLE, "c1")
+    settings = Settings(state_dir=state)
+    with caplog.at_level(logging.WARNING, logger="pxx.config"):
+        assert apply_stable_overlay(settings, state) == settings
+    assert "outside the state directory" in caplog.text
+
+
+def test_stable_overlay_model_candidate_reresolves_review_model(tmp_path):
+    """A promoted `model` overlay must re-flow into a SPARSE reviewer overlay —
+    load_settings resolved review_model against the old model, so without a
+    re-resolve the reviewer keeps the stale model (CodeRabbit)."""
+    from dataclasses import replace
+
+    from pxx.config import ModelRef
+
+    _promote(tmp_path, "c-model", "model", "qwen3:8b")
+    base = replace(
+        Settings(state_dir=tmp_path),
+        review_overlay=(("provider", "ollama"),),  # sparse: only provider pinned
+        review_model=ModelRef(provider="ollama", model="stale-coder:latest"),
+    )
+    overlaid = apply_stable_overlay(base, tmp_path)
+    assert overlaid.model.model == "qwen3:8b"
+    assert overlaid.review_model.model == "qwen3:8b"  # re-resolved from the new model
+
+
+def test_stable_overlay_fallback_models_rejects_unknown_provider(tmp_path, caplog):
+    """A fallback_models candidate with an unsupported provider is skipped — parity
+    with the model branch, not silently pointed at localhost (CodeRabbit)."""
+    _promote(tmp_path, "c-fb", "fallback_models", [{"provider": "bogus", "model": "x"}])
+    settings = Settings(state_dir=tmp_path)
+    with caplog.at_level(logging.WARNING, logger="pxx.config"):
+        assert apply_stable_overlay(settings, tmp_path) == settings
+    assert "unknown provider" in caplog.text
+
+
+def test_stable_overlay_rejects_non_positive_budget(tmp_path, caplog):
+    """A non-positive/non-finite budget must not be applied (a NaN passes
+    `> current` as False and would then break every budget comparison; a negative
+    limit would fail every run) (CodeRabbit)."""
+    _promote(tmp_path, "c-bud", "budgets", {"max_rounds": -5}, baseline_budgets={"max_rounds": 25})
+    settings = Settings(state_dir=tmp_path)
+    with caplog.at_level(logging.WARNING, logger="pxx.config"):
+        overlaid = apply_stable_overlay(settings, tmp_path)
+    assert overlaid.budgets.max_rounds == settings.budgets.max_rounds  # unchanged
+    assert "non-finite/non-positive" in caplog.text
+
+
+def test_stable_overlay_target_without_settings_field_is_skipped(tmp_path, caplog):
+    """review_mode is a valid candidate target but has no Settings field:
+    skipped loudly, never invented."""
+    _promote(tmp_path, "c-review", "review_mode", "advisory")
+    settings = Settings(state_dir=tmp_path)
+    with caplog.at_level(logging.WARNING, logger="pxx.config"):
+        assert apply_stable_overlay(settings, tmp_path) == settings
+    assert "no Settings field" in caplog.text
+
+
+def test_stable_overlay_budgets_tighten_only(tmp_path):
+    _promote(
+        tmp_path,
+        "c-budget",
+        "budgets",
+        {"max_rounds": 5},
+        baseline_budgets={"max_rounds": 25},
+    )
+    overlaid = apply_stable_overlay(Settings(state_dir=tmp_path), tmp_path)
+    assert overlaid.budgets.max_rounds == 5
+    assert overlaid.budgets.max_tokens == 200_000  # untouched
+
+
+def test_stable_overlay_budgets_never_loosens_current(tmp_path, caplog):
+    """The candidate was tighten-only vs ITS baseline, but the operator has
+    since tightened further — applying it would loosen, so it is skipped."""
+    _promote(
+        tmp_path,
+        "c-budget",
+        "budgets",
+        {"max_rounds": 5},
+        baseline_budgets={"max_rounds": 25},
+    )
+    from dataclasses import replace
+
+    from pxx.safety import Budgets
+
+    settings = replace(Settings(state_dir=tmp_path), budgets=Budgets(max_rounds=3))
+    with caplog.at_level(logging.WARNING, logger="pxx.config"):
+        assert apply_stable_overlay(settings, tmp_path) == settings
+    assert "LOOSEN" in caplog.text
+
+
+def test_stable_overlay_pinned_key_wins(tmp_path):
+    """Operator-pinned keys (CLI overrides) always beat the overlay."""
+    _promote(tmp_path, "c-mem", "memory_retrieval_limit", 4)
+    settings = Settings(state_dir=tmp_path)
+    overlaid = apply_stable_overlay(
+        settings, tmp_path, pinned=frozenset({"memory_retrieval_limit"})
+    )
+    assert overlaid.memory_retrieval_limit == 8
+
+
+def test_stable_overlay_applies_model_candidate(tmp_path):
+    _promote(tmp_path, "c-model", "model", "qwen3:8b")
+    overlaid = apply_stable_overlay(Settings(state_dir=tmp_path), tmp_path)
+    assert overlaid.model.model == "qwen3:8b"
+    assert overlaid.model.provider == "ollama"  # unspecified fields inherit
+
+
+def test_stable_overlay_non_settings_candidate_is_unchanged(tmp_path):
+    """A promoted content candidate is not a settings overlay."""
+    from pxx.improve.candidates import make_candidate, write_candidate
+    from pxx.improve.channels import Channel, ChannelManager
+
+    candidate = make_candidate(
+        "c-prompt", "content", "pxx/prompts/native_system.md", "new wording", "r", ("run-1",)
+    )
+    write_candidate(candidate, tmp_path)
+    ChannelManager(tmp_path).activate(Channel.STABLE, "c-prompt")
+    settings = Settings(state_dir=tmp_path)
+    assert apply_stable_overlay(settings, tmp_path) == settings

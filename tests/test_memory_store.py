@@ -107,7 +107,12 @@ def test_dedupe_upgrades_to_strongest_provenance(tmp_path):
     async def go():
         # unreviewed model_claim first, then an identical reviewer-approved run
         await store.add(
-            "proj", "session_outcome", content, evidence_confidence=0.5, provenance="model_claim"
+            "proj",
+            "session_outcome",
+            content,
+            evidence_confidence=0.5,
+            provenance="model_claim",
+            validation="none",
         )
         await store.add(
             "proj",
@@ -115,6 +120,7 @@ def test_dedupe_upgrades_to_strongest_provenance(tmp_path):
             content,
             evidence_confidence=0.7,
             provenance="reviewer_agreement",
+            validation="review",
         )
 
     run(go())
@@ -123,6 +129,7 @@ def test_dedupe_upgrades_to_strongest_provenance(tmp_path):
     assert rows[0].seen_count == 2
     assert rows[0].evidence_confidence == 0.7
     assert rows[0].provenance == "reviewer_agreement"  # label upgraded, not stale
+    assert rows[0].validation == "review"  # validation label upgraded too
     store.close()
 
 
@@ -138,15 +145,22 @@ def test_dedupe_keeps_stronger_provenance_when_weaker_recurs(tmp_path):
             content,
             evidence_confidence=0.7,
             provenance="reviewer_agreement",
+            validation="review",
         )
         await store.add(
-            "proj", "session_outcome", content, evidence_confidence=0.5, provenance="model_claim"
+            "proj",
+            "session_outcome",
+            content,
+            evidence_confidence=0.5,
+            provenance="model_claim",
+            validation="none",
         )
 
     run(go())
     rows = store.list("proj")
     assert rows[0].evidence_confidence == 0.7
     assert rows[0].provenance == "reviewer_agreement"  # not downgraded
+    assert rows[0].validation == "review"  # validation not downgraded either
     store.close()
 
 

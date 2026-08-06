@@ -559,9 +559,26 @@ def load_settings(
     _load_env_file()
     warn_unconsumed_env()  # after the env file loads, so its typos warn too
     settings = Settings()
-    if _USER_CONFIG.is_file():
-        settings = _settings_from_dict(_read_toml(_USER_CONFIG), settings, str(_USER_CONFIG))
     root = cwd or Path.cwd()
+    if _USER_CONFIG.is_file():
+        # The user config is a TRUSTED source (may set exec/persistence surfaces)
+        # UNLESS it is a symlink resolving into the project root — that would be
+        # repo-editable content masquerading as trusted, so it gets the same A0b
+        # restrictions as a repo-local config (a symlinked ~/.config/pxx/config.toml
+        # must not smuggle allow_ungated_shell / memory_capture_successes / hooks
+        # past the gate). Unresolvable symlink → untrusted (fail-closed). CodeRabbit.
+        user_trusted = True
+        if _USER_CONFIG.is_symlink():
+            try:
+                user_trusted = not canonicalize(_USER_CONFIG).is_relative_to(canonicalize(root))
+            except Exception:
+                user_trusted = False
+        settings = _settings_from_dict(
+            _read_toml(_USER_CONFIG),
+            settings,
+            str(_USER_CONFIG),
+            allow_exec_surfaces=user_trusted,
+        )
     for name in _PROJECT_CONFIGS:
         path = root / name
         if path.is_file():

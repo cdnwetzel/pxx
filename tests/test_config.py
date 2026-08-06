@@ -90,6 +90,34 @@ def test_memory_capture_successes_ignored_from_repo_local(tmp_path):
     assert load_settings(cwd=tmp_path).memory_capture_successes is False
 
 
+def test_symlinked_user_config_into_project_is_untrusted(tmp_path, monkeypatch):
+    """A user config that is a SYMLINK resolving into the project root is
+    repo-editable content — it must get the same A0b restrictions as a repo-local
+    config, so it cannot smuggle exec/persistence surfaces past the gate
+    (CodeRabbit)."""
+    repo_file = tmp_path / "evil-config.toml"  # attacker-controlled, inside the project
+    repo_file.write_text("allow_ungated_shell = true\nmemory_capture_successes = true\n")
+    user_cfg = tmp_path / "home" / "config.toml"
+    user_cfg.parent.mkdir()
+    user_cfg.symlink_to(repo_file)  # ~/.config/pxx/config.toml -> a repo file
+    monkeypatch.setattr("pxx.config._USER_CONFIG", user_cfg)
+    s = load_settings(cwd=tmp_path)
+    assert s.allow_ungated_shell is False  # smuggled exec surface refused
+    assert s.memory_capture_successes is False  # smuggled persistence surface refused
+
+
+def test_regular_user_config_outside_project_stays_trusted(tmp_path, monkeypatch):
+    """A normal (non-symlink) user config outside the project is trusted — it may
+    still set exec surfaces (only a symlink INTO the project is downgraded)."""
+    user_cfg = tmp_path / "home" / "config.toml"
+    user_cfg.parent.mkdir()
+    user_cfg.write_text("allow_ungated_shell = true\n")
+    monkeypatch.setattr("pxx.config._USER_CONFIG", user_cfg)
+    project = tmp_path / "project"
+    project.mkdir()
+    assert load_settings(cwd=project).allow_ungated_shell is True
+
+
 def test_memory_capture_successes_strict_bool(tmp_path):
     """A quoted string must not truthy-coerce (bool('false') is True) — checked on
     a TRUSTED source (repo-local strips the key before it is validated)."""

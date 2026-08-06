@@ -3,6 +3,65 @@
 All notable changes to pxx are documented here. The 1.x series history is
 preserved in git (tag `v1.3.3` and earlier).
 
+## [2.4.0] — 2026-08-06
+
+The **Kimi K3 Swarm audit** — an independent architecture + quality audit
+(2.8T-parameter frontier model, high-effort) of the repo at `v2.3.7` — landed as
+three waves: validated bug/security fixes, then the loop-closing feature, then
+the learning-loop completion. Every item rode the normal gate (verified in a real
+venv → PR → CI + CodeRabbit). Notably, the Wave 1 memory-capture fix was authored
+**by pxx fixing its own bug** on local hardware (receipt **R-034**).
+
+### Added
+
+- **`memory_retrieval_limit` setting + stable settings overlay** (Wave 2 — closes
+  the improvement loop): the `improve/` plane (candidates, promotion guards,
+  shadow/canary, autopromote) never changed a production run. `memory_retrieval_limit`
+  is now a real `Settings` field (default `8` == the historical `_SEARCH_HITS`, so
+  an unconfigured box is byte-identical; strict positive-int TOML parse) consumed
+  by memory injection. `apply_stable_overlay()` applies the STABLE channel's
+  *settings*-class candidate at session start — re-validated (content-hash tamper
+  check), budgets **tighten-only** against the current budgets, CLI-pinned keys
+  always win, fail-closed but never bricking (a broken/tampered/absent artifact →
+  base settings + a warning). This unblocks live (model-scored) eval arms.
+- **Opt-in success-exemplar capture** `memory_capture_successes` (Wave 3, default
+  **off**, byte-identical when off): a COMPLETED run writes exactly one compact
+  `session_outcome` exemplar of **bounded shape metadata only** (files-changed /
+  tool-call counts — the raw task prompt is not persisted, since this durable row
+  later becomes prompt context), `contamination_risk` below auto-quarantine,
+  provenance from the completed-run ladder, deduped so identical verified shapes
+  grow `seen_count` — the recurrence signal the graduation ladder consumes.
+  Enabling it turns on persistent memory writes, so the key is honoured only from
+  a trusted source (user config / `PXX_MEMORY_CAPTURE_SUCCESSES` / CLI — never a
+  repo-local `pxx.toml`, A0b). Preserves the Phase 20.5 "no silent
+  success-to-knowledge" default. Also: `MemoryStore` dedup now upgrades an
+  observation's provenance *label* (not only its numeric confidence) when a
+  stronger-evidence recurrence arrives.
+
+### Fixed
+
+- **Memory capture read the wrong event key** (Wave 1, R-034): the `tool_result`
+  branch read `result`/`output`, but the tool bus emits `result_preview` — so
+  **every real tool-result observation was silently dropped**. Now reads
+  `result_preview` first (legacy keys kept as fallbacks); failed tool calls
+  (`error=True`) are captured at low confidence so they stay distinguishable.
+- **Unbounded `git worktree add`** (Wave 1): `improve/channels.py` and
+  `improve/scheduler.py` ran `worktree add` with no `timeout=` — the two sites the
+  2.3.6/R-030 git-bounding missed. Both now `timeout=30` and degrade to the copy
+  fallback on `TimeoutExpired` (R-030's boundary amended to name the gap).
+
+### Security
+
+- **Fail-closed secrets gate on auto-commit** (Wave 1): `commit_session_work` now
+  scans the staged delta (`governance.scan_staged`, already fail-closed) before an
+  auto-commit; any finding or an unrunnable scan → no commit, work left staged.
+- **The PR-time governance scan is now armed** (Wave 1): same-repo PRs/pushes run
+  `pxx check --all-files --require-denylist` (fork PRs stay unarmed with a loud
+  warning), closing the 1.3.x silent-green hole where an empty denylist passed
+  silently. Arming immediately surfaced — and this release fixes — fleet host
+  names leaked into the public receipts corpus; `docs/RECEIPTS.md` now describes
+  hardware by capability, not by hostname/IP.
+
 ## [2.3.7] — 2026-08-05
 
 Done-signal early-exit — the second half of "clean loop termination". 2.3.6's

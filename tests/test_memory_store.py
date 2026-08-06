@@ -97,6 +97,73 @@ def test_add_and_dedupe(tmp_path):
     store.close()
 
 
+def test_dedupe_upgrades_to_strongest_provenance(tmp_path):
+    """A recurrence carrying STRONGER evidence adopts the stronger provenance
+    LABEL, not just the numeric confidence — else a row would read `model_claim`
+    with reviewer-level evidence (CodeRabbit)."""
+    store = make_store(tmp_path)
+    content = "completed run: 1 file(s) changed, 2 tool call(s)"
+
+    async def go():
+        # unreviewed model_claim first, then an identical reviewer-approved run
+        await store.add(
+            "proj",
+            "session_outcome",
+            content,
+            evidence_confidence=0.5,
+            provenance="model_claim",
+            validation="none",
+        )
+        await store.add(
+            "proj",
+            "session_outcome",
+            content,
+            evidence_confidence=0.7,
+            provenance="reviewer_agreement",
+            validation="review",
+        )
+
+    run(go())
+    rows = store.list("proj")
+    assert len(rows) == 1
+    assert rows[0].seen_count == 2
+    assert rows[0].evidence_confidence == 0.7
+    assert rows[0].provenance == "reviewer_agreement"  # label upgraded, not stale
+    assert rows[0].validation == "review"  # validation label upgraded too
+    store.close()
+
+
+def test_dedupe_keeps_stronger_provenance_when_weaker_recurs(tmp_path):
+    """The reverse: a weaker later recurrence must NOT downgrade the label."""
+    store = make_store(tmp_path)
+    content = "completed run: 2 file(s) changed, 4 tool call(s)"
+
+    async def go():
+        await store.add(
+            "proj",
+            "session_outcome",
+            content,
+            evidence_confidence=0.7,
+            provenance="reviewer_agreement",
+            validation="review",
+        )
+        await store.add(
+            "proj",
+            "session_outcome",
+            content,
+            evidence_confidence=0.5,
+            provenance="model_claim",
+            validation="none",
+        )
+
+    run(go())
+    rows = store.list("proj")
+    assert rows[0].evidence_confidence == 0.7
+    assert rows[0].provenance == "reviewer_agreement"  # not downgraded
+    assert rows[0].validation == "review"  # validation not downgraded either
+    store.close()
+
+
 def test_dedupe_is_per_project(tmp_path):
     store = make_store(tmp_path)
 

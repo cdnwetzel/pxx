@@ -127,6 +127,15 @@ class Settings:
     #: auto-derive (``pxx.improve.cycle``); a promoted stable-channel candidate
     #: overlays it at run start (``apply_stable_overlay``).
     memory_retrieval_limit: int = 8
+    #: Opt-in success-exemplar capture (a narrow Phase 20.5 amendment). The
+    #: shipped default is OFF, preserving Phase 20.5 verbatim: COMPLETED
+    #: sessions write NOTHING automatically (no silent success-to-knowledge
+    #: conversion). When true, a COMPLETED session writes EXACTLY ONE compact
+    #: episodic ``session_outcome`` observation (see
+    #: ``pxx.memory.capture.record_observations``), so the store's
+    #: skill/playbook graduation ladder can also learn from gate-verified
+    #: successes. Failed-session capture is unaffected either way.
+    memory_capture_successes: bool = False
 
     @property
     def effective_budgets(self) -> Budgets:
@@ -183,6 +192,7 @@ _KNOWN_KEYS = {
     "loop_review",
     "done_signal",
     "memory_retrieval_limit",
+    "memory_capture_successes",
     "budgets",
     "hooks",
     "mcp_servers",
@@ -269,13 +279,16 @@ def _settings_from_dict(
     allow_exec_surfaces: bool = True,
 ) -> Settings:
     """Merge one config source. ``allow_exec_surfaces=False`` (repo-local
-    project configs) means hook commands, MCP server definitions, and
-    ``allow_ungated_shell`` are IGNORED with a loud warning: a file inside the
-    edit surface must not be able to define — or DISABLE — the gate that guards
-    the edit surface (A0b). A checked-in ``allow_ungated_shell = true`` would let
-    an untrusted repo turn off the run_shell safeguard for anyone who runs pxx in
-    it, so it is honoured only from user config, env, or CLI."""
-    for key in ("hooks", "mcp_servers", "allow_ungated_shell"):
+    project configs) means hook commands, MCP server definitions,
+    ``allow_ungated_shell``, and ``memory_capture_successes`` are IGNORED with a
+    loud warning: a file inside the edit surface must not be able to define — or
+    DISABLE — the gate that guards the edit surface (A0b). A checked-in
+    ``allow_ungated_shell = true`` would let an untrusted repo turn off the
+    run_shell safeguard; a checked-in ``memory_capture_successes = true`` would
+    let it enable persistent memory writes (a model that edits the repo could
+    seed later sessions' context) — so both are honoured only from user config,
+    env, or CLI."""
+    for key in ("hooks", "mcp_servers", "allow_ungated_shell", "memory_capture_successes"):
         if key in data and not allow_exec_surfaces:
             log.warning(
                 "ignoring %s in repo-local config %s (exec surfaces are honored "
@@ -400,6 +413,13 @@ def _settings_from_dict(
         if isinstance(value, bool) or not isinstance(value, int) or value < 1:
             raise ConfigError(f"{source}: memory_retrieval_limit must be a positive integer")
         kwargs["memory_retrieval_limit"] = value
+    if "memory_capture_successes" in data:
+        # Strict boolean (same fail-open reasoning as loop_review): a quoted
+        # "false" must not silently truthy-coerce to True.
+        value = data["memory_capture_successes"]
+        if not isinstance(value, bool):
+            raise ConfigError(f"{source}: memory_capture_successes must be a boolean")
+        kwargs["memory_capture_successes"] = value
     if "budgets" in data:
         b = data["budgets"]
         unknown = set(b) - _KNOWN_BUDGET_KEYS
@@ -453,6 +473,7 @@ _ENV_MAP = {
     "PXX_AUTO_COMMIT": "auto_commit",
     "PXX_LOOP_REVIEW": "loop_review",
     "PXX_DONE_SIGNAL": "done_signal",
+    "PXX_MEMORY_CAPTURE_SUCCESSES": "memory_capture_successes",
     "PXX_BACKEND": "backend",
     # 1.x compat
     "PXX_OLLAMA_BASE": "base_url",
@@ -498,6 +519,20 @@ def _settings_from_env(base: Settings) -> Settings:
                 # Default-on: an explicit env value toggles it (e.g.
                 # PXX_DONE_SIGNAL=0 turns the early-exit off for this box).
                 data[cfg_key] = value.lower() in ("1", "true", "yes", "on")
+            elif cfg_key == "memory_capture_successes":
+                # Strict (enables a durable-memory persistence surface; a typo
+                # must be loud, not silently coerced). Env is a trusted source,
+                # so unlike repo-local TOML this IS honoured.
+                low = value.strip().lower()
+                if low in ("1", "true", "yes", "on"):
+                    data[cfg_key] = True
+                elif low in ("0", "false", "no", "off"):
+                    data[cfg_key] = False
+                else:
+                    raise ConfigError(
+                        f"{env_key} must be a boolean "
+                        "(1/true/yes/on or 0/false/no/off), got " + repr(value)
+                    )
             else:
                 data[cfg_key] = value
     if os.environ.get("PXX_MEMORY_ENABLED", "").lower() in ("0", "false", "no"):
@@ -524,9 +559,26 @@ def load_settings(
     _load_env_file()
     warn_unconsumed_env()  # after the env file loads, so its typos warn too
     settings = Settings()
-    if _USER_CONFIG.is_file():
-        settings = _settings_from_dict(_read_toml(_USER_CONFIG), settings, str(_USER_CONFIG))
     root = cwd or Path.cwd()
+    if _USER_CONFIG.is_file():
+        # The user config is a TRUSTED source (may set exec/persistence surfaces)
+        # UNLESS it is a symlink resolving into the project root — that would be
+        # repo-editable content masquerading as trusted, so it gets the same A0b
+        # restrictions as a repo-local config (a symlinked ~/.config/pxx/config.toml
+        # must not smuggle allow_ungated_shell / memory_capture_successes / hooks
+        # past the gate). Unresolvable symlink → untrusted (fail-closed). CodeRabbit.
+        user_trusted = True
+        if _USER_CONFIG.is_symlink():
+            try:
+                user_trusted = not canonicalize(_USER_CONFIG).is_relative_to(canonicalize(root))
+            except Exception:
+                user_trusted = False
+        settings = _settings_from_dict(
+            _read_toml(_USER_CONFIG),
+            settings,
+            str(_USER_CONFIG),
+            allow_exec_surfaces=user_trusted,
+        )
     for name in _PROJECT_CONFIGS:
         path = root / name
         if path.is_file():

@@ -12,6 +12,14 @@ enter the durable layers. FAILED runs record *episodic* observations with
 ``failed_run_inference`` provenance (EVIDENCE_RANK 0.2) and
 ``contamination_risk=0.5``, so failure lessons are visible but visibly
 low-trust. Frequency != correctness.
+
+Opt-in amendment (``memory_capture_successes``): when the operator flips
+that setting on, a COMPLETED run writes EXACTLY ONE compact
+``session_outcome`` exemplar (see :func:`record_observations`) — one line,
+gate-verified provenance, lower contamination than a failure inference —
+so the graduation ladder can also learn from verified successes. The
+default stays off; Phase 20.5 semantics are preserved unless the operator
+opts in.
 """
 
 from __future__ import annotations
@@ -37,6 +45,18 @@ MAX_CONTENT_CHARS = 2000
 
 #: Contamination applied to failed-run inferences (Phase 20).
 FAILED_CONTAMINATION_RISK = 0.5
+
+#: Contamination applied to opt-in success exemplars: below a failure
+#: inference (0.5) because the session's own gates verified the outcome,
+#: but nonzero — a success may still be right for the wrong reason. Well
+#: below ``MemoryStore.auto_quarantine``'s 0.7 default threshold, so an
+#: exemplar is never quarantined by construction.
+SUCCESS_CONTAMINATION_RISK = 0.3
+
+#: Confidence for opt-in success exemplars: above the failed-run inference
+#: evidence rank (0.2 — the gates verified this outcome, nothing about a
+#: failure is inferred), below explicit `remember` observations (0.8).
+SUCCESS_CONFIDENCE = 0.6
 
 #: Event kinds that never become observations (chatter, not learnings).
 _SKIP_KINDS = frozenset(
@@ -227,6 +247,39 @@ def _failure_provenance(events: list[Event], terminal: str) -> tuple[str, str]:
     return "model_claim", "none"
 
 
+def _success_exemplar(events: list[Event]) -> NewObservation:
+    """The ONE compact observation an opt-in COMPLETED session writes.
+
+    Bounded, non-sensitive SHAPE metadata only — files-changed count
+    (``file_changed`` events) and tool-call count. The raw task preview is
+    deliberately NOT stored: it is free-form user-prompt text (truncation does
+    not remove secrets), and this row is DURABLE memory that later becomes
+    prompt context, so persisting it would be a data-exposure vector
+    (CodeRabbit). The session id is likewise not part of the content: the store
+    dedupes on ``sha256(project + content)`` and a repeat increments
+    ``seen_count`` (store.py recurrence), so identical verified-success shapes
+    across sessions collapse into one row whose recurrence grows — the signal
+    the episodic→skill graduation ladder consumes. The session id is still
+    recorded in its own column.
+    """
+    files = 0
+    calls = 0
+    for event in events:
+        kind = getattr(event, "kind", "")
+        if kind == "file_changed":
+            files += 1
+        elif kind == "tool_call":
+            calls += 1
+    content = _cap(f"completed run: {files} file(s) changed, {calls} tool call(s)")
+    return NewObservation(
+        kind="session_outcome",
+        content=content,
+        tags=("outcome",),
+        source="completed_run",
+        confidence=SUCCESS_CONFIDENCE,
+    )
+
+
 async def record_observations(
     store: MemoryStore,
     project: str,
@@ -235,22 +288,53 @@ async def record_observations(
     *,
     pre_sha: str = "",
     root: str | Path | None = None,
+    capture_successes: bool = False,
 ) -> int:
     """Best-effort writer used by ``pxx.session``. Returns rows written; never raises.
 
     Phase 20.5: COMPLETED sessions write NOTHING automatically (no silent
     success-to-knowledge conversion); only FAILED sessions capture episodic
     observations, marked low-trust (failed_run_inference + contamination).
+
+    Opt-in: with ``capture_successes`` a COMPLETED session writes EXACTLY
+    ONE gate-verified ``session_outcome`` exemplar (see
+    :func:`_success_exemplar`); provenance comes from the same ladder a
+    completed run maps to (``reviewer_agreement`` when the review gate
+    approved, else ``model_claim``). The default preserves Phase 20.5.
     """
     written = 0
     try:
         terminal = _terminal_code(events)
         if terminal == str(TerminalCode.COMPLETED):
-            log.debug(
-                "memory capture: skipping auto-write for completed session "
-                "(successes are not auto-converted to knowledge)"
-            )
-            return 0
+            if not capture_successes:
+                log.debug(
+                    "memory capture: skipping auto-write for completed session "
+                    "(successes are not auto-converted to knowledge)"
+                )
+                return 0
+            obs = _success_exemplar(events)
+            provenance, validation = _failure_provenance(events, terminal)
+            try:
+                await store.add(
+                    project,
+                    obs.kind,
+                    obs.content,
+                    tags=obs.tags,
+                    source=obs.source,
+                    session_id=session_id,
+                    confidence=obs.confidence,
+                    evidence_confidence=EVIDENCE_RANK[provenance],
+                    contamination_risk=SUCCESS_CONTAMINATION_RISK,
+                    outcome=terminal,
+                    layer=str(KnowledgeLayer.EPISODIC),
+                    provenance=provenance,
+                    validation=validation,
+                    agent_version_id=_agent_version_id(events),
+                )
+                written += 1
+            except Exception:
+                log.exception("observation write failed (best-effort, continuing)")
+            return written
         failed = bool(terminal)
         if not failed:
             return 0

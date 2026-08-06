@@ -102,7 +102,7 @@ def observations_from_events(events: list[Event]) -> list[NewObservation]:
         data = _data(event)
         if kind == "tool_result":
             tool = str(data.get("tool") or data.get("name") or "tool")
-            result = data.get("result", data.get("output", ""))
+            result = data.get("result_preview", data.get("result", data.get("output", "")))
             result_text = str(result).strip()
             if not result_text:
                 continue
@@ -111,7 +111,7 @@ def observations_from_events(events: list[Event]) -> list[NewObservation]:
                     kind="tool_result",
                     content=_cap(f"{tool}: {result_text}"),
                     source="tool_result",
-                    confidence=0.6,
+                    confidence=(0.3 if data.get("error") else 0.6),
                 )
             )
         elif kind == "file_changed":

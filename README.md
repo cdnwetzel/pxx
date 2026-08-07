@@ -40,6 +40,52 @@ can delegate to [aider](https://github.com/Aider-AI/aider) as an optional edit e
 - **Interop**: consumes MCP servers as tools, and exposes its own memory as an MCP
   server for other agents (Claude Code, goose, opencode, …).
 
+## Where pxx fits
+
+This is a fit guide, not a sales pitch — pxx isn't competing on raw capability. It
+exists because one distinction is **architectural, not marketing:** a hosted SaaS
+coding agent *cannot* be self-hosted. Your source and your inference run on the
+vendor's infrastructure by construction. Where that's permitted you have many good
+options. Where it isn't — regulated, air-gapped, IP-sensitive, sovereignty-required —
+that entire category is off the table before capabilities are even discussed, because
+those environments demand a higher standard than "the vendor is trustworthy": the code
+and the inference must stay inside controls the operator owns, and every action must be
+auditable.
+
+pxx is built to that sovereign standard:
+
+- **Self-hosted, always.** Code and inference stay on hardware *you* own — local,
+  on-prem, or fully air-gapped; your models, your network, your key management, your
+  audit boundary. No vendor in the loop, no telemetry, no data egress.
+- **Host-enforced, not model-trusted.** Scope, permissions, budgets, and hooks are
+  enforced by the host — a jailbroken or confused model still can't leave its lane —
+  and every action and approval lands in a hash-chained, tamper-evident audit log.
+- **Open and inspectable — no unknowns.** MIT, under the same community model that
+  made Linux and the tools you already rely on — not "source-available," not open-core
+  with the real logic hidden behind a service. You can read the code and the docs and
+  follow every gate, tool, and decision end to end; there are no hidden functions and
+  no telemetry.
+- **Evidence-gated — a step beyond typical open source.** Open source hands you the
+  source; pxx also keeps the *receipts*. Every capability claim maps to a dated,
+  reproducible record in
+  [docs/RECEIPTS.md](https://github.com/cdnwetzel/pxx/blob/v2/docs/RECEIPTS.md) with an
+  explicit statement of what is *not* claimed — evidence, not just availability.
+
+The through-line is **verify, don't trust:** no vendor to trust (there isn't one), no
+binary to trust (read it), no claims to trust (check the receipts).
+
+**Use pxx when** self-hosting, sovereignty, and provable audit are *requirements* — when
+the work simply cannot leave your perimeter and "trust the vendor" isn't a sufficient
+control.
+
+pxx is deliberately **not** trying to be the tool for every environment. If your
+environment permits SaaS and you want maximum capability on hard or greenfield work, a
+hosted frontier agent will do more; if you want turn-by-turn pair editing, a local
+assistant such as [aider](https://github.com/Aider-AI/aider) (which pxx can delegate to)
+may fit better. pxx has no browser yet and leans on smaller local models — it trades
+breadth for sovereignty and auditability, on purpose. It's early (2.x) and
+solo-maintained; the receipts, not the prose, are the source of truth.
+
 ## Install
 
 ```sh

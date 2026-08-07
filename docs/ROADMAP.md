@@ -393,6 +393,39 @@ CHANGELOG.md; highlights:
   Shared "refuse-unverified-output" ethos makes the fit natural; the
   integration stays optional and degrades to any OpenAI-compatible endpoint.
 - Cross-repo knowledge federation.
+- **Remote human-in-the-loop (HITL) approval — a fail-closed PreToolUse hook.**
+  Turn an unattended `pxx run`/`loop` in a write-capable mode into one you
+  supervise from your phone: at a gated action (destructive command, commit,
+  significant spend) the run pauses, pushes an actionable notification with
+  Approve / Abort buttons, and blocks on the response. This reuses the *existing*
+  gate seam — a PreToolUse hook that already receives `{"tool","args"}`, already
+  blocks the call until it exits, and is honored only from trusted config (never
+  repo-local, A0b) — so it is a hook + a tiny listener, not a new subsystem.
+  **Non-negotiable hardening (the naive `0.0.0.0:8080` + global signal-file
+  script is fail-OPEN and must not gate a control plane):**
+  - **Per-request HMAC nonce, single-use.** Approve/Abort URLs carry
+    `?req=<nonce>&sig=HMAC(nonce, secret)`; the listener verifies the signature,
+    matches the nonce to *that specific* pending request, and burns it after one
+    tap. Unknown / replayed / mismatched nonce → ignored (no forgery, no replay,
+    no wrong-request approval).
+  - **Deadline → fail-closed DENY.** The wait has a timeout; no answer = HALT,
+    never proceed. A stale signal must never auto-approve a later prompt.
+  - **Bind `127.0.0.1`, reach it over a private overlay** (Tailscale/WireGuard /
+    SSH tunnel), never a LAN-exposed or reverse-proxied unauth port.
+  - **Don't leak the diff/command.** The notification carries a request id + a
+    one-line summary only; details are pulled from the box, not shipped to a
+    third-party push server.
+  - **Receipt the decision.** Emit the approve/deny as a `gate_decision` audit
+    event (tool, args-hash, who, when) into the hash-chained log — a lock-screen
+    tap becomes an auditable record, which is the whole point.
+- **Self-hosted `ntfy` as the notification transport.** Pair the HITL hook with a
+  self-hosted `ntfy` server (Docker, one binary) on the fleet instead of the
+  public `ntfy.sh` — so prompt summaries and action URLs never transit a
+  third-party server (a topic name is security-by-obscurity), the notify channel
+  is auth'd (access tokens / ACLs), and it composes with the existing report/
+  notify seam (`PXX_REPORT_CHANNEL`/`PXX_REPORT_TARGET`). Degrades gracefully to
+  public `ntfy.sh` for anyone who hasn't self-hosted (with the "don't leak
+  content" rule doing the heavy lifting there).
 - **Kimi K3 Swarm audit — deeper findings (need a maintainer design decision,
   recorded 2026-08-06).** Real at `e770b19`, ranked by severity; each is a design
   choice, so they sit here as roadmap entries, not diffs. Security depth is the

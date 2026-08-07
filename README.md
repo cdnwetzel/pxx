@@ -59,7 +59,8 @@ pxx is built to that sovereign standard:
   audit boundary. No vendor in the loop, no telemetry, no data egress.
 - **Host-enforced, not model-trusted.** Scope, permissions, budgets, and hooks are
   enforced by the host — a jailbroken or confused model still can't leave its lane —
-  and every action and approval lands in a hash-chained, tamper-evident audit log.
+  and the run's policy decisions and terminal outcome are recorded in a hash-chained,
+  tamper-evident audit log you can verify (`pxx audit verify`).
 - **Open, inspectable, and yours to change.** MIT, under the same community model that
   made Linux and the tools you already rely on — not "source-available," not open-core
   with the real logic hidden behind a service. You don't just get to *read* every gate,

@@ -60,11 +60,16 @@ pxx is built to that sovereign standard:
 - **Host-enforced, not model-trusted.** Scope, permissions, budgets, and hooks are
   enforced by the host — a jailbroken or confused model still can't leave its lane —
   and every action and approval lands in a hash-chained, tamper-evident audit log.
-- **Open and inspectable — no unknowns.** MIT, under the same community model that
+- **Open, inspectable, and yours to change.** MIT, under the same community model that
   made Linux and the tools you already rely on — not "source-available," not open-core
-  with the real logic hidden behind a service. You can read the code and the docs and
-  follow every gate, tool, and decision end to end; there are no hidden functions and
-  no telemetry.
+  with the real logic hidden behind a service. You don't just get to *read* every gate,
+  tool, and decision (no hidden functions, no telemetry) — you have the full open-source
+  freedoms to **run, study, modify, and redistribute** it. For a regulated shop that's
+  the deepest control there is: fork it, harden the enforcement to *your* compliance
+  regime, add your own gates, and own that fork — no vendor lock-in, and no dependence on
+  a vendor's roadmap or continued existence. (MIT goes even further than Linux's
+  copyleft: adapt it freely, even inside proprietary internal tooling, with no strings.)
+  SaaS grants you none of these rights; pxx grants all of them.
 - **Evidence-gated — a step beyond typical open source.** Open source hands you the
   source; pxx also keeps the *receipts*. Every capability claim maps to a dated,
   reproducible record in

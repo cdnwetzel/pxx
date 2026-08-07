@@ -440,6 +440,44 @@ CHANGELOG.md; highlights:
   preferred. Public `ntfy.sh` degrades gracefully only for **notify-only** alerts
   (no action buttons); the HMAC-over-decision binding above narrows but does not
   remove the front-running window on a public transport, so approvals never ride it.
+- **Governed `web_fetch` — a fail-closed research tool (the "browser" gap).** The
+  biggest capability gap vs. hosted agents is the inability to read live docs. Close
+  it with a *bounded HTTP fetch*, NOT an unrestricted scripted browser — a full
+  JS/forms headless browser is a far larger attack surface and is deferred. The
+  hazards are two-directional and both are first-class:
+  - **Egress is allowlist-only, trusted-config-only.** Fetch only hosts on an
+    operator allowlist (honored from user config / env / CLI, never repo-local —
+    A0b; a checked-in `pxx.toml` must not add a fetch host). Default DENY; no
+    arbitrary URLs; bounded response size + timeout (the git-bounding discipline).
+  - **Ingress is UNTRUSTED data, never instructions.** Fetched content is fenced
+    and can never carry tool directives or alter the plan (the same prompt-injection
+    defense as the judge-input finding); a page saying "run `rm -rf`" is inert text.
+  - **New model-visible tool ⇒ deliberate, opt-in, versioned.** Adding `web_fetch`
+    changes `broker._TOOL_CLASSES` (byte-pinned by the psaios integration — the
+    done-signal was built to avoid exactly this), so it ships OFF by default and the
+    tool-surface bump is an explicit, versioned change, not a silent pin break.
+  - **Receipt + no-leak.** Every fetch emits a `gate_decision` (host, url-hash,
+    bytes) into the hash-chained log; the content-denylist scan gates anything a
+    fetch would persist into memory/receipts, so a fetch can't smuggle a secret or
+    a host name out (the leak the armed scan caught this session) or in.
+  - Honest tension: this adds network egress to a privacy-first local tool, so it is
+    strictly opt-in, allowlisted, audited, and degrades to "off."
+- **Local codebase documentation — a `Devin Wiki` analog, on pxx's terms.** Generate
+  and maintain codebase docs *locally* (in-repo markdown / a static artifact, no
+  cloud, no external host), so the "codebase understanding" capability doesn't
+  require a SaaS. Built to pxx's evidence discipline, not a hallucinated wiki:
+  - **Deterministic skeleton first.** Module map, public API, entry points, and
+    dependency edges come from the repo + AST (deterministic, no model), so the
+    structural spine can't hallucinate.
+  - **Model prose is grounded + provenance-marked.** Any generated description is
+    anchored to `file:line` and carries provenance (verified vs. `model_claim`) —
+    no unverified claim presented as fact (the receipts ethos).
+  - **Fed by graduated memory.** Pull from the knowledge layers that have actually
+    graduated (skills/playbooks/observations), so the docs reflect what pxx has
+    learned about *this* codebase, not generic boilerplate.
+  - **Reproducible + governed.** `pxx docs` emits a dated, content-hashed artifact
+    (drift is visible) and runs through `pxx check` before write, so no secret /
+    host name / PII lands in the published docs.
 - **Kimi K3 Swarm audit — deeper findings (need a maintainer design decision,
   recorded 2026-08-06).** Real at `e770b19`, ranked by severity; each is a design
   choice, so they sit here as roadmap entries, not diffs. Security depth is the

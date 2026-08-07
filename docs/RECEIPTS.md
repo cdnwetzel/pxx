@@ -1675,5 +1675,55 @@ green full suite. The specification-vs-execution split is the honest line.
 
 ---
 
+## R-035 — n8n orchestrates a governed, audited pxx coding run over the local HTTP API
+
+**Claim.** A self-hosted **n8n** workflow triggered a complete pxx coding session
+entirely over pxx's **local HTTP API** — Bearer-token-authenticated, scope-confined,
+and recorded in the hash-chained audit — with no cloud and no code egress. It shows
+pxx composing as the *governed coding engine* behind a general orchestrator on the
+operator's own box: the sovereign-automation stack (trigger → govern → code → audit)
+is real, not a diagram.
+
+**Grade.** Attested (2026-08-07, one real local end-to-end run) + Reproducible (the
+importable workflow, the server invocation, and the procedure are kept —
+`docs/examples/n8n-pxx-workflow.json`).
+
+**Exact configuration (nothing inherits).** **n8n 2.33.6**, self-hosted (via
+`npx n8n`, loopback), executed through its own engine (`n8n execute`). **pxx 2.4.0**
+`pxx serve` (FastAPI/uvicorn, the `[server]` extra) bound `127.0.0.1:8477` with a
+`PXX_SERVER_TOKEN` Bearer secret and `PXX_SCOPE=mathlib.py`; coder = `Qwen3-Coder` via
+a local vLLM endpoint (`127.0.0.1:8001`); `permission=auto`. Target = a throwaway git
+repo (`mathlib.py` with `add()` + a failing `multiply` test). Workflow: **Manual
+Trigger → Set (task) → HTTP POST `/v1/sessions` (`Authorization: Bearer …`) → HTTP GET
+`/v1/sessions/{id}/events`**.
+
+**Procedure (reproduction path).** Start `pxx serve` in the target repo with the
+token + scope + a reachable local model; `n8n import:workflow`; `n8n execute --id …`
+so n8n's HTTP node drives pxx; verify the on-disk edit, the scope, and `pxx audit verify`.
+
+**Observed (2026-08-07).**
+- **Auth gate:** `POST /v1/sessions` with **no** token → **HTTP 401** (the API is not
+  open; a non-loopback bind additionally fail-closes without a token).
+- **n8n → pxx:** `n8n execute` finished **status `success`** (~21 s); n8n's HTTP node
+  received pxx session id **`babc434ebbcb`** and streamed its events.
+- **pxx did the work, governed:** the session added `def multiply(a, b): return a * b`
+  (correct — `multiply(6,7)=42`), **only `mathlib.py`** changed (scope held), terminal
+  `COMPLETED`.
+- **Audited:** the session is recorded in the day's hash-chained audit log and
+  **`pxx audit verify` → `OK`**.
+
+**Boundary — explicitly not claimed.** (a) The server path runs a **single
+`session.run`**, not `pxx loop` — correctness here is a precise, scoped task producing
+the right edit, NOT a test-gated/done-signal loop (wire a `test_command` / drive
+`pxx loop` for that; R-031/R-033). (b) The security boundary is the **loopback + token**
+binding — do not expose `pxx serve` to a network without a token (the server
+fail-closes a non-loopback bind that has none). (c) n8n was driven via its **CLI
+engine** (`n8n execute`, equivalent to a manual trigger); the *webhook*-triggered
+variant is the shipped importable JSON but additionally needs the workflow **activated**
+in a running n8n. (d) Small local model + a trivial task — this proves the *integration
+and governance*, not model capability on hard work (R-033 is the capability-bar receipt).
+
+---
+
 *Convention: entries are append-only and dated; superseded claims are
 struck through with a pointer to the superseding entry, never deleted.*

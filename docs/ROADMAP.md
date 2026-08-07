@@ -403,11 +403,14 @@ CHANGELOG.md; highlights:
   repo-local, A0b) — so it is a hook + a tiny listener, not a new subsystem.
   **Non-negotiable hardening (the naive `0.0.0.0:8080` + global signal-file
   script is fail-OPEN and must not gate a control plane):**
-  - **Per-request HMAC nonce, single-use.** Approve/Abort URLs carry
-    `?req=<nonce>&sig=HMAC(nonce, secret)`; the listener verifies the signature,
-    matches the nonce to *that specific* pending request, and burns it after one
-    tap. Unknown / replayed / mismatched nonce → ignored (no forgery, no replay,
-    no wrong-request approval).
+  - **Per-request HMAC over the decision, single-use nonce consumed atomically.**
+    Sign a *canonical message binding `{request_id, nonce, decision}`* — not the
+    nonce alone — so an `approve` signature can never be replayed as `abort` (or
+    vice-versa) and a capability can't be swapped by editing a path/param. The
+    listener verifies the signature, matches the server-minted nonce to *that
+    specific* pending request, and consumes it **atomically** (a compare-and-set,
+    so a double-tap / concurrent submit can't both win). Unknown / replayed /
+    mismatched → ignored (no forgery, no replay, no wrong-request approval).
   - **Deadline → fail-closed DENY.** The wait has a timeout; no answer = HALT,
     never proceed. A stale signal must never auto-approve a later prompt.
   - **Bind `127.0.0.1`, reach it over a private overlay** (Tailscale/WireGuard /
@@ -415,17 +418,24 @@ CHANGELOG.md; highlights:
   - **Don't leak the diff/command.** The notification carries a request id + a
     one-line summary only; details are pulled from the box, not shipped to a
     third-party push server.
-  - **Receipt the decision.** Emit the approve/deny as a `gate_decision` audit
-    event (tool, args-hash, who, when) into the hash-chained log — a lock-screen
-    tap becomes an auditable record, which is the whole point.
+  - **Receipt the decision — and gate the release ON the receipt.** A metadata-
+    only `gate_decision` append (tool, args-hash, who, when) must **succeed before
+    the approval is released** — the audit write is part of the fail-closed
+    decision path, not the best-effort/telemetry `AuditLog.record` contract, so a
+    log that cannot record produces no unreceipted approval. A lock-screen tap
+    becomes a hash-chained record, which is the whole point.
 - **Self-hosted `ntfy` as the notification transport.** Pair the HITL hook with a
   self-hosted `ntfy` server (Docker, one binary) on the fleet instead of the
   public `ntfy.sh` — so prompt summaries and action URLs never transit a
   third-party server (a topic name is security-by-obscurity), the notify channel
   is auth'd (access tokens / ACLs), and it composes with the existing report/
-  notify seam (`PXX_REPORT_CHANNEL`/`PXX_REPORT_TARGET`). Degrades gracefully to
-  public `ntfy.sh` for anyone who hasn't self-hosted (with the "don't leak
-  content" rule doing the heavy lifting there).
+  notify seam (`PXX_REPORT_CHANNEL`/`PXX_REPORT_TARGET`). **An action-bearing
+  approval is a bearer capability** — anyone who reads the topic (or a leaked/
+  forwarded notification) could tap Approve before the intended approver — so the
+  private/self-hosted, auth'd transport is **required for approvals**, not just
+  preferred. Public `ntfy.sh` degrades gracefully only for **notify-only** alerts
+  (no action buttons); the HMAC-over-decision binding above narrows but does not
+  remove the front-running window on a public transport, so approvals never ride it.
 - **Kimi K3 Swarm audit — deeper findings (need a maintainer design decision,
   recorded 2026-08-06).** Real at `e770b19`, ranked by severity; each is a design
   choice, so they sit here as roadmap entries, not diffs. Security depth is the

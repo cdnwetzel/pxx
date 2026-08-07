@@ -418,12 +418,16 @@ CHANGELOG.md; highlights:
   - **Don't leak the diff/command.** The notification carries a request id + a
     one-line summary only; details are pulled from the box, not shipped to a
     third-party push server.
-  - **Receipt the decision — and gate the release ON the receipt.** A metadata-
-    only `gate_decision` append (tool, args-hash, who, when) must **succeed before
-    the approval is released** — the audit write is part of the fail-closed
-    decision path, not the best-effort/telemetry `AuditLog.record` contract, so a
-    log that cannot record produces no unreceipted approval. A lock-screen tap
-    becomes a hash-chained record, which is the whole point.
+  - **Receipt the decision — and gate the release ON the receipt, via a STRICT
+    path.** A metadata-only `gate_decision` record (tool, args-hash, who, when)
+    must **durably persist before the approval is released**. It cannot ride the
+    normal path: both `AuditLog.record` and `EventBus.emit` swallow write /
+    subscriber failures, so a routine emission could release approval with no
+    JSONL line and no advanced `.head` anchor. The approval path performs a
+    *verified* append that advances the hash-chain head and checks it, and treats
+    any failure as DENY — the audit write is the fail-closed decision, not
+    best-effort telemetry, so a log that cannot record yields no approval. A
+    lock-screen tap becomes a hash-chained record, which is the whole point.
 - **Self-hosted `ntfy` as the notification transport.** Pair the HITL hook with a
   self-hosted `ntfy` server (Docker, one binary) on the fleet instead of the
   public `ntfy.sh` — so prompt summaries and action URLs never transit a

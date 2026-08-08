@@ -1911,5 +1911,50 @@ lower layer.
 
 ---
 
+## R-040 — parallel fan-out: n8n dispatches N governed pxx engines, joins, aggregates, and routes on the aggregate
+
+**Claim.** One n8n workflow fans out across **N independent governed pxx engines** (one
+`pxx serve` per repo, each with its own scope), runs them concurrently, **joins** all
+terminals, **aggregates** the host-enforced terminal codes, and **routes on the
+aggregate** — `all-clear` only if every session passed, else `HOLD` naming the
+failure(s). A gate over a fleet, not a single call.
+
+**Grade.** Attested (2026-08-08, executed end-to-end via `n8n execute`, three real
+sessions across three engines; per-engine side-effects verified) + Reproducible
+(`docs/examples/n8n-pxx-fanout-pipeline.json`).
+
+**Exact configuration (nothing inherits).** n8n **2.33.7** (self-hosted, CLI engine);
+**three** `pxx serve` **2.4.0** engines, each a separate git repo + scope, all on local
+ollama **Qwen3-Coder-30B**: `:8477` scope `mathlib.py`, `:8478` scope `stringutil.py`,
+`:8479` scope `listutil.py` (shared Bearer token). Pipeline: **Code** emits 3 jobs
+(`{port, label, task}`) → **HTTP POST `/v1/sessions`** per job (start is non-blocking, so
+all three launch before any join) → **HTTP GET `/events`** per job (join to each
+terminal) → **Code** aggregates `{results, passed, total, allPassed, failures}` → **IF
+`allPassed`** → `all-clear` | `HOLD`.
+
+**Observed (2026-08-08, one run, side-effects verified).**
+
+| Engine | Job | Terminal | File effect |
+|---|---|---|---|
+| `:8477` mathlib | add `multiply()` | `COMPLETED` | `def multiply` written |
+| `:8478` stringutil | add `whisper()` | `COMPLETED` | `def whisper` written |
+| `:8479` listutil | edit `README.md` (out of scope) | **`OUT_OF_SCOPE`** | **clean tree — nothing written** |
+
+**Aggregate route:** `HOLD — 2/3 passed; failures: listutil (OOS):OUT_OF_SCOPE`. The
+one out-of-scope job was blocked by *its* engine's scope gate, surfaced as a
+non-`COMPLETED` terminal, and correctly denied the `all-clear` — the routing decision is
+computed over provable, host-enforced terminal codes across the whole fleet.
+
+**Boundary — explicitly not claimed.** (a) The engines share **one 16 GB GPU**, so the
+three 30B generations **serialize at inference** — the *parallelism is at the
+orchestration layer* (concurrent dispatch + join + aggregate), and wall-clock ≈ sum of
+the real edits on this hardware; genuine inference concurrency needs distinct
+backends/GPUs (the config is unchanged — point each engine's `base_url` at a different
+box). (b) N=3 here; the pattern is N-agnostic (add jobs + engines). (c) Fan-out is
+across **separate repos/scopes on separate serves** — concurrent sessions on a single
+serve/repo would contend on the working tree; that isolation is the point.
+
+---
+
 *Convention: entries are append-only and dated; superseded claims are
 struck through with a pointer to the superseding entry, never deleted.*

@@ -1,0 +1,44 @@
+{
+  "name": "n8n -> pxx (governed coding task)",
+  "nodes": [
+    {
+      "parameters": { "httpMethod": "POST", "path": "pxx-task", "responseMode": "responseNode" },
+      "id": "webhook1", "name": "Webhook (task in)", "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2, "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST", "url": "http://127.0.0.1:8477/v1/sessions",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [ { "name": "Authorization", "value": "Bearer <PXX_SERVER_TOKEN>" } ] },
+        "sendBody": true, "specifyBody": "json",
+        "jsonBody": "={ \"task\": $json.body.task, \"permission\": \"auto\" }",
+        "options": {}
+      },
+      "id": "http1", "name": "pxx: start session", "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2, "position": [520, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=http://127.0.0.1:8477/v1/sessions/{{ $json.session_id }}/events",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [ { "name": "Authorization", "value": "Bearer <PXX_SERVER_TOKEN>" } ] },
+        "options": { "timeout": 180000 }
+      },
+      "id": "http2", "name": "pxx: stream to terminal", "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2, "position": [800, 300]
+    },
+    {
+      "parameters": { "respondWith": "json", "responseBody": "={ \"session_id\": $('pxx: start session').item.json.session_id, \"result\": $json }" },
+      "id": "resp1", "name": "Respond", "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1, "position": [1080, 300]
+    }
+  ],
+  "connections": {
+    "Webhook (task in)": { "main": [[{ "node": "pxx: start session", "type": "main", "index": 0 }]] },
+    "pxx: start session": { "main": [[{ "node": "pxx: stream to terminal", "type": "main", "index": 0 }]] },
+    "pxx: stream to terminal": { "main": [[{ "node": "Respond", "type": "main", "index": 0 }]] }
+  },
+  "settings": {}
+}

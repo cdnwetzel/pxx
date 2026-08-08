@@ -1725,5 +1725,61 @@ and governance*, not model capability on hard work (R-033 is the capability-bar 
 
 ---
 
+## R-036 — a fail-closed remote-HITL approval gate: a PreToolUse hook pauses a tool, blocks on a signed decision, defaults to deny
+
+**Claim.** pxx's PreToolUse hook can implement a fail-closed human-in-the-loop
+approval gate: it **pauses a gated tool call mid-run**, routes an approval request
+out to a notifier, and **blocks until a human decision** — allowing the tool only on
+an explicit, cryptographically-verified **Approve**, and **denying on Abort *or* no
+answer**. All three decision paths proven on real pxx runs.
+
+**Grade.** Attested (2026-08-08, real `pxx edit` runs, all three paths) + Reproducible
+(the reference hook + listener + n8n workflow + procedure are kept —
+`docs/examples/hitl/`).
+
+**Exact configuration (nothing inherits).** pxx **2.4.0** `pxx edit` (permission
+`edit`, `PXX_SCOPE=mathlib.py`) on a throwaway repo (`mathlib.py` `add()` + a failing
+`multiply` test). Coder = a local ollama **Qwen3-Coder-30B** (the Approve path was
+also confirmed on a second local vLLM 14B coder — model choice is irrelevant to the
+gate). PreToolUse hook (`matcher = "edit_file"`, `timeout = 90`) =
+`docs/examples/hitl/hitl_gate.py`; decision listener = `hitl_listener.py` bound
+`127.0.0.1:8479`. Contract: `{tool,args}` on stdin, exit 0 = allow / non-zero = deny.
+
+Hardening (the roadmap HITL item): **HMAC over the *decision*** — `sig = HMAC(secret,
+f"{nonce}:{decision}")`, so an Approve link can never be replayed as Abort;
+**single-use nonce consumed atomically** (`O_EXCL`); a **strict receipt** (`fsync`'d
+`decisions.jsonl`) that must persist **before** an allow is released; block up to
+`HITL_DEADLINE`, and abort / unreadable / receipt-failure / no-answer all → deny.
+
+**Procedure (reproduction path).** Configure the hook from a TRUSTED source
+(`~/.config/pxx/config.toml` — repo-local is stripped, A0b); start the listener;
+`pxx edit`; when the model calls `edit_file` the hook fires, posts the request, and
+blocks; deliver (or withhold) the signed decision; observe the terminal + whether the
+edit landed.
+
+**Observed (2026-08-08).**
+
+| Decision | Gate | Tool | Terminal / result |
+|---|---|---|---|
+| **Approve** (signed) | fired, paused `edit_file` | allowed | `COMPLETED` — `multiply` added |
+| **Abort** (signed) | fired, paused | denied (exit 2) | `HOOK_DENIED` — edit blocked (0 change) |
+| **Timeout** (no answer, 15 s) | fired, paused | denied (exit 2) | `HOOK_DENIED` — edit blocked (0 change) |
+
+The strict receipt recorded each: `approve→allow`, `abort→deny`, `timeout→deny`.
+
+**Boundary — explicitly not claimed.** (a) This attests the fail-closed *gate* (hook
++ listener + decision) end-to-end; the notification *routing* through n8n → Slack/ntfy
+was **not executed here** — the hook posted to a local `/pending` capture (an n8n
+stand-in) and the human tap was **simulated** by invoking the exact signed callback a
+button/action fires. The real Slack/ntfy last-mile is the operator's wire-up (n8n
+workflow provided in `docs/examples/hitl/`; Slack *answer-in-chat* needs a Slack app
+with Socket Mode or an interactivity Request URL). (b) The hook + listener are a
+**reference implementation**, not shipped pxx code — the roadmap HITL item is what
+ships it into the runtime. (c) The listener stays loopback + secret-bound; the secret
+is env-only. (d) `edit_file` was the gated tool via `matcher`; scope which tools gate
+to your risk tolerance.
+
+---
+
 *Convention: entries are append-only and dated; superseded claims are
 struck through with a pointer to the superseding entry, never deleted.*

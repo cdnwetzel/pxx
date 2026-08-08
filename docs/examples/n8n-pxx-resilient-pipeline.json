@@ -1,0 +1,638 @@
+{
+ "name": "pxx resilient (memory-augmented, guard-cancel, retry, escalate)",
+ "id": "pxxResilient001",
+ "nodes": [
+  {
+   "parameters": {},
+   "id": "t1",
+   "name": "Manual Trigger",
+   "type": "n8n-nodes-base.manualTrigger",
+   "typeVersion": 1,
+   "position": [
+    80,
+    400
+   ]
+  },
+  {
+   "parameters": {
+    "url": "http://127.0.0.1:8477/v1/memory/search?q=mathlib%20convention&k=3",
+    "sendHeaders": true,
+    "headerParameters": {
+     "parameters": [
+      {
+       "name": "Authorization",
+       "value": "Bearer <PXX_SERVER_TOKEN>"
+      }
+     ]
+    },
+    "options": {}
+   },
+   "id": "ms",
+   "name": "memory: search",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    260,
+    400
+   ]
+  },
+  {
+   "parameters": {
+    "jsCode": "const hits=($input.first().json.results||[]).map(r=>r.content);\nconst conv=hits[0]||'(no prior memory)';\nconst task='Add a multiply(a, b) function to mathlib.py returning a*b; keep add; edit only mathlib.py. Convention from memory: '+conv;\nreturn [{json:{task, conv, attempt:1}}];"
+   },
+   "id": "prep",
+   "name": "enrich from memory",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    440,
+    400
+   ]
+  },
+  {
+   "parameters": {
+    "method": "POST",
+    "url": "http://127.0.0.1:8477/v1/sessions",
+    "sendHeaders": true,
+    "headerParameters": {
+     "parameters": [
+      {
+       "name": "Authorization",
+       "value": "Bearer <PXX_SERVER_TOKEN>"
+      }
+     ]
+    },
+    "sendBody": true,
+    "specifyBody": "json",
+    "jsonBody": "={{ JSON.stringify({ task: $json.task, permission: 'auto' }) }}",
+    "options": {}
+   },
+   "id": "a1s",
+   "name": "attempt1: start",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    640,
+    300
+   ]
+  },
+  {
+   "parameters": {
+    "amount": 3,
+    "unit": "seconds"
+   },
+   "id": "a1w",
+   "name": "guard: stall window",
+   "type": "n8n-nodes-base.wait",
+   "typeVersion": 1.1,
+   "position": [
+    820,
+    300
+   ]
+  },
+  {
+   "parameters": {
+    "method": "POST",
+    "url": "=http://127.0.0.1:8477/v1/sessions/{{ $('attempt1: start').item.json.session_id }}/cancel",
+    "sendHeaders": true,
+    "headerParameters": {
+     "parameters": [
+      {
+       "name": "Authorization",
+       "value": "Bearer <PXX_SERVER_TOKEN>"
+      }
+     ]
+    },
+    "options": {}
+   },
+   "id": "a1c",
+   "name": "guard: cancel (inject stall)",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    1000,
+    300
+   ]
+  },
+  {
+   "parameters": {
+    "method": "GET",
+    "url": "=http://127.0.0.1:8477/v1/sessions/{{ $('attempt1: start').item.json.session_id }}/events",
+    "sendHeaders": true,
+    "headerParameters": {
+     "parameters": [
+      {
+       "name": "Authorization",
+       "value": "Bearer <PXX_SERVER_TOKEN>"
+      }
+     ]
+    },
+    "options": {
+     "response": {
+      "response": {
+       "responseFormat": "text"
+      }
+     },
+     "timeout": 240000
+    }
+   },
+   "id": "a1e",
+   "name": "attempt1: terminal",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    1180,
+    300
+   ]
+  },
+  {
+   "parameters": {
+    "jsCode": "const raw=String($input.first().json.data||$input.first().json.body||'');let terminal='UNKNOWN';for(const line of raw.split('\\n')){const s=line.trim();if(!s.startsWith('data:'))continue;let e;try{e=JSON.parse(s.slice(5).trim());}catch(_){continue;}if((e.kind||'')==='session_end')terminal=(e.data&&e.data.code)||terminal;}return [{json:{attempt:1,terminal}}];"
+   },
+   "id": "a1p",
+   "name": "attempt1: parse",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    1360,
+    300
+   ]
+  },
+  {
+   "parameters": {
+    "conditions": {
+     "options": {
+      "caseSensitive": true,
+      "typeValidation": "strict"
+     },
+     "conditions": [
+      {
+       "id": "c1",
+       "leftValue": "={{ $json.terminal }}",
+       "rightValue": "COMPLETED",
+       "operator": {
+        "type": "string",
+        "operation": "equals"
+       }
+      }
+     ],
+     "combinator": "and"
+    },
+    "options": {}
+   },
+   "id": "if1",
+   "name": "attempt1 done?",
+   "type": "n8n-nodes-base.if",
+   "typeVersion": 2,
+   "position": [
+    1540,
+    300
+   ]
+  },
+  {
+   "parameters": {
+    "method": "POST",
+    "url": "http://127.0.0.1:8477/v1/memory/add",
+    "sendHeaders": true,
+    "headerParameters": {
+     "parameters": [
+      {
+       "name": "Authorization",
+       "value": "Bearer <PXX_SERVER_TOKEN>"
+      }
+     ]
+    },
+    "sendBody": true,
+    "specifyBody": "json",
+    "jsonBody": "={{ JSON.stringify({ content: 'pipeline: multiply() task COMPLETED on attempt 1', tags: ['outcome','resilient'] }) }}",
+    "options": {}
+   },
+   "id": "m1",
+   "name": "memory: record (attempt1)",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    1740,
+    180
+   ]
+  },
+  {
+   "parameters": {
+    "assignments": {
+     "assignments": [
+      {
+       "id": "r1",
+       "name": "route",
+       "value": "COMPLETED on attempt 1 (no retry needed)",
+       "type": "string"
+      }
+     ]
+    },
+    "options": {}
+   },
+   "id": "res1",
+   "name": "result: attempt1",
+   "type": "n8n-nodes-base.set",
+   "typeVersion": 3.4,
+   "position": [
+    1920,
+    180
+   ]
+  },
+  {
+   "parameters": {
+    "method": "POST",
+    "url": "http://127.0.0.1:8477/v1/sessions",
+    "sendHeaders": true,
+    "headerParameters": {
+     "parameters": [
+      {
+       "name": "Authorization",
+       "value": "Bearer <PXX_SERVER_TOKEN>"
+      }
+     ]
+    },
+    "sendBody": true,
+    "specifyBody": "json",
+    "jsonBody": "={{ JSON.stringify({ task: $('enrich from memory').item.json.task, permission: 'auto' }) }}",
+    "options": {}
+   },
+   "id": "a2s",
+   "name": "attempt2: start (retry)",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    1740,
+    460
+   ]
+  },
+  {
+   "parameters": {
+    "method": "GET",
+    "url": "=http://127.0.0.1:8477/v1/sessions/{{ $json.session_id }}/events",
+    "sendHeaders": true,
+    "headerParameters": {
+     "parameters": [
+      {
+       "name": "Authorization",
+       "value": "Bearer <PXX_SERVER_TOKEN>"
+      }
+     ]
+    },
+    "options": {
+     "response": {
+      "response": {
+       "responseFormat": "text"
+      }
+     },
+     "timeout": 240000
+    }
+   },
+   "id": "a2e",
+   "name": "attempt2: terminal",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    1920,
+    460
+   ]
+  },
+  {
+   "parameters": {
+    "jsCode": "const raw=String($input.first().json.data||$input.first().json.body||'');let terminal='UNKNOWN';for(const line of raw.split('\\n')){const s=line.trim();if(!s.startsWith('data:'))continue;let e;try{e=JSON.parse(s.slice(5).trim());}catch(_){continue;}if((e.kind||'')==='session_end')terminal=(e.data&&e.data.code)||terminal;}return [{json:{attempt:2,terminal}}];"
+   },
+   "id": "a2p",
+   "name": "attempt2: parse",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    2100,
+    460
+   ]
+  },
+  {
+   "parameters": {
+    "conditions": {
+     "options": {
+      "caseSensitive": true,
+      "typeValidation": "strict"
+     },
+     "conditions": [
+      {
+       "id": "c2",
+       "leftValue": "={{ $json.terminal }}",
+       "rightValue": "COMPLETED",
+       "operator": {
+        "type": "string",
+        "operation": "equals"
+       }
+      }
+     ],
+     "combinator": "and"
+    },
+    "options": {}
+   },
+   "id": "if2",
+   "name": "attempt2 done?",
+   "type": "n8n-nodes-base.if",
+   "typeVersion": 2,
+   "position": [
+    2280,
+    460
+   ]
+  },
+  {
+   "parameters": {
+    "method": "POST",
+    "url": "http://127.0.0.1:8477/v1/memory/add",
+    "sendHeaders": true,
+    "headerParameters": {
+     "parameters": [
+      {
+       "name": "Authorization",
+       "value": "Bearer <PXX_SERVER_TOKEN>"
+      }
+     ]
+    },
+    "sendBody": true,
+    "specifyBody": "json",
+    "jsonBody": "={{ JSON.stringify({ content: 'pipeline: attempt1 INTERRUPTED (guard), HEALED on retry (attempt 2 COMPLETED)', tags: ['outcome','self-heal'] }) }}",
+    "options": {}
+   },
+   "id": "m2",
+   "name": "memory: record (healed)",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    2460,
+    360
+   ]
+  },
+  {
+   "parameters": {
+    "assignments": {
+     "assignments": [
+      {
+       "id": "r2",
+       "name": "route",
+       "value": "=SELF-HEALED \u2014 attempt1 terminal was {{ $('attempt1: parse').item.json.terminal }}, retry (attempt2) COMPLETED",
+       "type": "string"
+      }
+     ]
+    },
+    "options": {}
+   },
+   "id": "res2",
+   "name": "result: healed",
+   "type": "n8n-nodes-base.set",
+   "typeVersion": 3.4,
+   "position": [
+    2640,
+    360
+   ]
+  },
+  {
+   "parameters": {
+    "method": "POST",
+    "url": "http://127.0.0.1:8477/v1/memory/add",
+    "sendHeaders": true,
+    "headerParameters": {
+     "parameters": [
+      {
+       "name": "Authorization",
+       "value": "Bearer <PXX_SERVER_TOKEN>"
+      }
+     ]
+    },
+    "sendBody": true,
+    "specifyBody": "json",
+    "jsonBody": "={{ JSON.stringify({ content: 'pipeline: exhausted 2 attempts, escalating', tags: ['outcome','escalate'] }) }}",
+    "options": {}
+   },
+   "id": "m3",
+   "name": "memory: record (fail)",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    2460,
+    600
+   ]
+  },
+  {
+   "parameters": {
+    "assignments": {
+     "assignments": [
+      {
+       "id": "r3",
+       "name": "route",
+       "value": "ESCALATE \u2014 retries exhausted, no completion",
+       "type": "string"
+      }
+     ]
+    },
+    "options": {}
+   },
+   "id": "res3",
+   "name": "result: escalate",
+   "type": "n8n-nodes-base.set",
+   "typeVersion": 3.4,
+   "position": [
+    2640,
+    600
+   ]
+  }
+ ],
+ "connections": {
+  "Manual Trigger": {
+   "main": [
+    [
+     {
+      "node": "memory: search",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "memory: search": {
+   "main": [
+    [
+     {
+      "node": "enrich from memory",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "enrich from memory": {
+   "main": [
+    [
+     {
+      "node": "attempt1: start",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "attempt1: start": {
+   "main": [
+    [
+     {
+      "node": "guard: stall window",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "guard: stall window": {
+   "main": [
+    [
+     {
+      "node": "guard: cancel (inject stall)",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "guard: cancel (inject stall)": {
+   "main": [
+    [
+     {
+      "node": "attempt1: terminal",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "attempt1: terminal": {
+   "main": [
+    [
+     {
+      "node": "attempt1: parse",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "attempt1: parse": {
+   "main": [
+    [
+     {
+      "node": "attempt1 done?",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "attempt1 done?": {
+   "main": [
+    [
+     {
+      "node": "memory: record (attempt1)",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
+      "node": "attempt2: start (retry)",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "memory: record (attempt1)": {
+   "main": [
+    [
+     {
+      "node": "result: attempt1",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "attempt2: start (retry)": {
+   "main": [
+    [
+     {
+      "node": "attempt2: terminal",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "attempt2: terminal": {
+   "main": [
+    [
+     {
+      "node": "attempt2: parse",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "attempt2: parse": {
+   "main": [
+    [
+     {
+      "node": "attempt2 done?",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "attempt2 done?": {
+   "main": [
+    [
+     {
+      "node": "memory: record (healed)",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
+      "node": "memory: record (fail)",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "memory: record (healed)": {
+   "main": [
+    [
+     {
+      "node": "result: healed",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "memory: record (fail)": {
+   "main": [
+    [
+     {
+      "node": "result: escalate",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  }
+ },
+ "settings": {}
+}

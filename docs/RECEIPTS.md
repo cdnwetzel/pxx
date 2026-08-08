@@ -1868,5 +1868,48 @@ hardened service; run it loopback-only as shown.
 
 ---
 
+## R-039 — a resilient, self-healing n8n→pxx pipeline: memory-augmented, guard-cancel, retry, escalate
+
+**Claim.** A production pipeline needs more than a happy path. This one is
+**memory-augmented** (it reads pxx's memory to enrich the task *before* running and
+records the outcome *after*) and **self-healing**: a guard cancels a stalled run
+(cooperative `INTERRUPTED`, nothing written), the pipeline **retries**, and if retries
+are exhausted it **escalates** — all routed on pxx's host-enforced terminal codes.
+
+**Grade.** Attested (2026-08-08, executed end-to-end via `n8n execute`, two real
+sessions) + Reproducible (`docs/examples/n8n-pxx-resilient-pipeline.json`).
+
+**Exact configuration (nothing inherits).** n8n **2.33.7** (self-hosted, CLI engine);
+pxx **2.4.0** `pxx serve` (`127.0.0.1:8477`, Bearer, `PXX_SCOPE=mathlib.py`, memory
+enabled); coder = local ollama **Qwen3-Coder-30B**. Pipeline: **memory search** (GET
+`/v1/memory/search`) → **enrich** (fold the top note into the task) → **attempt 1** POST
+`/v1/sessions` → a **guard** (Wait → POST `/v1/sessions/{id}/cancel`) injects a stall →
+parse terminal → **IF `COMPLETED`** (no) → **attempt 2** (retry, POST `/v1/sessions`) →
+parse → **IF `COMPLETED`** (yes) → **memory add** (POST `/v1/memory/add`, record the
+heal) → result. Non-completion on the last attempt routes to **escalate** (+ a failure
+note to memory).
+
+**Observed (2026-08-08, single run, verified side-effects).**
+
+| Stage | Result |
+|---|---|
+| memory search → enrich | task carried the retrieved `mathlib.py` convention note |
+| attempt 1 + guard cancel | terminal **`INTERRUPTED`**, `diff_lines: 0` (nothing written) |
+| retry (attempt 2) | terminal **`COMPLETED`** — `def multiply` written to `mathlib.py` |
+| terminal route | **`result: healed`** — *"attempt1 INTERRUPTED, retry (attempt2) COMPLETED"* |
+| memory add | the self-heal outcome note is retrievable afterward |
+
+**Boundary — explicitly not claimed.** (a) The transient failure is **injected** by the
+guard (Wait+cancel) to make the heal deterministic — it stands in for a real stall /
+timeout / transient backend error; the *mechanism* (cancel → retry → escalate) is real,
+the *trigger* is staged. (b) Retry is **unrolled to max=2** (two explicit attempts), not
+a dynamic loop — legible and deterministic; widen by adding attempts or a loop node. (c)
+Cooperative cancel depends on the backend honoring `cancel()`; the `INTERRUPTED`
+terminal with `diff_lines: 0` is the evidence it did. (d) This is orchestration
+resilience — pxx's own in-session healing loop (`pxx loop`, R-031/R-034) is a separate,
+lower layer.
+
+---
+
 *Convention: entries are append-only and dated; superseded claims are
 struck through with a pointer to the superseding entry, never deleted.*

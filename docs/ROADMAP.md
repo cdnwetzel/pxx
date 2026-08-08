@@ -88,6 +88,17 @@ milestone reviewer-verified by execution):
 
 ## Next (2.x hardening)
 
+**Sequencing (recorded 2026-08-08, post-2.4.0 / post-n8n battery R-035–R-040).**
+Waves 1–3 shipped in 2.4.0, so the near-term order is:
+1. **Full-VRAM 30B benchmark** — the same 30B run on a 40 GB NVLINK box (fits entirely
+   in VRAM) vs. the 16 GB partial-offload number behind the n8n receipts; fast,
+   high-signal, gated only on the operator's sudo.
+2. **Self-hosted `ntfy` transport** (see *Later*) — upgrades the R-036/R-038 signed
+   callback into a real remote approve/abort tap; small, and closes the HITL loop.
+3. **Live eval arms** (below) — the 2.5 headline, now *unblocked* by Wave 2.
+Backlog candidate that emerged from the n8n work: a **first-class pxx n8n node** (vs. the
+HTTP-node pattern already proven in R-035–R-040).
+
 - Earned enablement: run the daemon in production, accumulate the real-run
   and human-promotion counts the auto-promotion readiness bars require
   (100 real runs, 3 human promotions) — auto-promotion stays report-and-refuse

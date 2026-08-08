@@ -1817,5 +1817,56 @@ as the rest of the corpus.
 
 ---
 
+## R-038 — a governed autonomous PR: n8n → pxx codes → HITL approval → a *real* GitHub PR (approve opens one, abort opens none)
+
+**Claim.** The R-035/036/037 seams compose into one end-to-end pipeline that takes a
+real side-effect *only* after a human says yes. A self-hosted n8n workflow: starts a
+governed `pxx serve` session, **polls to the terminal code** (R-037), and on
+`COMPLETED` **blocks on a signed human approval** (R-036) before a broker performs the
+one privileged action — `git push` + `gh pr create` against a real GitHub repo. On
+**Approve** a real PR is opened; on **Abort** the change is discarded and **no PR** is
+opened. Both outcomes verified against the live repo's PR count.
+
+**Grade.** Attested (2026-08-08, both outcomes, on a real private GitHub repo
+`cdnwetzel/pxx-sandbox`) + Reproducible (token-free workflow + broker shipped under
+`docs/examples/hitl/`).
+
+**Exact configuration (nothing inherits).** n8n **2.33.6** (self-hosted, CLI engine);
+pxx **2.4.0** `pxx serve` (`127.0.0.1:8477`, Bearer auth, `PXX_SCOPE=mathlib.py`);
+coder = a local ollama **Qwen3-Coder-30B** (RTX-class box, SSH-tunnelled); an approval
+**broker** (`127.0.0.1:8480`, FastAPI) that mints HMAC-signed single-use approve/abort
+URLs, blocks fail-closed to a deadline, and owns the *only* code path that touches the
+remote (`/open-pr` → `git push` + `gh pr create`). Pipeline: **Manual Trigger → Set
+task → POST `/v1/sessions` → GET `/events`** (blocks to terminal) **→ Code** (parse
+`session_end` code) **→ IF `COMPLETED`** → **POST `/request-approval`** (blocks on the
+signed human decision) **→ IF `approve`** → **POST `/open-pr`** (real PR) **| abort** →
+discard, no PR; non-`COMPLETED` → escalate, no PR.
+
+**Observed (2026-08-08, live `cdnwetzel/pxx-sandbox`).**
+
+| Human decision | Broker action | Repo result |
+|---|---|---|
+| **approve** (signed) | `git push` + `gh pr create` | **real PR opened** (`pxx: add multiply()`, head `pxx/demo-…`) — open PR count **0 → 1** |
+| **abort** (signed) | none | change discarded — open PR count **stays 1** (abort added none) |
+
+**Why it's un-gameable.** The signature is HMAC over `{nonce}:{decision}` (an approve
+link can't be replayed as an abort or vice-versa), the decision is consumed atomically
+(`O_EXCL`, single-use), and the deadline defaults to **deny**. The privileged action
+lives in the broker, *behind* the approval — n8n's `executeCommand` node is disabled by
+default, so there is no path from "workflow ran" to "PR opened" that skips the gate. The
+coding step is itself governed (host-enforced scope + terminal taxonomy, R-037), so an
+out-of-scope or failed run never reaches the approval step at all.
+
+**Boundary — explicitly not claimed.** (a) The approval "tap" in this proof was a signed
+`curl` to the broker's approve URL (the same URL a Slack button / self-hosted ntfy
+action would carry, R-036) — the *gate* is real; the *transport to a phone* is the
+documented next wire. (b) `pxx-sandbox` is a throwaway repo seeded for the demo; the
+task (`add multiply()`) is trivial by design — the receipt is about the **governed
+side-effect boundary**, not model capability (R-033 is the capability-bar receipt). (c)
+The broker is a ~110-line reference (`docs/examples/hitl/hitl_broker.py`), not a
+hardened service; run it loopback-only as shown.
+
+---
+
 *Convention: entries are append-only and dated; superseded claims are
 struck through with a pointer to the superseding entry, never deleted.*

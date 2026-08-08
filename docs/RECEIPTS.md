@@ -1781,5 +1781,41 @@ to your risk tolerance.
 
 ---
 
+## R-037 — a governed multi-step n8n pipeline routes on pxx's terminal code (both branches)
+
+**Claim.** Beyond the single call of R-035, a self-hosted n8n workflow drives a
+*governed multi-step pipeline*: trigger → start a `pxx serve` session → **poll to the
+terminal** → **branch on the terminal code**. The routing is driven by pxx's
+host-enforced governance — an in-scope task `COMPLETED`s (→ the open-PR path); an
+out-of-scope task is **blocked by pxx's scope gate and reported `OUT_OF_SCOPE`** (→ the
+escalate path, no PR). Both branches proven on real runs.
+
+**Grade.** Attested (2026-08-08, both branches) + Reproducible (the workflow is at
+`docs/examples/n8n-pxx-cx-pipeline.json`).
+
+**Exact configuration (nothing inherits).** n8n **2.33.6** (self-hosted, CLI engine);
+pxx **2.4.0** `pxx serve` (`127.0.0.1:8477`, Bearer auth, `PXX_SCOPE=mathlib.py`);
+coder = a local ollama **Qwen3-Coder-30B**. Pipeline: **Manual Trigger → Set task →
+HTTP POST `/v1/sessions` → HTTP GET `/v1/sessions/{id}/events`** (text response; blocks
+to terminal) **→ Code** (parse the last `session_end` code) **→ IF** (`terminal ==
+COMPLETED`) **→ branch A** (success / open-PR) **| branch B** (escalate).
+
+**Observed (2026-08-08).**
+
+| Task | pxx terminal | IF route | pxx governance |
+|---|---|---|---|
+| in-scope (`mathlib.py`) | `COMPLETED` | **branch A** — success → open PR | edit made |
+| out-of-scope (edit `tests/`, scope=`mathlib.py`) | `OUT_OF_SCOPE` | **branch B** — escalate → no PR | write **blocked**, 0 files changed |
+
+**Boundary — explicitly not claimed.** (a) The "open PR / notify" steps are branch
+`Set` nodes, **not executed** — no real PR/Slack side-effects in the proof; wire your
+own git/notify nodes there. (b) The server path runs a single `session.run` (not the
+loop's test gate). (c) The value of the receipt is the *seam*: n8n's routing decision
+follows pxx's **provable, host-enforced terminal code** (scope enforcement + the
+terminal taxonomy), not the model's self-report — the same "verify, don't trust" line
+as the rest of the corpus.
+
+---
+
 *Convention: entries are append-only and dated; superseded claims are
 struck through with a pointer to the superseding entry, never deleted.*

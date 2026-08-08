@@ -1,0 +1,276 @@
+{
+ "name": "pxx-cx-pipeline (poll + branch on terminal code)",
+ "id": "pxxCxPipeline001",
+ "nodes": [
+  {
+   "parameters": {},
+   "id": "t1",
+   "name": "Manual Trigger",
+   "type": "n8n-nodes-base.manualTrigger",
+   "typeVersion": 1,
+   "position": [
+    180,
+    300
+   ]
+  },
+  {
+   "parameters": {
+    "assignments": {
+     "assignments": [
+      {
+       "id": "a1",
+       "name": "task",
+       "value": "<YOUR SCOPED CODING TASK>",
+       "type": "string"
+      }
+     ]
+    },
+    "options": {}
+   },
+   "id": "s1",
+   "name": "Set task",
+   "type": "n8n-nodes-base.set",
+   "typeVersion": 3.4,
+   "position": [
+    380,
+    300
+   ]
+  },
+  {
+   "parameters": {
+    "method": "POST",
+    "url": "http://127.0.0.1:8477/v1/sessions",
+    "sendHeaders": true,
+    "headerParameters": {
+     "parameters": [
+      {
+       "name": "Authorization",
+       "value": "Bearer <PXX_SERVER_TOKEN>"
+      }
+     ]
+    },
+    "sendBody": true,
+    "specifyBody": "json",
+    "jsonBody": "={{ JSON.stringify({ task: $json.task, permission: 'auto' }) }}",
+    "options": {}
+   },
+   "id": "h1",
+   "name": "pxx: start",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    600,
+    300
+   ]
+  },
+  {
+   "parameters": {
+    "method": "GET",
+    "url": "=http://127.0.0.1:8477/v1/sessions/{{ $json.session_id }}/events",
+    "sendHeaders": true,
+    "headerParameters": {
+     "parameters": [
+      {
+       "name": "Authorization",
+       "value": "Bearer <PXX_SERVER_TOKEN>"
+      }
+     ]
+    },
+    "options": {
+     "response": {
+      "response": {
+       "responseFormat": "text"
+      }
+     },
+     "timeout": 240000
+    }
+   },
+   "id": "h2",
+   "name": "pxx: wait terminal",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    820,
+    300
+   ]
+  },
+  {
+   "parameters": {
+    "jsCode": "const raw = String($input.first().json.data || $input.first().json.body || '');\nlet terminal = 'UNKNOWN';\nlet tools = 0, files = 0;\nfor (const line of raw.split('\\n')) {\n  const s = line.trim();\n  if (!s.startsWith('data:')) continue;\n  let e; try { e = JSON.parse(s.slice(5).trim()); } catch (_) { continue; }\n  const k = e.kind || '';\n  if (k === 'tool_call') tools++;\n  if (k === 'file_changed') files++;\n  if (k === 'session_end') terminal = (e.data && e.data.code) || terminal;\n}\nconst sid = $('pxx: start').item.json.session_id;\nreturn [{ json: { session_id: sid, terminal, tools, files } }];"
+   },
+   "id": "c1",
+   "name": "parse terminal",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    1040,
+    300
+   ]
+  },
+  {
+   "parameters": {
+    "conditions": {
+     "options": {
+      "caseSensitive": true,
+      "typeValidation": "strict"
+     },
+     "conditions": [
+      {
+       "id": "cond1",
+       "leftValue": "={{ $json.terminal }}",
+       "rightValue": "COMPLETED",
+       "operator": {
+        "type": "string",
+        "operation": "equals"
+       }
+      }
+     ],
+     "combinator": "and"
+    },
+    "options": {}
+   },
+   "id": "if1",
+   "name": "IF completed?",
+   "type": "n8n-nodes-base.if",
+   "typeVersion": 2,
+   "position": [
+    1260,
+    300
+   ]
+  },
+  {
+   "parameters": {
+    "assignments": {
+     "assignments": [
+      {
+       "id": "o1",
+       "name": "route",
+       "value": "SUCCESS -> would open PR + notify",
+       "type": "string"
+      },
+      {
+       "id": "o2",
+       "name": "detail",
+       "value": "={{ 'session ' + $json.session_id + ' COMPLETED (' + $json.files + ' file(s), ' + $json.tools + ' tool call(s))' }}",
+       "type": "string"
+      }
+     ]
+    },
+    "options": {}
+   },
+   "id": "ok",
+   "name": "branch A: success",
+   "type": "n8n-nodes-base.set",
+   "typeVersion": 3.4,
+   "position": [
+    1500,
+    200
+   ]
+  },
+  {
+   "parameters": {
+    "assignments": {
+     "assignments": [
+      {
+       "id": "e1",
+       "name": "route",
+       "value": "ESCALATE -> notify human, do NOT open PR",
+       "type": "string"
+      },
+      {
+       "id": "e2",
+       "name": "detail",
+       "value": "={{ 'session ' + $json.session_id + ' terminal=' + $json.terminal }}",
+       "type": "string"
+      }
+     ]
+    },
+    "options": {}
+   },
+   "id": "esc",
+   "name": "branch B: escalate",
+   "type": "n8n-nodes-base.set",
+   "typeVersion": 3.4,
+   "position": [
+    1500,
+    400
+   ]
+  }
+ ],
+ "connections": {
+  "Manual Trigger": {
+   "main": [
+    [
+     {
+      "node": "Set task",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Set task": {
+   "main": [
+    [
+     {
+      "node": "pxx: start",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "pxx: start": {
+   "main": [
+    [
+     {
+      "node": "pxx: wait terminal",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "pxx: wait terminal": {
+   "main": [
+    [
+     {
+      "node": "parse terminal",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "parse terminal": {
+   "main": [
+    [
+     {
+      "node": "IF completed?",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "IF completed?": {
+   "main": [
+    [
+     {
+      "node": "branch A: success",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
+      "node": "branch B: escalate",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  }
+ },
+ "settings": {}
+}

@@ -1,0 +1,49 @@
+{
+  "name": "pxx HITL approval router (ntfy + Slack)",
+  "meta": {
+    "note": "Receives an approval request from the pxx PreToolUse gate hook and fans it out to ntfy (phone action buttons) and Slack (chat). The Approve/Abort URLs are HMAC-signed, single-use links the hook minted; tapping one hits your decision listener directly, which the hook is polling. Replace <NTFY_BASE>, <NTFY_TOPIC>, and the Slack credential. Slack answer-in-chat (buttons) needs a Slack app with Socket Mode or an interactivity Request URL; the simple message below carries the two links."
+  },
+  "nodes": [
+    {
+      "parameters": { "httpMethod": "POST", "path": "pxx-approval", "responseMode": "lastNode" },
+      "id": "wh", "name": "approval-in (from pxx hook)", "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2, "position": [220, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=<NTFY_BASE>/<NTFY_TOPIC>",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [
+          { "name": "Title", "value": "pxx wants to run: {{ $json.body.tool }}" },
+          { "name": "Priority", "value": "high" },
+          { "name": "Actions", "value": "=http, Approve, {{ $json.body.approve_url }}, method=POST; http, Abort, {{ $json.body.abort_url }}, method=POST" }
+        ] },
+        "sendBody": true, "contentType": "raw", "rawContentType": "text/plain",
+        "body": "={{ $json.body.summary }}",
+        "options": {}
+      },
+      "id": "ntfy", "name": "notify: ntfy (phone buttons)", "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2, "position": [520, 220]
+    },
+    {
+      "parameters": {
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "slackApi",
+        "method": "POST", "url": "https://slack.com/api/chat.postMessage",
+        "sendBody": true, "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ channel: '#pxx-approvals', text: `*pxx approval needed* — \\`${$json.body.tool}\\`\\n${$json.body.summary}\\n<${$json.body.approve_url}|Approve>  |  <${$json.body.abort_url}|Abort>` }) }}",
+        "options": {}
+      },
+      "id": "slack", "name": "notify: Slack (chat)", "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2, "position": [520, 380]
+    }
+  ],
+  "connections": {
+    "approval-in (from pxx hook)": { "main": [[
+      { "node": "notify: ntfy (phone buttons)", "type": "main", "index": 0 },
+      { "node": "notify: Slack (chat)", "type": "main", "index": 0 }
+    ]] }
+  },
+  "settings": {}
+}

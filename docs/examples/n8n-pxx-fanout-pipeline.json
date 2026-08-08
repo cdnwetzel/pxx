@@ -1,0 +1,256 @@
+{
+ "name": "pxx parallel fan-out (N governed engines -> aggregate -> route)",
+ "id": "pxxFanout001",
+ "nodes": [
+  {
+   "parameters": {},
+   "id": "t1",
+   "name": "Manual Trigger",
+   "type": "n8n-nodes-base.manualTrigger",
+   "typeVersion": 1,
+   "position": [
+    80,
+    400
+   ]
+  },
+  {
+   "parameters": {
+    "jsCode": "return [\n {json:{port:8477,label:'mathlib',   task:'Add multiply(a, b) to mathlib.py returning a*b; keep add; edit only mathlib.py.'}},\n {json:{port:8478,label:'stringutil',task:'Add whisper(s) to stringutil.py returning s.lower(); keep shout; edit only stringutil.py.'}},\n {json:{port:8479,label:'listutil (OOS)',task:'Add a section to README.md documenting the listutil module.'}}\n];"
+   },
+   "id": "jobs",
+   "name": "jobs (3)",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    260,
+    400
+   ]
+  },
+  {
+   "parameters": {
+    "method": "POST",
+    "url": "=http://127.0.0.1:{{ $json.port }}/v1/sessions",
+    "sendHeaders": true,
+    "headerParameters": {
+     "parameters": [
+      {
+       "name": "Authorization",
+       "value": "Bearer <PXX_SERVER_TOKEN>"
+      }
+     ]
+    },
+    "sendBody": true,
+    "specifyBody": "json",
+    "jsonBody": "={{ JSON.stringify({ task: $json.task, permission: 'auto' }) }}",
+    "options": {}
+   },
+   "id": "start",
+   "name": "fan-out: start all",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    460,
+    400
+   ]
+  },
+  {
+   "parameters": {
+    "method": "GET",
+    "url": "=http://127.0.0.1:{{ $('jobs (3)').item.json.port }}/v1/sessions/{{ $json.session_id }}/events",
+    "sendHeaders": true,
+    "headerParameters": {
+     "parameters": [
+      {
+       "name": "Authorization",
+       "value": "Bearer <PXX_SERVER_TOKEN>"
+      }
+     ]
+    },
+    "options": {
+     "response": {
+      "response": {
+       "responseFormat": "text"
+      }
+     },
+     "timeout": 300000
+    }
+   },
+   "id": "wait",
+   "name": "join: wait each terminal",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    660,
+    400
+   ]
+  },
+  {
+   "parameters": {
+    "mode": "runOnceForAllItems",
+    "jsCode": "const jobs=$('jobs (3)').all();\nconst outs=$input.all();\nfunction term(o){const raw=String(o.json.data||o.json.body||'');let t='UNKNOWN';for(const line of raw.split('\\n')){const s=line.trim();if(!s.startsWith('data:'))continue;let e;try{e=JSON.parse(s.slice(5).trim());}catch(_){continue;}if((e.kind||'')==='session_end')t=(e.data&&e.data.code)||t;}return t;}\nconst results=outs.map((o,i)=>({label:(jobs[i]&&jobs[i].json.label)||('job'+i),terminal:term(o)}));\nconst failures=results.filter(r=>r.terminal!=='COMPLETED');\nreturn [{json:{results,total:results.length,passed:results.length-failures.length,allPassed:failures.length===0,failures:failures.map(f=>f.label+':'+f.terminal)}}];"
+   },
+   "id": "agg",
+   "name": "aggregate terminals",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    880,
+    400
+   ]
+  },
+  {
+   "parameters": {
+    "conditions": {
+     "options": {
+      "caseSensitive": true,
+      "typeValidation": "strict"
+     },
+     "conditions": [
+      {
+       "id": "c1",
+       "leftValue": "={{ $json.allPassed }}",
+       "rightValue": true,
+       "operator": {
+        "type": "boolean",
+        "operation": "true",
+        "singleValue": true
+       }
+      }
+     ],
+     "combinator": "and"
+    },
+    "options": {}
+   },
+   "id": "if",
+   "name": "all passed?",
+   "type": "n8n-nodes-base.if",
+   "typeVersion": 2,
+   "position": [
+    1080,
+    400
+   ]
+  },
+  {
+   "parameters": {
+    "assignments": {
+     "assignments": [
+      {
+       "id": "r1",
+       "name": "route",
+       "value": "=ALL-CLEAR \u2014 {{ $json.passed }}/{{ $json.total }} governed sessions COMPLETED, safe to proceed",
+       "type": "string"
+      }
+     ]
+    },
+    "options": {}
+   },
+   "id": "ok",
+   "name": "result: all-clear",
+   "type": "n8n-nodes-base.set",
+   "typeVersion": 3.4,
+   "position": [
+    1300,
+    300
+   ]
+  },
+  {
+   "parameters": {
+    "assignments": {
+     "assignments": [
+      {
+       "id": "r2",
+       "name": "route",
+       "value": "=HOLD \u2014 {{ $json.passed }}/{{ $json.total }} passed; failures: {{ $json.failures.join(', ') }}",
+       "type": "string"
+      }
+     ]
+    },
+    "options": {}
+   },
+   "id": "hold",
+   "name": "result: hold",
+   "type": "n8n-nodes-base.set",
+   "typeVersion": 3.4,
+   "position": [
+    1300,
+    500
+   ]
+  }
+ ],
+ "connections": {
+  "Manual Trigger": {
+   "main": [
+    [
+     {
+      "node": "jobs (3)",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "jobs (3)": {
+   "main": [
+    [
+     {
+      "node": "fan-out: start all",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "fan-out: start all": {
+   "main": [
+    [
+     {
+      "node": "join: wait each terminal",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "join: wait each terminal": {
+   "main": [
+    [
+     {
+      "node": "aggregate terminals",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "aggregate terminals": {
+   "main": [
+    [
+     {
+      "node": "all passed?",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "all passed?": {
+   "main": [
+    [
+     {
+      "node": "result: all-clear",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
+      "node": "result: hold",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  }
+ },
+ "settings": {}
+}

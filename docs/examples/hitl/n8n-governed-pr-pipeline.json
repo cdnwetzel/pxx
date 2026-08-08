@@ -1,0 +1,404 @@
+{
+ "name": "pxx governed autonomous PR (poll -> HITL approval -> real PR)",
+ "id": "pxxGovernedPR01",
+ "nodes": [
+  {
+   "parameters": {},
+   "id": "t1",
+   "name": "Manual Trigger",
+   "type": "n8n-nodes-base.manualTrigger",
+   "typeVersion": 1,
+   "position": [
+    120,
+    300
+   ]
+  },
+  {
+   "parameters": {
+    "assignments": {
+     "assignments": [
+      {
+       "id": "a1",
+       "name": "task",
+       "value": "<YOUR SCOPED CODING TASK>",
+       "type": "string"
+      }
+     ]
+    },
+    "options": {}
+   },
+   "id": "s1",
+   "name": "Set task",
+   "type": "n8n-nodes-base.set",
+   "typeVersion": 3.4,
+   "position": [
+    300,
+    300
+   ]
+  },
+  {
+   "parameters": {
+    "method": "POST",
+    "url": "http://127.0.0.1:8477/v1/sessions",
+    "sendHeaders": true,
+    "headerParameters": {
+     "parameters": [
+      {
+       "name": "Authorization",
+       "value": "Bearer <PXX_SERVER_TOKEN>"
+      }
+     ]
+    },
+    "sendBody": true,
+    "specifyBody": "json",
+    "jsonBody": "={{ JSON.stringify({ task: $json.task, permission: 'auto' }) }}",
+    "options": {}
+   },
+   "id": "h1",
+   "name": "pxx: start",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    480,
+    300
+   ]
+  },
+  {
+   "parameters": {
+    "method": "GET",
+    "url": "=http://127.0.0.1:8477/v1/sessions/{{ $json.session_id }}/events",
+    "sendHeaders": true,
+    "headerParameters": {
+     "parameters": [
+      {
+       "name": "Authorization",
+       "value": "Bearer <PXX_SERVER_TOKEN>"
+      }
+     ]
+    },
+    "options": {
+     "response": {
+      "response": {
+       "responseFormat": "text"
+      }
+     },
+     "timeout": 240000
+    }
+   },
+   "id": "h2",
+   "name": "pxx: wait terminal",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    660,
+    300
+   ]
+  },
+  {
+   "parameters": {
+    "jsCode": "const raw=String($input.first().json.data||$input.first().json.body||'');let terminal='UNKNOWN';for(const line of raw.split('\\n')){const s=line.trim();if(!s.startsWith('data:'))continue;let e;try{e=JSON.parse(s.slice(5).trim());}catch(_){continue;}if((e.kind||'')==='session_end')terminal=(e.data&&e.data.code)||terminal;}return [{json:{session_id:$('pxx: start').item.json.session_id,terminal}}];"
+   },
+   "id": "c1",
+   "name": "parse terminal",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    840,
+    300
+   ]
+  },
+  {
+   "parameters": {
+    "conditions": {
+     "options": {
+      "caseSensitive": true,
+      "typeValidation": "strict"
+     },
+     "conditions": [
+      {
+       "id": "x1",
+       "leftValue": "={{ $json.terminal }}",
+       "rightValue": "COMPLETED",
+       "operator": {
+        "type": "string",
+        "operation": "equals"
+       }
+      }
+     ],
+     "combinator": "and"
+    },
+    "options": {}
+   },
+   "id": "if1",
+   "name": "IF completed?",
+   "type": "n8n-nodes-base.if",
+   "typeVersion": 2,
+   "position": [
+    1020,
+    300
+   ]
+  },
+  {
+   "parameters": {
+    "method": "POST",
+    "url": "http://127.0.0.1:8480/request-approval",
+    "sendBody": true,
+    "specifyBody": "json",
+    "jsonBody": "={{ JSON.stringify({ summary: 'pxx session ' + $json.session_id + ' COMPLETED \u2014 approve to open a PR on pxx-sandbox?' }) }}",
+    "options": {
+     "timeout": 120000
+    }
+   },
+   "id": "ap",
+   "name": "request approval (blocks)",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    1220,
+    220
+   ]
+  },
+  {
+   "parameters": {
+    "conditions": {
+     "options": {
+      "caseSensitive": true,
+      "typeValidation": "strict"
+     },
+     "conditions": [
+      {
+       "id": "x2",
+       "leftValue": "={{ $json.decision }}",
+       "rightValue": "approve",
+       "operator": {
+        "type": "string",
+        "operation": "equals"
+       }
+      }
+     ],
+     "combinator": "and"
+    },
+    "options": {}
+   },
+   "id": "if2",
+   "name": "IF approved?",
+   "type": "n8n-nodes-base.if",
+   "typeVersion": 2,
+   "position": [
+    1400,
+    220
+   ]
+  },
+  {
+   "parameters": {
+    "method": "POST",
+    "url": "http://127.0.0.1:8480/open-pr",
+    "sendBody": true,
+    "specifyBody": "json",
+    "jsonBody": "={{ JSON.stringify({ title: 'pxx: add multiply()', body: 'Autonomously produced by pxx; opened by the n8n governed pipeline after HITL approval.' }) }}",
+    "options": {
+     "timeout": 120000
+    }
+   },
+   "id": "pr",
+   "name": "open PR (via broker)",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    1580,
+    140
+   ]
+  },
+  {
+   "parameters": {
+    "assignments": {
+     "assignments": [
+      {
+       "id": "r1",
+       "name": "route",
+       "value": "PR OPENED (HITL-approved)",
+       "type": "string"
+      },
+      {
+       "id": "r2",
+       "name": "pr_url",
+       "value": "={{ $json.stdout }}",
+       "type": "string"
+      }
+     ]
+    },
+    "options": {}
+   },
+   "id": "okp",
+   "name": "result: PR opened",
+   "type": "n8n-nodes-base.set",
+   "typeVersion": 3.4,
+   "position": [
+    1760,
+    140
+   ]
+  },
+  {
+   "parameters": {
+    "assignments": {
+     "assignments": [
+      {
+       "id": "b1",
+       "name": "route",
+       "value": "ABORTED by human \u2014 changes discarded, no PR",
+       "type": "string"
+      }
+     ]
+    },
+    "options": {}
+   },
+   "id": "abt",
+   "name": "result: aborted",
+   "type": "n8n-nodes-base.set",
+   "typeVersion": 3.4,
+   "position": [
+    1580,
+    300
+   ]
+  },
+  {
+   "parameters": {
+    "assignments": {
+     "assignments": [
+      {
+       "id": "e1",
+       "name": "route",
+       "value": "={{ 'ESCALATE \u2014 terminal=' + $json.terminal + ', no PR' }}",
+       "type": "string"
+      }
+     ]
+    },
+    "options": {}
+   },
+   "id": "esc",
+   "name": "result: escalate",
+   "type": "n8n-nodes-base.set",
+   "typeVersion": 3.4,
+   "position": [
+    1220,
+    420
+   ]
+  }
+ ],
+ "connections": {
+  "Manual Trigger": {
+   "main": [
+    [
+     {
+      "node": "Set task",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Set task": {
+   "main": [
+    [
+     {
+      "node": "pxx: start",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "pxx: start": {
+   "main": [
+    [
+     {
+      "node": "pxx: wait terminal",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "pxx: wait terminal": {
+   "main": [
+    [
+     {
+      "node": "parse terminal",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "parse terminal": {
+   "main": [
+    [
+     {
+      "node": "IF completed?",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "IF completed?": {
+   "main": [
+    [
+     {
+      "node": "request approval (blocks)",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
+      "node": "result: escalate",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "request approval (blocks)": {
+   "main": [
+    [
+     {
+      "node": "IF approved?",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "IF approved?": {
+   "main": [
+    [
+     {
+      "node": "open PR (via broker)",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
+      "node": "result: aborted",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "open PR (via broker)": {
+   "main": [
+    [
+     {
+      "node": "result: PR opened",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  }
+ },
+ "settings": {}
+}

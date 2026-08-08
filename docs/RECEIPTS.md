@@ -1725,5 +1725,236 @@ and governance*, not model capability on hard work (R-033 is the capability-bar 
 
 ---
 
+## R-036 — a fail-closed remote-HITL approval gate: a PreToolUse hook pauses a tool, blocks on a signed decision, defaults to deny
+
+**Claim.** pxx's PreToolUse hook can implement a fail-closed human-in-the-loop
+approval gate: it **pauses a gated tool call mid-run**, routes an approval request
+out to a notifier, and **blocks until a human decision** — allowing the tool only on
+an explicit, cryptographically-verified **Approve**, and **denying on Abort *or* no
+answer**. All three decision paths proven on real pxx runs.
+
+**Grade.** Attested (2026-08-08, real `pxx edit` runs, all three paths) + Reproducible
+(the reference hook + listener + n8n workflow + procedure are kept —
+`docs/examples/hitl/`).
+
+**Exact configuration (nothing inherits).** pxx **2.4.0** `pxx edit` (permission
+`edit`, `PXX_SCOPE=mathlib.py`) on a throwaway repo (`mathlib.py` `add()` + a failing
+`multiply` test). Coder = a local ollama **Qwen3-Coder-30B** (the Approve path was
+also confirmed on a second local vLLM 14B coder — model choice is irrelevant to the
+gate). PreToolUse hook (`matcher = "edit_file"`, `timeout = 90`) =
+`docs/examples/hitl/hitl_gate.py`; decision listener = `hitl_listener.py` bound
+`127.0.0.1:8479`. Contract: `{tool,args}` on stdin, exit 0 = allow / non-zero = deny.
+
+Hardening (the roadmap HITL item): **HMAC over the *decision*** — `sig = HMAC(secret,
+f"{nonce}:{decision}")`, so an Approve link can never be replayed as Abort;
+**single-use nonce consumed atomically** (`O_EXCL`); a **strict receipt** (`fsync`'d
+`decisions.jsonl`) that must persist **before** an allow is released; block up to
+`HITL_DEADLINE`, and abort / unreadable / receipt-failure / no-answer all → deny.
+
+**Procedure (reproduction path).** Configure the hook from a TRUSTED source
+(`~/.config/pxx/config.toml` — repo-local is stripped, A0b); start the listener;
+`pxx edit`; when the model calls `edit_file` the hook fires, posts the request, and
+blocks; deliver (or withhold) the signed decision; observe the terminal + whether the
+edit landed.
+
+**Observed (2026-08-08).**
+
+| Decision | Gate | Tool | Terminal / result |
+|---|---|---|---|
+| **Approve** (signed) | fired, paused `edit_file` | allowed | `COMPLETED` — `multiply` added |
+| **Abort** (signed) | fired, paused | denied (exit 2) | `HOOK_DENIED` — edit blocked (0 change) |
+| **Timeout** (no answer, 15 s) | fired, paused | denied (exit 2) | `HOOK_DENIED` — edit blocked (0 change) |
+
+The strict receipt recorded each: `approve→allow`, `abort→deny`, `timeout→deny`.
+
+**Boundary — explicitly not claimed.** (a) This attests the fail-closed *gate* (hook
++ listener + decision) end-to-end; the notification *routing* through n8n → Slack/ntfy
+was **not executed here** — the hook posted to a local `/pending` capture (an n8n
+stand-in) and the human tap was **simulated** by invoking the exact signed callback a
+button/action fires. The real Slack/ntfy last-mile is the operator's wire-up (n8n
+workflow provided in `docs/examples/hitl/`; Slack *answer-in-chat* needs a Slack app
+with Socket Mode or an interactivity Request URL). (b) The hook + listener are a
+**reference implementation**, not shipped pxx code — the roadmap HITL item is what
+ships it into the runtime. (c) The listener stays loopback + secret-bound; the secret
+is env-only. (d) `edit_file` was the gated tool via `matcher`; scope which tools gate
+to your risk tolerance.
+
+---
+
+## R-037 — a governed multi-step n8n pipeline routes on pxx's terminal code (both branches)
+
+**Claim.** Beyond the single call of R-035, a self-hosted n8n workflow drives a
+*governed multi-step pipeline*: trigger → start a `pxx serve` session → **poll to the
+terminal** → **branch on the terminal code**. The routing is driven by pxx's
+host-enforced governance — an in-scope task `COMPLETED`s (→ the open-PR path); an
+out-of-scope task is **blocked by pxx's scope gate and reported `OUT_OF_SCOPE`** (→ the
+escalate path, no PR). Both branches proven on real runs.
+
+**Grade.** Attested (2026-08-08, both branches) + Reproducible (the workflow is at
+`docs/examples/n8n-pxx-cx-pipeline.json`).
+
+**Exact configuration (nothing inherits).** n8n **2.33.6** (self-hosted, CLI engine);
+pxx **2.4.0** `pxx serve` (`127.0.0.1:8477`, Bearer auth, `PXX_SCOPE=mathlib.py`);
+coder = a local ollama **Qwen3-Coder-30B**. Pipeline: **Manual Trigger → Set task →
+HTTP POST `/v1/sessions` → HTTP GET `/v1/sessions/{id}/events`** (text response; blocks
+to terminal) **→ Code** (parse the last `session_end` code) **→ IF** (`terminal ==
+COMPLETED`) **→ branch A** (success / open-PR) **| branch B** (escalate).
+
+**Observed (2026-08-08).**
+
+| Task | pxx terminal | IF route | pxx governance |
+|---|---|---|---|
+| in-scope (`mathlib.py`) | `COMPLETED` | **branch A** — success → open PR | edit made |
+| out-of-scope (edit `tests/`, scope=`mathlib.py`) | `OUT_OF_SCOPE` | **branch B** — escalate → no PR | write **blocked**, 0 files changed |
+
+**Boundary — explicitly not claimed.** (a) The "open PR / notify" steps are branch
+`Set` nodes, **not executed** — no real PR/Slack side-effects in the proof; wire your
+own git/notify nodes there. (b) The server path runs a single `session.run` (not the
+loop's test gate). (c) The value of the receipt is the *seam*: n8n's routing decision
+follows pxx's **provable, host-enforced terminal code** (scope enforcement + the
+terminal taxonomy), not the model's self-report — the same "verify, don't trust" line
+as the rest of the corpus.
+
+---
+
+## R-038 — a governed autonomous PR: n8n → pxx codes → HITL approval → a *real* GitHub PR (approve opens one, abort opens none)
+
+**Claim.** The R-035/036/037 seams compose into one end-to-end pipeline that takes a
+real side-effect *only* after a human says yes. A self-hosted n8n workflow: starts a
+governed `pxx serve` session, **polls to the terminal code** (R-037), and on
+`COMPLETED` **blocks on a signed human approval** (R-036) before a broker performs the
+one privileged action — `git push` + `gh pr create` against a real GitHub repo. On
+**Approve** a real PR is opened; on **Abort** the change is discarded and **no PR** is
+opened. Both outcomes verified against the live repo's PR count.
+
+**Grade.** Attested (2026-08-08, both outcomes, on a real private GitHub repo
+`cdnwetzel/pxx-sandbox`) + Reproducible (token-free workflow + broker shipped under
+`docs/examples/hitl/`).
+
+**Exact configuration (nothing inherits).** n8n **2.33.6** (self-hosted, CLI engine);
+pxx **2.4.0** `pxx serve` (`127.0.0.1:8477`, Bearer auth, `PXX_SCOPE=mathlib.py`);
+coder = a local ollama **Qwen3-Coder-30B** (RTX-class box, SSH-tunnelled); an approval
+**broker** (`127.0.0.1:8480`, FastAPI) that mints HMAC-signed single-use approve/abort
+URLs, blocks fail-closed to a deadline, and owns the *only* code path that touches the
+remote (`/open-pr` → `git push` + `gh pr create`). Pipeline: **Manual Trigger → Set
+task → POST `/v1/sessions` → GET `/events`** (blocks to terminal) **→ Code** (parse
+`session_end` code) **→ IF `COMPLETED`** → **POST `/request-approval`** (blocks on the
+signed human decision) **→ IF `approve`** → **POST `/open-pr`** (real PR) **| abort** →
+discard, no PR; non-`COMPLETED` → escalate, no PR.
+
+**Observed (2026-08-08, live `cdnwetzel/pxx-sandbox`).**
+
+| Human decision | Broker action | Repo result |
+|---|---|---|
+| **approve** (signed) | `git push` + `gh pr create` | **real PR opened** (`pxx: add multiply()`, head `pxx/demo-…`) — open PR count **0 → 1** |
+| **abort** (signed) | none | change discarded — open PR count **stays 1** (abort added none) |
+
+**Why it's un-gameable.** The signature is HMAC over `{nonce}:{decision}` (an approve
+link can't be replayed as an abort or vice-versa), the decision is consumed atomically
+(`O_EXCL`, single-use), and the deadline defaults to **deny**. The privileged action
+lives in the broker, *behind* the approval — n8n's `executeCommand` node is disabled by
+default, so there is no path from "workflow ran" to "PR opened" that skips the gate. The
+coding step is itself governed (host-enforced scope + terminal taxonomy, R-037), so an
+out-of-scope or failed run never reaches the approval step at all.
+
+**Boundary — explicitly not claimed.** (a) The approval "tap" in this proof was a signed
+`curl` to the broker's approve URL (the same URL a Slack button / self-hosted ntfy
+action would carry, R-036) — the *gate* is real; the *transport to a phone* is the
+documented next wire. (b) `pxx-sandbox` is a throwaway repo seeded for the demo; the
+task (`add multiply()`) is trivial by design — the receipt is about the **governed
+side-effect boundary**, not model capability (R-033 is the capability-bar receipt). (c)
+The broker is a ~110-line reference (`docs/examples/hitl/hitl_broker.py`), not a
+hardened service; run it loopback-only as shown.
+
+---
+
+## R-039 — a resilient, self-healing n8n→pxx pipeline: memory-augmented, guard-cancel, retry, escalate
+
+**Claim.** A production pipeline needs more than a happy path. This one is
+**memory-augmented** (it reads pxx's memory to enrich the task *before* running and
+records the outcome *after*) and **self-healing**: a guard cancels a stalled run
+(cooperative `INTERRUPTED`, nothing written), the pipeline **retries**, and if retries
+are exhausted it **escalates** — all routed on pxx's host-enforced terminal codes.
+
+**Grade.** Attested (2026-08-08, executed end-to-end via `n8n execute`, two real
+sessions) + Reproducible (`docs/examples/n8n-pxx-resilient-pipeline.json`).
+
+**Exact configuration (nothing inherits).** n8n **2.33.7** (self-hosted, CLI engine);
+pxx **2.4.0** `pxx serve` (`127.0.0.1:8477`, Bearer, `PXX_SCOPE=mathlib.py`, memory
+enabled); coder = local ollama **Qwen3-Coder-30B**. Pipeline: **memory search** (GET
+`/v1/memory/search`) → **enrich** (fold the top note into the task) → **attempt 1** POST
+`/v1/sessions` → a **guard** (Wait → POST `/v1/sessions/{id}/cancel`) injects a stall →
+parse terminal → **IF `COMPLETED`** (no) → **attempt 2** (retry, POST `/v1/sessions`) →
+parse → **IF `COMPLETED`** (yes) → **memory add** (POST `/v1/memory/add`, record the
+heal) → result. Non-completion on the last attempt routes to **escalate** (+ a failure
+note to memory).
+
+**Observed (2026-08-08, single run, verified side-effects).**
+
+| Stage | Result |
+|---|---|
+| memory search → enrich | task carried the retrieved `mathlib.py` convention note |
+| attempt 1 + guard cancel | terminal **`INTERRUPTED`**, `diff_lines: 0` (nothing written) |
+| retry (attempt 2) | terminal **`COMPLETED`** — `def multiply` written to `mathlib.py` |
+| terminal route | **`result: healed`** — *"attempt1 INTERRUPTED, retry (attempt2) COMPLETED"* |
+| memory add | the self-heal outcome note is retrievable afterward |
+
+**Boundary — explicitly not claimed.** (a) The transient failure is **injected** by the
+guard (Wait+cancel) to make the heal deterministic — it stands in for a real stall /
+timeout / transient backend error; the *mechanism* (cancel → retry → escalate) is real,
+the *trigger* is staged. (b) Retry is **unrolled to max=2** (two explicit attempts), not
+a dynamic loop — legible and deterministic; widen by adding attempts or a loop node. (c)
+Cooperative cancel depends on the backend honoring `cancel()`; the `INTERRUPTED`
+terminal with `diff_lines: 0` is the evidence it did. (d) This is orchestration
+resilience — pxx's own in-session healing loop (`pxx loop`, R-031/R-034) is a separate,
+lower layer.
+
+---
+
+## R-040 — parallel fan-out: n8n dispatches N governed pxx engines, joins, aggregates, and routes on the aggregate
+
+**Claim.** One n8n workflow fans out across **N independent governed pxx engines** (one
+`pxx serve` per repo, each with its own scope), runs them concurrently, **joins** all
+terminals, **aggregates** the host-enforced terminal codes, and **routes on the
+aggregate** — `all-clear` only if every session passed, else `HOLD` naming the
+failure(s). A gate over a fleet, not a single call.
+
+**Grade.** Attested (2026-08-08, executed end-to-end via `n8n execute`, three real
+sessions across three engines; per-engine side-effects verified) + Reproducible
+(`docs/examples/n8n-pxx-fanout-pipeline.json`).
+
+**Exact configuration (nothing inherits).** n8n **2.33.7** (self-hosted, CLI engine);
+**three** `pxx serve` **2.4.0** engines, each a separate git repo + scope, all on local
+ollama **Qwen3-Coder-30B**: `:8477` scope `mathlib.py`, `:8478` scope `stringutil.py`,
+`:8479` scope `listutil.py` (shared Bearer token). Pipeline: **Code** emits 3 jobs
+(`{port, label, task}`) → **HTTP POST `/v1/sessions`** per job (start is non-blocking, so
+all three launch before any join) → **HTTP GET `/events`** per job (join to each
+terminal) → **Code** aggregates `{results, passed, total, allPassed, failures}` → **IF
+`allPassed`** → `all-clear` | `HOLD`.
+
+**Observed (2026-08-08, one run, side-effects verified).**
+
+| Engine | Job | Terminal | File effect |
+|---|---|---|---|
+| `:8477` mathlib | add `multiply()` | `COMPLETED` | `def multiply` written |
+| `:8478` stringutil | add `whisper()` | `COMPLETED` | `def whisper` written |
+| `:8479` listutil | edit `README.md` (out of scope) | **`OUT_OF_SCOPE`** | **clean tree — nothing written** |
+
+**Aggregate route:** `HOLD — 2/3 passed; failures: listutil (OOS):OUT_OF_SCOPE`. The
+one out-of-scope job was blocked by *its* engine's scope gate, surfaced as a
+non-`COMPLETED` terminal, and correctly denied the `all-clear` — the routing decision is
+computed over provable, host-enforced terminal codes across the whole fleet.
+
+**Boundary — explicitly not claimed.** (a) The engines share **one 16 GB GPU**, so the
+three 30B generations **serialize at inference** — the *parallelism is at the
+orchestration layer* (concurrent dispatch + join + aggregate), and wall-clock ≈ sum of
+the real edits on this hardware; genuine inference concurrency needs distinct
+backends/GPUs (the config is unchanged — point each engine's `base_url` at a different
+box). (b) N=3 here; the pattern is N-agnostic (add jobs + engines). (c) Fan-out is
+across **separate repos/scopes on separate serves** — concurrent sessions on a single
+serve/repo would contend on the working tree; that isolation is the point.
+
+---
+
 *Convention: entries are append-only and dated; superseded claims are
 struck through with a pointer to the superseding entry, never deleted.*

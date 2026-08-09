@@ -57,6 +57,18 @@ def test_approval_blocks_carry_nonce_and_actions(broker):
     assert by_id["pxx_modify"]["value"] == "nonce9"  # modify button present (P2)
     assert by_id["pxx_approve"]["style"] == "primary"
     assert by_id["pxx_abort"]["style"] == "danger"
+    # no origin given -> no origin line, first block is the summary (backward compatible)
+    assert blocks[0]["type"] == "section"
+
+
+def test_approval_blocks_origin_label(broker):
+    blocks = broker.approval_blocks("n1", "do a thing", origin="openclaw")
+    # origin renders as a distinct top context line carrying the source label
+    assert blocks[0]["type"] == "context"
+    assert "openclaw" in blocks[0]["elements"][0]["text"]
+    # the buttons still carry the nonce regardless of origin
+    actions = next(b for b in blocks if b["type"] == "actions")["elements"]
+    assert {e["action_id"] for e in actions} == {"pxx_approve", "pxx_abort", "pxx_modify"}
 
 
 def test_outcome_blocks_render_each_terminal(broker):

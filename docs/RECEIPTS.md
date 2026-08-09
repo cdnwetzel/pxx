@@ -1956,5 +1956,126 @@ serve/repo would contend on the working tree; that isolation is the point.
 
 ---
 
+## R-041 — VRAM capacity beats GPU generation: full-VRAM 40 GB Ampere runs the 30B ~2.2× faster than a newer 16 GB card that must offload
+
+**Claim.** The ~40 tok/s behind the n8n-battery receipts (R-035–R-040) was a *16 GB,
+partial-CPU-offload* number, not a hardware ceiling. Running the **identical** 30B weights
+on a **40 GB dual-GPU (NVLINK) box** where the model fits **entirely in VRAM** roughly
+**doubles** generation speed — and the winner is the *older* Ampere pair, not the newer
+single card, purely because capacity avoids the offload.
+
+**Grade.** Attested (2026-08-09, both boxes back-to-back, identical prompt / seed / weights).
+Directly measured tok/s from the engine's `eval_count / eval_duration`, plus the engine's
+GPU/CPU placement report and `nvidia-smi`.
+
+**Exact configuration.** Same model both sides: **Qwen3-Coder-30B-A3B, Q4_K_M GGUF,
+identical digest** (`06c1097efce0`, MoE 30.5B total / ~3B active). Same Ollama build
+(0.32.6), same fixed prompt (`seed=42, temperature=0, num_predict=320`).
+
+| Box | GPU(s) | Model placement | Gen speed |
+|---|---|---|---|
+| **16 GB, newer gen** (Blackwell, single card) | 16 GB | **33% / 67% CPU/GPU — partial offload** | **31.8 tok/s** |
+| **40 GB, older gen** (Ampere ×2, NVLINK) | 20 + 20 GB | **100% GPU — no offload** (11.3 + 10.7 GB across the pair) | **69.3 tok/s** (69.3 / 69.3 / 68.5) |
+
+**~2.2× faster on identical weights.** The KV/context also grew for free on the 40 GB box
+(Ollama auto-sized 32 K context vs 16 K on the constrained card).
+
+**End-to-end, not just a micro-benchmark.** A 3-task governed `pxx run` suite (same model,
+same tasks, same 3 rounds and ~6.5 K tokens each — identical *work*, so the gap is pure
+hardware) confirms the raw figure carries into real coding:
+
+| Task | 16 GB (offload) | 40 GB (full VRAM) | speedup |
+|---|---|---|---|
+| add `multiply` | 32.0 s | 7.2 s | 4.4× (cold load on the 16 GB box) |
+| add `safe_divide` | 17.0 s | 8.7 s | 2.0× |
+| add `slugify` | 18.8 s | 9.1 s | 2.1× |
+
+Steady-state **~2.2×** end-to-end (matching the raw tok/s); the 4.4× is a first-call model
+load. pxx finishes real governed tasks roughly twice as fast on the full-VRAM box.
+
+**Boundary — explicitly not claimed.** (a) One Q4_K_M quant of one 30B on two specific
+boxes; a *capacity-vs-offload* demonstration, not a general GPU ranking — a newer card with
+≥ the model's footprint in VRAM would not pay the offload tax. (b) tok/s is single-stream,
+model hot; batching/concurrency differ (see R-042). (c) The comparison isolates placement
+(offload vs none); the GPUs differ in generation/bandwidth too, but the decisive variable
+here is that 40 GB fits the model and 16 GB does not. (d) Capability/perf assumptions expire
+when hardware/allocation changes — re-measure on the actual box, don't infer.
+
+---
+
+## R-042 — dual-GPU NVLINK makes fan-out real: 198% at N=2, and a single model splits +14% over the link
+
+**Claim.** R-040 showed n8n fan-out over one 16 GB GPU *serializes* at inference. On a
+two-GPU NVLINK box the serialization disappears: a model pinned per GPU gives **genuine
+2× aggregate throughput**, and even a single model split across the link runs **faster**
+than on one GPU. The dual-GPU box is not just more VRAM — it is a real parallel-inference
+substrate.
+
+**Grade.** Attested (2026-08-09, measured on the box) + Reproducible (protocol below).
+
+**Config.** Two RTX A4500 (20 GB each) in **NVLINK NV4** (4 × 14.06 = ~56 GB/s aggregate,
+per `nvidia-smi nvlink --status`); Ollama 0.32.6; two GPU-pinned serves
+(`CUDA_VISIBLE_DEVICES=0` / `=1`).
+
+| Test | Setup | Result |
+|---|---|---|
+| **P2 — model per GPU** | gpt-oss:20b, one copy per GPU, both fired | single 49.7 → **98.3 tok/s = 198%** (near-perfect 2×) |
+| **P3 — single model split** | qwen3-coder:30b (18 GB, fits one card), ctx 2048 | 1-GPU **59.7** → 2-GPU NVLINK split **68.3** = **+14%** |
+| baseline (one GPU, N streams) | Tier-1, Ollama default | aggregate flat ~65 tok/s (serializes) |
+
+**Why.** Generation is memory-bandwidth-bound. Two GPUs ≈ 2× aggregate bandwidth; NVLINK's
+56 GB/s keeps cross-GPU sync cheap enough that splitting a *single* model still nets +14%,
+and *independent* models per GPU scale almost perfectly. This is exactly the concurrent
+fan-out a single GPU can't provide (R-040's boundary) — real on the dual-GPU box.
+
+**Boundary.** P2 used a model that fits one card (13 GB) so each GPU holds a full copy; a
+model too big for one card must tensor-split (the P3 regime). Single-GPU serialization
+(Tier-1) was at Ollama's default `NUM_PARALLEL`; batched single-GPU throughput is a separate
+measurement. CUDA device ordering ≠ nvidia-smi index (cosmetic).
+
+---
+
+## R-043 — throughput is set by ACTIVE parameters, not headline size; quant + a 70B map the VRAM ceiling
+
+**Claim.** On identical hardware (40 GB, full VRAM), single-stream coder throughput is
+governed by **active** parameters per token, not total size: a 16 B MoE beats a 32 B dense
+by 4.5×. Model *size* maps cleanly onto the VRAM ceiling — a Q8 30 B (35 GB) and a dense
+32 B run fully in 40 GB but are impossible on 16 GB, while a 70 B Q4 (~42 GB) breaches even
+40 GB and offloads.
+
+**Grade.** Attested (2026-08-09) + Reproducible (Ollama 0.32.6, seed-fixed prompt, single stream).
+
+**Observed (40 GB box, single stream).**
+| Model | Type (active/tok) | Placement | tok/s |
+|---|---|---|---|
+| deepseek-coder-v2:16b | MoE (~2.4 B) | 100% GPU, 19 GB | **94.3** |
+| qwen3-coder:30b Q4 | MoE (~3 B) | 100% GPU, 22 GB | 69.3 |
+| qwen3-coder:30b **Q8** | MoE (~3 B) | 100% GPU, **35 GB** | **63.6** |
+| gpt-oss:20b | reasoning | 100% GPU, 12 GB | 53.5 |
+| gemma2:27b | dense (27 B) | 100% GPU, 17 GB | 24.3 |
+| qwen2.5-coder:32b Q4 | dense (32 B) | 100% GPU, 29 GB | **20.8** |
+| llama3.3:70b Q4 | dense (70 B) | **28%/72% CPU/GPU** (54 GB) | 3.8 |
+
+→ **Active-params dominate:** the 16 B MoE (94.3) is **4.5×** the 32 B dense (20.8); the
+30 B MoE (69.3) is 3.3× the dense 32 B despite more total params. **Q8 costs almost
+nothing:** 63.6 vs Q4's 69.3 (~8%) for double the weight precision — and its 35 GB fits
+40 GB but is **impossible on 16 GB**. The 70 B Q4 (~42 GB) **breaches even 40 GB**.
+
+**The 70B offload contest (each box offloads differently).**
+| Box | VRAM / RAM / CPU | 70B placement | tok/s |
+|---|---|---|---|
+| 40 GB box | 40 GB VRAM, 256 GB ECC quad-channel, 44 threads | 28%/72% CPU/GPU (~28% spills) | **3.8** |
+| 16 GB box | 16 GB VRAM, 64 GB dual-channel, 32 threads | only ~14/42 GB fits (~67% spills) | **did not reach a serving state** in repeated attempts |
+
+→ The 70 B is **usable-but-slow on 40 GB** (3.8 tok/s, ~28% offload onto quad-channel +
+44 threads) and **impractical on 16 GB** (~67% would offload; the model never loaded to a
+serving state here). Capacity + memory-subsystem, not GPU generation, set the ceiling.
+
+**Boundary.** Single-stream, model hot; quant levels differ per model where noted; "active
+params" are architectural estimates; throughput ≠ quality. The 16 GB 70 B result is a
+non-completion, reported as such — no tok/s is claimed for it.
+
+---
+
 *Convention: entries are append-only and dated; superseded claims are
 struck through with a pointer to the superseding entry, never deleted.*

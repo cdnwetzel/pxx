@@ -2077,5 +2077,52 @@ non-completion, reported as such — no tok/s is claimed for it.
 
 ---
 
+## R-044 — a live Slack HITL round-trip: approve tapped in Slack releases a blocked pxx gate, over Socket Mode, no public endpoint
+
+**Claim.** The R-036/R-038 HITL gate now has its **primary transport** wired to Slack
+(the roadmap decision of 2026-08-09: richer feedback preferred). A blocked approval is
+posted to a private Slack channel as a Block Kit card; a human **taps Approve in Slack**;
+the decision comes back over **Socket Mode** (the app dials out, so there is **no inbound
+public endpoint**); the single-use decision releases the blocked call. Proven live against
+a real workspace.
+
+**Grade.** Attested (2026-08-09, live end-to-end on workspace `CWetzel.com`, real human
+tap) + Reproducible (reference broker at `docs/examples/hitl/slack_hitl_broker.py`;
+pure-logic unit tests in `tests/test_slack_hitl_broker.py`).
+
+**Exact configuration (nothing inherits).** A classic Slack app (`chat:write` + Socket
+Mode, created from a manifest; the workspace is not next-gen-platform eligible, so this is
+deliberately a classic Socket Mode app, not a hosted "run on Slack" app). Broker: FastAPI
+`/request-approval` on loopback `:8490` + `slack_sdk` `SocketModeClient`/`WebClient`,
+tokens read from trusted env (`PXX_SLACK_APP_TOKEN` `xapp-`, `PXX_SLACK_BOT_TOKEN` `xoxb-`,
+`PXX_SLACK_CHANNEL`), **no CLI dependency at runtime**. Same seam as the FastAPI broker:
+the PreToolUse hook POSTs `{summary}` and polls the decision file.
+
+**Observed (2026-08-09, one live run).**
+
+| Step | Result |
+|---|---|
+| `POST /request-approval` | Block Kit card posted to `#pxx-approval` (Approve/Abort carry the nonce) |
+| human taps **Approve** in Slack | `block_actions` delivered over the app's outbound websocket |
+| Socket Mode handler | wrote a **single-use** decision (`O_EXCL`, fsync'd): `by: chris, decision: approve` |
+| blocked `/request-approval` | released, returned `decision: approve` (nonce `1284b50…`) |
+| the card | edited in place to show the outcome + who decided |
+
+Pre-flight the same day also verified `auth.test` (bot token), `chat.postMessage` (live
+post), and `apps.connections.open` (the `xapp-` token opens a Socket Mode `wss://`).
+
+**Boundary — explicitly not claimed.** (a) **Approve** is the path proven *live*; **abort**
+is the symmetric handler (same `write_decision`, different `action_id`) and **timeout** is
+the fail-closed deadline (return `timeout` → deny) — both are covered by the unit tests of
+the decision logic and are the same fail-closed semantics R-036 already proved live, but
+this receipt attests the *approve* tap specifically. (b) The **Modify** modal is P2, not
+yet built (the button is present; `view_submission` handling is the next slice). (c) The
+broker is a ~150-line reference impl, not a hardened service; run it loopback with the
+Socket Mode connection to Slack. (d) Security invariant held: the approval is a bearer
+capability, and it rode an authenticated, endpoint-less transport (Socket Mode) into a
+private channel — no public callback URL exists in this path at all.
+
+---
+
 *Convention: entries are append-only and dated; superseded claims are
 struck through with a pointer to the superseding entry, never deleted.*

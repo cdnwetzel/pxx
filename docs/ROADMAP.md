@@ -387,11 +387,44 @@ CHANGELOG.md; highlights:
 - Model-backed boundary roles (today's are deterministic). **First step
   shipped in 2.2.0** (see above): the reviewer role can run on its own
   model/endpoint. Remaining:
-  - **Extend per-role routing beyond `review`** — `[roles.coder]` /
-    `[roles.planner]` on the same overlay mechanism, so e.g. an
-    NL-interpreter/planner runs on the Mac and feeds the GPU coder (only the
-    reviewer role is wired through the runtime today; the config surface is
-    fail-closed on any other role name).
+  - **Multi-role model routing (fleet-aware)** — extend per-role routing beyond
+    `review` to a general `[roles.*]` table so each role runs on its own model
+    and endpoint (only the reviewer role is wired through the runtime today; the
+    config surface is fail-closed on any other role name). Recorded 2026-08-09
+    after the full-VRAM/NVLINK benchmark (R-041–R-043) made the fleet's per-model
+    speeds evidence-based.
+    - **First buildable slice — three roles, two already proven.** Generalize the
+      shipped `review_model` overlay to `[roles.plan] / [roles.code] /
+      [roles.review]` and add exactly one *new* role, `plan`. `code`+`review`
+      already work (the two-box loop: coder on the GPU box, judge on the Mac).
+      The only net-new code is the config generalization (mirror `review_model`)
+      plus a model-backed planning pass at task start. Prove it with one governed
+      run: strong planner → tight scope → warm coder → separate judge.
+    - **Warm/cold latency-class principle (handles Ollama's cold-load cost).**
+      Roles split by latency budget: **hot-loop roles (`code`, `review`)** run
+      many times per task → keep them *warm*; **one-shot upstream roles
+      (`plan`, research, scope-proposal)** run once and tolerate a 30–60 s
+      cold-load of the *strongest* model, amortized over a multi-minute task. The
+      penalty lands where it doesn't hurt.
+    - **Fleet map (avoid swapping by co-residence, not a scheduler).** The
+      benchmark showed the 40 GB NVLINK box can hold the entire hot loop warm at
+      once (coder ~22 GB + a small judge ~10 GB co-resident); a 16 GB box holds a
+      fast MoE scoper (e.g. a 16 B coder at ~94 tok/s); the Mac holds a
+      planner/interpreter/judge-fallback. Static per-box pinning first — no
+      swap-scheduler on day one.
+    - **Mechanism before policy (sequencing).** The routing *mechanism* (`roles`
+      dict) is small, low-risk plumbing and can land near-term. The *evidence-
+      based* role→model *assignment* rides on **live eval arms** (above), which
+      score which model actually wins each role instead of guessing; today's
+      benchmark is the first data point.
+    - **Invariants kept.** Routing is config-driven, not agent-decided (the agent
+      can't re-route itself); every role's model+endpoint lands in the audit log;
+      **scoping stays host-enforced** — a planner model may *propose* scope, but
+      the host still enforces it (R-014), so `scope` is a proposal feeding a
+      policy gate, not a model that decides.
+    - **Deferred (write down, don't build):** the `research` role (blocked on the
+      governed `web_fetch` item below — no point routing a role with no tool yet);
+      any auto-swap/model-manager logic (static pinning suffices given fleet VRAM).
   - **Model-back the deterministic Reproducer / Boundary-Reviewer /
     Artifact-Reviewer** roles (`roles.py`), calibrated the same way the
     review judge is (`pxx calibrate`).

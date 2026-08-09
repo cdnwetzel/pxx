@@ -19,6 +19,7 @@ Env: PXX_SLACK_APP_TOKEN (xapp-), PXX_SLACK_BOT_TOKEN (xoxb-), PXX_SLACK_CHANNEL
 slack_sdk is imported lazily inside build()/main so the pure helpers below import (and
 unit-test) without the dependency. Run: uv run --with slack_sdk --with fastapi --with uvicorn python3 slack_hitl_broker.py
 """
+
 from __future__ import annotations
 
 import json
@@ -42,8 +43,7 @@ def write_decision(hitl_dir: Path, nonce: str, decision: str, who: str) -> bool:
     if decision not in ("approve", "abort") or not nonce.isalnum():
         return False
     try:
-        fd = os.open(hitl_dir / f"{nonce}.decision",
-                     os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        fd = os.open(hitl_dir / f"{nonce}.decision", os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
     except FileExistsError:
         return False
     with os.fdopen(fd, "w") as f:
@@ -57,26 +57,47 @@ def approval_blocks(nonce: str, summary: str) -> list:
     """Block Kit for an approval request. nonce rides in each button's value."""
     return [
         {"type": "section", "text": {"type": "mrkdwn", "text": summary}},
-        {"type": "actions", "block_id": f"pxx:{nonce}", "elements": [
-            {"type": "button", "text": {"type": "plain_text", "text": "Approve"},
-             "style": "primary", "action_id": "pxx_approve", "value": nonce},
-            {"type": "button", "text": {"type": "plain_text", "text": "Abort"},
-             "style": "danger", "action_id": "pxx_abort", "value": nonce},
-        ]},
-        {"type": "context", "elements": [
-            {"type": "mrkdwn", "text": "Deny-by-default after the deadline."}]},
+        {
+            "type": "actions",
+            "block_id": f"pxx:{nonce}",
+            "elements": [
+                {
+                    "type": "button",
+                    "text": {"type": "plain_text", "text": "Approve"},
+                    "style": "primary",
+                    "action_id": "pxx_approve",
+                    "value": nonce,
+                },
+                {
+                    "type": "button",
+                    "text": {"type": "plain_text", "text": "Abort"},
+                    "style": "danger",
+                    "action_id": "pxx_abort",
+                    "value": nonce,
+                },
+            ],
+        },
+        {
+            "type": "context",
+            "elements": [{"type": "mrkdwn", "text": "Deny-by-default after the deadline."}],
+        },
     ]
 
 
 def outcome_blocks(decision: str, user_id: str) -> list:
-    label = {"approve": "✅ approved", "abort": "\U0001f6ab aborted",
-             "timeout": "⏳ expired → denied"}.get(decision, decision)
+    label = {
+        "approve": "✅ approved",
+        "abort": "\U0001f6ab aborted",
+        "timeout": "⏳ expired → denied",
+    }.get(decision, decision)
     who = f" by <@{user_id}>" if user_id else ""
-    return [{"type": "section",
-             "text": {"type": "mrkdwn", "text": f"pxx approval — *{label}*{who}"}}]
+    return [
+        {"type": "section", "text": {"type": "mrkdwn", "text": f"pxx approval — *{label}*{who}"}}
+    ]
 
 
 # ---- runtime wiring (slack_sdk + fastapi imported here so the module imports clean) ----
+
 
 def main() -> None:
     from fastapi import Body, FastAPI
@@ -108,9 +129,12 @@ def main() -> None:
         if decision and write_decision(hitl_dir, nonce, decision, who):
             ch_ts = posted.get(nonce)
             if ch_ts:
-                web.chat_update(channel=ch_ts[0], ts=ch_ts[1],
-                                text=f"pxx approval {decision} by {who}",
-                                blocks=outcome_blocks(decision, user.get("id", "")))
+                web.chat_update(
+                    channel=ch_ts[0],
+                    ts=ch_ts[1],
+                    text=f"pxx approval {decision} by {who}",
+                    blocks=outcome_blocks(decision, user.get("id", "")),
+                )
 
     sm.socket_mode_request_listeners.append(on_socket)
 
@@ -124,8 +148,9 @@ def main() -> None:
     def request_approval(body: dict = Body(default={})):
         nonce = token_hex(8)
         summary = body.get("summary", "(no summary)")
-        resp = web.chat_postMessage(channel=channel, text="pxx approval request",
-                                    blocks=approval_blocks(nonce, summary))
+        resp = web.chat_postMessage(
+            channel=channel, text="pxx approval request", blocks=approval_blocks(nonce, summary)
+        )
         posted[nonce] = (resp["channel"], resp["ts"])
         spool = hitl_dir / f"{nonce}.decision"
         end = time.time() + deadline
@@ -137,9 +162,12 @@ def main() -> None:
                     d = "unreadable"
                 return {"nonce": nonce, "decision": d}
             time.sleep(0.5)
-        web.chat_update(channel=posted[nonce][0], ts=posted[nonce][1],
-                        text="pxx approval expired (denied)",
-                        blocks=outcome_blocks("timeout", ""))
+        web.chat_update(
+            channel=posted[nonce][0],
+            ts=posted[nonce][1],
+            text="pxx approval expired (denied)",
+            blocks=outcome_blocks("timeout", ""),
+        )
         return {"nonce": nonce, "decision": "timeout"}  # fail-closed
 
     sm.connect()  # Socket Mode listener runs in a background thread

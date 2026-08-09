@@ -4,6 +4,7 @@ The example is a reference implementation, not part of the pxx package, so we lo
 it by path. Its slack_sdk / fastapi imports are lazy (inside main()), so these pure
 helpers import and test WITHOUT those dependencies installed.
 """
+
 from __future__ import annotations
 
 import importlib.util
@@ -13,8 +14,7 @@ from pathlib import Path
 import pytest
 
 _EXAMPLE = (
-    Path(__file__).resolve().parent.parent
-    / "docs" / "examples" / "hitl" / "slack_hitl_broker.py"
+    Path(__file__).resolve().parent.parent / "docs" / "examples" / "hitl" / "slack_hitl_broker.py"
 )
 
 

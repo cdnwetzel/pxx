@@ -2115,12 +2115,53 @@ post), and `apps.connections.open` (the `xapp-` token opens a Socket Mode `wss:/
 is the symmetric handler (same `write_decision`, different `action_id`) and **timeout** is
 the fail-closed deadline (return `timeout` → deny) — both are covered by the unit tests of
 the decision logic and are the same fail-closed semantics R-036 already proved live, but
-this receipt attests the *approve* tap specifically. (b) The **Modify** modal is P2, not
-yet built (the button is present; `view_submission` handling is the next slice). (c) The
+this receipt attests the *approve* tap specifically. (b) The **Modify** modal is P2;
+~~not yet built~~ now built and proven live, see R-045 (`view_submission` handling
+shipped). (c) The
 broker is a ~150-line reference impl, not a hardened service; run it loopback with the
 Socket Mode connection to Slack. (d) Security invariant held: the approval is a bearer
 capability, and it rode an authenticated, endpoint-less transport (Socket Mode) into a
 private channel — no public callback URL exists in this path at all.
+
+---
+
+## R-045 — the Slack HITL Modify path: a human re-scopes the request in a modal, and the structured decision releases the gate
+
+**Claim.** The richer feedback that motivated choosing Slack over a button-only transport
+(the roadmap decision of 2026-08-09) is proven live: instead of a binary approve/abort, a
+human taps **Modify**, a Slack modal opens, they enter a **revised scope and a note**, and
+those structured fields come back over Socket Mode as a single-use `modify` decision that
+releases the blocked pxx gate. This completes the P2 slice that R-044 left open.
+
+**Grade.** Attested (2026-08-09, live end-to-end on workspace `CWetzel.com`, real human
+filling the modal) + Reproducible (`docs/examples/hitl/slack_hitl_broker.py`; pure-logic
+unit tests in `tests/test_slack_hitl_broker.py` cover the modal build, the submission
+parse, and the single-use `modify` write).
+
+**Exact configuration (nothing inherits).** Same broker and app as R-044, extended: the
+approval card now carries a third button, **Modify**. On tap, the handler calls
+`views.open` with a modal (`callback_id` `pxx_modify_submit`, the nonce in
+`private_metadata`, two optional inputs: revised scope and note). On submit, the
+`view_submission` payload is read into `{scope, note}`, written as a single-use (`O_EXCL`,
+fsync'd) `modify` decision, and the card is edited to show the modification. All over the
+app's outbound Socket Mode connection; no public endpoint.
+
+**Observed (2026-08-09, one live run).**
+
+| Step | Result |
+|---|---|
+| tap **Modify** | `block_actions` `action_id=pxx_modify` → `views.open` returned `ok=true` (modal shown) |
+| fill + **Send back** | `view_submission` `callback_id=pxx_modify_submit`, `scope='mathlib.py'`, `note='Only add multiply'` |
+| decision written | single-use `modify` record: `by: chris, scope: mathlib.py, note: Only add multiply` |
+| blocked `/request-approval` | released, returned `decision: modify` (nonce `ef0d403…`) |
+
+**Boundary — explicitly not claimed.** (a) The `modify` decision *records* the human's
+revised scope and note; *acting* on them (re-running the agent under the tighter scope) is
+the caller's job, not the broker's. It is a structured hand-back, not an automatic re-run.
+(b) Fields are optional and free-text; the host still enforces whatever scope is ultimately
+set (a proposed scope is a proposal into pxx's gate, R-014, not a bypass). (c) Same
+reference-impl and loopback caveats as R-044. (d) The single-use and fail-closed-timeout
+invariants are unchanged and covered by the unit tests, now including the `modify` path.
 
 ---
 

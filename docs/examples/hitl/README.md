@@ -18,8 +18,12 @@ alone). Approvals only ride an authenticated, non-public transport.
 
 There are two independent stacks here. Pick by what you are gating. These are two
 *triggers*, not two Slack channels or two roles: both can post to the same
-`#pxx-approvals` channel. Use separate channels only if you want to visually distinguish an
-interactive run's approvals from a pipeline's, which is a preference, not a requirement.
+`#pxx-approvals` channel. To keep sources distinguishable in one channel, `POST
+/request-approval` takes an optional **`origin`** label (for example `"pxx run"`,
+`"n8n: governed-PR"`, or `"openclaw"`) that renders as a distinct top line on the card, so
+you always see where an approval came from without needing a channel per source. Use
+separate channels only if you also want them physically split, which is a preference, not
+a requirement.
 
 ### A. Supervise your own `pxx run` (the PreToolUse gate)
 

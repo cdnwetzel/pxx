@@ -65,8 +65,13 @@ def write_decision(
     return True
 
 
-def approval_blocks(nonce: str, summary: str) -> list:
-    """Block Kit for an approval request. nonce rides in each button's value."""
+def approval_blocks(nonce: str, summary: str, origin: str = "") -> list:
+    """Block Kit for an approval request. nonce rides in each button's value.
+
+    `origin` is a free-text source label (e.g. "pxx run", "n8n: governed-PR",
+    "openclaw") rendered as a distinct top line, so one channel can carry approvals
+    from many sources and you always see where a card came from.
+    """
 
     def button(text, action_id, style=None):
         b = {
@@ -79,7 +84,12 @@ def approval_blocks(nonce: str, summary: str) -> list:
             b["style"] = style
         return b
 
-    return [
+    blocks = []
+    if origin:
+        blocks.append(
+            {"type": "context", "elements": [{"type": "mrkdwn", "text": f"📨 from *{origin}*"}]}
+        )
+    blocks += [
         {"type": "section", "text": {"type": "mrkdwn", "text": summary}},
         {
             "type": "actions",
@@ -95,6 +105,7 @@ def approval_blocks(nonce: str, summary: str) -> list:
             "elements": [{"type": "mrkdwn", "text": "Deny-by-default after the deadline."}],
         },
     ]
+    return blocks
 
 
 def modify_modal(nonce: str) -> dict:
@@ -229,8 +240,11 @@ def main() -> None:
     def request_approval(body: dict = Body(default={})):
         nonce = token_hex(8)
         summary = body.get("summary", "(no summary)")
+        origin = body.get("origin", "")  # free-text source label, shown on the card
         resp = web.chat_postMessage(
-            channel=channel, text="pxx approval request", blocks=approval_blocks(nonce, summary)
+            channel=channel,
+            text="pxx approval request",
+            blocks=approval_blocks(nonce, summary, origin),
         )
         posted[nonce] = (resp["channel"], resp["ts"])
         spool = hitl_dir / f"{nonce}.decision"

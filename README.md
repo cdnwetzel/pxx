@@ -1,4 +1,4 @@
-# pxx 2.0 — local-first AI coding agent runtime
+# pxx 2.0 - local-first AI coding agent runtime
 
 [![CI](https://github.com/cdnwetzel/pxx/actions/workflows/ci.yml/badge.svg?branch=v2)](https://github.com/cdnwetzel/pxx/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/pxx-orchestrator)](https://pypi.org/project/pxx-orchestrator/)
@@ -6,13 +6,13 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 `pxx` is an async, event-sourced coding-agent runtime that runs against **your own
-inference** (Ollama, vLLM, or any OpenAI-compatible endpoint) — no cloud dependency,
+inference** (Ollama, vLLM, or any OpenAI-compatible endpoint) - no cloud dependency,
 no telemetry, no API keys required. It pairs a native tool-calling agent loop with
 persistent cross-session memory, deterministic safety gates, and MCP interop, and
 can delegate to [aider](https://github.com/Aider-AI/aider) as an optional edit engine.
 
 > **New here? → [Hands-on tutorial](https://github.com/cdnwetzel/pxx/blob/v2/docs/TUTORIAL.md)**
-> Every claim this project makes is evidence-gated — dated records, reproducible
+> Every claim this project makes is evidence-gated - dated records, reproducible
 > procedures, and explicit non-claims live in
 > [docs/RECEIPTS.md](https://github.com/cdnwetzel/pxx/blob/v2/docs/RECEIPTS.md).
 
@@ -27,14 +27,14 @@ can delegate to [aider](https://github.com/Aider-AI/aider) as an optional edit e
 
 - **Offline-capable**: all inference stays on your machine or your LAN.
 - **pxx owns the runtime**: every model/tool event flows through pxx's event bus.
-  Backends cannot bypass policy — scope, permissions, budgets, and hooks are
+  Backends cannot bypass policy - scope, permissions, budgets, and hooks are
   enforced by the host, never by the model.
 - **Persistent memory**: observations from previous sessions (files changed, tool
   outcomes, your own `remember` notes) are stored in a local SQLite database with
   hybrid BM25 + vector search and injected deterministically at session start.
 - **Fail-closed safety**: read-only by default. Writes require `edit`/`run` mode,
   stay inside a canonicalized scope (symlinks resolved), shell commands are gated
-  in every write-capable mode (a hook, sandbox, or explicit opt-in — even under
+  in every write-capable mode (a hook, sandbox, or explicit opt-in - even under
   unattended `run`), and every run ends with a machine-readable terminal code in
   a hash-chained audit log.
 - **Interop**: consumes MCP servers as tools, and exposes its own memory as an MCP
@@ -42,45 +42,56 @@ can delegate to [aider](https://github.com/Aider-AI/aider) as an optional edit e
 
 ## Where pxx fits
 
-This is a fit guide, not a sales pitch — pxx isn't competing on raw capability. It
+This is a fit guide, not a sales pitch - pxx isn't competing on raw capability. It
 exists because one distinction is **architectural, not marketing:** a hosted SaaS
 coding agent *cannot* be self-hosted. Your source and your inference run on the
 vendor's infrastructure by construction. Where that's permitted you have many good
-options. Where it isn't — regulated, air-gapped, IP-sensitive, sovereignty-required —
+options. Where it isn't - regulated, air-gapped, IP-sensitive, sovereignty-required -
 that entire category is off the table before capabilities are even discussed, because
 those environments demand a higher standard than "the vendor is trustworthy": the code
 and the inference must stay inside controls the operator owns, and every action must be
 auditable.
 
+One honest caveat up front: running locally and air-gapped is not unique to pxx. Local
+agents such as aider and opencode run entirely on your own hardware too, so locality is
+the floor here, not the differentiator. What pxx adds sits above the model, in the points
+below, and it is defense in depth *inside* the isolation you build, never a substitute
+for it.
+
 pxx is built to that sovereign standard:
 
-- **Self-hosted, always.** Code and inference stay on hardware *you* own — local,
-  on-prem, or fully air-gapped; your models, your network, your key management, your
-  audit boundary. No vendor in the loop, no telemetry, no data egress.
+- **Self-hosted, always (the floor, not the pitch).** Code and inference stay on
+  hardware you own: local, on-prem, or fully air-gapped; your models, your network, your
+  key management, your audit boundary. No vendor in the loop, no telemetry, no data
+  egress. Other local agents do this too; the difference is the two points below.
 - **Host-enforced, not model-trusted.** Scope, permissions, budgets, and hooks are
-  enforced by the host — a jailbroken or confused model still can't leave its lane —
-  and the run's policy decisions and terminal outcome are recorded in a hash-chained,
-  tamper-evident audit log you can verify (`pxx audit verify`).
+  enforced by the host process, so a jailbroken or confused model still can't write
+  outside the files you allowed. This is an action-level boundary and defense in depth
+  *inside* your own isolation (network, sandbox, air-gap), not a replacement for it. And
+  because the gate is our code, the honest control is not to trust it: read it (MIT) and
+  verify the hash-chained, tamper-evident audit of what it actually did (`pxx audit
+  verify`).
 - **Open, inspectable, and yours to change.** MIT, under the same community model that
-  made Linux and the tools you already rely on — not "source-available," not open-core
+  made Linux and the tools you already rely on - not "source-available," not open-core
   with the real logic hidden behind a service. You don't just get to *read* every gate,
-  tool, and decision (no hidden functions, no telemetry) — you have the full open-source
+  tool, and decision (no hidden functions, no telemetry) - you have the full open-source
   freedoms to **run, study, modify, and redistribute** it. For a regulated shop that's
   the deepest control there is: fork it, harden the enforcement to *your* compliance
-  regime, add your own gates, and own that fork — no vendor lock-in, and no dependence on
+  regime, add your own gates, and own that fork - no vendor lock-in, and no dependence on
   a vendor's roadmap or continued existence. (MIT goes even further than Linux's
   copyleft: adapt it freely, even inside proprietary internal tooling, with no strings.)
   SaaS grants you none of these rights; pxx grants all of them.
-- **Evidence-gated — a step beyond typical open source.** Open source hands you the
+- **Evidence-gated - a step beyond typical open source.** Open source hands you the
   source; pxx also keeps the *receipts*. Every capability claim maps to a dated,
   reproducible record in
   [docs/RECEIPTS.md](https://github.com/cdnwetzel/pxx/blob/v2/docs/RECEIPTS.md) with an
-  explicit statement of what is *not* claimed — evidence, not just availability.
+  explicit statement of what is *not* claimed - evidence, not just availability.
 
 The through-line is **verify, don't trust:** no vendor to trust (there isn't one), no
-binary to trust (read it), no claims to trust (check the receipts).
+binary to trust (read it), no claims to trust (check the receipts). You should not have to
+trust software you did not write, so this is built to be read and its record verified.
 
-**Use pxx when** self-hosting, sovereignty, and provable audit are *requirements* — when
+**Use pxx when** self-hosting, sovereignty, and provable audit are *requirements* - when
 the work simply cannot leave your perimeter and "trust the vendor" isn't a sufficient
 control.
 
@@ -88,7 +99,7 @@ pxx is deliberately **not** trying to be the tool for every environment. If your
 environment permits SaaS and you want maximum capability on hard or greenfield work, a
 hosted frontier agent will do more; if you want turn-by-turn pair editing, a local
 assistant such as [aider](https://github.com/Aider-AI/aider) (which pxx can delegate to)
-may fit better. pxx has no browser yet and leans on smaller local models — it trades
+may fit better. pxx has no browser yet and leans on smaller local models - it trades
 breadth for sovereignty and auditability, on purpose. It's early (2.x) and
 solo-maintained; the receipts, not the prose, are the source of truth.
 
@@ -101,7 +112,7 @@ pip install "pxx-orchestrator[aider]"   # aider delegation backend (Python < 3.1
 pip install "pxx-orchestrator[server]"  # headless HTTP API (pxx serve)
 ```
 
-Prerequisites: Python 3.11+, and a reachable model endpoint —
+Prerequisites: Python 3.11+, and a reachable model endpoint -
 [Ollama](https://ollama.com) by default (`ollama pull qwen2.5-coder:7b`).
 
 ## Backends
@@ -120,7 +131,7 @@ Default selection: **aider when the `aider` binary is on `PATH`, else native**
 **Tool calling.** The native backend needs an endpoint that accepts tool calls
 (`tools` in the chat-completions request). Ollama supports tool calling out of
 the box. vLLM must be launched with `--enable-auto-tool-choice
---tool-call-parser <parser>` — without those flags every native round fails
+--tool-call-parser <parser>` - without those flags every native round fails
 with HTTP 400 (`"auto" tool choice requires …`). `pxx doctor` probes for this
 under a realistic agent context and reports if a model accepts `tools` but
 answers in prose (some small models tool-call on a toy probe yet degrade under
@@ -141,7 +152,7 @@ pxx loop -m "Fix the failing tests" --scope src  # bounded edit→test→review 
 pxx chat                            # interactive session
 ```
 
-Edits land **uncommitted** by default so you can review them first — pass
+Edits land **uncommitted** by default so you can review them first - pass
 `--commit` (or `PXX_AUTO_COMMIT=1` / `auto_commit = true`) to have a COMPLETED
 run commit its work. The `pxx-pre/<ts>` safety tag always points at the
 pre-session HEAD, so undo is `git reset --hard <tag>` either way.
@@ -151,7 +162,7 @@ scope, shell via hooks) → **auto** (unattended, budgets enforced). Every run i
 bounded: max rounds/tokens/cost/wall-clock/diff-lines, all configurable.
 
 > **New to pxx?** The [**hands-on tutorial**](https://github.com/cdnwetzel/pxx/blob/v2/docs/TUTORIAL.md) takes you from install to building
-> (and safely undoing) a small tool in ~25 minutes — the fastest way to get the mental model:
+> (and safely undoing) a small tool in ~25 minutes - the fastest way to get the mental model:
 > read-only by default, scoped edits, and the safety tag that nets your work.
 
 ## Memory
@@ -163,12 +174,12 @@ pxx memory list
 ```
 
 Memory is hybrid-retrieved (FTS5 BM25 0.4 + embedding cosine 0.6). Embeddings come
-from a local Ollama model when reachable, else a deterministic hash embedder —
+from a local Ollama model when reachable, else a deterministic hash embedder -
 search always works offline. TTL'd observations archive to JSONL monthly.
 Memory is **context, never policy**.
 
 Memory is **project-scoped by working directory**: `search`/`list` see only the
-current directory's project (its directory name) — run them from the directory
+current directory's project (its directory name) - run them from the directory
 the memory was added in. Keyword search matches whole tokens exactly (no
 stemming): searching `round` will not match `rounding`.
 
@@ -202,7 +213,7 @@ base_url = "http://gpu-box:8000"
 
 [[hooks]]
 event = "PreToolUse"
-command = "/usr/local/bin/my-gate"   # exit 0 allow / 2 deny — deterministic
+command = "/usr/local/bin/my-gate"   # exit 0 allow / 2 deny - deterministic
 
 [[mcp_servers]]
 name = "filesystem"
@@ -226,7 +237,7 @@ Beyond the everyday verbs (`ask`/`edit`/`plan`/`run`/`loop`/`chat`):
 **Safety & release**
 
 ```sh
-pxx check [--all-files]   # secret/PII scan — staged files, or all tracked files
+pxx check [--all-files]   # secret/PII scan - staged files, or all tracked files
 pxx upgrade               # upgrade the pxx install in place
 pxx review [--staged|--since SHA]  # read-only review of the current diff (exit 2 on REVISE)
 pxx doctor                # diagnose setup (endpoints, backend, memory, config)
@@ -274,14 +285,14 @@ Every verb self-describes: append `--help` (e.g. `pxx check --help`).
 - Edit-capable sessions (`edit`/`run`/`loop`/`goal`, in a git repo) tie a safety net
   before anything can write: uncommitted work is stashed
   (`--include-untracked`, message carries the run id) and HEAD is tagged
-  `pxx-pre/<ts>`. Restore with `git reset --hard <tag>` + `git stash pop` —
+  `pxx-pre/<ts>`. Restore with `git reset --hard <tag>` + `git stash pop` -
   pop is your move, never pxx's. Disable with `safety_net = false`.
-- Paths are canonicalized with symlinks resolved before any gate decision —
+- Paths are canonicalized with symlinks resolved before any gate decision -
   model output never defines the trust boundary.
 - Hooks are deterministic gates (like Claude Code's PreToolUse): they cannot be
   overridden by model judgment.
 - The audit log (`~/.local/state/pxx/audit/YYYY-MM-DD.jsonl`) is hash-chained and
-  metadata-only — no prompts, file contents, or secrets. Verify with
+  metadata-only - no prompts, file contents, or secrets. Verify with
   `pxx audit verify <path>`.
 - Bounded loops stop on: round cap, diff cap, budget, scope violation,
   non-monotonic test progress (`NO_TEST_PROGRESS`), a detected oscillation
@@ -295,10 +306,10 @@ With 2.0 on PyPI:
 - **pipx**: `pipx upgrade pxx-orchestrator`
 - **pip**: `pip install -U pxx-orchestrator`
 - **from source**: `git pull && uv sync --extra dev --extra server`
-- **in-place**: `pxx upgrade` — upgrades the pxx install (detects uv tool /
+- **in-place**: `pxx upgrade` - upgrades the pxx install (detects uv tool /
   pipx / pip automatically)
 
-Settings, memory, and audit state carry forward — 2.0 migrates them on first
+Settings, memory, and audit state carry forward - 2.0 migrates them on first
 run (see [docs/MIGRATION.md](https://github.com/cdnwetzel/pxx/blob/v2/docs/MIGRATION.md)).
 
 ## Development
@@ -312,7 +323,7 @@ uv run ruff check
 
 > 2.0 lives on [`cdnwetzel/pxx`](https://github.com/cdnwetzel/pxx) (this repo);
 > the 1.x line continues on its `v1.x` branch. The public history is a
-> curated series — the full development history stays private.
+> curated series - the full development history stays private.
 
 Pull requests are reviewed automatically by
 [CodeRabbit](https://coderabbit.ai) (config in `.coderabbit.yaml`) in
@@ -320,4 +331,4 @@ addition to human review.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT - see [LICENSE](LICENSE).

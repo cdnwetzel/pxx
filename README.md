@@ -52,15 +52,25 @@ those environments demand a higher standard than "the vendor is trustworthy": th
 and the inference must stay inside controls the operator owns, and every action must be
 auditable.
 
+One honest caveat up front: running locally and air-gapped is not unique to pxx. Local
+agents such as aider and opencode run entirely on your own hardware too, so locality is
+the floor here, not the differentiator. What pxx adds sits above the model, in the points
+below, and it is defense in depth *inside* the isolation you build, never a substitute
+for it.
+
 pxx is built to that sovereign standard:
 
-- **Self-hosted, always.** Code and inference stay on hardware *you* own — local,
-  on-prem, or fully air-gapped; your models, your network, your key management, your
-  audit boundary. No vendor in the loop, no telemetry, no data egress.
+- **Self-hosted, always (the floor, not the pitch).** Code and inference stay on
+  hardware you own: local, on-prem, or fully air-gapped; your models, your network, your
+  key management, your audit boundary. No vendor in the loop, no telemetry, no data
+  egress. Other local agents do this too; the difference is the two points below.
 - **Host-enforced, not model-trusted.** Scope, permissions, budgets, and hooks are
-  enforced by the host — a jailbroken or confused model still can't leave its lane —
-  and the run's policy decisions and terminal outcome are recorded in a hash-chained,
-  tamper-evident audit log you can verify (`pxx audit verify`).
+  enforced by the host process, so a jailbroken or confused model still can't write
+  outside the files you allowed. This is an action-level boundary and defense in depth
+  *inside* your own isolation (network, sandbox, air-gap), not a replacement for it. And
+  because the gate is our code, the honest control is not to trust it: read it (MIT) and
+  verify the hash-chained, tamper-evident audit of what it actually did (`pxx audit
+  verify`).
 - **Open, inspectable, and yours to change.** MIT, under the same community model that
   made Linux and the tools you already rely on — not "source-available," not open-core
   with the real logic hidden behind a service. You don't just get to *read* every gate,
@@ -78,7 +88,8 @@ pxx is built to that sovereign standard:
   explicit statement of what is *not* claimed — evidence, not just availability.
 
 The through-line is **verify, don't trust:** no vendor to trust (there isn't one), no
-binary to trust (read it), no claims to trust (check the receipts).
+binary to trust (read it), no claims to trust (check the receipts). You should not have to
+trust software you did not write, so this is built to be read and its record verified.
 
 **Use pxx when** self-hosting, sovereignty, and provable audit are *requirements* — when
 the work simply cannot leave your perimeter and "trust the vendor" isn't a sufficient

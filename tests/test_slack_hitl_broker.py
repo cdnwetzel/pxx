@@ -29,6 +29,7 @@ def broker():
 def test_decision_for_action_maps_only_decision_buttons(broker):
     assert broker.decision_for_action("pxx_approve") == "approve"
     assert broker.decision_for_action("pxx_abort") == "abort"
+    # modify is not a terminal decision here: it opens a modal, not writes a decision
     assert broker.decision_for_action("pxx_modify") is None
     assert broker.decision_for_action("nonsense") is None
 
@@ -53,11 +54,58 @@ def test_approval_blocks_carry_nonce_and_actions(broker):
     by_id = {e["action_id"]: e for e in actions}
     assert by_id["pxx_approve"]["value"] == "nonce9"
     assert by_id["pxx_abort"]["value"] == "nonce9"
+    assert by_id["pxx_modify"]["value"] == "nonce9"  # modify button present (P2)
     assert by_id["pxx_approve"]["style"] == "primary"
     assert by_id["pxx_abort"]["style"] == "danger"
 
 
 def test_outcome_blocks_render_each_terminal(broker):
-    for decision in ("approve", "abort", "timeout"):
+    for decision in ("approve", "abort", "modify", "timeout"):
         blocks = broker.outcome_blocks(decision, "U123")
         assert blocks and blocks[0]["type"] == "section"
+
+
+# ---- P2: Modify modal ----
+
+
+def test_write_decision_modify_carries_fields_single_use(broker, tmp_path):
+    ok = broker.write_decision(
+        tmp_path,
+        "abc",
+        "modify",
+        "chris",
+        extra={"scope": "mathlib.py", "note": "only add multiply"},
+    )
+    assert ok is True
+    # still single-use even for modify
+    assert broker.write_decision(tmp_path, "abc", "approve", "attacker") is False
+    rec = json.loads((tmp_path / "abc.decision").read_text())
+    assert rec["decision"] == "modify"
+    assert rec["scope"] == "mathlib.py" and rec["note"] == "only add multiply"
+
+
+def test_modify_modal_carries_nonce_and_fields(broker):
+    view = broker.modify_modal("nonceX")
+    assert view["callback_id"] == broker.MODIFY_CALLBACK
+    assert view["private_metadata"] == "nonceX"
+    block_ids = {b["block_id"] for b in view["blocks"]}
+    assert block_ids == {"scope", "note"}
+
+
+def test_read_modify_submission_extracts_fields(broker):
+    view = {
+        "private_metadata": "nonceX",
+        "state": {
+            "values": {
+                "scope": {"scope_input": {"value": "mathlib.py"}},
+                "note": {"note_input": {"value": "only add multiply"}},
+            }
+        },
+    }
+    assert broker.read_modify_submission(view) == {
+        "nonce": "nonceX",
+        "scope": "mathlib.py",
+        "note": "only add multiply",
+    }
+    # missing/empty view degrades gracefully, never raises
+    assert broker.read_modify_submission({}) == {"nonce": "", "scope": "", "note": ""}

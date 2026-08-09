@@ -90,11 +90,13 @@ milestone reviewer-verified by execution):
 
 **Sequencing (recorded 2026-08-08, post-2.4.0 / post-n8n battery R-035–R-040).**
 Waves 1–3 shipped in 2.4.0, so the near-term order is:
-1. **Full-VRAM 30B benchmark** — the same 30B run on a 40 GB NVLINK box (fits entirely
-   in VRAM) vs. the 16 GB partial-offload number behind the n8n receipts; fast,
-   high-signal, gated only on the operator's sudo.
-2. **Self-hosted `ntfy` transport** (see *Later*) — upgrades the R-036/R-038 signed
-   callback into a real remote approve/abort tap; small, and closes the HITL loop.
+1. ~~**Full-VRAM 30B benchmark**~~ **DONE 2026-08-09 (R-041–R-043):** full-VRAM 40 GB
+   (69.3 tok/s) vs. 16 GB offload (31.8) ≈ 2.2×; dual-GPU NVLINK fan-out 198%; active-
+   params dominate throughput. Now informs the multi-role routing assignments below.
+2. **Pluggable HITL transport** (see *Later*) — upgrades the R-036/R-038 signed callback
+   into a real remote approve/abort **and reply-with-modifications** tap. **Slack (Socket
+   Mode) is the primary transport** (richer conversational feedback preferred; no inbound
+   endpoint); self-hosted `ntfy` stays the sovereign default. Closes the HITL loop.
 3. **Live eval arms** (below) — the 2.5 headline, now *unblocked* by Wave 2.
 Backlog candidate that emerged from the n8n work: a **first-class pxx n8n node** (vs. the
 HTTP-node pattern already proven in R-035–R-040).
@@ -472,18 +474,33 @@ CHANGELOG.md; highlights:
     any failure as DENY — the audit write is the fail-closed decision, not
     best-effort telemetry, so a log that cannot record yields no approval. A
     lock-screen tap becomes a hash-chained record, which is the whole point.
-- **Self-hosted `ntfy` as the notification transport.** Pair the HITL hook with a
-  self-hosted `ntfy` server (Docker, one binary) on the fleet instead of the
-  public `ntfy.sh` — so prompt summaries and action URLs never transit a
-  third-party server (a topic name is security-by-obscurity), the notify channel
-  is auth'd (access tokens / ACLs), and it composes with the existing report/
-  notify seam (`PXX_REPORT_CHANNEL`/`PXX_REPORT_TARGET`). **An action-bearing
-  approval is a bearer capability** — anyone who reads the topic (or a leaked/
-  forwarded notification) could tap Approve before the intended approver — so the
-  private/self-hosted, auth'd transport is **required for approvals**, not just
-  preferred. Public `ntfy.sh` degrades gracefully only for **notify-only** alerts
-  (no action buttons); the HMAC-over-decision binding above narrows but does not
-  remove the front-running window on a public transport, so approvals never ride it.
+- **Pluggable HITL transport — Slack (Socket Mode) primary, self-hosted `ntfy`
+    sovereign default.** The broker already mints signed, single-use approve/abort
+    URLs (R-036/R-038); a *thin transport adapter* renders the message and carries
+    back the decision, so the transport is swappable and the crypto/gate is
+    unchanged. **Decision (2026-08-09): richer conversational feedback is
+    preferred**, so HITL is not just approve/abort — the human can **reply with
+    modifications** ("approve but re-scope to fileX", "why did you pick Y?"), which
+    tips the primary transport to Slack.
+  - **Slack via Socket Mode (primary).** Interactive buttons *and* threaded
+    replies/modals, so it covers both simple approve/abort and richer HITL. Socket
+    Mode has the app **dial out** over a websocket — **no inbound public endpoint**,
+    so the broker stays behind NAT/firewall with nothing exposed; works on Slack
+    free tier. Cost/asterisk: Slack is **SaaS** — the approval summary (which
+    describes what the agent is about to do) transits Slack's cloud, so it is the
+    *convenient/daily* transport, not the one the sovereignty pitch names.
+  - **Self-hosted `ntfy` (sovereign default / fallback).** Docker, one binary on the
+    fleet; nothing leaves your infra. Button-only (approve/abort, no free-text
+    reply) but the on-thesis choice for the regulated / air-gapped pitch and where
+    no data may egress. Composes with the existing report/notify seam
+    (`PXX_REPORT_CHANNEL`/`PXX_REPORT_TARGET`).
+  - **Security invariant (both transports).** **An action-bearing approval is a
+    bearer capability** — whoever can tap Approve holds it — so the transport must
+    be **auth'd and non-public**: Socket Mode is authenticated with no public
+    endpoint; self-hosted `ntfy` is auth'd (tokens/ACLs). Public `ntfy.sh` is
+    allowed only for **notify-only** alerts (no action buttons); the
+    HMAC-over-decision binding narrows but does not remove the front-running window
+    on a public transport, so approvals never ride one.
 - **Governed `web_fetch` — a fail-closed research tool (the "browser" gap).** The
   biggest capability gap vs. hosted agents is the inability to read live docs. Close
   it with a *bounded HTTP fetch*, NOT an unrestricted scripted browser — a full

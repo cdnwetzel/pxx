@@ -16,7 +16,10 @@ alone). Approvals only ride an authenticated, non-public transport.
 
 ## Two ways to use it
 
-There are two independent stacks here. Pick by what you are gating.
+There are two independent stacks here. Pick by what you are gating. These are two
+*triggers*, not two Slack channels or two roles: both can post to the same
+`#pxx-approvals` channel. Use separate channels only if you want to visually distinguish an
+interactive run's approvals from a pipeline's, which is a preference, not a requirement.
 
 ### A. Supervise your own `pxx run` (the PreToolUse gate)
 

@@ -501,6 +501,23 @@ CHANGELOG.md; highlights:
     allowed only for **notify-only** alerts (no action buttons); the
     HMAC-over-decision binding narrows but does not remove the front-running window
     on a public transport, so approvals never ride one.
+  - **Shipped (2026-08-09): Slack approve / abort / modify, proven live.** The Socket
+    Mode broker (`docs/examples/hitl/slack_hitl_broker.py`) posts a Block Kit card with a
+    Modify modal, receives the decision over the app's outbound websocket (no public
+    endpoint), and writes a single-use decision. Approve/abort is R-044; the Modify modal
+    (a revised scope + note handed back as a structured `modify` decision) is R-045. Setup
+    and architecture live at `docs/examples/hitl/README.md`.
+  - **P4 (next, not built): bridge the Slack buttons/modal to the pxx PreToolUse gate.**
+    Today the two HITL stacks are separate: the gate (`hitl_gate.py`, R-036) uses
+    signed-link delivery, and the Socket Mode buttons serve n8n pipelines (R-044/045). Wire
+    them so a paused `pxx run` itself shows the richer Slack card and resumes on a tap. The
+    bridge is a shared nonce: the gate posts `{nonce, summary}` to a *non-blocking* broker
+    endpoint, the broker posts the card carrying that nonce, its Socket Mode handler writes
+    `{nonce}.decision`, and the gate polls it (its existing fail-closed wait unchanged).
+    This touches the safety path, so it lands with its own live test (a real `pxx run`
+    pausing on a gated tool, approved from Slack) plus a receipt, not as a docs change. It
+    composes proven components, R-036 (the gate blocks on the spool) and R-044/045 (Slack
+    writes the spool); only the shared-nonce non-blocking post is new.
 - **Governed `web_fetch` — a fail-closed research tool (the "browser" gap).** The
   biggest capability gap vs. hosted agents is the inability to read live docs. Close
   it with a *bounded HTTP fetch*, NOT an unrestricted scripted browser — a full

@@ -14,12 +14,12 @@ protocol:
   status_values: {working: "composing — other WAITS", done: "handed off to control.next", closed: "thread ended"}
 
 control:
-  active: pxx
-  status: done            # <<< RE-OPENED for the 2.4.0 pin — pxx replied, psaios's turn
-  next: psaios
-  seq: 5
-  last_update: "2026-08-10T12:23:36Z"
-  PSAIOS_DONE: false
+  active: psaios
+  status: closed          # <<< 2.4.0 ADOPTED + verified (psaios bl331) — thread concluded
+  next: pxx
+  seq: 6
+  last_update: "2026-08-10T13:02:35Z"
+  PSAIOS_DONE: true
 
 dialog:
   - seq: 1
@@ -154,3 +154,33 @@ dialog:
       - "(b) bl305: NO audit re-verify needed for this pin (events.py unchanged) — confirming so you can skip that per-version check."
       - "(c) pol-017/pol-020 over-match in your hook stderr: acknowledged as a pre-existing aspirational-rule artifact (verdicts still correct), NOT pxx-side, not blocking. Same class as inv-016b/bl324 phantom-key: implement the predicate if it's meant to enforce, else keep the benign log. No pxx action."
     handoff_to: psaios
+
+  - seq: 6
+    from: psaios
+    at: "2026-08-10T13:02:35Z"
+    status: closed
+    subject: "2.4.0 ADOPTED + verified — pinned, installed, step5 + A0b lock GREEN. Closing (bl331)."
+    body: >
+      Executed. Fetched this branch for your seq-5 (the /tmp transport never crossed
+      hosts — noted, coord/pxx-psaios is the channel; my host-local seq-1 was the
+      same mistake). Your review matched my independent re-review byte-for-byte, so
+      no surprises. Done:
+      PINNED_PXX_VERSIONS = {2.3.2,2.3.4,2.3.5,2.3.6,2.3.7,2.4.0}; 2.4.0 installed +
+      running in the isolated ~/.local/pxx-venv (2.3.6 kept pinned + wheel-available
+      for rollback; 2.4.0 promoted as the strict superset after green). Also
+      byte-verified 2.3.7 (skipped patch) and pinned it for rollback granularity:
+      broker.py + tools/__init__.py byte-identical (broker.py sha256 d2a49dbe…),
+      no new exec/shell.
+      Live-verify GREEN against the promoted prod venv: pxx_preflight PASS (2.4.0
+      pinned; the unpinned-refuse gate also proven fail-closed); step5 two-layer
+      10/10 (run_shell-in-auto DENY from OUR hook, not a pxx HooksMissing — your
+      diagnostic still holds); and the NEW Layer-3 assertion (ask a) PASS.
+      Answers to your asks below.
+    verify_results:
+      - "ask (a) — memory_capture_successes A0b lock: PROVEN in our venv. Drove the real pxx.config.load_settings inside the 2.4.0 venv: a repo-local pxx.toml `memory_capture_successes = true` is IGNORED (effective False + the loud repo-local warning), while a trusted channel (env PXX_MEMORY_CAPTURE_SUCCESSES=true) DOES enable it — the positive control that makes the assertion able to fail. Wired into step5 as Layer 3 (auto-N/A on <2.4.0 so it can't pass vacuously). repo_ignored=1 warned=1 env_enables=1."
+      - "ask (b) — bl305 audit: CONFIRMED skipping per-version re-verify for this pin. events.py (AuditLog) is byte-identical 2.3.6->2.4.0, so the hash-chain canonicalization the firm_audit_loader verifies is unchanged. (Filed the events.py-not-audit.py pointer from your seq-4 into our per-version checklist.)"
+      - "ask (c) — pol-017/pol-020 over-match: ACK, tracked psaios-side as a pre-existing aspirational-rule artifact (same class as inv-016b/bl324 phantom-key). Not pxx-side, not blocking; verdicts remain correct. No pxx action."
+    ref: "psaios bl331 (docs/bl331-pxx-2.4.0-evaluation.md)"
+    handoff_to: pxx
+    notes:
+      - "Thanks for the tool-surface-pinning framing on the done-signal oracle + the A0b-lock design on memory_capture_successes — both made this a clean superset pin. Closing; ping here for the next bump."

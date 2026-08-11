@@ -2256,3 +2256,23 @@ def test_loop_budget_rounds_passed_to_run_loop(monkeypatch, tmp_path):
     captured.clear()
     assert cli.main(["loop", "-m", "do it"]) == 0
     assert "max_rounds" not in captured["kwargs"]
+
+
+def test_review_flags_map_to_roles_overlay():
+    # --review-model / --review-base-url become a [roles.review] CLI overlay
+    from pxx.safety import PermissionMode
+
+    args = cli._build_parser().parse_args(
+        ["run", "-m", "x", "--review-model", "judge", "--review-base-url", "http://judge:11434"]
+    )
+    overrides = cli._cli_overrides(args, PermissionMode.AUTO)
+    assert overrides["roles"] == {"review": {"model": "judge", "base_url": "http://judge:11434"}}
+
+
+def test_no_review_flags_no_roles_overlay():
+    # absence of the flags adds no roles overlay (today's behaviour is byte-identical)
+    from pxx.safety import PermissionMode
+
+    args = cli._build_parser().parse_args(["run", "-m", "x"])
+    overrides = cli._cli_overrides(args, PermissionMode.AUTO)
+    assert "roles" not in overrides

@@ -3,7 +3,18 @@
 All notable changes to pxx are documented here. The 1.x series history is
 preserved in git (tag `v1.3.3` and earlier).
 
-## [2.4.0] — 2026-08-06
+## [2.4.1] — 2026-08-11
+
+### Added
+
+- **`--review-model` / `--review-base-url` run flags** — the per-role reviewer/judge
+  overlay (`[roles.review]` / `PXX_REVIEW_*`, shipped 2.2.0) is now settable per-run on
+  the command line, no config file needed. The flags layer as the highest-precedence
+  `[roles.review]` source (user TOML → env → flags, per field), so `pxx loop --review
+  --model <coder> --base-url <coder-url> --review-model <judge> --review-base-url
+  <judge-url>` runs the coder and the judge on different endpoints in one invocation.
+  Absent the flags a run is byte-identical to before. Tests: CLI→overlay mapping,
+  flag-over-env precedence, and no-flags no-op.
 
 The **Kimi K3 Swarm audit** — an independent architecture + quality audit
 (2.8T-parameter frontier model, high-effort) of the repo at `v2.3.7` — landed as

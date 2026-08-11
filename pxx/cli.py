@@ -195,6 +195,16 @@ def _add_run_options(parser: argparse.ArgumentParser, *, files: bool = True) -> 
         parser.add_argument("files", nargs="*", help="context files (noted in the prompt)")
     parser.add_argument("--model", help="model name (e.g. qwen2.5-coder:7b)")
     parser.add_argument("--base-url", help="endpoint base URL")
+    parser.add_argument(
+        "--review-model",
+        help="model for the reviewer/judge role (defaults to --model); "
+        "sets [roles.review].model, overriding PXX_REVIEW_MODEL",
+    )
+    parser.add_argument(
+        "--review-base-url",
+        help="endpoint base URL for the reviewer/judge role (defaults to --base-url); "
+        "sets [roles.review].base_url, overriding PXX_REVIEW_BASE_URL",
+    )
     parser.add_argument("--provider", choices=["ollama", "openai", "vllm", "openai-compatible"])
     parser.add_argument("--scope", help="comma-separated repo-relative scope prefixes")
     parser.add_argument("--budget-rounds", type=_positive_int, help="max agent rounds")
@@ -571,6 +581,15 @@ def _cli_overrides(args: argparse.Namespace, permission: PermissionMode) -> dict
         overrides["provider"] = args.provider
     if args.base_url:
         overrides["base_url"] = args.base_url
+    # Per-role reviewer overlay from CLI flags — merges into the same [roles.review]
+    # overlay as PXX_REVIEW_* / user TOML, but applied last so a flag wins per-field.
+    review: dict = {}
+    if getattr(args, "review_model", None):
+        review["model"] = args.review_model
+    if getattr(args, "review_base_url", None):
+        review["base_url"] = args.review_base_url
+    if review:
+        overrides["roles"] = {"review": review}
     if args.scope:
         overrides["scope"] = [s.strip() for s in args.scope.split(",") if s.strip()]
     budgets = {}

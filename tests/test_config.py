@@ -489,6 +489,39 @@ def test_roles_review_env_overrides_user_config(tmp_path, monkeypatch):
     assert settings.effective_review_model.base_url == "http://cfg:11434"
 
 
+def test_roles_review_cli_overlay(tmp_path):
+    # the --review-model / --review-base-url flags land as a CLI roles.review overlay
+    settings = load_settings(
+        cwd=tmp_path,
+        cli_overrides={
+            "model": "coder-model",
+            "roles": {"review": {"model": "judge", "base_url": "http://judge:11434"}},
+        },
+    )
+    assert settings.model.model == "coder-model"
+    assert settings.effective_review_model.model == "judge"
+    assert settings.effective_review_model.endpoint == "http://judge:11434"
+    # coder and judge are genuinely split onto different endpoints
+    assert settings.effective_review_model.endpoint != settings.model.endpoint
+
+
+def test_roles_review_cli_overrides_env(tmp_path, monkeypatch):
+    # CLI is the last layer, so a --review-model flag wins over PXX_REVIEW_MODEL
+    monkeypatch.setenv("PXX_REVIEW_MODEL", "from-env")
+    settings = load_settings(
+        cwd=tmp_path,
+        cli_overrides={"roles": {"review": {"model": "from-cli"}}},
+    )
+    assert settings.effective_review_model.model == "from-cli"
+
+
+def test_no_review_cli_overlay_leaves_review_model_none(tmp_path):
+    # absence of the flags == today's behaviour: reviewer reuses the coder model
+    settings = load_settings(cwd=tmp_path, cli_overrides={"model": "coder-model"})
+    assert settings.review_model is None
+    assert settings.effective_review_model is settings.model
+
+
 def test_roles_review_late_resolves_against_final_coder_model(tmp_path, monkeypatch):
     # The overlay is sparse: a config `[roles.review] base_url` must inherit the
     # coder model/api_key set by a LATER env layer, not a stale early copy.

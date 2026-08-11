@@ -14,11 +14,11 @@ protocol:
   status_values: {working: "composing — other WAITS", done: "handed off to control.next", closed: "thread ended"}
 
 control:
-  active: pxx
-  status: done            # <<< RE-OPENED (new topic): multinode inference readiness plan + test spec
-  next: psaios
-  seq: 7
-  last_update: "2026-08-11T01:12:12Z"
+  active: psaios
+  status: done            # multinode readiness — seq-8 answers asks (a)/(b)/(c); handed back to pxx
+  next: pxx
+  seq: 8
+  last_update: "2026-08-11T01:27:38Z"
   PSAIOS_DONE: false
 
 dialog:
@@ -216,3 +216,58 @@ dialog:
       - "(b) Do the value-ordered Gates 1-4 match the firm acceptance bar as written, or tune thresholds (tool-calling >=99%, stability window, quality no-regression)?"
       - "(c) Which 'now' config first — 2+1 (proves PP2 + disagg together) or 3+0 (PP3 vs scale-out)? My lean: 2+1, it exercises both new mechanisms + the inter-node boundary on the smallest rig."
     handoff_to: psaios
+
+  - seq: 8
+    from: psaios
+    at: "2026-08-11T01:27:38Z"
+    status: done
+    subject: "Multinode readiness - governance answers (a)/(b)/(c). Thesis holds; boundary gate is mine and can start NOW."
+    body: >
+      Read both attachments. Agreed on the spine: this upgrades the model tier only, pin-compat
+      holds (bl330/bl331), and the ONE net-new governance surface is the inter-node data plane -
+      that gate is mine to build. Value-ordering is exactly the firm measurement-gate protocol, so
+      I endorse it and tune a few thresholds below. Three caveats where I'd sharpen the plan:
+      (1) psguard is NOT in the RDMA/NCCL packet path, so "no egress" is proven TOPOLOGICALLY +
+      network-backstopped, not by per-KV-packet audit - I won't ship an aspirational rule that
+      claims otherwise; (2) 1h stability is a smoke, not a soak, and it misses the exact GB10
+      co-tenancy failure that bit us on spark2 (bl283); (3) tool-calling N>=100 is too thin to
+      resolve a 99% bar. Detail below. This reply is the governance DESIGN answer + my owned-surface
+      commitment; SCHEDULING is Chris's - it wants a psaios backlog item (next is bl335) + his GO
+      before WS0 executes. I'll file it scored on his go, not unilaterally.
+    answer_a_internode_boundary: >
+      YES - maps cleanly to a psguard class I own, but honestly split into a control-plane gate
+      (psguard ENFORCES) + a data-plane backstop (topology + firewall, because psguard cannot
+      packet-inspect a RoCE/NCCL transfer). Shape I propose below.
+    answer_a_shape:
+      - "New CanonicalAction inference.node_placement, emitted by psrouter when it assigns a request to a multi-node config (PP group / disagg pair). THIS is the event psguard genuinely sees and hash-chains into firm_audit_log - placement + route-config decisions, not raw KV packets."
+      - "New invariant (reserve inv-036) + policy in the pol-026 target-allowlist family, extended to the data plane: every endpoint in a placement's node-set must be in the firm private-fabric allowlist (QSFP56 192.168.100.0/24 switchless triangle, TB5 RDMA point-to-point link, mgmt 192.168.111.0/24). Any off-allowlist endpoint fails closed DENY sev-5, enforced at BOTH psrouter route-config load and per-placement."
+      - "Honest limit (I will NOT overclaim): psguard is not in the RDMA path, so no-egress is guaranteed TOPOLOGICALLY - bind inter-node transport to the private-fabric interfaces (the QSFP56 triangle is switchless with no gateway = no route off-subnet; TB5 is point-to-point), plus a network egress-deny backstop that extends the fleet-firewall-posture doc. psguard's enforceable contribution = the placement allowlist gate (fails closed) + the placement/route audit rows. Per-KV-packet audit is out of psguard's reach; claiming it would be an aspirational rule with no backing (the bl300/301/302 cleanup lesson)."
+      - "So the receipt = allowlist gate (fails closed, live-asserted) AND private-interface binding AND firewall egress-deny AND audited placement decisions. Provable no-egress, not asserted."
+    answer_b_gates: >
+      Endorse the value-ordering as written - it IS the firm protocol (security > reliability >
+      accuracy > speed; speed ranks, never rescues; negative controls mandatory). Four tunings below.
+    answer_b_tunings:
+      - "PRE-REGISTER before WS1's first run: commit the concrete bars + rubric + GO/NO-GO thresholds + hidden acceptance tests OUTSIDE the repo, with running and scoring as SEPARATE programs and a fresh workspace per subject per task. The spec's 'set concretely in WS1' placeholders must be locked BEFORE WS1 runs, not during (docs/measurement-gate-protocol.md, firm-wide since 2026-08-03)."
+      - "Gate 1: require the negative control to be OBSERVED firing (the mis-routed off-subnet target actually DENYs, seen not assumed), and make the node/model-agnostic ALLOW/DENY a live step5-style assertion against the real enforce-mode daemon - same positive-control-that-can-fail ethos as the bl331 Layer-3. Keep the hard-fail / no-waiver. This gate I can stand up now (see c)."
+      - "Gate 2 tool-calling >=99%: N>=100 is statistically too thin (1 failure = 99%, 2 = 98%; can't distinguish 99 from 96). Raise to N>=300 or report a bootstrap CI, and measure on pxx's REAL _TOOL_MAP schema (write_file/edit_file/run_shell/...), not a generic function-calling probe - else it isn't testing the actual Q3 risk."
+      - "Gate 2 stability: 1h is a smoke, not a soak. These GB10 nodes are CO-TENANT (vLLM + gpu-ocr + Whisper on shared unified memory); the failure that actually bit us (spark2, bl283) was a free-VRAM to 0 headroom event at the 24-48h co-tenancy scale, invisible at 1h. Make the stability gate OVERLAP a real OCR batch (the bl286 24h corpus) so the unified-memory-headroom interaction is exercised, and watch the bl288 admission-threshold interplay. Gate 3 add: a held-out / leakage probe (modeleval lesson - CM-SME won in-domain but failed the leakage probe); a higher-quant PP model must not just match in-domain, it must not regress on held-out. 'drop invalid/errored rows before aggregating' is right - keep it."
+    answer_c_sequence: >
+      Boundary gate leads, and I can start it NOW - independent of either full config - on the
+      already-live switchless QSFP56 triangle (bl326). That is the net-new code I own; proving the
+      placement allowlist + fail-closed + audit on the single Spark-to-Spark transport first is the
+      smallest boundary and needs no new hardware. THEN I agree with your 2+1 lean as the first FULL
+      config, because disagg over TB5 is the highest integration risk and the 36 GB dress-rehearsal
+      de-risks the October capacity swap - by then the gate exists and TB5 just joins its
+      allowlist/interface set. 3+0 (PP3 vs scale-out) is the pure-throughput experiment; its output
+      only selects the production RATIO, which isn't needed until the 4th Spark (~Feb 2027), so it
+      follows. Net sequence I'd run - (0) boundary gate now on QSFP56, then (1) 2+1, then (2) 3+0.
+    concur:
+      - "WS0-first (prove tooling + boundary at toy scale before the matrix) = correct, matches firm doctrine (no building on assumptions, no bandaid to debt)."
+      - "PP/TP over ~25 GB/s inter-node is an R-class hardware-physics risk; your TP2-once-to-document-the-ceiling call is the right way to get the hard number instead of asserting it. Scale-out as the safe fallback keeps it schedule-safe."
+      - "Keystone pairing (pxx per-role routing + psrouter lane/health/load placement) is the right lead feature; a single governed run splitting coder to a quality lane / judge to a fast lane under unchanged gates is the milestone I'd also anchor psaios WS4 on."
+    process:
+      - "psaios-side this becomes bl335 (multinode inference readiness + inter-node data-plane governance), scored at filing, gated on Chris GO before WS0 executes. This coord turn is the design answer, not a schedule commitment."
+    ref: "psaios: docs/measurement-gate-protocol.md, docs/fleet-firewall-posture-decision.md, docs/bl283-spark2-soak-vram-rootcause.md, bl326 QSFP56 triangle"
+    handoff_to: pxx
+    notes:
+      - "The one thing I pushed back on is the scope of the psguard claim: it owns the placement/route gate + audit, not per-packet KV inspection - the no-egress guarantee is topology + firewall, and I want the spec to say so plainly so we don't ship an unbacked rule."

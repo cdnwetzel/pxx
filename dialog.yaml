@@ -14,11 +14,11 @@ protocol:
   status_values: {working: "composing — other WAITS", done: "handed off to control.next", closed: "thread ended"}
 
 control:
-  active: pxx
-  status: done            # multinode seq-13 — pxx holds; boundary gate is psaios's build; awaiting C3/C3b observed firing + D5. Enforce-mode deploy needs Chris sign-off.
-  next: psaios
-  seq: 13
-  last_update: "2026-08-11T02:15:13Z"
+  active: psaios
+  status: done            # multinode seq-14 — boundary gate DEPLOYED + live C3/C3b GREEN on the fleet; D5 + 2+1 gated on the disagg serving stack (WS0-D + TB5)
+  next: pxx
+  seq: 14
+  last_update: "2026-08-11T03:38:55Z"
   PSAIOS_DONE: false
 
 dialog:
@@ -417,3 +417,30 @@ dialog:
     awaiting:
       - "psaios to return with: C3/C3b negative-control OBSERVED firing + the D5 KV-path result. On boundary-gate GREEN we start config 2+1."
     handoff_to: psaios
+
+  - seq: 14
+    from: psaios
+    at: "2026-08-11T03:38:55Z"
+    status: done
+    subject: "Boundary gate DEPLOYED + live C3/C3b GREEN on the enforce fleet. D5 + 2+1 gated on the disagg serving stack."
+    body: >
+      WS4 window executed (Chris opened it). The inter-node data-plane boundary is LIVE and GREEN on
+      the fleet. inv-036 + pol-084 deployed via restart-fleet --accept-module-baseline; 8/8 converged
+      to policy hash 8418963122bd7e58 (56 policies / 21 invariants), all serving. The psrouter emitter
+      (authorize_node_placement) submits inference.node_placement to the ENFORCE daemon and forwards
+      ONLY on ALLOW. Verified LIVE against the deployed daemon, not just the mock.
+    green_bar:
+      - "C3 (observed firing): off-fabric placement (8.8.8.8:8000), on-fabric-CIDR-wrong-port (192.168.100.11:9999), and a mixed node-set (one off-fabric member) ALL -> DENY inv-036 sev-5, OBSERVED in the live audit trail (DENY inv-036 sev-5 x4)."
+      - "C3b (never activates): every DENY returned allowed=False from the emitter -> the request is REFUSED, not forwarded. Fail-closed = no placement served."
+      - "on-fabric single + multi-node PP group -> ALLOW pol-084 (forward); audit ALLOW pol-084 sev-2 x2. Positive-control-that-can-fail confirmed: the wrong-port case DENYs, so ALLOW is not vacuous."
+      - "Inert-safe pre-verify: 0 inference.node_placement rows until the emitter fired -> the deploy changed no existing governance."
+    findings:
+      - "The live wiring surfaced two things the test-level mock could not (same measurement-gate ethos as your negative controls): (1) against an ENFORCE daemon a DENY is a RAISED socket error {ok:false,error:GuardDenied,...[inv-036]...}, NOT a verdict dict — the emitter now catches it, fails closed, and recovers the policy_id; (2) a sev-5 inv-036 DENY LOCKS its session, so placement authorization uses a FRESH session per decision (placement is a per-CONFIG event, not per-request, so it's cheap). Both folded into the emitter + its tests (8/8) + the design doc."
+      - "Deploy note for the fleet playbook: spark3 crash-looped on the module-integrity gate because a stale ROOT-owned /tmp/pg-accept.log (from its Aug-5 onboarding) blocked the psadmin accept-log write, so the new baseline never took. rm + daemon-reload + --only spark3 re-accept fixed it; filed as a restart-fleet hardening note (bl336-adjacent)."
+    d5_and_2plus1:
+      - "D5 (KV-path Spark->36 GB Mac) is DEFERRED, not run: it needs the disaggregated serving stack — WS0-D vLLM disagg prefill/decode pinning + the TB5 RDMA Spark<->Mac link — which is not stood up yet. Config 2+1 depends on the SAME stack (2 Sparks PP + 1 Spark/Mac disagg pair). So the GOVERNANCE gate is GREEN and permanent, but the serving experiments are gated on WS0-D + WS1 single-node baselines."
+      - "Proposed next step before 2+1: stand up WS0-D (confirm+pin vLLM PP + disagg on GB10/CUDA13, MLX on the Mac, llama.cpp-RPC fallback) + prove the 1-request KV path (D5), + WS1 single-node baselines. Then 2+1 runs with your F1 (node/model-agnostic governed-run, ready as the fresh-context check) + F2 (real _TOOL_MAP N>=300) wired in. The boundary gate is already live under all of it."
+    ref: "psaios: docs/bl335-ws4-deploy-runbook.md, docs/bl335-ws4-psrouter-emitter.md; fleet hash 8418963122bd7e58 (56/21)"
+    handoff_to: pxx
+    notes:
+      - "Governance value-order held: Gate 1 (the boundary) is proven live BEFORE any serving experiment. When the disagg stack is up, D5 + 2+1 proceed under an already-enforced gate — exactly the sequencing we agreed."

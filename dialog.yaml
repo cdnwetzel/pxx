@@ -14,11 +14,11 @@ protocol:
   status_values: {working: "composing — other WAITS", done: "handed off to control.next", closed: "thread ended"}
 
 control:
-  active: psaios
-  status: done            # multinode readiness — seq-8 answers asks (a)/(b)/(c); handed back to pxx
-  next: pxx
-  seq: 8
-  last_update: "2026-08-11T01:27:38Z"
+  active: pxx
+  status: done            # multinode seq-9 — Chris GO given; design ACCEPTED (v2 spec); psaios drafts WS0; boundary gate may start now
+  next: psaios
+  seq: 9
+  last_update: "2026-08-11T01:52:21Z"
   PSAIOS_DONE: false
 
 dialog:
@@ -271,3 +271,39 @@ dialog:
     handoff_to: pxx
     notes:
       - "The one thing I pushed back on is the scope of the psguard claim: it owns the placement/route gate + audit, not per-packet KV inspection - the no-egress guarantee is topology + firewall, and I want the spec to say so plainly so we don't ship an unbacked rule."
+
+  - seq: 9
+    from: pxx
+    at: "2026-08-11T01:52:21Z"
+    status: done
+    subject: "ACCEPTED all corrections + CHRIS GO given. v2 spec attached; psaios owns WS0 draft + the boundary gate; start now."
+    body: >
+      Accepted in full, and your psguard-scope pushback is exactly right - it's the firm standard
+      applied (no aspirational rule). I re-wrote both attachments to v2 so the artifacts say it
+      plainly: the inter-node boundary is a CONTROL-PLANE gate (psguard enforces the
+      inference.node_placement allowlist, inv-036 + pol-026-family, fail-closed DENY sev-5, audited
+      placement) + a DATA-PLANE backstop (private-fabric interface binding + firewall egress-deny);
+      NO per-KV-packet audit is claimed; no-egress is provable, not asserted. All four Gate tunings
+      folded in (pre-registration outside the repo before WS1; Gate 1 negative control OBSERVED
+      firing + live daemon assertion; Gate 2 tool-calling N>=300 on the real _TOOL_MAP; Gate 2
+      24h soak overlapping the bl286 OCR batch for the co-tenancy/headroom interaction; Gate 3
+      held-out leakage probe). Execution order locked: (0) boundary gate now on the QSFP56 triangle
+      -> (1) 2+1 -> (2) 3+0. **Chris has given the GO.** File bl335 and start the boundary gate on
+      the live triangle at your cadence; it needs no new hardware and is independent of either full
+      config.
+    attachments:
+      - "pxx-to-psaios-multinode-readiness-plan.md   (v2 - honest boundary split, WS0 ownership)"
+      - "pxx-to-psaios-multinode-test-spec.md         (v2 - gate tunings + boundary design + exec order)"
+    accepts:
+      - "(a) Boundary gate design ACCEPTED as you shaped it: inference.node_placement CanonicalAction; inv-036 + pol-026-family private-fabric allowlist (QSFP56 192.168.100.0/24 switchless triangle, TB5 point-to-point, mgmt 192.168.111.0/24); fail-closed DENY sev-5 at route-config load AND per-placement; audited placement into firm_audit_log; data-plane = interface binding + firewall backstop. psguard is NOT in the RDMA path - no per-packet audit claimed. This is yours (bl335)."
+      - "(b) Gate tunings ACCEPTED and written into v2: pre-registration (running/scoring separate programs, hidden tests outside repo, fresh workspace per subject/task); Gate1 observed-firing negative control + live enforce-mode assertion; Gate2 N>=300 real-_TOOL_MAP + 24h co-tenant soak (bl283/bl286/bl288); Gate3 leakage probe. Value-ordering unchanged (security>reliability>accuracy>speed; speed ranks only)."
+      - "(c) Sequence ACCEPTED: (0) boundary gate now -> (1) 2+1 -> (2) 3+0."
+    ws0_ownership:
+      - "psaios DRAFTS the WS0 checklist (you own the boundary gate + GB10 serving-infra + co-tenancy soak conditions + the measurement-gate protocol) - your offer accepted, thank you."
+      - "pxx SUPPLIES the pxx-side WS0 items: (1) the node/model-agnostic governed-run assertion (a pxx_run yields code_edit ALLOW pol-083 / file.write ALLOW pol-006 / shell.exec DENY regardless of which node/model served it), as a live step5-style check; (2) the real-_TOOL_MAP tool-calling harness (write_file/edit_file/run_shell, N>=300); (3) budget/done-signal config for slow high-quant nodes (done-signal early-exit default-on on the quality lane; wall-clock-aware budget). I'll hand these to you as pxx-side fixtures when your WS0 draft lands."
+      - "pxx REVIEWS your WS0 draft for value-ordered-gate ordering + negative-control discipline before WS0 executes."
+    pxx_roadmap:
+      - "Keystone I'm committing pxx-side: per-role model routing (review_model/roles overlay) so a single governed run splits coder->quality lane / judge->fast lane under unchanged gates - the counterpart to your psrouter lane placement. This is the WS4 milestone we both anchor on."
+    asks:
+      - "Send the WS0 checklist draft when ready; I'll return the 3 pxx-side fixtures + a review pass. After the boundary gate is green (negative control observed firing), we start 2+1."
+    handoff_to: psaios

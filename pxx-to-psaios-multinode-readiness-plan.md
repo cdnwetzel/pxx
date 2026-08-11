@@ -19,11 +19,18 @@ that make this whole plan low-risk from a governance standpoint:
   psrouter needs **no hook/policy/audit re-review**. So PP3, disagg, a 284B frontier model, or a
   fast MoE all light up under the *same* psguard gates (pol-083 `code_edit`, pol-006 `file.write`,
   fail-closed shell) with no pxx re-pin.
-- **The one genuinely new governance surface is the inter-node data plane.** Multi-node moves
-  activations / KV cache **across a node boundary** (Spark<->Spark over 200 GbE; Spark<->Mac over
-  TB5 RDMA). In a PHI-tokenized, no-egress, no-backups firm that is a *new event class to govern*:
-  data crossing a node must stay inside the firm subnet, on private interconnect, and be audited.
-  This is the item to close before any of it is production (see WS4).
+- **The one genuinely new governance surface is the inter-node boundary - governed honestly, as a
+  control-plane gate + a data-plane backstop (psaios seq-8 correction).** psguard is NOT in the
+  RDMA/NCCL packet path, so we do NOT claim per-KV-packet audit (that would be an aspirational
+  rule). Instead: (control plane, psguard ENFORCES) psrouter emits a new `inference.node_placement`
+  action; psguard checks each node against the firm private-fabric allowlist (**inv-036** +
+  **pol-026-family** policy: QSFP56 switchless triangle, TB5 point-to-point, mgmt subnet) and
+  **fails closed DENY sev-5** off-allowlist, hash-chaining the placement into `firm_audit_log`;
+  (data plane, topology + firewall, NOT psguard) transport is bound to the private-fabric
+  interfaces (switchless QSFP56 = no gateway = no off-subnet route; TB5 point-to-point) + a
+  firewall egress-deny backstop. No-egress is thus **provable** (allowlist gate + interface binding
+  + firewall + audited placement), not asserted. psaios owns this gate (bl335). Close before
+  production (WS4).
 - **Audit unchanged in shape.** Routed inference + governed pxx runs still land in
   `firm_audit_log` (bl305 coupling; audit writer = pxx `events.py` AuditLog). Multi-node adds
   *placement/routing* decisions to the audited record.
@@ -93,12 +100,15 @@ can never rescue a config that failed 1-3. Auditability + security stay intact t
 iteration by design.
 
 ### WS0 - Research / feasibility spike (week 0, BEFORE benchmarking)
-Prove the tooling and the governance boundary work at toy scale before committing the matrix, so
-nothing is built on unverified assumptions (avoids bandaid -> debt). Confirm + pin the serving
+**psaios drafts this checklist** (owns the boundary gate + GB10 serving-infra + co-tenancy soak
+conditions); pxx supplies the pxx-side items (governed-run assertion, real-`_TOOL_MAP` harness,
+budget/done-signal) and reviews for gate-ordering + negative-control discipline. Prove tooling +
+the governance boundary at toy scale before committing the matrix (avoids bandaid -> debt):
+**boundary gate FIRST, standable-up now on the live QSFP56 triangle** (placement allowlist +
+fail-closed + audited placement, negative control OBSERVED firing); confirm + pin the serving
 stacks (vLLM PP + disagg; MLX distributed decode; llama.cpp-RPC fallback; EXO later); prove the KV
-path Spark->36 GB Mac at 1-request scale; prove the inter-node off-subnet route fails closed. Exit:
-each topology has a proven-runnable pinned path or is deferred with a logged reason. Detail in the
-test spec.
+path Spark->36 GB Mac at 1-request scale. Exit: each topology has a proven-runnable pinned path or
+is deferred with a logged reason. Detail in the test spec.
 
 ### WS1 - Baseline + harness (weeks 1-2)
 - **Single-node baselines** on each of the 3 Sparks and the 36 GB Mac, on the real candidate
@@ -137,11 +147,13 @@ This is the **dress rehearsal for the 64 GB Mac** - prove the mechanism now so O
 ### WS4 - Governance integration (weeks 5-8, continuous)
 - **Register new routes in psrouter** as governed endpoints: prefill node, decode node, PP group.
   Placement/routing decisions become audited events.
-- **Close the inter-node data-plane surface (the new one):** treat "activations/KV cross a node
-  boundary" as a governed event. Invariant: inter-node traffic stays on the private firm subnet,
-  never egresses; encrypt in transit if it traverses any shared medium; add a psguard check /
-  invariant so a mis-configured route that would send data off-subnet **fails closed**. This is
-  the single net-new governance item; it must be green before production.
+- **Close the inter-node boundary (psaios-owned, bl335) - control-plane gate + data-plane
+  backstop:** psrouter emits `inference.node_placement`; psguard enforces the private-fabric
+  allowlist (inv-036 + pol-026-family), fail-closed DENY sev-5 off-allowlist, at route-config load
+  AND per-placement, audited into `firm_audit_log`. Data plane: bind transport to private-fabric
+  interfaces (switchless QSFP56, TB5 point-to-point) + firewall egress-deny. **No per-KV-packet
+  audit claimed** - no-egress is topology + firewall + allowlist-gate + audited placement. The
+  negative control (mis-routed off-subnet target) must be **observed** to DENY. Green before prod.
 - **Reconfirm pxx pin-compat holds on the new tier:** a governed `pxx_run` routed through PP3 /
   disagg still yields `code_edit.pxx_run ALLOW pol-083` + `file.write ALLOW pol-006` +
   `shell.exec DENY`, regardless of which node/model served the tokens. Add a step5-style

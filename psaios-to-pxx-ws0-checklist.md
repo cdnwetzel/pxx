@@ -1,8 +1,10 @@
-# bl335 WS0 — research/feasibility spike checklist (psaios draft v1)
+# bl335 WS0 — research/feasibility spike checklist (psaios v1.1)
 
-**Owner:** psaios (CC CLI, 7960). **Reviewer before execution:** pxx-side agent (gate-ordering +
-negative-control discipline). **Status:** DRAFT for pxx review — GO given (coord seq-9), boundary
-gate may start on the live QSFP56 triangle at psaios cadence.
+**Owner:** psaios (CC CLI, 7960). **Status:** **pxx review PASS (coord seq-11)** on gate-ordering +
+negative-control discipline; **CLEARED to execute the boundary gate** on the live QSFP56 triangle.
+v1.1 folds pxx's two sharpening notes: **B4/B5** (baseline diff = hard PASS/FAIL + injected-delta
+positive control) and **C3b** (denied route must never activate, not just log a DENY), plus the
+**D1** no-silent-scope-cut tightening.
 
 **Purpose (firm doctrine):** prove the tooling AND the governance boundary work at toy scale BEFORE
 committing the benchmark matrix — no building on assumptions, no bandaid→debt. WS0 is the gate that
@@ -38,9 +40,13 @@ a dry-run; and the pre-registration artifact is committed. Every check ships a *
   `kernel_state: OK` on all in-scope nodes.
 - [ ] **B4** `return-to-baseline` script: stop experimental services → restore netplan from B1 →
   **reboot touched nodes** (clean auto-start to baseline) → re-run B1-B3 sweep → **diff vs the
-  captured baseline**; any delta surfaced, not left.
+  captured baseline**. The diff is a **hard PASS/FAIL**, not a "surfaced" note: a silent or
+  unexplained delta = a vacuous restore = **FAILED session** (pxx seq-11 sharpening). Every delta is
+  either explained-and-accepted or the session fails.
 - [ ] **B5** **Dry-run both scripts** on one Spark (no real change) — prove capture→restore→diff is
-  clean and idempotent. A session that cannot restore baseline is a FAILED session.
+  clean and idempotent, AND **inject a deliberate delta and prove the diff goes RED** (positive
+  control: "restore verified" must be provably *able to fail*, or B4's PASS is vacuous). A session
+  that cannot restore baseline is a FAILED session.
 - [ ] **B6** Back-up-netplan step is wired as a hard precondition to any fabric edit (trivial now;
   mandatory). After-hours/weekend execution only.
 
@@ -58,6 +64,10 @@ a dry-run; and the pre-registration artifact is committed. Every check ships a *
   naming an off-allowlist endpoint is **DENY sev-5 at BOTH route-config load AND per-placement** —
   and this DENY is *observed* in the audit log, not assumed. (Positive-control-that-can-fail ethos,
   like bl331 Layer-3: an on-allowlist placement must ALLOW, so the gate can distinguish.)
+- [ ] **C3b** **Prove the denied route NEVER ACTIVATES** (pxx seq-11 sharpening): fail-closed means
+  **no placement is served** on a DENY — not merely that a DENY row is written. A denied-but-still-served
+  route is the real failure mode. Assert psrouter does not forward the request and no tokens are
+  served on the off-allowlist path (check the serving side, not only the audit side).
 - [ ] **C4** **Private-interface binding proof:** inter-node transport binds only to the QSFP56
   (`192.168.100.x`) / TB5 interfaces, never a routable/mgmt NIC — verified by actual socket/interface
   inspection, not config assertion.
@@ -72,9 +82,10 @@ a dry-run; and the pre-registration artifact is committed. Every check ships a *
 
 ## D. GB10 serving-infra feasibility (toy scale) — prove + PIN before the matrix
 
-- [ ] **D1** vLLM PP + disaggregated prefill/decode confirmed runnable on GB10 / CUDA 13; pin exact
-  version. (Flag from bl333: Qwen3-Coder-Next-80B did NOT run on vLLM 0.21.0 as of 2026-08-03 —
-  re-check.)
+- [ ] **D1** vLLM PP + disaggregated prefill/decode confirmed runnable on GB10 / CUDA 13; **pin the
+  exact working version OR defer the affected model with a logged reason — no silent scope-cut**
+  (pxx seq-11). Flag from bl333: Qwen3-Coder-Next-80B did NOT run on vLLM 0.21.0 as of 2026-08-03 —
+  either pin the version that runs it or log it deferred.
 - [ ] **D2** MLX distributed decode confirmed on the M4 Max; pin version.
 - [ ] **D3** llama.cpp-RPC PP **fallback** confirmed; pin version.
 - [ ] **D4** EXO heterogeneous — **defer with a logged reason** (bleeding-edge; gated on the 64 GB

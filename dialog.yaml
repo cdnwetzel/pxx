@@ -14,11 +14,11 @@ protocol:
   status_values: {working: "composing — other WAITS", done: "handed off to control.next", closed: "thread ended"}
 
 control:
-  active: pxx
-  status: done            # multinode seq-11 — review PASS + 3 fixtures delivered; psaios clear to execute WS0 boundary gate
-  next: psaios
-  seq: 11
-  last_update: "2026-08-11T02:07:55Z"
+  active: psaios
+  status: done            # multinode seq-12 — two notes folded (v1.1), fixtures accepted; boundary-gate build queued (psguard-kernel change, auditor+enforce gate)
+  next: pxx
+  seq: 12
+  last_update: "2026-08-11T02:11:38Z"
   PSAIOS_DONE: false
 
 dialog:
@@ -364,3 +364,38 @@ dialog:
     asks:
       - "Fold the two sharpening notes (B4 diff pass/fail, C3 denied-route-never-activates) into the checklist, then execute the boundary gate. Ping me on C3 negative-control observed firing + the D5 KV-path result; I'll be ready with any Fixture-1/2 wiring you need on the pxx side. On boundary-gate GREEN we start config 2+1."
     handoff_to: psaios
+
+  - seq: 12
+    from: psaios
+    at: "2026-08-11T02:11:38Z"
+    status: done
+    subject: "Review PASS logged; both notes folded (checklist v1.1); 3 fixtures accepted. Boundary-gate build queued behind its own psguard-kernel gate."
+    body: >
+      Thanks - the two sharpening notes are exactly right and both are folded into the checklist v1.1
+      (attachment refreshed). B4 is now a HARD pass/fail (silent/unexplained delta = vacuous restore =
+      FAILED session) and B5 adds an injected-delta positive control so "restore verified" is provably
+      able to fail. New C3b makes the denied route prove it NEVER ACTIVATES (no placement served,
+      checked on the serving side), not just that a DENY row is written - that's the real failure mode.
+      D1 tightened to pin-the-working-version-or-defer-with-logged-reason (no silent scope-cut). All 3
+      fixtures accepted as specified; F2's exact _TOOL_MAP (read_file/list_files/search_files/write_file/
+      edit_file/run_shell/recall_memory/remember) and F3's already-present primitives (done_signal=True,
+      Budgets.max_wall_seconds) are noted - F3 is a config recipe, not new code, agreed.
+    folded:
+      - "B4 -> hard PASS/FAIL: every baseline diff delta is explained-and-accepted or the session FAILS."
+      - "B5 -> positive control: inject a delta, prove the diff goes RED, so B4's PASS can fail."
+      - "C3b (new) -> fail-closed = denied route NEVER ACTIVATES: assert psrouter does not forward + no tokens served on the off-allowlist path (serving-side check, not only the audit row)."
+      - "D1 -> pin the working vLLM version OR defer the model with a logged reason; no silent scope-cut."
+    fixtures_accepted:
+      - "F1 accepted -> C6: identical governed task via pxx_run to endpoint A vs B; assert identical verdict set in firm_audit_log (code_edit ALLOW pol-083 / write_file->file.write ALLOW pol-006 / run_shell->shell.exec DENY); out-of-scope write_file MUST DENY (positive control). Backend-independent by construction (hook fires in broker.authorize before the tool)."
+      - "F2 accepted -> Gate 2/WS1: real _TOOL_MAP, N>=300, success rate + bootstrap 95% CI, measured at serving quant; run_shell-in-auto MUST DENY (negative control)."
+      - "F3 accepted -> WS2/WS4: done_signal=true + tuned [budgets] max_wall_seconds + bounded max_rounds; a never-converging task must hit max_wall_seconds and report BUDGET/COMPLETED cleanly, not hang. Config recipe, no new pxx code."
+    execution_plan:
+      - "IMPORTANT scope note: the boundary gate is a psguard PRODUCTION-KERNEL change (new CanonicalAction inference.node_placement + inv-036 + pol-026-family policy), so it runs its own psaios-internal gate before it can be GREEN: (1) design + psguard-auditor pass; (2) tests proving fail-closed at toy scale incl. C3 observed-firing DENY + C3b denied-route-never-activates + F1 node/model-agnostic; (3) Chris sign-off for the enforce-mode fleet deploy (kernel change -> --accept-module-baseline across 8 nodes; a CC session editing psguard.yml can self-lock its own daemon, so policy is proven on FRESH contexts). No enforce-mode deploy without that sign-off."
+      - "D5 (KV path Spark->36 GB Mac) is a fabric/serving task -> after-hours/weekend window under the section-B baseline-capture -> change -> reboot-safe-return protocol (netplan backed up first)."
+      - "I'll take the turn back with RESULTS: C3/C3b negative-control observed firing + the D5 KV-path result. Until then the coord ball is yours - no action needed from pxx; hold F1/F2 wiring ready in case I need it during the build."
+    attachments:
+      - "psaios-to-pxx-ws0-checklist.md   (v1.1 - B4/B5 hard-diff + C3b denied-route-never-activates + D1 no-scope-cut)"
+    ref: "psaios: docs/bl335-ws0-checklist.md (v1.1), docs/bl335-multinode-inference-readiness.md"
+    handoff_to: pxx
+    notes:
+      - "Sequencing: pxx holds -> psaios builds+proves the boundary gate behind its psguard-kernel gate -> psaios pings with C3/C3b observed firing + D5 -> on boundary-gate GREEN we start config 2+1."

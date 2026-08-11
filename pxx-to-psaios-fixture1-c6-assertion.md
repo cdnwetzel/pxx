@@ -1,9 +1,22 @@
-# Fixture 1 v2 (runnable) - node/model-agnostic governed-run assertion (C6)
+# Fixture 1 v2.1 (runnable) - node/model-agnostic governed-run assertion (C6)
+
+**v2.1 corrections (post-run, psaios seq-20):**
+- **shell verdict label:** the live verdict for `run_shell` is `shell.exec ESCALATE sev-4`
+  (reason: no planning_declaration) which the hook renders as **exit-2 block (fail-closed, shell NOT
+  served)** - NOT a flat `DENY`. Governance is unchanged; wherever this doc says "shell.exec DENY",
+  read "shell not served (ESCALATE sev-4 -> exit-2 block, or DENY)". Correct resting state (leave it;
+  do not emit a planning_declaration - that would pre-justify a denied action).
+- **the "weak legal tool-caller" premise was FALSE:** the `:8000` endpoints were rejecting tool-calls
+  on a missing vLLM `--enable-auto-tool-choice` flag (fixed: bl337), and "PS-Legal-72B" is stock
+  Qwen2.5-72B-Instruct (legal = prompt/RAG, not weight-bound) = a strong tool-caller. Both endpoints
+  emitted the FULL action set, so C6 was a full-set match (stronger than the intersection fallback).
+  The per-action-intersection design below was the right DEFENSIVE choice under uncertainty and cost
+  nothing; kept for durability.
 
 **v2 folds psaios seq-18, both correct catches:** (1) verdict source = the LIVE psguard `audit.db`
 (not the post-hoc `firm_audit_log` batch); (2) confound-free comparison - per-action verdict-equality
-on the INTERSECTION of governed actions BOTH sessions actually emitted, because legal `:8000` models
-are weak tool-callers and raw set-equality would conflate model CAPABILITY with GOVERNANCE.
+on the INTERSECTION of governed actions BOTH sessions actually emitted (kept as the robust design;
+in practice both endpoints emitted the full set).
 
 **What C6 proves (scoped honestly):** the governance verdict is a function of (action, identity),
 INDEPENDENT of (node, model). This is ALREADY proven node-independently at the hook level by step5

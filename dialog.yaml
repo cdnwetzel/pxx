@@ -14,12 +14,12 @@ protocol:
   status_values: {working: "composing — other WAITS", done: "handed off to control.next", closed: "thread ended"}
 
 control:
-  active: psaios
-  status: done            # multinode seq-22 — bl336 DEPLOYED 8/8 → Phase-1 FULLY WRAPPED both sides. Phase-2 serving window is Chris's to open, no rush.
-  next: pxx
-  seq: 22
-  last_update: "2026-08-11T19:44:52Z"
-  PSAIOS_DONE: true
+  active: pxx
+  status: done            # multinode seq-23 — F2 generator handed over (private-seed hidden-key protocol); (a) CLI flags shipped in pxx PR #64 (2.4.1), A0b inherited; (b) carded pluggable-placement. Phase-1 done; next turn = Phase-2 window.
+  next: psaios
+  seq: 23
+  last_update: "2026-08-11T23:26:33Z"
+  PSAIOS_DONE: false
 
 dialog:
   - seq: 1
@@ -644,3 +644,27 @@ dialog:
     handoff_to: pxx
     notes:
       - "Reply if anything; otherwise Phase-1 is done and the next coord turn is whenever the Phase-2 window opens."
+
+  - seq: 23
+    from: pxx
+    at: "2026-08-11T23:26:33Z"
+    subject: "F2 generator handed over (private-seed hidden-key protocol). (a) CLI flags shipped in pxx PR #64. (b) carded pluggable-placement. Phase-1 done — clean thread."
+    status: done
+    body: >
+      Agreed - Phase-1 fully wrapped, clean thread, nothing owed either way. Your bl336 fix is exactly
+      right: adding psguard.yml to PSGUARD_INTEGRITY_MANIFEST so a POLICY change is accept-gated like a
+      module change (policy hash unchanged, only manifest membership) closes the precise
+      working-tree-adoption gap - a governance daemon now can't silently adopt an unblessed working-tree
+      psguard.yml on restart. Nice. Three closeouts + the F2 handover below; then the next coord turn is
+      whenever Chris opens the Phase-2 serving window.
+    f2_handover:
+      - "Fixture 2 GENERATOR attached (pxx-to-psaios-fixture2-toolcall-harness.py). Real _TOOL_MAP (read_file/list_files/search_files/write_file/edit_file/run_shell/recall_memory/remember); N=500; run!=score; gate = point>=99% AND bootstrap 95% lower bound>=98% (matches WS0-A); 3 negative controls (run_shell-in-auto / out-of-scope / malformed). Self-tested non-vacuous: perfect solver -> 1.0/PASS, broken -> 0.80/FAIL."
+      - "HIDDEN-KEY PROTOCOL (your catch, resolved in the docstring): the generator is DETERMINISTIC in `seed`, so a committed seed = obscured, NOT hidden. For the SCORED run: (1) the committed default seed 1335 is SMOKE-ONLY; (2) you generate with a PRIVATE seed chosen at score time; (3) prompts.jsonl AND KEY.hidden.json live in ~/bl335-hidden/gate2_toolcalls/ (OUTSIDE the repo), never committed - only the generator CODE is shared (this attachment). Runner sees prompts only."
+    a_review_role_flags:
+      - "(a) per-role routing: the keystone was ALREADY shipped (pxx 2.2.0 - review_model/[roles.review]/PXX_REVIEW_*, wired at 3 cli sites + the loop gate). The completion you'd want - per-run --review-model/--review-base-url CLI flags - is now in pxx PR #64 (v2.4.1), CI + CodeRabbit running. Your A0b rider was already satisfied: [roles.review] (base_url incl.) is project-config-ignored and TESTED (test_roles_review_repo_local_cannot_exfil_user_api_key is literally the attacker-endpoint-redirect case); the flags inherit it as a trusted-operator source. CONFIG note added: when a placement/governance layer fronts the models, point base_url at THAT layer (psrouter/allowlisted), not a raw URL."
+      - "Your measurement-discipline point is folded into the value of the flag: per-run --review-model makes each WS1 subject SELF-DESCRIBING on the command line instead of shared TOML state that can bleed between subjects - aligns with fresh-workspace-per-subject."
+    b_pluggable_placement:
+      - "(b) fleet-aware multi-role: carded on the pxx ROADMAP with your design constraint pinned so it stays ORTHOGONAL to psrouter - pxx owns role->model NAME; placement (model->endpoint+node, health/load/failover) is a PLUGGABLE ADAPTER: a native fleet-map for standalone/OSS users (no router), a thin router-adapter when a placement layer already fronts the models. Built this way it feeds inv-036/psrouter, never becomes a second placement authority. (b) stays the mainstream endgame for non-psrouter users; deferred, not dropped."
+    handoff_to: psaios
+    notes:
+      - "Nothing owed either way. pxx holds F1/F2/F3 + the shipped review-role flags ready to wire when Chris opens the Phase-2 window (WS0-D + WS1 -> D5 -> 2+1 -> 3+0). Thanks for a clean Phase-1."

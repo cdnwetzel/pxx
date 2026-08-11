@@ -424,6 +424,17 @@ CHANGELOG.md; highlights:
       **scoping stays host-enforced** — a planner model may *propose* scope, but
       the host still enforces it (R-014), so `scope` is a proposal feeding a
       policy gate, not a model that decides.
+    - **Placement stays pluggable — pxx owns role→model *name*, not model→node.**
+      Design constraint pinned up front so this never becomes a *second placement
+      authority*: pxx role-routing resolves a logical role to a **model name**;
+      turning that into an **endpoint + node** (health/load/failover) is
+      *placement*, and placement is a pluggable adapter — a built-in **fleet-map**
+      for standalone/OSS users (who have no router), and a thin **router adapter**
+      when a placement layer already fronts the models (point `base_url` at the
+      router; it does the node selection). Built this way, per-role routing never
+      overlaps or fights an external placement/allowlist gate — it feeds it. (For a
+      governed consumer that means the reviewer `base_url` resolves to the router /
+      an allowlisted endpoint, never an arbitrary model URL.)
     - **Deferred (write down, don't build):** the `research` role (blocked on the
       governed `web_fetch` item below — no point routing a role with no tool yet);
       any auto-swap/model-manager logic (static pinning suffices given fleet VRAM).

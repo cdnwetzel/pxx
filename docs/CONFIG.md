@@ -120,17 +120,29 @@ base_url = "http://localhost:11434" # judge on the Mac (e.g. via SSH tunnel)
 ```
 
 Only `review` is recognised today (an unknown role name is a fail-closed
-error). Precedence follows the normal layering; env `PXX_REVIEW_*` overlays
-the TOML, and the overlay is resolved against the final coder model (a later
-`PXX_MODEL`/`PXX_API_KEY` still reaches the reviewer). Consumed by `pxx review`,
-`pxx calibrate`, and the opt-in `pxx loop --review` gate (`--review-mode
-blocking|advisory`).
+error). Precedence layers per field: user TOML, then env `PXX_REVIEW_*`, then the
+`--review-model` / `--review-base-url` run flags (each overrides the last), and
+the overlay is resolved against the final coder model (a later
+`PXX_MODEL`/`PXX_API_KEY` still reaches the reviewer). So the split is settable
+without a config file:
+
+```bash
+pxx loop --review --model qwen3-coder:30b --base-url http://gpu-box:11434 \
+         --review-model qwen3.5:9b --review-base-url http://localhost:11434
+```
+
+Consumed by `pxx review`, `pxx calibrate`, and the opt-in `pxx loop --review`
+gate (`--review-mode blocking|advisory`).
 
 **Trust boundary.** Reviewer routing is a data-egress surface — the diff (and
 any bearer token) is sent to `base_url`. Like `[[hooks]]` and `[[mcp_servers]]`,
 `[roles.review]` is honoured **only from user config, env, or CLI**, never from
 a repo-local `pxx.toml` / `.pxx/config.toml` (a checked-in file trying to set it
-is ignored with a warning).
+is ignored with a warning). The `--review-base-url` flag is a trusted-operator
+source, so it is honoured — but when a **placement or governance layer fronts
+your models** (a router that allowlists endpoints), point `base_url` at *that
+layer*, not a raw model URL, so endpoint selection stays governed by it rather
+than bypassed (see "Multi-role model routing" in ROADMAP for the placement split).
 
 ## Portable / single-box degrade
 

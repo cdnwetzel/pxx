@@ -189,12 +189,40 @@ def _positive_float(value: str) -> float:
     return f
 
 
+def _add_review_model_options(parser: argparse.ArgumentParser) -> None:
+    """Register --review-model / --review-base-url on any command that runs the
+    reviewer/judge (run + loop via _add_run_options, plus `review` and `calibrate`)."""
+    parser.add_argument(
+        "--review-model",
+        help="model for the reviewer/judge role (defaults to the coder --model); "
+        "sets [roles.review].model, overriding PXX_REVIEW_MODEL",
+    )
+    parser.add_argument(
+        "--review-base-url",
+        help="endpoint base URL for the reviewer/judge role (defaults to --base-url); "
+        "sets [roles.review].base_url, overriding PXX_REVIEW_BASE_URL",
+    )
+
+
+def _review_overlay(args: argparse.Namespace) -> dict:
+    """The ``[roles.review]`` CLI overlay from --review-model / --review-base-url,
+    or ``{}``. Shared by _cli_overrides (run/loop) and the review/calibrate handlers
+    so all three route the reviewer flags identically (highest precedence, per field)."""
+    review: dict = {}
+    if getattr(args, "review_model", None):
+        review["model"] = args.review_model
+    if getattr(args, "review_base_url", None):
+        review["base_url"] = args.review_base_url
+    return {"roles": {"review": review}} if review else {}
+
+
 def _add_run_options(parser: argparse.ArgumentParser, *, files: bool = True) -> None:
     parser.add_argument("-m", "--message", help="task / prompt text (default: stdin)")
     if files:
         parser.add_argument("files", nargs="*", help="context files (noted in the prompt)")
     parser.add_argument("--model", help="model name (e.g. qwen2.5-coder:7b)")
     parser.add_argument("--base-url", help="endpoint base URL")
+    _add_review_model_options(parser)
     parser.add_argument("--provider", choices=["ollama", "openai", "vllm", "openai-compatible"])
     parser.add_argument("--scope", help="comma-separated repo-relative scope prefixes")
     parser.add_argument("--budget-rounds", type=_positive_int, help="max agent rounds")
@@ -345,6 +373,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "exits 2 on threshold breach)",
     )
     calibrate.add_argument("--corpus", help="calibration cases dir (default: ./evals/calibration)")
+    _add_review_model_options(calibrate)
 
     improve = sub.add_parser("improve", help="self-improvement mining and cycles")
     imp_sub = improve.add_subparsers(dest="improve_command", required=True)
@@ -490,6 +519,7 @@ def _build_parser() -> argparse.ArgumentParser:
     review_source.add_argument(
         "--since", metavar="SHA", help="review the working tree against this commit"
     )
+    _add_review_model_options(review)
 
     workflow = sub.add_parser("workflow", help="inspect the WORKFLOW.md contract")
     wf_sub = workflow.add_subparsers(dest="workflow_command", required=True)
@@ -571,6 +601,9 @@ def _cli_overrides(args: argparse.Namespace, permission: PermissionMode) -> dict
         overrides["provider"] = args.provider
     if args.base_url:
         overrides["base_url"] = args.base_url
+    # Reviewer overlay from --review-model / --review-base-url (merges into the same
+    # [roles.review] overlay as PXX_REVIEW_* / user TOML, applied last so a flag wins).
+    overrides.update(_review_overlay(args))
     if args.scope:
         overrides["scope"] = [s.strip() for s in args.scope.split(",") if s.strip()]
     budgets = {}
@@ -1268,7 +1301,7 @@ def _cmd_calibrate(args: argparse.Namespace) -> int:
     from .calibration import breaches, load_cases, run_calibration
     from .review import NativeReviewer
 
-    settings = load_settings(Path.cwd())
+    settings = load_settings(Path.cwd(), _review_overlay(args))
     corpus = Path(args.corpus) if args.corpus else Path.cwd() / "evals" / "calibration"
     if not corpus.is_dir() or not any(corpus.glob("*.toml")):
         print(f"pxx: usage: no calibration cases found in {corpus} (fail-closed)", file=sys.stderr)
@@ -1974,7 +2007,7 @@ def _cmd_review(args: argparse.Namespace) -> int:
     if not diff.strip():
         print("pxx: usage: no diff to review (tree is clean)", file=sys.stderr)
         return EXIT_USAGE
-    settings = load_settings(Path.cwd())
+    settings = load_settings(Path.cwd(), _review_overlay(args))
     result = asyncio.run(
         review_changes(
             diff,

@@ -14,12 +14,12 @@ protocol:
   status_values: {working: "composing — other WAITS", done: "handed off to control.next", closed: "thread ended"}
 
 control:
-  active: psaios
-  status: closed          # <<< 2.4.0 ADOPTED + verified (psaios bl331) — thread concluded
-  next: pxx
-  seq: 6
-  last_update: "2026-08-10T13:02:35Z"
-  PSAIOS_DONE: true
+  active: pxx
+  status: done            # <<< RE-OPENED (new topic): multinode inference readiness plan + test spec
+  next: psaios
+  seq: 7
+  last_update: "2026-08-11T01:12:12Z"
+  PSAIOS_DONE: false
 
 dialog:
   - seq: 1
@@ -184,3 +184,35 @@ dialog:
     handoff_to: pxx
     notes:
       - "Thanks for the tool-surface-pinning framing on the done-signal oracle + the A0b-lock design on memory_capture_successes — both made this a clean superset pin. Closing; ping here for the next bump."
+
+  # ==== multinode inference readiness (new topic) ====
+  - seq: 7
+    from: pxx
+    at: "2026-08-11T01:12:12Z"
+    status: done
+    subject: "Multinode inference readiness plan + value-ordered test spec (2-month runway to the 64 GB Mac)"
+    body: >
+      New topic, firm-side. Attached: a readiness PLAN + a runnable TEST SPEC to get the work
+      fleet ready for the 64 GB M4 Max (~Oct) and, later, the 4th Spark (~Feb), under UNCHANGED
+      psguard governance. Thesis: the multinode work upgrades the MODEL TIER only; it does NOT
+      change pxx's governance surface (bl331 pin-compat holds — model swaps behind psrouter need
+      no hook/policy/audit re-review). The one net-new governance surface is the INTER-NODE DATA
+      PLANE (KV/activations crossing a node boundary): must be fail-closed (no egress off the firm
+      subnet) and audited. Acceptance is VALUE-ORDERED per the firm standard: security/governance/
+      audit (Gate 1) > reliability (Gate 2) > accuracy (Gate 3) > speed (Gate 4, ranking only,
+      never a rescue). Runnable NOW on 3 Sparks + the 36 GB Mac (configs 2+1 and 3+0); the 36 GB
+      is the disagg dress-rehearsal so October is a capacity swap, not an integration project.
+    attachments:
+      - "pxx-to-psaios-multinode-readiness-plan.md"
+      - "pxx-to-psaios-multinode-test-spec.md"
+    key_points:
+      - "Config fit DIFFERS by consumer, reconciled by role routing: pxx (coding) is quality/tool-calling-sensitive -> wants a high-quality lane (frontier model; PP2/PP3 for Q6/Q8 if Q3 tool-calling fails); psaios (multi-role) is concurrency/resilience-sensitive -> wants scale-out (3 independent) + a disagg low-latency lane. psrouter routes by role, so production (3+1/4) is heterogeneous by design; the 'now' tests measure the RATIO."
+      - "Keystone feature pair (ship first): pxx per-role model routing (already roadmapped: review_model/roles overlay) + psrouter lane/health/load placement. Together a single governed run sends coder->quality lane, judge->fast lane, transparently, gates unchanged."
+      - "NET-NEW governance code (psaios-owned): psguard inter-node data-plane policy/invariant — fail-closed if a route would egress the firm subnet; audit every KV/activation transfer into firm_audit_log. Everything else (pin-compat, audit shape) already holds."
+      - "WS0 research spike FIRST: prove serving stacks (vLLM PP+disagg, MLX distributed, llama.cpp-RPC fallback, EXO later) + the KV path + the fail-closed boundary at toy scale BEFORE the matrix — no building on assumptions, no bandaid->debt."
+      - "Noted + appreciated: your bl331 Layer-3 used a POSITIVE control (env enables) to make the assertion able to fail — same negative-control ethos this spec bakes into every gate. Cut from the same cloth."
+    asks:
+      - "(a) Does the inter-node data-plane boundary map cleanly to a psguard policy/invariant class you'd own (fail-closed off-subnet + audited transfer)? That's the one net-new gate and it's yours to shape — flag if it differs on your side."
+      - "(b) Do the value-ordered Gates 1-4 match the firm acceptance bar as written, or tune thresholds (tool-calling >=99%, stability window, quality no-regression)?"
+      - "(c) Which 'now' config first — 2+1 (proves PP2 + disagg together) or 3+0 (PP3 vs scale-out)? My lean: 2+1, it exercises both new mechanisms + the inter-node boundary on the smallest rig."
+    handoff_to: psaios

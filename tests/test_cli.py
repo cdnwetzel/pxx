@@ -2276,3 +2276,20 @@ def test_no_review_flags_no_roles_overlay():
     args = cli._build_parser().parse_args(["run", "-m", "x"])
     overrides = cli._cli_overrides(args, PermissionMode.AUTO)
     assert "roles" not in overrides
+
+
+def test_review_flags_on_reviewer_subcommands():
+    # the commands that actually run the reviewer — `review` and `calibrate` — also
+    # accept the flags and build the same [roles.review] overlay
+    for cmd in ("review", "calibrate"):
+        args = cli._build_parser().parse_args(
+            [cmd, "--review-model", "judge", "--review-base-url", "http://judge:11434"]
+        )
+        assert cli._review_overlay(args) == {
+            "roles": {"review": {"model": "judge", "base_url": "http://judge:11434"}}
+        }
+
+
+def test_review_overlay_empty_without_flags():
+    args = cli._build_parser().parse_args(["review"])
+    assert cli._review_overlay(args) == {}

@@ -515,6 +515,16 @@ def test_roles_review_cli_overrides_env(tmp_path, monkeypatch):
     assert settings.effective_review_model.model == "from-cli"
 
 
+def test_roles_review_cli_base_url_overrides_env(tmp_path, monkeypatch):
+    # endpoint precedence too: --review-base-url wins over PXX_REVIEW_BASE_URL (per field)
+    monkeypatch.setenv("PXX_REVIEW_BASE_URL", "http://from-env:11434")
+    settings = load_settings(
+        cwd=tmp_path,
+        cli_overrides={"roles": {"review": {"base_url": "http://from-cli:11434"}}},
+    )
+    assert settings.effective_review_model.base_url == "http://from-cli:11434"
+
+
 def test_no_review_cli_overlay_leaves_review_model_none(tmp_path):
     # absence of the flags == today's behaviour: reviewer reuses the coder model
     settings = load_settings(cwd=tmp_path, cli_overrides={"model": "coder-model"})

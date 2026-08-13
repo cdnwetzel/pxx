@@ -391,11 +391,19 @@ CHANGELOG.md; highlights:
   broken edits, not confident-but-wrong claims. Add a pass that cross-references the
   model's stated claims against actual tool-read content. Prior art to reuse: the
   faithfulness verifier already running on a sibling RAG system (each answer's claims
-  checked against the retrieved text); bring that axis into the coding loop, shipped
-  with a negative control (a proven-fail case).
+  checked against the retrieved text); bring that axis into the coding loop. **First
+  increment (prototyped): quote-grounding** — every non-trivial code span the model quotes
+  must appear in content it read or wrote (read tool-results + the diff), checked
+  line-by-line so elision/reflow don't false-positive; an ungrounded line (a fabricated
+  comment, invented code) is flagged. Wire it beside the deterministic objective gates
+  (`_edit_objectively_done`), **advisory first** (fp-rate measured like the reviewer's) then
+  promotable to a heal trigger. **Negative control (mandatory):** a fabricated quote MUST
+  flag and a real one MUST pass, so the check can go red — a check that cannot fail is not a
+  check.
 - **Diff-scoped retry on a failed review (community feedback, 2026-08-12).** The heal
-  round already carries the reviewer's specific findings and re-edits the
-  already-modified tree, so prior good work persists. Sharpening: label the rejection
+  round already threads the reviewer's structured findings (the VERDICT contract's
+  per-finding reasons) into the next round and re-edits the already-modified tree, so
+  prior good work persists. Sharpening: label the rejection
   explicitly in the retry prompt ("rejected because X; preserve everything else unless
   it caused that"), so a heal fixes only the flagged issue instead of risking a
   reproduced omission or an unrelated regression.
@@ -404,7 +412,8 @@ CHANGELOG.md; highlights:
   as good design: capability/role model routing (2.2.0 + the 2.4.1
   `--review-model`/`--review-base-url` flags), deterministic memory pre-injection at
   context-build (`memory_retrieval_limit`, not model-tool-dependent), and a standing
-  versioned eval corpus + reviewer-calibration suite gating every release. The two
+  versioned eval corpus (`pxx eval`) + reviewer-calibration suite (`pxx calibrate`, which
+  tracks the judge's false-positive rate) gating every release. The two
   additive directions from the same feedback are the two items above.
 
 ## Later

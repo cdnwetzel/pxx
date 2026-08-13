@@ -415,6 +415,21 @@ CHANGELOG.md; highlights:
   versioned eval corpus (`pxx eval`) + reviewer-calibration suite (`pxx calibrate`, which
   tracks the judge's false-positive rate) gating every release. The two
   additive directions from the same feedback are the two items above.
+- **Context paging — virtual memory for small-context models (evaluate; ref: Camelid's Context
+  Paging Runtime, timtoole02, 2026-08).** Let a 4B/8K-window local model work on a whole repo by
+  building a fresh, hard-capped **capsule** per action instead of replaying the transcript/repo.
+  pxx already has the SPINE: fresh-context-per-round, host-run verification (the model can't grade
+  its own work, R-014), honest-stop terminal codes (`BLOCKED != COMPLETED`), typed/gated actions
+  (`broker.authorize`), stale-edit rejection (`edit_file` exact-match). The **net-new subsystem**:
+  (1) bounded-capsule assembly under a hard INPUT-token cap (real tokenizer) with a prioritized
+  eviction order that never drops the target source; (2) **symbol cards + a tiny repo map**
+  (structural memory, hash-invalidated); (3) a **`NEED_CONTEXT` page-fault** action (request exact
+  source vs. guess; results bounded-by-reference); (4) **sha-256 source pages** as the one
+  authority + patches carrying the expected source hash. Synergy: (3)/(4) are the same grounding
+  axis as the content-truthfulness gate. Strategic: context assembly is pxx's agent-runtime layer
+  while Camelid builds this into the inference-engine layer — decide **build-native vs.
+  compose-on-Camelid** (interop today via `openai-compatible`; revive the parked timtoole02 RFC).
+  Prototype + Neo (8 GB) receipt plan: `docs/context-paging-prototype.md`.
 
 ## Later
 

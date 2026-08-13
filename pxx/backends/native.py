@@ -27,6 +27,7 @@ from ..config import ModelRef, native_timeout
 from ..errors import BackendError, GateError
 from ..outcome import RunOutcome, TerminalCode
 from ..safety import PermissionMode
+from ..truthfulness import check_quote_grounding
 from .base import BackendCapabilities, SessionContext
 from .mock import make_tool_context
 
@@ -226,6 +227,9 @@ class NativeBackend:
         tokens = 0
         prose_nudges = 0
         cost: float | None = None  # None until a priced model produces a cost
+        # Grounding sources for the content-truthfulness check: everything the model reads
+        # (tool results) or writes (edit-tool args), accumulated across this run's rounds.
+        grounding: list[str] = []
         while True:
             if self._cancelled or ctx.cancel_event.is_set():
                 return RunOutcome(
@@ -385,6 +389,32 @@ class NativeBackend:
                         }
                     )
                     continue
+                # Content-truthfulness (advisory): the model's final narration must not quote
+                # code absent from everything it read or wrote. FAIL-SAFE (an advisory check
+                # must never break a run) and non-blocking (a warning event, not a gate).
+                try:
+                    ungrounded = check_quote_grounding(summary, grounding)
+                    if ungrounded:
+                        await ctx.bus.emit(
+                            "content_truthfulness",
+                            {
+                                "backend": "native",
+                                "model": model.model,
+                                "round": rounds,
+                                "ungrounded": len(ungrounded),
+                                "samples": [f.quote[:120] for f in ungrounded[:3]],
+                                "advisory": True,
+                            },
+                            session_id=ctx.session_id,
+                        )
+                        log.warning(
+                            "content-truthfulness (advisory): %d quoted span(s) in the summary "
+                            "grounded in neither read nor written content (%s)",
+                            len(ungrounded),
+                            model.endpoint,
+                        )
+                except Exception as exc:  # advisory MUST NOT affect the run's outcome
+                    log.debug("content-truthfulness check skipped: %s", exc)
                 return RunOutcome(
                     code=TerminalCode.COMPLETED,
                     summary=summary or "done",
@@ -412,6 +442,8 @@ class NativeBackend:
                     except Exception as exc:  # tool runtime error: let the model recover
                         log.warning("tool %s failed: %s", name, exc)
                         result = f"error: {type(exc).__name__}: {exc}"
+                    # written args (edit-tool content etc.) ground the model's later quotes
+                    grounding.extend(str(v) for v in args.values() if isinstance(v, str))
                 if name in _EDIT_TOOLS and not str(result).startswith("error:"):
                     edited = True
                 messages.append(
@@ -421,6 +453,7 @@ class NativeBackend:
                         "content": str(result),
                     }
                 )
+                grounding.append(str(result))  # tool-read content grounds later quotes
 
             # Done-signal early-exit: this turn changed files, so ask the injected
             # oracle whether the on-disk edit already passes every mandatory gate

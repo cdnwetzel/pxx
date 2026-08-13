@@ -32,6 +32,7 @@ EVENT_KINDS = frozenset(
         "tool_call",
         "tool_call_prose",
         "tool_result",
+        "content_truthfulness",
         "tool_action_proposed",
         "policy_decision",
         "file_changed",

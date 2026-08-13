@@ -583,3 +583,48 @@ def test_pretty_printed_embedded_tool_call_detected(tmp_path):
     outcome = asyncio.run(make_backend(handler).run("do it", ctx))
     assert outcome.summary == "done properly"
     assert [e.data["nudges"] for e in ctx.bus.history if e.kind == "tool_call_prose"] == [1]
+
+
+def test_content_truthfulness_flags_fabricated_quote(tmp_path):
+    # summary quotes code grounded in nothing the model read/wrote -> advisory event (non-blocking)
+    summary = "The file defines:\n```python\ndef never_read():\n    return fabricated()\n```"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=completion(summary))
+
+    ctx = make_ctx(tmp_path)
+    outcome = asyncio.run(make_backend(handler).run("do it", ctx))
+    assert outcome.code is TerminalCode.COMPLETED  # advisory does NOT block
+    evts = [e for e in ctx.bus.history if e.kind == "content_truthfulness"]
+    assert len(evts) == 1
+    assert evts[0].data["ungrounded"] >= 1 and evts[0].data["advisory"] is True
+
+
+def test_content_truthfulness_grounded_quote_no_event(tmp_path):
+    # NEGATIVE CONTROL: a quote of content the model actually read must NOT fire
+    read_content = "def real_fn(x):\n    return x + 1"
+    responses = [
+        tool_call_round("c1", "read_file", '{"path": "x.py"}'),
+        completion(f"The file has:\n```python\n{read_content}\n```\nLooks correct."),
+    ]
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        r = responses[calls["n"]]
+        calls["n"] += 1
+        return httpx.Response(200, json=r)
+
+    ctx = make_ctx(tmp_path, tools=FakeRegistry(result=read_content))
+    outcome = asyncio.run(make_backend(handler).run("inspect x.py", ctx))
+    assert outcome.code is TerminalCode.COMPLETED
+    assert [e for e in ctx.bus.history if e.kind == "content_truthfulness"] == []
+
+
+def test_content_truthfulness_plain_prose_no_event(tmp_path):
+    # a normal narration with no code quotes never fires -> no false positive on prose
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=completion("I reviewed the code and it looks fine."))
+
+    ctx = make_ctx(tmp_path)
+    asyncio.run(make_backend(handler).run("do it", ctx))
+    assert [e for e in ctx.bus.history if e.kind == "content_truthfulness"] == []

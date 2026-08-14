@@ -30,7 +30,7 @@ so a hash means one thing across the whole system (mirrors pxx's canonical hashi
      in a transcript.
    - **Source pages:** repo files, each addressed by its `sha-256` (above) — the single authority.
    - **Artifact store:** full test/terminal logs on disk; the model gets a bounded summary + a
-     reference ID.
+     reference ID — the summary is **scrubbed of secrets** (credentials never reach the model).
 
 2. **Capsule builder (per action):** fixed agent kernel + task contract (from the ledger) + the
    EXACT target source verbatim (never summarized, never evicted) + a compact diagnostic (last
@@ -49,7 +49,8 @@ so a hash means one thing across the whole system (mirrors pxx's canonical hashi
    - `PATCH(path, expected_sha, diff)` — applied only if `expected_sha` matches the page's current
      hash, else REJECT + page fresh source (never apply blind).
    - `RUN_TEST` — runs **the ledger's acceptance command only** (host-owned); a model-selected
-     command is refused (else the model could grade its own work).
+     command is refused (else the model could grade its own work). Runs in the sandbox under a
+     host **timeout + resource bound** (a runaway test can't hang the loop).
    - `SEARCH | INSPECT` — bounded results, returned by reference.
    - `COMPLETE` — accepted **only** after a host `RUN_TEST` of the ledger command passes.
    - `BLOCKED` — an honest stop; **never** recorded as `COMPLETE`.

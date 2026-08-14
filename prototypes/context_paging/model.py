@@ -52,7 +52,8 @@ def _int_or_none(v) -> int | None:
         return v
     if isinstance(v, float) and v.is_integer():
         return int(v)
-    if isinstance(v, str) and v.isdigit():
+    # str.isdigit() is True for non-ASCII digits like "²" that int() then REJECTS — require ASCII
+    if isinstance(v, str) and v.isascii() and v.isdigit():
         return int(v)
     return None
 

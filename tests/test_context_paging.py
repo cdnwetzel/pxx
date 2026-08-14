@@ -498,6 +498,7 @@ def test_int_or_none_coerces_usage_values():
 
     assert _int_or_none("50") == 50 and _int_or_none(50) == 50 and _int_or_none(3.0) == 3
     assert _int_or_none(True) is None and _int_or_none("x") is None and _int_or_none(None) is None
+    assert _int_or_none("²") is None  # non-ASCII digit: isdigit() True but int() would raise
 
 
 # ------------------------------------------------ review-hardening negative controls (PR #69)

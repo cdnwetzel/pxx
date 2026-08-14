@@ -452,7 +452,8 @@ def test_reconcile_invalidates_stale_verification_after_crash(tmp_path):
     )
     assert ex2.reconcile() == "applied"
     assert reloaded.verified is False and reloaded.revision == 1
-    assert Ledger.load(state).verified is False  # persisted, so COMPLETE cannot ride it
+    on_disk = Ledger.load(state)  # BOTH the cleared verification and the bumped revision persisted
+    assert on_disk.verified is False and on_disk.revision == 1  # exactly-once recovery is durable
 
 
 def test_artifact_get_refuses_path_traversal(tmp_path):

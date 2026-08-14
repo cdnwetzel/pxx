@@ -10,7 +10,8 @@ eviction. **Symbol cards, a repo map, and symbol-level requests are v1** — v0 
 the v0 host can do deterministically.
 
 **What pxx already provides (reuse, don't rebuild).** Host-enforced scope + tool gating
-(`broker.authorize`), the terminal taxonomy (`BLOCKED != COMPLETED`), host-run verification (the
+(`broker.authorize`), the terminal taxonomy (an honest non-success stop keeps its own code —
+`OUT_OF_SCOPE`, `LINT_BLOCKED`, … — and is never relabeled `COMPLETED`), host-run verification (the
 model can't grade its own work, R-014), fresh-context-per-round, and stale-edit rejection
 (`edit_file` exact old_string match). v0 adds only the *paging* layer on top.
 
@@ -36,7 +37,9 @@ so a hash means one thing across the whole system (mirrors pxx's canonical hashi
    EXACT target source verbatim (never summarized, never evicted) + a compact diagnostic (last
    failure summary + ref) + this phase's tool list. Enforce a **hard input cap** (start 5,500
    tokens) measured with the REAL tokenizer; over budget → evict in order **history → dependency
-   pages** (never the target source).
+   pages** (never the target source). Tie-break **within** a category deterministically —
+   **oldest-touched first** (by last-referenced action seq) — so the same over-budget capsule
+   always evicts the same entry (a receipt is reproducible).
 
    - **Overflow path (kernel + contract + target source alone > cap after all evictions):** the
      host returns a preflight **`BLOCKED(reason="target_source_exceeds_capsule")`** — a legal,
@@ -47,20 +50,31 @@ so a hash means one thing across the whole system (mirrors pxx's canonical hashi
 
    - `NEED_CONTEXT(path)` — a page fault; host pages the exact file in.
    - `PATCH(path, expected_sha, diff)` — applied only if `expected_sha` matches the page's current
-     hash, else REJECT + page fresh source (never apply blind).
+     hash, else REJECT + page fresh source (never apply blind). v0 `diff` is an **exact
+     `old_string`/`new_string` replacement, no fuzz** (reuses pxx's `edit_file` matcher) — the sha
+     guards the whole-file revision, the exact-match guards the edit site; unified-diff/hunk
+     semantics are v1.
    - `RUN_TEST` — runs **the ledger's acceptance command only** (host-owned); a model-selected
      command is refused (else the model could grade its own work). Runs in the sandbox under a
      host **timeout + resource bound** (a runaway test can't hang the loop).
    - `SEARCH | INSPECT` — bounded results, returned by reference.
-   - `COMPLETE` — accepted **only** after a host `RUN_TEST` of the ledger command passes.
-   - `BLOCKED` — an honest stop; **never** recorded as `COMPLETE`.
+   - `COMPLETE` — a model **request** to finish; the host records the terminal code `COMPLETED`
+     **only** after its own `RUN_TEST` of the ledger command passes (the action name and the
+     terminal code are deliberately distinct — the model asks, the host decides).
+   - `BLOCKED` — a model **request** to stop honestly; recorded under a specific non-success
+     terminal code (`OUT_OF_SCOPE`, `LINT_BLOCKED`, budget, …), **never** relabeled `COMPLETED`.
 
 4. **Host executor + verifier (crash-safe):** before mutating, persist an **in-flight action record
    with an idempotency key**; apply the patch, reindex the hash, and bump the ledger revision under
-   an **atomic commit** (tmp-then-replace, ordered so a crash leaves a recoverable state); on
-   startup **reconcile** the in-flight record (already-applied → skip; not-applied → discard;
-   **ambiguous → fail closed**), so an interrupted action never double-applies or leaves source /
-   page-index / ledger inconsistent. Tools run sandboxed. No transcript replay.
+   an **atomic commit**. `tmp-then-replace` is atomic **per file**, not across the three; v0's
+   single-file task keeps this to **one source file + the ledger**, committed in a fixed order
+   (source → reindex → ledger revision) where any crash point is reconcilable from the idempotency
+   record — the page index is a **derived cache** rebuilt from the source's bytes, never an
+   independent source of truth. On startup **reconcile** the in-flight record (already-applied →
+   skip; not-applied → discard; **ambiguous → fail closed**), so an interrupted action never
+   double-applies or leaves source / page-index / ledger inconsistent. A true **write-ahead journal
+   across N files is a v1 requirement** (multi-file patches). Tools run sandboxed. No transcript
+   replay.
 
 5. **Loop:** build capsule → model → one typed action → host executes/verifies → update ledger →
    repeat until COMPLETE / BLOCKED / budget.
@@ -69,9 +83,10 @@ so a hash means one thing across the whole system (mirrors pxx's canonical hashi
 
 - **Hardware:** Neo (8 GB MacBook), a real 4B/8K model via Ollama (e.g. `qwen3:4b`).
 - **Task:** a small, real single-file bug fix whose failing test must pass.
-- **PASS receipt (schema — recorded to disk):**
+- **PASS receipt (schema — recorded to disk).** Illustrative shape, not literal JSON: the bare
+  `...` marks elided repeated entries.
 
-  ```json
+  ```jsonc
   {
     "model_id": "...", "tokenizer_id": "...",
     "capsules": [{"action_seq": 1, "input_tokens": 4123, "under_cap": true}, ...],

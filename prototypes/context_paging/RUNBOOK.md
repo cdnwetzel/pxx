@@ -203,7 +203,8 @@ uv run --with transformers --extra dev python -m prototypes.context_paging.run_n
 ```
 
 Archive **every run's receipt** under `receipts/` (§4) — **N ≥ 3 runs each, per pass** (latency +
-memory) means many files, each named by its `(candidate, pass, run-id)` identity; do not collapse
+memory) means many files, each named by its full `(candidate, pass, topology, run-id)` identity
+(the two passes can use different topologies, so `topology` must be in the name); do not collapse
 repetitions into one file. Report **median + spread** per the pre-registration. Deciding metrics: **memory pressure on the
 box under test** and **sustained wall-clock** — not peak
 tok/s.

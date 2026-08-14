@@ -3,14 +3,15 @@
 Every test names both directions where relevant: a fabricated quote MUST be flagged and a
 real one MUST pass, so the suite proves the check can distinguish, not merely stay green.
 """
-from pxx.truthfulness import check_quote_grounding, TruthfulnessFinding
+
+from pxx.truthfulness import check_quote_grounding
 
 _READ = 'def parse_config(path):\n    """Load the config."""\n    return {"key": read(path)}'
 _DIFF = "+def added_helper(x):\n+    return x + 1"
 
 
 def test_grounded_fenced_quote_passes():
-    text = "The file has:\n```python\ndef parse_config(path):\n    return {\"key\": read(path)}\n```"
+    text = 'The file has:\n```python\ndef parse_config(path):\n    return {"key": read(path)}\n```'
     assert check_quote_grounding(text, [_READ]) == []
 
 
@@ -24,12 +25,12 @@ def test_fabricated_fenced_quote_flagged():
 
 
 def test_grounded_inline_code_passes():
-    text = "It calls `return {\"key\": read(path)}` at the end."
+    text = 'It calls `return {"key": read(path)}` at the end.'
     assert check_quote_grounding(text, [_READ]) == []
 
 
 def test_ungrounded_inline_code_flagged():
-    text = "It calls `return {\"secret\": exfiltrate(path)}` at the end."
+    text = 'It calls `return {"secret": exfiltrate(path)}` at the end.'
     findings = check_quote_grounding(text, [_READ])
     assert len(findings) == 1 and findings[0].kind == "inline"
 
@@ -43,7 +44,7 @@ def test_prose_and_short_backticks_ignored():
 
 def test_whitespace_insensitive_grounding():
     # the model reflows indentation; still grounded -> no false positive
-    text = "```python\ndef parse_config(path):\n        return {\"key\": read(path)}\n```"
+    text = '```python\ndef parse_config(path):\n        return {"key": read(path)}\n```'
     assert check_quote_grounding(text, [_READ]) == []
 
 
@@ -61,7 +62,7 @@ def test_empty_text_and_no_sources():
 
 def test_non_vacuous_can_pass_and_fail():
     # the check MUST be able to both pass a real quote and flag a fabricated one
-    real = "```python\ndef parse_config(path):\n    return {\"key\": read(path)}\n```"
+    real = '```python\ndef parse_config(path):\n    return {"key": read(path)}\n```'
     fake = "```python\ndef never_existed():\n    return fabricated()\n```"
     assert check_quote_grounding(real, [_READ]) == []
     assert check_quote_grounding(fake, [_READ]) != []

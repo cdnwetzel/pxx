@@ -6,7 +6,7 @@ comment that isn't there, claiming code it doesn't have). The objective gates
 (lint/tests/diff-cap) catch broken edits, not confident-but-wrong claims.
 
 First increment: **quote grounding**. Every non-trivial code span the model quotes in its
-narration must appear in content it actually read or wrote (read tool-results ∪ the diff).
+narration must appear in content it actually read or wrote (read tool-results plus the diff).
 An ungrounded quote is a fabrication. Deterministic, no model, so it is trivially
 unit-testable with a negative control (a fabricated quote MUST be flagged; a real one MUST
 pass — a check that cannot go red is not a check).
@@ -14,6 +14,7 @@ pass — a check that cannot go red is not a check).
 This module is the pure checker; wiring it into the loop as an advisory gate (fp-rate
 measured before it can block) is a separate step.
 """
+
 from __future__ import annotations
 
 import re

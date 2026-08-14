@@ -20,8 +20,9 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-# Fenced ```...``` blocks (any/no language tag) and inline `...` spans.
-_FENCE_RE = re.compile(r"```[A-Za-z0-9_+.-]*\n(.*?)```", re.DOTALL)
+# Fenced ```...``` blocks (any/no info string, incl. spaces like ```python hl_lines=1; CRLF
+# tolerated) and inline `...` spans.
+_FENCE_RE = re.compile(r"```[^\n]*\r?\n(.*?)```", re.DOTALL)
 _INLINE_RE = re.compile(r"`([^`\n]+)`")
 _WS_RE = re.compile(r"\s+")
 
@@ -92,12 +93,19 @@ def check_quote_grounding(text: str, sources: list[str]) -> list[TruthfulnessFin
     """
     if not text:
         return []
-    grounded = _normalize("\n".join(s for s in sources if s))
+    # Normalize each source SEPARATELY (not one joined blob): a quote is grounded only if some
+    # single source contains it whole. Joining would let a quote whose first half ends source A
+    # and whose second half starts source B pass, though no source ever held the quoted code.
+    grounded_sources = [g for g in (_normalize(s) for s in sources if s) if g]
+
+    def _is_grounded(norm: str) -> bool:
+        return any(norm in g for g in grounded_sources)
+
     findings: list[TruthfulnessFinding] = []
     seen: set[str] = set()
     for m in _FENCE_RE.finditer(text):
         for display, norm in _substantive_lines(m.group(1)):
-            if norm not in grounded:
+            if not _is_grounded(norm):
                 if norm not in seen:
                     seen.add(norm)
                     findings.append(TruthfulnessFinding(quote=display[:200], kind="fenced"))
@@ -106,7 +114,7 @@ def check_quote_grounding(text: str, sources: list[str]) -> list[TruthfulnessFin
         span = m.group(1)
         if _looks_like_code(span):
             norm = _normalize(span)
-            if norm and norm not in grounded and norm not in seen:
+            if norm and not _is_grounded(norm) and norm not in seen:
                 seen.add(norm)
                 findings.append(TruthfulnessFinding(quote=span.strip()[:200], kind="inline"))
     return findings

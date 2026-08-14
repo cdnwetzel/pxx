@@ -13,17 +13,22 @@ preserved in git (tag `v1.3.3` and earlier).
   there, presenting invented code as real). The objective gates (lint/tests/diff-cap) catch
   broken edits, not confident-but-wrong claims. This ships the **first increment: deterministic
   quote-grounding** (`pxx/truthfulness.py`). Every non-trivial code span the model quotes in its
-  final narration must appear in content it actually read or wrote — read tool-results ∪ the
-  edit-tool args accumulated across the run. Fenced blocks are checked **line-by-line** (a model
-  that quotes a function but elides its docstring is being terse, not fabricating; a single
-  invented line is what flags); inline spans are checked only when they look like code
-  (whitespace-normalized, no model, fully deterministic).
+  final narration must appear in content it actually read or wrote — the union of read
+  tool-results and **edit-tool** args accumulated across the run. Grounding is checked
+  **per-source** (a quote must sit inside a single source, so it can't be assembled from two
+  unrelated reads) and only **edit-tool** args count as "written" (a non-edit tool arg is
+  model-supplied, not read content, so it can't launder a fabricated quote). Fenced blocks are
+  checked **line-by-line** (a model that quotes a function but elides its docstring is being
+  terse, not fabricating; a single invented line is what flags), tolerating spaced info strings
+  and CRLF; inline spans are checked only when they look like code (whitespace-normalized, no
+  model, fully deterministic).
 - Wired into the native loop's COMPLETED path as an **advisory, non-blocking, fail-safe** check:
-  an ungrounded quote emits a `content_truthfulness` event (+ a warning log) but **never**
-  changes a run's outcome — the `try/except` swallows any checker error so an advisory can't
-  break a run. Advisory-first is deliberate: the false-positive rate is measured on real runs
-  (like the reviewer's calibration) **before** the gate is ever promotable to a heal trigger.
-  Prove-before-you-call-it.
+  an ungrounded quote emits a **metadata-only** `content_truthfulness` event (count + a kind
+  breakdown, **never** the quoted code — the audit stream carries no file contents) plus a
+  warning log, but **never** changes a run's outcome — the `try/except` swallows any checker
+  error so an advisory can't break a run. Advisory-first is deliberate: the false-positive rate
+  is measured on real runs (like the reviewer's calibration) **before** the gate is ever
+  promotable to a heal trigger. Prove-before-you-call-it.
 - **Negative control (shipped in the tests):** a fabricated quote MUST flag and a real quote
   MUST pass — a check that cannot go red is not a check. `content_truthfulness` registered in
   the `EVENT_KINDS` allowlist.

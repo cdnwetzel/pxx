@@ -4,6 +4,8 @@ Every test names both directions where relevant: a fabricated quote MUST be flag
 real one MUST pass, so the suite proves the check can distinguish, not merely stay green.
 """
 
+from __future__ import annotations
+
 from pxx.truthfulness import check_quote_grounding
 
 _READ = 'def parse_config(path):\n    """Load the config."""\n    return {"key": read(path)}'
@@ -71,3 +73,29 @@ def test_non_vacuous_can_pass_and_fail():
 def test_deduplicates_repeated_ungrounded_quote():
     text = "`return madeup(a)` ... and again `return madeup(a)`"
     assert len(check_quote_grounding(text, [_READ])) == 1
+
+
+def test_quote_spanning_two_sources_is_not_grounded():
+    # NEGATIVE CONTROL for per-source grounding: the quote's first half ends source A and its
+    # second half starts source B, but NO single source ever held the quoted line. Joining the
+    # sources into one blob would falsely pass it; per-source membership must flag it.
+    src_a = "def handler(request):\n    return early_"
+    src_b = "guard(request)\n    do_other_thing()"
+    text = "`return early_guard(request)` is how it works."
+    findings = check_quote_grounding(text, [src_a, src_b])
+    assert len(findings) == 1 and findings[0].kind == "inline"
+
+
+def test_fenced_info_string_with_spaces_still_checked():
+    # NEGATIVE CONTROL: a fenced block with a spaced info string (```python hl_lines=1) and
+    # CRLF newlines must still be parsed and its fabricated line flagged, not skipped.
+    text = "```python hl_lines=1\r\ndef never_existed():\r\n    return fabricated()\r\n```"
+    findings = check_quote_grounding(text, [_READ])
+    assert len(findings) == 1 and findings[0].kind == "fenced"
+
+
+def test_fenced_spaced_info_string_grounded_quote_passes():
+    # the same spaced-info-string fence, but a REAL quote -> must pass (the widened regex did
+    # not turn every such block into a false positive)
+    text = '```python title=config.py\ndef parse_config(path):\n    return {"key": read(path)}\n```'
+    assert check_quote_grounding(text, [_READ]) == []

@@ -217,6 +217,7 @@ class BudgetGuard:
   First reachable wins. Returns `ModelRef`.
 
 ### truthfulness.py
+
 - **A content axis, orthogonal to permission.** Scope/R-014 governs what the agent may
   *touch*; `truthfulness.py` governs whether what it *says* about the code is grounded. Neither
   subsumes the other: an in-scope run can still fabricate, and the objective gates

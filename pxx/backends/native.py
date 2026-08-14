@@ -395,6 +395,12 @@ class NativeBackend:
                 try:
                     ungrounded = check_quote_grounding(summary, grounding)
                     if ungrounded:
+                        # METADATA ONLY: the audit stream carries no prompt bodies / file
+                        # contents / code (events.py contract). Emit the count and a kind
+                        # breakdown, never the quoted spans themselves.
+                        kinds: dict[str, int] = {}
+                        for f in ungrounded:
+                            kinds[f.kind] = kinds.get(f.kind, 0) + 1
                         await ctx.bus.emit(
                             "content_truthfulness",
                             {
@@ -402,7 +408,7 @@ class NativeBackend:
                                 "model": model.model,
                                 "round": rounds,
                                 "ungrounded": len(ungrounded),
-                                "samples": [f.quote[:120] for f in ungrounded[:3]],
+                                "kinds": kinds,
                                 "advisory": True,
                             },
                             session_id=ctx.session_id,
@@ -442,8 +448,12 @@ class NativeBackend:
                     except Exception as exc:  # tool runtime error: let the model recover
                         log.warning("tool %s failed: %s", name, exc)
                         result = f"error: {type(exc).__name__}: {exc}"
-                    # written args (edit-tool content etc.) ground the model's later quotes
-                    grounding.extend(str(v) for v in args.values() if isinstance(v, str))
+                    # Only EDIT-tool args ground later quotes (they become on-disk content).
+                    # A non-edit tool's args are model-supplied, not read content — grounding
+                    # them would let the model launder a fabricated quote through, say, a
+                    # search query. Tool *results* (reads) still ground for every tool.
+                    if name in _EDIT_TOOLS:
+                        grounding.extend(str(v) for v in args.values() if isinstance(v, str))
                 if name in _EDIT_TOOLS and not str(result).startswith("error:"):
                     edited = True
                 messages.append(

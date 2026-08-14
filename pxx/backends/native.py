@@ -448,14 +448,14 @@ class NativeBackend:
                     except Exception as exc:  # tool runtime error: let the model recover
                         log.warning("tool %s failed: %s", name, exc)
                         result = f"error: {type(exc).__name__}: {exc}"
-                    # Only EDIT-tool args ground later quotes (they become on-disk content).
-                    # A non-edit tool's args are model-supplied, not read content — grounding
-                    # them would let the model launder a fabricated quote through, say, a
-                    # search query. Tool *results* (reads) still ground for every tool.
-                    if name in _EDIT_TOOLS:
-                        grounding.extend(str(v) for v in args.values() if isinstance(v, str))
                 if name in _EDIT_TOOLS and not str(result).startswith("error:"):
                     edited = True
+                    # Only a SUCCESSFUL edit-tool call grounds later quotes: its args became
+                    # on-disk content. A FAILED edit wrote nothing, and a non-edit tool's args
+                    # are model-supplied, not read content — grounding either would let the
+                    # model launder a fabricated quote. Tool *results* (reads) still ground for
+                    # every tool below.
+                    grounding.extend(str(v) for v in args.values() if isinstance(v, str))
                 messages.append(
                     {
                         "role": "tool",

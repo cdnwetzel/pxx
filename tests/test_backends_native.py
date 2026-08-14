@@ -651,6 +651,51 @@ def test_content_truthfulness_nonedit_tool_arg_does_not_ground(tmp_path):
     assert len(evts) == 1 and evts[0].data["ungrounded"] >= 1
 
 
+def test_content_truthfulness_successful_edit_arg_grounds(tmp_path):
+    # POSITIVE mirror: a SUCCESSFUL edit's args DO ground a later quote (they became on-disk
+    # content) -> quoting them is truthful -> no advisory event.
+    written = "def helper(n):\n    return n * 2"
+    responses = [
+        tool_call_round("c1", "write_file", json.dumps({"path": "x.py", "content": written})),
+        completion(f"I wrote:\n```python\n{written}\n```"),
+    ]
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        r = responses[calls["n"]]
+        calls["n"] += 1
+        return httpx.Response(200, json=r)
+
+    ctx = make_ctx(tmp_path, tools=FakeRegistry(result="ok: wrote x.py"))
+    outcome = asyncio.run(make_backend(handler).run("write x.py", ctx))
+    assert outcome.code is TerminalCode.COMPLETED
+    assert [e for e in ctx.bus.history if e.kind == "content_truthfulness"] == []
+
+
+def test_content_truthfulness_failed_edit_arg_does_not_ground(tmp_path):
+    # NEGATIVE CONTROL: an edit tool that FAILS (result starts with "error:") wrote nothing, so
+    # its args must not ground a later quote — else the model could quote code from a rejected
+    # write as if it were real. The advisory must still fire.
+    fake_code = "def written_but_failed():\n    return nope()"
+    responses = [
+        tool_call_round("c1", "write_file", json.dumps({"path": "x.py", "content": fake_code})),
+        completion(f"I wrote:\n```python\n{fake_code}\n```"),
+    ]
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        r = responses[calls["n"]]
+        calls["n"] += 1
+        return httpx.Response(200, json=r)
+
+    # the edit tool returns an error -> nothing landed on disk
+    ctx = make_ctx(tmp_path, tools=FakeRegistry(result="error: permission denied"))
+    outcome = asyncio.run(make_backend(handler).run("write x.py", ctx))
+    assert outcome.code is TerminalCode.COMPLETED
+    evts = [e for e in ctx.bus.history if e.kind == "content_truthfulness"]
+    assert len(evts) == 1 and evts[0].data["ungrounded"] >= 1
+
+
 def test_content_truthfulness_plain_prose_no_event(tmp_path):
     # a normal narration with no code quotes never fires -> no false positive on prose
     def handler(request: httpx.Request) -> httpx.Response:

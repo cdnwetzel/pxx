@@ -216,6 +216,23 @@ class BudgetGuard:
 - Priority: explicit `--model`/`PXX_MODEL` > vLLM endpoints > Ollama.
   First reachable wins. Returns `ModelRef`.
 
+### truthfulness.py
+
+- **A content axis, orthogonal to permission.** Scope/R-014 governs what the agent may
+  *touch*; `truthfulness.py` governs whether what it *says* about the code is grounded. Neither
+  subsumes the other: an in-scope run can still fabricate, and the objective gates
+  (lint/tests/diff-cap) catch broken edits, not confident-but-wrong prose.
+- `check_quote_grounding(text, sources) -> list[TruthfulnessFinding]`: pure, deterministic, no
+  model. Every non-trivial code span the model quotes must appear in `sources` = read
+  tool-results ∪ written edit-tool args. Fenced blocks checked **line-by-line** (elision/reflow
+  tolerated; one finding per block at its first ungrounded line); inline spans checked only when
+  they look like code; all whitespace-normalized. Empty list == all grounded.
+- **Advisory-first contract.** Wired into the native loop's COMPLETED path as non-blocking +
+  fail-safe (a `try/except` guarantees an advisory check never changes an outcome); emits a
+  `content_truthfulness` event. Promotion to a heal trigger is gated on measuring the
+  false-positive rate on real runs first — same prove-before-you-block posture as the reviewer's
+  calibration. Ships with a negative control (fabricated MUST flag, real MUST pass).
+
 ### memory/
 - `store.py`: `MemoryStore(path)` — SQLite, WAL mode.
   Tables: `observations(id INTEGER PK, project TEXT, kind TEXT, content TEXT,

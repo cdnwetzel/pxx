@@ -399,7 +399,9 @@ CHANGELOG.md; highlights:
   (`_edit_objectively_done`), **advisory first** (fp-rate measured like the reviewer's) then
   promotable to a heal trigger. **Negative control (mandatory):** a fabricated quote MUST
   flag and a real one MUST pass, so the check can go red — a check that cannot fail is not a
-  check.
+  check. **Shipped advisory in 2.4.2** (`pxx/truthfulness.py` + native-loop wiring, fail-safe /
+  non-blocking, `content_truthfulness` event, negative control in tests). **Still open:**
+  promotion to a heal trigger, gated on measuring the false-positive rate on real runs first.
 - **Diff-scoped retry on a failed review (community feedback, 2026-08-12).** The heal
   round already threads the reviewer's structured findings (the VERDICT contract's
   per-finding reasons) into the next round and re-edits the already-modified tree, so

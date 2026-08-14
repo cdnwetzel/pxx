@@ -583,3 +583,124 @@ def test_pretty_printed_embedded_tool_call_detected(tmp_path):
     outcome = asyncio.run(make_backend(handler).run("do it", ctx))
     assert outcome.summary == "done properly"
     assert [e.data["nudges"] for e in ctx.bus.history if e.kind == "tool_call_prose"] == [1]
+
+
+def test_content_truthfulness_flags_fabricated_quote(tmp_path):
+    # summary quotes code grounded in nothing the model read/wrote -> advisory event (non-blocking)
+    summary = "The file defines:\n```python\ndef never_read():\n    return fabricated()\n```"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=completion(summary))
+
+    ctx = make_ctx(tmp_path)
+    outcome = asyncio.run(make_backend(handler).run("do it", ctx))
+    assert outcome.code is TerminalCode.COMPLETED  # advisory does NOT block
+    evts = [e for e in ctx.bus.history if e.kind == "content_truthfulness"]
+    assert len(evts) == 1
+    data = evts[0].data
+    assert data["ungrounded"] >= 1 and data["advisory"] is True
+    # METADATA ONLY: the event must carry a kind breakdown, never the quoted spans (audit
+    # stream is metadata-only; leaking "fabricated()" here would violate that contract).
+    assert data["kinds"].get("fenced", 0) >= 1
+    assert "samples" not in data
+    assert "fabricated" not in json.dumps(data)
+
+
+def test_content_truthfulness_grounded_quote_no_event(tmp_path):
+    # NEGATIVE CONTROL: a quote of content the model actually read must NOT fire
+    read_content = "def real_fn(x):\n    return x + 1"
+    responses = [
+        tool_call_round("c1", "read_file", '{"path": "x.py"}'),
+        completion(f"The file has:\n```python\n{read_content}\n```\nLooks correct."),
+    ]
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        r = responses[calls["n"]]
+        calls["n"] += 1
+        return httpx.Response(200, json=r)
+
+    ctx = make_ctx(tmp_path, tools=FakeRegistry(result=read_content))
+    outcome = asyncio.run(make_backend(handler).run("inspect x.py", ctx))
+    assert outcome.code is TerminalCode.COMPLETED
+    assert [e for e in ctx.bus.history if e.kind == "content_truthfulness"] == []
+
+
+def test_content_truthfulness_nonedit_tool_arg_does_not_ground(tmp_path):
+    # NEGATIVE CONTROL for edit-tools-only grounding: the model stuffs fabricated code into a
+    # NON-edit tool's argument (a read_file hint), whose RESULT does not echo it, then quotes
+    # that code as real. A non-edit arg is model-supplied, not read content, so it must NOT
+    # ground the quote -> the advisory must still fire (no laundering via a search/read arg).
+    fake_code = "def fabricated_thing():\n    return evil()"
+    responses = [
+        tool_call_round("c1", "read_file", json.dumps({"path": "x.py", "hint": fake_code})),
+        completion(f"The file has:\n```python\n{fake_code}\n```"),
+    ]
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        r = responses[calls["n"]]
+        calls["n"] += 1
+        return httpx.Response(200, json=r)
+
+    # result deliberately does NOT contain the fabricated code (only the arg did)
+    ctx = make_ctx(tmp_path, tools=FakeRegistry(result="tool output"))
+    outcome = asyncio.run(make_backend(handler).run("inspect x.py", ctx))
+    assert outcome.code is TerminalCode.COMPLETED
+    evts = [e for e in ctx.bus.history if e.kind == "content_truthfulness"]
+    assert len(evts) == 1 and evts[0].data["ungrounded"] >= 1
+
+
+def test_content_truthfulness_successful_edit_arg_grounds(tmp_path):
+    # POSITIVE mirror: a SUCCESSFUL edit's args DO ground a later quote (they became on-disk
+    # content) -> quoting them is truthful -> no advisory event.
+    written = "def helper(n):\n    return n * 2"
+    responses = [
+        tool_call_round("c1", "write_file", json.dumps({"path": "x.py", "content": written})),
+        completion(f"I wrote:\n```python\n{written}\n```"),
+    ]
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        r = responses[calls["n"]]
+        calls["n"] += 1
+        return httpx.Response(200, json=r)
+
+    ctx = make_ctx(tmp_path, tools=FakeRegistry(result="ok: wrote x.py"))
+    outcome = asyncio.run(make_backend(handler).run("write x.py", ctx))
+    assert outcome.code is TerminalCode.COMPLETED
+    assert [e for e in ctx.bus.history if e.kind == "content_truthfulness"] == []
+
+
+def test_content_truthfulness_failed_edit_arg_does_not_ground(tmp_path):
+    # NEGATIVE CONTROL: an edit tool that FAILS (result starts with "error:") wrote nothing, so
+    # its args must not ground a later quote — else the model could quote code from a rejected
+    # write as if it were real. The advisory must still fire.
+    fake_code = "def written_but_failed():\n    return nope()"
+    responses = [
+        tool_call_round("c1", "write_file", json.dumps({"path": "x.py", "content": fake_code})),
+        completion(f"I wrote:\n```python\n{fake_code}\n```"),
+    ]
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        r = responses[calls["n"]]
+        calls["n"] += 1
+        return httpx.Response(200, json=r)
+
+    # the edit tool returns an error -> nothing landed on disk
+    ctx = make_ctx(tmp_path, tools=FakeRegistry(result="error: permission denied"))
+    outcome = asyncio.run(make_backend(handler).run("write x.py", ctx))
+    assert outcome.code is TerminalCode.COMPLETED
+    evts = [e for e in ctx.bus.history if e.kind == "content_truthfulness"]
+    assert len(evts) == 1 and evts[0].data["ungrounded"] >= 1
+
+
+def test_content_truthfulness_plain_prose_no_event(tmp_path):
+    # a normal narration with no code quotes never fires -> no false positive on prose
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=completion("I reviewed the code and it looks fine."))
+
+    ctx = make_ctx(tmp_path)
+    asyncio.run(make_backend(handler).run("do it", ctx))
+    assert [e for e in ctx.bus.history if e.kind == "content_truthfulness"] == []

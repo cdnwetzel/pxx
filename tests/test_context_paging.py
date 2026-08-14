@@ -352,6 +352,62 @@ def test_ledger_round_trips_on_disk(tmp_path):
     assert back.revision == 3 and back.target_path == "a.py" and back.acceptance_cmd == ["pytest"]
 
 
+# ------------------------------------------------ performance instrumentation (A/B/C receipts)
+def test_deterministic_run_leaves_performance_empty(tmp_path):
+    # the offline mechanism must NEVER populate performance (it is a hardware measurement) — so
+    # the receipt stays reproducible byte-for-byte across machines.
+    root, sha0 = _make_repo(tmp_path)
+    state = tmp_path / ".pxx-paging"
+    rt = _runtime(
+        root,
+        state,
+        [
+            {
+                "type": "PATCH",
+                "path": "bug.py",
+                "expected_sha": sha0,
+                "old_string": "return a - b  # BUG",
+                "new_string": "return a + b",
+            },
+            {"type": "RUN_TEST"},
+            {"type": "COMPLETE"},
+        ],
+    )
+    _, receipt = rt.run()
+    assert receipt.performance == {}
+
+
+def test_build_performance_aggregates_stats():
+    from prototypes.context_paging.run_neo import build_performance
+
+    stats = [
+        {"latency_s": 2.0, "ttft_s": 1.5, "prompt_tokens": 5000, "completion_tokens": 50},
+        {"latency_s": 4.0, "ttft_s": 3.5, "prompt_tokens": 5200, "completion_tokens": 40},
+    ]
+    p = build_performance(
+        stats, wall_clock_s=7.0, swap_delta_mb=12.5, transport="lan", streamed=True
+    )
+    assert p["model_calls"] == 2
+    assert p["model_time_s"] == 6.0
+    assert p["total_prompt_tokens"] == 10200 and p["total_completion_tokens"] == 90
+    assert p["prompt_tokens_per_s"] == round(10200 / 6.0, 2)  # prefill-inclusive throughput
+    assert p["ttft_median_s"] == 2.5  # median(1.5, 3.5)
+    assert p["swap_used_delta_mb"] == 12.5 and p["transport"] == "lan" and p["streamed"] is True
+
+
+def test_build_performance_handles_endpoints_without_usage():
+    # an endpoint that doesn't report token usage -> totals/rates are None, never fabricated
+    from prototypes.context_paging.run_neo import build_performance
+
+    stats = [{"latency_s": 1.0, "ttft_s": None, "prompt_tokens": None, "completion_tokens": None}]
+    p = build_performance(
+        stats, wall_clock_s=1.2, swap_delta_mb=None, transport="local", streamed=False
+    )
+    assert p["total_prompt_tokens"] is None and p["prompt_tokens_per_s"] is None
+    assert p["ttft_median_s"] is None and p["swap_used_delta_mb"] is None
+    assert p["model_calls"] == 1 and p["wall_clock_s"] == 1.2
+
+
 # ------------------------------------------------ review-hardening negative controls (PR #69)
 def test_patch_invalidates_a_prior_passing_verification(tmp_path):
     # CRITICAL: a passing RUN_TEST is only valid for the source it ran on. After a green test, a

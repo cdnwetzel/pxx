@@ -53,9 +53,10 @@ uv run --extra dev python -m prototypes.context_paging.run_neo \
   capsules, lower it (e.g. 4000). If it never has enough context, raise it.
 - `--workdir ... --keep` writes the scratch repo + `state/receipt.json` to a fixed dir you keep
   (omit both to use a temp dir that's cleaned up).
-- **Real token count (recommended for the receipt):** add `--hf-tokenizer Qwen/Qwen3-4B`. It needs
-  `transformers` **in the same interpreter** — run `uv run --with transformers --extra dev python -m
-  prototypes.context_paging.run_neo ...` (a bare `pip install transformers` may target a different
+- **Real token count (recommended for the receipt):** add `--hf-tokenizer Qwen/Qwen3-4B` to the
+  command above. It needs `transformers` **in the same interpreter**, so launch with
+  `uv run --with transformers --extra dev python -m prototypes.context_paging.run_neo <the flags
+  above> --hf-tokenizer Qwen/Qwen3-4B` (a bare `pip install transformers` may target a different
   Python, and `run_neo` then silently falls back). Without it the cap uses a documented char/4
   approximation, and the receipt's `tokenizer_id` records which was used — it never overstates fidelity.
 
@@ -116,7 +117,8 @@ Once you get a `COMPLETED` receipt, archive it **inside the checked-out repo** (
 this works wherever you cloned) with a filename that labels the **hardware + model**:
 
 ```bash
-REPO_ROOT="$(git -C ~/ai/pxx rev-parse --show-toplevel)"
+# run this from inside your pxx checkout (any location)
+REPO_ROOT="$(git rev-parse --show-toplevel)"
 DEST="$REPO_ROOT/prototypes/context_paging/receipts"
 mkdir -p "$DEST"
 # name it <hardware>-<model>-<date>.json so the box under test is unambiguous

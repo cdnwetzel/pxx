@@ -83,7 +83,8 @@ def build_performance(
     tokens_complete = bool(with_prompt) and len(with_prompt) == n and len(with_comp) == n
 
     def _rate(total, time_s):  # over MATCHED time only, so partial usage never deflates the rate
-        return round(total / time_s, 2) if (total and time_s and time_s > 0) else None
+        # total is None == usage missing (rate unknown); total == 0 is a KNOWN zero, not missing
+        return round(total / time_s, 2) if (total is not None and time_s and time_s > 0) else None
 
     # clean prefill/decode split (stream mode): prefill over TTFT, decode over (latency - TTFT)
     pf = [s for s in with_prompt if s.get("ttft_s") is not None]

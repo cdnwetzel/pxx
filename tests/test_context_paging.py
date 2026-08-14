@@ -470,6 +470,36 @@ def test_consume_sse_all_malformed_yields_no_content():
     assert content is None and usage is None
 
 
+def test_consume_sse_ignores_non_string_content_delta():
+    # a non-str delta.content (e.g. a list) must be skipped, not crash "".join(...)
+    from prototypes.context_paging.model import consume_sse
+
+    lines = [
+        'data: {"choices": [{"delta": {"content": ["not", "a", "string"]}}]}',
+        'data: {"choices": [{"delta": {"content": "ok"}}]}',
+    ]
+    content, _, _ = consume_sse(lines, started=0.0)
+    assert content == "ok"
+
+
+def test_build_performance_zero_tokens_reports_zero_not_missing():
+    # 0 known tokens is a real 0.0 rate; only MISSING usage (None) yields None
+    from prototypes.context_paging.run_neo import build_performance
+
+    stats = [{"latency_s": 1.0, "ttft_s": None, "prompt_tokens": 0, "completion_tokens": 0}]
+    p = build_performance(
+        stats, wall_clock_s=1.0, swap_delta_mb=None, transport="local", streamed=False
+    )
+    assert p["total_prompt_tokens"] == 0 and p["prompt_tokens_per_s"] == 0.0
+
+
+def test_int_or_none_coerces_usage_values():
+    from prototypes.context_paging.model import _int_or_none
+
+    assert _int_or_none("50") == 50 and _int_or_none(50) == 50 and _int_or_none(3.0) == 3
+    assert _int_or_none(True) is None and _int_or_none("x") is None and _int_or_none(None) is None
+
+
 # ------------------------------------------------ review-hardening negative controls (PR #69)
 def test_patch_invalidates_a_prior_passing_verification(tmp_path):
     # CRITICAL: a passing RUN_TEST is only valid for the source it ran on. After a green test, a

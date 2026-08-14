@@ -44,6 +44,19 @@ class ScriptedModel:
 _JSON_RE = re.compile(r"\{.*\}", re.DOTALL)
 
 
+def _int_or_none(v) -> int | None:
+    """Coerce a usage token count to int; a bool, non-numeric string, or garbage -> None."""
+    if isinstance(v, bool):
+        return None
+    if isinstance(v, int):
+        return v
+    if isinstance(v, float) and v.is_integer():
+        return int(v)
+    if isinstance(v, str) and v.isdigit():
+        return int(v)
+    return None
+
+
 def consume_sse(lines, started: float):
     """Parse an OpenAI-style SSE stream into (content, ttft_s, usage). Malformed chunks (non-JSON,
     ``[]``, odd ``choices`` shapes) are SKIPPED, never raised — one bad chunk must not crash the
@@ -66,7 +79,7 @@ def consume_sse(lines, started: float):
             choices = chunk.get("choices") or []
             first = choices[0] if isinstance(choices, list) and choices else None
             delta = first.get("delta", {}).get("content") if isinstance(first, dict) else None
-            if delta:
+            if isinstance(delta, str) and delta:  # only text deltas — a non-str would break join
                 if ttft_s is None:
                     ttft_s = time.perf_counter() - started
                 parts.append(delta)
@@ -151,12 +164,14 @@ class OpenAICompatibleModel:
                 return consume_sse(resp.iter_lines(), started)
 
     def _record(self, started: float, ttft_s: float | None, usage: dict | None) -> None:
-        u = usage or {}
+        u = usage if isinstance(usage, dict) else {}  # a non-dict usage must not break .get
         self.stats.append(
             {
                 "latency_s": time.perf_counter() - started,
                 "ttft_s": ttft_s,
-                "prompt_tokens": u.get("prompt_tokens"),
-                "completion_tokens": u.get("completion_tokens"),
+                # coerce token counts to int (some servers send strings); garbage -> None, never
+                # a value that would blow up sum() in build_performance
+                "prompt_tokens": _int_or_none(u.get("prompt_tokens")),
+                "completion_tokens": _int_or_none(u.get("completion_tokens")),
             }
         )

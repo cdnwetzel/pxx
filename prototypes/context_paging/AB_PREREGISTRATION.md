@@ -56,7 +56,10 @@ across capsules with a common prefix). The A/B/C is thus roadmap signal, not jus
 1. **Negative control first (proves the harness, not the hardware):** run
    `tests/test_context_paging.py` on the control host — it must pass identically regardless of which
    endpoint is used. A green offline suite means any A/B/C delta is hardware, not code.
-2. **N ≥ 3 runs per candidate**, back to back, after thermal settling. Record every `receipt.json`.
+2. **N ≥ 3 runs per candidate PER PASS** (so N≥3 latency-pass runs *and* N≥3 memory-pass runs),
+   back to back, after thermal settling. Tag every measurement with **(candidate, pass, topology,
+   run-id)** and record every `receipt.json` under that identity. **Never** pair a memory-pass number
+   with an unrelated latency-pass receipt — they are different runs.
 3. Keep the phone (C) **foreground + screen-on + plugged in** for the whole run.
 
 > **Measure memory ON the box under test — not the host.** `performance.swap_used_delta_mb` samples

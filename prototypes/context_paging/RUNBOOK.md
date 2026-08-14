@@ -176,8 +176,9 @@ that before running** — the A/B/C is only valid if you pin model/engine/host/t
 3. Find the phone's LAN IP + the app's port. From your **control Mac** (running the pxx host):
 
    ```bash
-   uv run --extra dev python -m prototypes.context_paging.run_neo \
+   uv run --with transformers --extra dev python -m prototypes.context_paging.run_neo \
        --base-url http://<iphone-ip>:<port>/v1 --model qwen3:4b \
+       --hf-tokenizer Qwen/Qwen3-4B \
        --cap 5500 --stream --transport lan \
        --workdir ~/paging-C-iphone --keep
    ```
@@ -195,13 +196,15 @@ Mac's Ollama on the LAN with `OLLAMA_HOST=0.0.0.0 ollama serve`, then:
 
 ```bash
 # A (2020 M1) and B (Neo) — same command, different --base-url, --transport lan
-uv run --extra dev python -m prototypes.context_paging.run_neo \
+uv run --with transformers --extra dev python -m prototypes.context_paging.run_neo \
     --base-url http://<box-ip>:11434/v1 --model qwen3:4b \
+    --hf-tokenizer Qwen/Qwen3-4B \
     --cap 5500 --stream --transport lan --workdir ~/paging-<A-or-B> --keep
 ```
 
-Archive all three receipts under `receipts/` (§4), N ≥ 3 runs each, and report **median + spread**
-per the pre-registration. Deciding metrics: **swap delta** and **sustained wall-clock** — not peak
+Archive all three receipts under `receipts/` (§4), **N ≥ 3 runs each, per pass** (latency + memory),
+and report **median + spread** per the pre-registration. Deciding metrics: **memory pressure on the
+box under test** and **sustained wall-clock** — not peak
 tok/s.
 
 Next after a green receipt: the **build-native vs. compose-on-Camelid** decision (revive the

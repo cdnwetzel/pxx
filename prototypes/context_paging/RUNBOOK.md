@@ -53,6 +53,11 @@ uv run --extra dev python -m prototypes.context_paging.run_neo \
   capsules, lower it (e.g. 4000). If it never has enough context, raise it.
 - `--workdir ... --keep` writes the scratch repo + `state/receipt.json` to a fixed dir you keep
   (omit both to use a temp dir that's cleaned up).
+- `--stream` (**recommended for any A/B**) streams deltas so the receipt records **time-to-first-token**
+  — the clean prefill-vs-decode separator. `--transport local|lan` labels whether the model is
+  co-located (`local`) or a remote endpoint like the iPhone (`lan`). Both land in
+  `receipt.performance` (wall-clock, prefill-inclusive tok/s, TTFT median, and — on macOS — the
+  **swap delta**, which is the real 8 GB failure signal).
 - **Real token count (recommended for the receipt):** add `--hf-tokenizer Qwen/Qwen3-4B` to the
   command above. It needs `transformers` **in the same interpreter**, so launch with
   `uv run --with transformers --extra dev python -m prototypes.context_paging.run_neo <the flags
@@ -113,17 +118,21 @@ same command, run on the mini.
 
 ## 4. Capture the receipt (make it a receipt, not a claim)
 
-Once you get a `COMPLETED` receipt, archive it **inside the checked-out repo** (derive the root so
-this works wherever you cloned) with a filename that labels the **hardware + model**:
+Archive **every run's receipt — `COMPLETED` *and* `BLOCKED`** (an honest `BLOCKED` is a valid
+result; cherry-picking only the COMPLETED runs would bias the record). Put it **inside the
+checked-out repo** (derive the root so this works wherever you cloned) with a filename that labels
+the **hardware + model + terminal**:
 
 ```bash
 # run this from inside your pxx checkout (any location)
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 DEST="$REPO_ROOT/prototypes/context_paging/receipts"
 mkdir -p "$DEST"
-# name it <hardware>-<model>-<date>.json so the box under test is unambiguous
+# name it <hardware>-<model>-<terminal>-<date>.json so the box + outcome are unambiguous
+# TERMINAL is the receipt's outcome, e.g. completed or blocked-target_not_utf8
+TERMINAL="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["terminal"].replace(":","-").lower())' ~/paging-neo-run/state/receipt.json)"
 cp ~/paging-neo-run/state/receipt.json \
-   "$DEST/neo-a18pro-8gb-qwen3-4b-$(date +%Y%m%d).json"
+   "$DEST/neo-a18pro-8gb-qwen3-4b-$TERMINAL-$(date +%Y%m%d).json"
 ```
 
 Then it goes through the normal gate (do NOT skip — this is the evidence):
@@ -146,6 +155,63 @@ gate confirms it): `uv run --extra dev pxx check --all-files` must be clean.
   are v1 and a later eval. One green receipt = the mechanism works end-to-end on Neo. If the 4B
   can't get there, that's a documented capability finding, and the honest `BLOCKED` receipt is
   itself the result.
+
+---
+
+## 6. Candidate C — the iPhone on-device run (and the 8 GB A/B/C)
+
+You can add a **third candidate** with **zero new host code**: the iPhone 16 Pro Max (same A18 Pro
+silicon as the "Neo" MacBook, also 8 GB) runs `qwen3:4b` **on-device** and the pxx host stays on a
+Mac. The phone is *only the model endpoint* — iOS never runs the Python host (it can't run the
+subprocess `RUN_TEST` cleanly, and it doesn't need to).
+
+**Why C is worth it:** B (Neo) and C (iPhone) are the *same chip* in different chassis, so **B vs C
+isolates cooling** while **A (2020 M1) vs {B,C} isolates chip generation**. Full design +
+pre-registered hypothesis + controls: [`AB_PREREGISTRATION.md`](./AB_PREREGISTRATION.md). **Read
+that before running** — the A/B/C is only valid if you pin model/engine/host/thermal parity.
+
+### Steps
+
+1. On the iPhone, install an app that serves a **custom GGUF** over an **OpenAI-compatible LAN
+   server** (e.g. *ai.local*, *Local LLM Server*). Load the **same `qwen3:4b` quant** as A/B — this
+   is the make-or-break control. If the app can only serve Apple's foundation model, C becomes a
+   *model+hardware* comparison; label it that way.
+2. Keep the app **foreground, screen on, plugged in** for the whole run (iOS suspends background apps).
+3. Find the phone's LAN IP + the app's port. From your **control Mac** (running the pxx host):
+
+   ```bash
+   uv run --with transformers --extra dev python -m prototypes.context_paging.run_neo \
+       --base-url http://<iphone-ip>:<port>/v1 --model qwen3:4b \
+       --hf-tokenizer Qwen/Qwen3-4B \
+       --cap 5500 --stream --transport lan \
+       --workdir ~/paging-C-iphone --keep
+   ```
+
+4. **Memory on C:** the receipt's `swap_used_delta_mb` is measured on the **host process** (the
+   control Mac) and does *not* see the phone. Read the phone's memory **on-device** (Xcode
+   Instruments, or the app's memory readout) and record it next to the receipt. Same rule for A/B on
+   a LAN run — sample swap on the box under test (`ssh box 'sysctl vm.swapusage'`) or run that box
+   co-located (`--transport local`); see the two-pass note in `AB_PREREGISTRATION.md`.
+
+### Same for A and B (fixed host, moving endpoint)
+
+Run the pxx host on **one** control Mac and only change `--base-url` per candidate. Expose each
+Mac's Ollama on the LAN with `OLLAMA_HOST=0.0.0.0 ollama serve`, then:
+
+```bash
+# A (2020 M1) and B (Neo) — same command, different --base-url, --transport lan
+uv run --with transformers --extra dev python -m prototypes.context_paging.run_neo \
+    --base-url http://<box-ip>:11434/v1 --model qwen3:4b \
+    --hf-tokenizer Qwen/Qwen3-4B \
+    --cap 5500 --stream --transport lan --workdir ~/paging-<A-or-B> --keep
+```
+
+Archive **every run's receipt** under `receipts/` (§4) — **N ≥ 3 runs each, per pass** (latency +
+memory) means many files, each named by its full `(candidate, pass, topology, run-id)` identity
+(the two passes can use different topologies, so `topology` must be in the name); do not collapse
+repetitions into one file. Report **median + spread** per the pre-registration. Deciding metrics: **memory pressure on the
+box under test** and **sustained wall-clock** — not peak
+tok/s.
 
 Next after a green receipt: the **build-native vs. compose-on-Camelid** decision (revive the
 parked timtoole02 RFC), and v1 (symbol cards + repo map + multi-file).

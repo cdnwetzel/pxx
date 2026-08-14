@@ -352,6 +352,155 @@ def test_ledger_round_trips_on_disk(tmp_path):
     assert back.revision == 3 and back.target_path == "a.py" and back.acceptance_cmd == ["pytest"]
 
 
+# ------------------------------------------------ performance instrumentation (A/B/C receipts)
+def test_deterministic_run_leaves_performance_empty(tmp_path):
+    # the offline mechanism must NEVER populate performance (it is a hardware measurement) — so
+    # the receipt stays reproducible byte-for-byte across machines.
+    root, sha0 = _make_repo(tmp_path)
+    state = tmp_path / ".pxx-paging"
+    rt = _runtime(
+        root,
+        state,
+        [
+            {
+                "type": "PATCH",
+                "path": "bug.py",
+                "expected_sha": sha0,
+                "old_string": "return a - b  # BUG",
+                "new_string": "return a + b",
+            },
+            {"type": "RUN_TEST"},
+            {"type": "COMPLETE"},
+        ],
+    )
+    _, receipt = rt.run()
+    assert receipt.performance == {}
+
+
+def test_build_performance_aggregates_stats():
+    from prototypes.context_paging.run_neo import build_performance
+
+    stats = [
+        {"latency_s": 2.0, "ttft_s": 1.5, "prompt_tokens": 5000, "completion_tokens": 50},
+        {"latency_s": 4.0, "ttft_s": 3.5, "prompt_tokens": 5200, "completion_tokens": 40},
+    ]
+    p = build_performance(
+        stats, wall_clock_s=7.0, swap_delta_mb=12.5, transport="lan", streamed=True
+    )
+    assert p["model_calls"] == 2
+    assert p["model_time_s"] == 6.0
+    assert p["total_prompt_tokens"] == 10200 and p["total_completion_tokens"] == 90
+    assert p["prompt_tokens_per_s"] == round(10200 / 6.0, 2)  # prefill-inclusive throughput
+    assert p["ttft_median_s"] == 2.5  # median(1.5, 3.5)
+    assert p["swap_used_delta_mb"] == 12.5 and p["transport"] == "lan" and p["streamed"] is True
+
+
+def test_build_performance_handles_endpoints_without_usage():
+    # an endpoint that doesn't report token usage -> totals/rates are None, never fabricated
+    from prototypes.context_paging.run_neo import build_performance
+
+    stats = [{"latency_s": 1.0, "ttft_s": None, "prompt_tokens": None, "completion_tokens": None}]
+    p = build_performance(
+        stats, wall_clock_s=1.2, swap_delta_mb=None, transport="local", streamed=False
+    )
+    assert p["total_prompt_tokens"] is None and p["prompt_tokens_per_s"] is None
+    assert p["ttft_median_s"] is None and p["swap_used_delta_mb"] is None
+    assert p["model_calls"] == 1 and p["wall_clock_s"] == 1.2 and p["tokens_complete"] is False
+
+
+def test_build_performance_p90_is_nearest_rank():
+    # 5 samples: nearest-rank P90 is index ceil(0.9*5)-1 = 4 (the 5th) — NOT round(4.5)=4th sample
+    from prototypes.context_paging.run_neo import build_performance
+
+    stats = [
+        {"latency_s": float(x), "ttft_s": None, "prompt_tokens": None, "completion_tokens": None}
+        for x in (1, 2, 3, 4, 5)
+    ]
+    p = build_performance(
+        stats, wall_clock_s=15.0, swap_delta_mb=None, transport="local", streamed=False
+    )
+    assert p["latency_p90_s"] == 5.0  # the top sample, not the fourth
+
+
+def test_build_performance_partial_usage_does_not_deflate_rate():
+    # one call reports usage (100 prompt tokens in 1.0s), one doesn't (9.0s). The rate must use
+    # ONLY the reporting call's time (100 tok/s), not total model time (which would give 10 tok/s).
+    from prototypes.context_paging.run_neo import build_performance
+
+    stats = [
+        {"latency_s": 1.0, "ttft_s": None, "prompt_tokens": 100, "completion_tokens": 5},
+        {"latency_s": 9.0, "ttft_s": None, "prompt_tokens": None, "completion_tokens": None},
+    ]
+    p = build_performance(
+        stats, wall_clock_s=10.0, swap_delta_mb=None, transport="local", streamed=False
+    )
+    assert p["prompt_tokens_per_s"] == 100.0 and p["tokens_complete"] is False
+
+
+def test_build_performance_prefill_decode_split():
+    from prototypes.context_paging.run_neo import build_performance
+
+    stats = [{"latency_s": 2.0, "ttft_s": 1.5, "prompt_tokens": 3000, "completion_tokens": 25}]
+    p = build_performance(
+        stats, wall_clock_s=2.1, swap_delta_mb=None, transport="lan", streamed=True
+    )
+    assert p["prefill_tokens_per_s"] == round(3000 / 1.5, 2)  # prefill over TTFT
+    assert p["decode_tokens_per_s"] == round(25 / 0.5, 2)  # decode over (latency - TTFT)
+
+
+def test_consume_sse_skips_malformed_chunks_without_crashing():
+    from prototypes.context_paging.model import consume_sse
+
+    lines = [
+        "data: not json",  # non-JSON -> skipped
+        "data: []",  # valid JSON but not a dict -> skipped
+        'data: {"choices": "bad"}',  # odd choices shape -> skipped
+        'data: {"choices": [{"delta": {"content": "he"}}]}',
+        'data: {"choices": [{"delta": {"content": "llo"}}], "usage": {"prompt_tokens": 9}}',
+        "data: [DONE]",
+    ]
+    content, ttft, usage = consume_sse(lines, started=0.0)
+    assert content == "hello" and usage == {"prompt_tokens": 9} and ttft is not None
+
+
+def test_consume_sse_all_malformed_yields_no_content():
+    from prototypes.context_paging.model import consume_sse
+
+    content, _, usage = consume_sse(["data: {", "data: []", ": comment"], started=0.0)
+    assert content is None and usage is None
+
+
+def test_consume_sse_ignores_non_string_content_delta():
+    # a non-str delta.content (e.g. a list) must be skipped, not crash "".join(...)
+    from prototypes.context_paging.model import consume_sse
+
+    lines = [
+        'data: {"choices": [{"delta": {"content": ["not", "a", "string"]}}]}',
+        'data: {"choices": [{"delta": {"content": "ok"}}]}',
+    ]
+    content, _, _ = consume_sse(lines, started=0.0)
+    assert content == "ok"
+
+
+def test_build_performance_zero_tokens_reports_zero_not_missing():
+    # 0 known tokens is a real 0.0 rate; only MISSING usage (None) yields None
+    from prototypes.context_paging.run_neo import build_performance
+
+    stats = [{"latency_s": 1.0, "ttft_s": None, "prompt_tokens": 0, "completion_tokens": 0}]
+    p = build_performance(
+        stats, wall_clock_s=1.0, swap_delta_mb=None, transport="local", streamed=False
+    )
+    assert p["total_prompt_tokens"] == 0 and p["prompt_tokens_per_s"] == 0.0
+
+
+def test_int_or_none_coerces_usage_values():
+    from prototypes.context_paging.model import _int_or_none
+
+    assert _int_or_none("50") == 50 and _int_or_none(50) == 50 and _int_or_none(3.0) == 3
+    assert _int_or_none(True) is None and _int_or_none("x") is None and _int_or_none(None) is None
+    assert _int_or_none("²") is None  # non-ASCII digit: isdigit() True but int() would raise
+
+
 # ------------------------------------------------ review-hardening negative controls (PR #69)
 def test_patch_invalidates_a_prior_passing_verification(tmp_path):
     # CRITICAL: a passing RUN_TEST is only valid for the source it ran on. After a green test, a

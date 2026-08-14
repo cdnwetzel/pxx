@@ -23,6 +23,10 @@ class Receipt:
     negative_controls: dict = field(default_factory=dict)
     verification: dict = field(default_factory=dict)
     terminal: str = ""
+    # Optional performance block, populated only by the LIVE runner (run_neo). The deterministic
+    # mechanism never sets it — timing/memory are hardware measurements, not part of the proof —
+    # so it stays {} in the offline suite and never makes the receipt non-reproducible.
+    performance: dict = field(default_factory=dict)
 
     def record_capsule(
         self, seq: int, input_tokens: int, cap: int, under_cap: bool, evicted: list[str]

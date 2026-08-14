@@ -59,11 +59,23 @@ across capsules with a common prefix). The A/B/C is thus roadmap signal, not jus
 2. **N ≥ 3 runs per candidate**, back to back, after thermal settling. Record every `receipt.json`.
 3. Keep the phone (C) **foreground + screen-on + plugged in** for the whole run.
 
+> **Measure memory ON the box under test — not the host.** `performance.swap_used_delta_mb` samples
+> the swap of the **Python host process**. With the fixed-host topology above, that is the *control
+> Mac*, not A/B/C — so a fixed-host LAN receipt's swap number reflects the wrong box and must be
+> ignored. To make swap a valid per-candidate metric, capture it **on the box under test**:
+> - **A / B (Macs):** either run the host **co-located** on that box (`--transport local`, accepting
+>   a small constant host overhead), OR sample the remote box out-of-band during the run
+>   (`ssh box 'sysctl vm.swapusage'`, or `memory_pressure`).
+> - **C (iPhone):** read memory **on-device** (Xcode Instruments, or the app's memory readout).
+>
+> So the A/B/C runs in **two passes**: a **latency pass** (fixed host, clean inference timing) and a
+> **memory pass** (co-located / on-device). Do not conflate them.
+
 ## Metrics (report all; the first two decide it)
 
-1. **Swap delta (`performance.swap_used_delta_mb`)** — the true 8 GB wall. If a box swaps, that
-   dominates; report it first. (Host-side on Macs; for the phone read memory on-device — Xcode
-   Instruments / the app's memory readout — and note it.)
+1. **Memory pressure / swap on the box under test** (see the box above — *not* the host receipt's
+   `swap_used_delta_mb` on a LAN run). The true 8 GB wall: if a box swaps, that dominates; report it
+   first.
 2. **Sustained wall-clock-to-receipt (`performance.wall_clock_s`)** — median over N runs.
 3. **TTFT median (`performance.ttft_median_s`, `--stream`)** — prefill proxy; separates the
    burst-prefill story from sustained.

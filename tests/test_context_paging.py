@@ -405,7 +405,69 @@ def test_build_performance_handles_endpoints_without_usage():
     )
     assert p["total_prompt_tokens"] is None and p["prompt_tokens_per_s"] is None
     assert p["ttft_median_s"] is None and p["swap_used_delta_mb"] is None
-    assert p["model_calls"] == 1 and p["wall_clock_s"] == 1.2
+    assert p["model_calls"] == 1 and p["wall_clock_s"] == 1.2 and p["tokens_complete"] is False
+
+
+def test_build_performance_p90_is_nearest_rank():
+    # 5 samples: nearest-rank P90 is index ceil(0.9*5)-1 = 4 (the 5th) — NOT round(4.5)=4th sample
+    from prototypes.context_paging.run_neo import build_performance
+
+    stats = [
+        {"latency_s": float(x), "ttft_s": None, "prompt_tokens": None, "completion_tokens": None}
+        for x in (1, 2, 3, 4, 5)
+    ]
+    p = build_performance(
+        stats, wall_clock_s=15.0, swap_delta_mb=None, transport="local", streamed=False
+    )
+    assert p["latency_p90_s"] == 5.0  # the top sample, not the fourth
+
+
+def test_build_performance_partial_usage_does_not_deflate_rate():
+    # one call reports usage (100 prompt tokens in 1.0s), one doesn't (9.0s). The rate must use
+    # ONLY the reporting call's time (100 tok/s), not total model time (which would give 10 tok/s).
+    from prototypes.context_paging.run_neo import build_performance
+
+    stats = [
+        {"latency_s": 1.0, "ttft_s": None, "prompt_tokens": 100, "completion_tokens": 5},
+        {"latency_s": 9.0, "ttft_s": None, "prompt_tokens": None, "completion_tokens": None},
+    ]
+    p = build_performance(
+        stats, wall_clock_s=10.0, swap_delta_mb=None, transport="local", streamed=False
+    )
+    assert p["prompt_tokens_per_s"] == 100.0 and p["tokens_complete"] is False
+
+
+def test_build_performance_prefill_decode_split():
+    from prototypes.context_paging.run_neo import build_performance
+
+    stats = [{"latency_s": 2.0, "ttft_s": 1.5, "prompt_tokens": 3000, "completion_tokens": 25}]
+    p = build_performance(
+        stats, wall_clock_s=2.1, swap_delta_mb=None, transport="lan", streamed=True
+    )
+    assert p["prefill_tokens_per_s"] == round(3000 / 1.5, 2)  # prefill over TTFT
+    assert p["decode_tokens_per_s"] == round(25 / 0.5, 2)  # decode over (latency - TTFT)
+
+
+def test_consume_sse_skips_malformed_chunks_without_crashing():
+    from prototypes.context_paging.model import consume_sse
+
+    lines = [
+        "data: not json",  # non-JSON -> skipped
+        "data: []",  # valid JSON but not a dict -> skipped
+        'data: {"choices": "bad"}',  # odd choices shape -> skipped
+        'data: {"choices": [{"delta": {"content": "he"}}]}',
+        'data: {"choices": [{"delta": {"content": "llo"}}], "usage": {"prompt_tokens": 9}}',
+        "data: [DONE]",
+    ]
+    content, ttft, usage = consume_sse(lines, started=0.0)
+    assert content == "hello" and usage == {"prompt_tokens": 9} and ttft is not None
+
+
+def test_consume_sse_all_malformed_yields_no_content():
+    from prototypes.context_paging.model import consume_sse
+
+    content, _, usage = consume_sse(["data: {", "data: []", ": comment"], started=0.0)
+    assert content is None and usage is None
 
 
 # ------------------------------------------------ review-hardening negative controls (PR #69)

@@ -44,6 +44,37 @@ class ScriptedModel:
 _JSON_RE = re.compile(r"\{.*\}", re.DOTALL)
 
 
+def consume_sse(lines, started: float):
+    """Parse an OpenAI-style SSE stream into (content, ttft_s, usage). Malformed chunks (non-JSON,
+    ``[]``, odd ``choices`` shapes) are SKIPPED, never raised — one bad chunk must not crash the
+    loop. If no valid content arrives, content is None (act() then returns BLOCKED)."""
+    parts: list[str] = []
+    ttft_s: float | None = None
+    usage: dict | None = None
+    for line in lines:
+        if not line or not line.startswith("data:"):
+            continue
+        data = line[len("data:") :].strip()
+        if data == "[DONE]":
+            break
+        try:
+            chunk = json.loads(data)
+            if not isinstance(chunk, dict):
+                continue
+            if isinstance(chunk.get("usage"), dict):
+                usage = chunk["usage"]
+            choices = chunk.get("choices") or []
+            first = choices[0] if isinstance(choices, list) and choices else None
+            delta = first.get("delta", {}).get("content") if isinstance(first, dict) else None
+            if delta:
+                if ttft_s is None:
+                    ttft_s = time.perf_counter() - started
+                parts.append(delta)
+        except (json.JSONDecodeError, AttributeError, TypeError, IndexError):
+            continue
+    return ("".join(parts) if parts else None), ttft_s, usage
+
+
 class OpenAICompatibleModel:
     """Minimal ``POST {base_url}/chat/completions`` client for a local OpenAI-compatible server
     (Ollama, vLLM, llama.cpp). ``base_url`` is the API root **including** ``/v1``
@@ -114,28 +145,10 @@ class OpenAICompatibleModel:
 
     def _stream_call(self, httpx, payload: dict, started: float):
         """Stream deltas so we can time the FIRST content token (TTFT ≈ prefill time)."""
-        parts: list[str] = []
-        ttft_s: float | None = None
-        usage: dict | None = None
         with httpx.Client(timeout=self.timeout) as client:
             with client.stream("POST", f"{self.base_url}/chat/completions", json=payload) as resp:
                 resp.raise_for_status()
-                for line in resp.iter_lines():
-                    if not line or not line.startswith("data:"):
-                        continue
-                    data = line[len("data:") :].strip()
-                    if data == "[DONE]":
-                        break
-                    chunk = json.loads(data)
-                    if chunk.get("usage"):
-                        usage = chunk["usage"]
-                    choices = chunk.get("choices") or []
-                    delta = choices[0].get("delta", {}).get("content") if choices else None
-                    if delta:
-                        if ttft_s is None:
-                            ttft_s = time.perf_counter() - started
-                        parts.append(delta)
-        return ("".join(parts) if parts else None), ttft_s, usage
+                return consume_sse(resp.iter_lines(), started)
 
     def _record(self, started: float, ttft_s: float | None, usage: dict | None) -> None:
         u = usage or {}

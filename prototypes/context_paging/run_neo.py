@@ -20,6 +20,7 @@ receipt's ``tokenizer_id`` so the receipt never overstates its fidelity.
 from __future__ import annotations
 
 import argparse
+import math
 import platform
 import shutil
 import statistics
@@ -63,41 +64,63 @@ def build_performance(
     transport: str,
     streamed: bool,
 ) -> dict:
-    """Aggregate per-call model samples into a comparable performance block. Pure + testable."""
-    latencies = [s["latency_s"] for s in stats if s.get("latency_s") is not None]
-    ttfts = [s["ttft_s"] for s in stats if s.get("ttft_s") is not None]
-    prompt_toks = [s["prompt_tokens"] for s in stats if s.get("prompt_tokens") is not None]
-    comp_toks = [s["completion_tokens"] for s in stats if s.get("completion_tokens") is not None]
+    """Aggregate per-call model samples into a comparable performance block. Pure + testable.
+
+    Rates are computed over the time of the calls that ACTUALLY reported usage (not all calls),
+    so a single call missing `usage` can't deflate the throughput. TTFT (stream mode) gives the
+    clean prefill/decode split: prefill_tokens_per_s over TTFT, decode over (latency - TTFT).
+    """
+    calls = [s for s in stats if s.get("latency_s") is not None]
+    latencies = [s["latency_s"] for s in calls]
+    ttfts = [s["ttft_s"] for s in calls if s.get("ttft_s") is not None]
+    n = len(latencies)
     model_time = sum(latencies)
-    total_prompt = sum(prompt_toks) if prompt_toks else None
-    total_comp = sum(comp_toks) if comp_toks else None
 
-    def _rate(total: int | None) -> float | None:
-        return round(total / model_time, 2) if (total is not None and model_time > 0) else None
+    with_prompt = [s for s in calls if s.get("prompt_tokens") is not None]
+    with_comp = [s for s in calls if s.get("completion_tokens") is not None]
+    total_prompt = sum(s["prompt_tokens"] for s in with_prompt) if with_prompt else None
+    total_comp = sum(s["completion_tokens"] for s in with_comp) if with_comp else None
+    tokens_complete = bool(with_prompt) and len(with_prompt) == n and len(with_comp) == n
 
-    perf: dict = {
+    def _rate(total, time_s):  # over MATCHED time only, so partial usage never deflates the rate
+        return round(total / time_s, 2) if (total and time_s and time_s > 0) else None
+
+    # clean prefill/decode split (stream mode): prefill over TTFT, decode over (latency - TTFT)
+    pf = [s for s in with_prompt if s.get("ttft_s") is not None]
+    dc = [s for s in with_comp if s.get("ttft_s") is not None]
+    prefill_time = sum(s["ttft_s"] for s in pf)
+    decode_time = sum(max(0.0, s["latency_s"] - s["ttft_s"]) for s in dc)
+
+    p90 = round(sorted(latencies)[min(n - 1, math.ceil(0.9 * n) - 1)], 3) if n else None
+    return {
         "transport": transport,  # "local" (host+model co-located) or "lan" (remote endpoint)
         "streamed": streamed,
         "wall_clock_s": round(wall_clock_s, 3),
-        "model_calls": len(latencies),
+        "model_calls": n,
         "model_time_s": round(model_time, 3),
         "latency_median_s": round(statistics.median(latencies), 3) if latencies else None,
-        "latency_p90_s": round(sorted(latencies)[max(0, round(len(latencies) * 0.9) - 1)], 3)
-        if latencies
-        else None,
+        "latency_p90_s": p90,
         "total_prompt_tokens": total_prompt,
         "total_completion_tokens": total_comp,
-        # aggregate throughput over model time; prompt-side is prefill-inclusive (big-in/tiny-out)
-        "prompt_tokens_per_s": _rate(total_prompt),
-        "completion_tokens_per_s": _rate(total_comp),
-        # TTFT ≈ prefill time (only when --stream): the clean prefill-vs-decode separator
+        "tokens_complete": tokens_complete,  # False => rates are over a subset of calls
+        # prefill-inclusive throughput over the matched calls' wall-clock
+        "prompt_tokens_per_s": _rate(total_prompt, sum(s["latency_s"] for s in with_prompt)),
+        "completion_tokens_per_s": _rate(total_comp, sum(s["latency_s"] for s in with_comp)),
+        # the CLEAN split (stream mode only): prefill over TTFT, decode over (latency - TTFT)
+        "prefill_tokens_per_s": _rate(
+            sum(s["prompt_tokens"] for s in pf) if pf else None, prefill_time
+        ),
+        "decode_tokens_per_s": _rate(
+            sum(s["completion_tokens"] for s in dc) if dc else None, decode_time
+        ),
         "ttft_median_s": round(statistics.median(ttfts), 3) if ttfts else None,
         "swap_used_delta_mb": round(swap_delta_mb, 2) if swap_delta_mb is not None else None,
-        "notes": "prompt_tokens_per_s is prefill-inclusive wall-clock throughput; use ttft_median_s "
-        "(stream mode) to separate prefill from decode. swap_used_delta_mb is host-side (macOS); "
-        "for the iPhone read memory on-device.",
+        "notes": "Rates are over the calls that reported usage (tokens_complete flags a subset). "
+        "prefill/decode_tokens_per_s (stream mode) are the clean split. swap_used_delta_mb is "
+        "measured on the HOST process: it reflects the box under test ONLY when host+model are "
+        "co-located (--transport local). For remote/LAN runs (incl. the iPhone) it measures the "
+        "control host — read the box-under-test's memory on that box / on-device instead.",
     }
-    return perf
 
 
 # A small, real single-file task: a buggy function whose failing test must pass.

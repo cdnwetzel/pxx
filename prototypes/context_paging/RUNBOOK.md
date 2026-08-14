@@ -174,15 +174,19 @@ that before running** — the A/B/C is only valid if you pin model/engine/host/t
    *model+hardware* comparison; label it that way.
 2. Keep the app **foreground, screen on, plugged in** for the whole run (iOS suspends background apps).
 3. Find the phone's LAN IP + the app's port. From your **control Mac** (running the pxx host):
+
    ```bash
    uv run --extra dev python -m prototypes.context_paging.run_neo \
        --base-url http://<iphone-ip>:<port>/v1 --model qwen3:4b \
        --cap 5500 --stream --transport lan \
        --workdir ~/paging-C-iphone --keep
    ```
-4. **Memory on C:** `swap_used_delta_mb` in the receipt is **host-side** and does *not* see the
-   phone's memory. Read the phone's memory pressure **on-device** (Xcode Instruments, or the app's
-   memory readout) and record it next to the receipt.
+
+4. **Memory on C:** the receipt's `swap_used_delta_mb` is measured on the **host process** (the
+   control Mac) and does *not* see the phone. Read the phone's memory **on-device** (Xcode
+   Instruments, or the app's memory readout) and record it next to the receipt. Same rule for A/B on
+   a LAN run — sample swap on the box under test (`ssh box 'sysctl vm.swapusage'`) or run that box
+   co-located (`--transport local`); see the two-pass note in `AB_PREREGISTRATION.md`.
 
 ### Same for A and B (fixed host, moving endpoint)
 

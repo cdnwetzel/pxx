@@ -19,7 +19,10 @@ from .pages import page_hash
 # and key=value assignments for secret-named keys.
 _SCRUBBERS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"(https?://)[^/@\s]+@"), r"\1***@"),
-    (re.compile(r"(?i)\b(authorization|bearer)\b\s*:?\s*\S+"), r"\1 ***"),
+    # Authorization / Bearer: scrub the WHOLE value to end-of-line (a JWT is dotted, not one
+    # \S+ token — a token-only match would leave most of the credential in place).
+    (re.compile(r"(?im)^(\s*authorization)\s*:.*$"), r"\1: ***"),
+    (re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]+"), "bearer ***"),
     (re.compile(r"(?i)\b(api[_-]?key|secret|token|password|passwd|pwd)\b\s*[=:]\s*\S+"), r"\1=***"),
     (re.compile(r"\b(sk|xoxb|ghp|gho|ghs|AKIA)[-_A-Za-z0-9]{12,}\b"), "***"),
 ]
@@ -60,12 +63,20 @@ class ArtifactStore:
         ref_id = f"{kind}-{page_hash(scrubbed.encode())[:12]}"
         (self.dir / f"{ref_id}.log").write_text(scrubbed)
         return ArtifactRef(
-            ref_id=ref_id, summary=self._summarize(scrubbed), total_bytes=len(content)
+            ref_id=ref_id,
+            summary=self._summarize(scrubbed),
+            total_bytes=len(content.encode("utf-8")),  # byte length, per the field name
         )
 
     def get(self, ref_id: str) -> str | None:
-        path = self.dir / f"{ref_id}.log"
-        return path.read_text() if path.is_file() else None
+        # ``ref_id`` reaches here straight from the model (via INSPECT). Confine it to the
+        # artifact dir: no path separators, no ``..`` escape, resolved path must stay inside.
+        if "/" in ref_id or "\\" in ref_id or ".." in ref_id or not ref_id:
+            return None
+        path = (self.dir / f"{ref_id}.log").resolve()
+        if path.parent != self.dir.resolve() or not path.is_file():
+            return None
+        return path.read_text()
 
     @staticmethod
     def _summarize(scrubbed: str) -> str:

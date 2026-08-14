@@ -80,14 +80,14 @@ def parse_action(obj: object) -> Action:
     if kind == "NEED_CONTEXT":
         return NeedContext(path=_require_str(obj, "path"))
     if kind == "PATCH":
+        new_string = obj.get("new_string")
+        if not isinstance(new_string, str):  # may be empty (a deletion), but must be present + str
+            raise ActionError("action missing/invalid string field: 'new_string'")
         return Patch(
             path=_require_str(obj, "path"),
             expected_sha=_require_str(obj, "expected_sha"),
             old_string=_require_str(obj, "old_string"),
-            # new_string may legitimately be empty (a deletion), so it is checked as str only
-            new_string=obj["new_string"]
-            if isinstance(obj.get("new_string"), str)
-            else _bad("new_string"),
+            new_string=new_string,
         )
     if kind == "RUN_TEST":
         return RunTest()
@@ -100,7 +100,3 @@ def parse_action(obj: object) -> Action:
     if kind == "BLOCKED":
         return Blocked(reason=_require_str(obj, "reason"))
     raise ActionError(f"unknown action type: {kind!r}")
-
-
-def _bad(field: str) -> str:
-    raise ActionError(f"action missing/invalid string field: {field!r}")

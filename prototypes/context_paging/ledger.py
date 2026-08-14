@@ -12,6 +12,8 @@ import json
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
+from .pages import _write_durably
+
 
 @dataclass
 class Ledger:
@@ -32,11 +34,11 @@ class Ledger:
         return Path(state_dir) / "ledger.json"
 
     def save(self, state_dir: Path) -> None:
-        """Atomic tmp-then-replace: the ledger file is never observed half-written."""
+        """Atomic tmp-then-replace + fsync: never observed half-written; survives power loss."""
         path = self._path(state_dir)
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps(asdict(self), indent=2, sort_keys=True))
+        _write_durably(tmp, json.dumps(asdict(self), indent=2, sort_keys=True).encode("utf-8"))
         tmp.replace(path)  # atomic on POSIX
 
     @classmethod

@@ -25,7 +25,18 @@ from pathlib import Path
 from .actions import Action, Blocked, Complete, Inspect, NeedContext, Patch, RunTest, Search
 from .artifacts import ArtifactStore
 from .ledger import Ledger
-from .pages import PageStore
+from .pages import PageStore, page_hash
+
+# directories never worth searching (large, irrelevant, or our own state)
+_SEARCH_SKIP = {
+    ".git",
+    ".venv",
+    "venv",
+    "node_modules",
+    "__pycache__",
+    ".pxx-paging",
+    ".mypy_cache",
+}
 
 #: (argv, cwd, timeout) -> (exit_code, combined_output). Injectable so tests stay hermetic and
 #: the live Neo run uses subprocess under a host timeout + resource bound.
@@ -83,6 +94,7 @@ class Executor:
         return self.state_dir / "inflight.json"
 
     def _write_inflight(self, record: dict) -> None:
+        self.state_dir.mkdir(parents=True, exist_ok=True)  # the record must land even standalone
         tmp = self._inflight_path.with_suffix(".json.tmp")
         tmp.write_text(json.dumps(record, sort_keys=True))
         tmp.replace(self._inflight_path)
@@ -140,7 +152,10 @@ class Executor:
     def _need_context(self, a: NeedContext) -> ExecResult:
         if not self.pages.exists(a.path):
             return ExecResult(observation=f"NEED_CONTEXT rejected: no such file {a.path!r}")
-        page = self.pages.read(a.path)
+        try:
+            page = self.pages.read(a.path)
+        except ValueError as exc:  # non-UTF-8 file: v0 pages text only
+            return ExecResult(observation=f"NEED_CONTEXT rejected: {exc}")
         return ExecResult(
             observation=f"# path: {page.path}\n# sha256: {page.sha}\n{page.text}",
             detail={"paged": a.path, "sha": page.sha},
@@ -150,9 +165,12 @@ class Executor:
         current = self.pages.current_hash(a.path)
         if current is None:
             return ExecResult(observation=f"PATCH rejected: no such file {a.path!r}")
+        try:
+            page = self.pages.read(a.path)  # read once; reused for stale-source + edit
+        except ValueError as exc:  # non-UTF-8: cannot safely patch text
+            return ExecResult(observation=f"PATCH rejected: {exc}", detail={"rejected": "not_utf8"})
         if current != a.expected_sha:
             # stale: the file moved under the model. Never apply blind — page fresh source.
-            page = self.pages.read(a.path)
             self.ledger.record_failure(f"stale PATCH on {a.path} (expected {a.expected_sha[:12]})")
             return ExecResult(
                 observation=(
@@ -161,7 +179,7 @@ class Executor:
                 ),
                 detail={"rejected": "stale_sha", "path": a.path},
             )
-        text = self.pages.read(a.path).text
+        text = page.text
         occurrences = text.count(a.old_string)
         if occurrences != 1:
             self.ledger.record_failure(f"PATCH old_string x{occurrences} on {a.path}")
@@ -173,9 +191,12 @@ class Executor:
                 detail={"rejected": "non_unique_match", "path": a.path},
             )
         new_text = text.replace(a.old_string, a.new_string, 1)
-        planned_sha = hashlib.sha256(new_text.encode("utf-8")).hexdigest()
+        planned_sha = page_hash(new_text.encode("utf-8"))  # the ONE hashing authority
 
-        # crash-safe commit: record -> apply -> bump+save -> clear
+        # crash-safe commit: record -> apply -> invalidate verification + bump+save -> clear.
+        # verified MUST drop here: a passing RUN_TEST is only valid for the source it ran on, so
+        # any source change invalidates it (else the model could PATCH after a green test and
+        # COMPLETE on stale verification). It is persisted in the SAME ledger.save as the bump.
         pre_revision = self.ledger.revision
         self._write_inflight(
             {
@@ -187,6 +208,7 @@ class Executor:
             }
         )
         applied_sha = self.pages.write(a.path, new_text)  # atomic file replace
+        self.ledger.verified = False
         self.ledger.bump()
         self.ledger.save(self.state_dir)
         self._clear_inflight()
@@ -208,10 +230,12 @@ class Executor:
         passed = code == 0
         if passed:
             self.ledger.verified = True
-            self.ledger.save(self.state_dir)
         else:
             self.ledger.verified = False
             self.ledger.record_failure(f"RUN_TEST exit {code} (see {ref.ref_id})")
+        self.ledger.save(
+            self.state_dir
+        )  # persist the verdict on BOTH branches (never in-memory only)
         verdict = "PASSED" if passed else f"FAILED (exit {code})"
         return ExecResult(
             observation=f"RUN_TEST {verdict}. artifact {ref.ref_id}:\n{ref.summary}",
@@ -231,12 +255,12 @@ class Executor:
         for p in sorted(self.root.rglob("*")):
             if not p.is_file():
                 continue
-            rel = str(p.relative_to(self.root))
-            if ".pxx-paging" in rel:
+            rel = p.relative_to(self.root)
+            if any(part in _SEARCH_SKIP for part in rel.parts):  # prune large/irrelevant dirs
                 continue
             try:
                 if a.query in p.read_text(errors="ignore"):
-                    hits.append(rel)
+                    hits.append(str(rel))
             except OSError:
                 continue
             if len(hits) >= self.search_limit:
@@ -252,7 +276,10 @@ class Executor:
         if art is not None:
             return ExecResult(observation=f"artifact {a.ref}:\n{art[:4000]}")
         if self.pages.exists(a.ref):
-            page = self.pages.read(a.ref)
+            try:
+                page = self.pages.read(a.ref)
+            except ValueError as exc:
+                return ExecResult(observation=f"INSPECT rejected: {exc}")
             return ExecResult(observation=f"# path: {page.path}\n# sha256: {page.sha}\n{page.text}")
         return ExecResult(observation=f"INSPECT: no artifact or file for ref {a.ref!r}")
 

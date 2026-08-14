@@ -112,13 +112,13 @@ class Runtime:
         terminal: Terminal | None = None
         while seq < self.max_actions:
             seq += 1
-            target = (
-                self.pages.read(self.ledger.target_path)
-                if self.pages.exists(self.ledger.target_path)
-                else None
-            )
-            if target is None:
+            if not self.pages.exists(self.ledger.target_path):
                 terminal = Terminal("BLOCKED", f"target_missing:{self.ledger.target_path}")
+                break
+            try:
+                target = self.pages.read(self.ledger.target_path)
+            except ValueError:  # non-UTF-8 target — v0 handles text files only, fail closed
+                terminal = Terminal("BLOCKED", "target_not_utf8")
                 break
             try:
                 capsule = self.builder.build(
@@ -135,8 +135,12 @@ class Runtime:
                 terminal = Terminal("BLOCKED", "target_source_exceeds_capsule")
                 break
 
-            if f"target:{target.path}" not in capsule.included:  # invariant guard
+            if f"target:{target.path}" not in capsule.included:
+                # the target source must ALWAYS be present — if it somehow isn't, fail closed
+                # rather than let the model act without authoritative source.
                 nc["overflow_never_dropped_target"] = False
+                terminal = Terminal("BLOCKED", "target_dropped_from_capsule")
+                break
             receipt.record_capsule(
                 seq, capsule.input_tokens, capsule.cap, capsule.under_cap, capsule.evicted
             )
@@ -200,6 +204,10 @@ class Runtime:
     def _absorb(self, action, result: ExecResult, deps: dict, diag: Diagnostic) -> None:
         detail = result.detail or {}
         if isinstance(action, NeedContext) and "paged" in detail:
+            # re-requesting a page must REFRESH its recency (move to newest) so a page the model
+            # keeps using is not the first evicted under cap pressure. dict preserves insertion
+            # order, so pop-then-set moves it to the end.
+            deps.pop(detail["paged"], None)
             deps[detail["paged"]] = self.pages.read(detail["paged"])
         if isinstance(action, Patch) and detail.get("applied"):
             deps.pop(action.path, None)  # stale now; re-page fresh if needed

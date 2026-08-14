@@ -44,8 +44,9 @@ _JSON_RE = re.compile(r"\{.*\}", re.DOTALL)
 
 
 class OpenAICompatibleModel:
-    """Minimal ``POST {base_url}/v1/chat/completions`` client for a local OpenAI-compatible
-    server (Ollama, vLLM, llama.cpp). The model is instructed to reply with ONE JSON action;
+    """Minimal ``POST {base_url}/chat/completions`` client for a local OpenAI-compatible server
+    (Ollama, vLLM, llama.cpp). ``base_url`` is the API root **including** ``/v1``
+    (e.g. ``http://localhost:11434/v1``). The model is instructed to reply with ONE JSON action;
     the first JSON object in its reply is parsed. httpx is imported lazily so the offline
     negative-control suite has zero network dependency."""
 
@@ -63,10 +64,19 @@ class OpenAICompatibleModel:
             "temperature": 0,
             "stream": False,
         }
+        # base_url is the OpenAI API root INCLUDING /v1 (e.g. http://host:11434/v1); append the
+        # path only, so a base already ending in /v1 does not become /v1/v1/chat/completions.
         with httpx.Client(timeout=self.timeout) as client:
-            resp = client.post(f"{self.base_url}/v1/chat/completions", json=payload)
+            resp = client.post(f"{self.base_url}/chat/completions", json=payload)
             resp.raise_for_status()
-            content = resp.json()["choices"][0]["message"]["content"]
+            body = resp.json()
+        try:
+            content = body["choices"][0]["message"]["content"]
+        except (KeyError, IndexError, TypeError):
+            # fail closed on a malformed envelope — never let it crash the loop
+            return {"type": "BLOCKED", "reason": "malformed_completion_envelope"}
+        if not isinstance(content, str):
+            return {"type": "BLOCKED", "reason": "completion_content_not_text"}
         match = _JSON_RE.search(content)
         if not match:
             return {"type": "BLOCKED", "reason": "model_returned_no_json_action"}

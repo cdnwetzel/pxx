@@ -9,8 +9,17 @@ reconciliation — so a hash means one thing across the whole system.
 from __future__ import annotations
 
 import hashlib
+import os
 from dataclasses import dataclass
 from pathlib import Path
+
+
+def _write_durably(path: Path, data: bytes) -> None:
+    """Write bytes and fsync the file so a subsequent atomic replace survives power loss."""
+    with open(path, "wb") as fh:
+        fh.write(data)
+        fh.flush()
+        os.fsync(fh.fileno())
 
 
 def canonical_path(root: Path, path: str | Path) -> Path:
@@ -56,10 +65,20 @@ class PageStore:
             return False
 
     def read(self, path: str) -> Page:
-        """Page-fault a file in: returns its text + the hash of its raw bytes."""
+        """Page-fault a file in: returns its text + the hash of its raw bytes.
+
+        Decodes **strictly**: a lossy decode would turn invalid bytes into U+FFFD, and an edit
+        computed against that text would corrupt the file on write-back. A non-UTF-8 file is not
+        a v0 text target — raise, so the caller fails closed rather than silently mangle bytes."""
         resolved = canonical_path(self.root, path)
         raw = resolved.read_bytes()
-        return Page(path=path, text=raw.decode("utf-8", errors="replace"), sha=page_hash(raw))
+        try:
+            text = raw.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise ValueError(
+                f"{path} is not valid UTF-8 (v0 targets text files only): {exc}"
+            ) from exc
+        return Page(path=path, text=text, sha=page_hash(raw))
 
     def current_hash(self, path: str) -> str | None:
         """The current on-disk hash, or None if the file is absent."""
@@ -79,6 +98,9 @@ class PageStore:
         resolved.parent.mkdir(parents=True, exist_ok=True)
         data = text.encode("utf-8")
         tmp = resolved.with_name(f".{resolved.name}.tmp-{page_hash(data)[:8]}")
-        tmp.write_bytes(data)
-        tmp.replace(resolved)  # atomic on POSIX
+        try:
+            _write_durably(tmp, data)  # fsync so the bytes survive power loss, not just a crash
+            tmp.replace(resolved)  # atomic on POSIX
+        finally:
+            tmp.unlink(missing_ok=True)  # never leave a stale .tmp dotfile in the sandbox
         return page_hash(data)

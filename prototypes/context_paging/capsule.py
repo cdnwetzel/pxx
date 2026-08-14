@@ -87,18 +87,20 @@ class CapsuleBuilder:
         ]
         if diagnostic:
             floor.append(_Section("diagnostic", diagnostic))
-        # Admission is measured on the RENDERED block (header + separator), which slightly
-        # over-estimates the joined prompt (token counts aren't perfectly additive) — so the
-        # ACTUAL assembled prompt is always <= the admitted budget <= cap. under_cap can't lie.
-        floor_cost = sum(self._cost(s) for s in floor)
-        if floor_cost > self.cap:
+        # Measure the ACTUAL assembled prompt at every step (not a sum of per-section counts):
+        # an arbitrary injected tokenizer need not be additive, so only measuring the real
+        # joined string makes ``under_cap`` a hard guarantee. If the floor alone busts the cap
+        # that is a preflight BLOCKED — the target source is never evicted/summarized to fit.
+        floor_prompt = self._join(floor)
+        floor_tokens = self.count(floor_prompt)
+        if floor_tokens > self.cap:
             raise CapsuleOverflow(
-                f"floor {floor_cost} > cap {self.cap} (target {target.path} cannot fit)"
+                f"floor {floor_tokens} > cap {self.cap} (target {target.path} cannot fit)"
             )
 
         # Evictable tiers, highest priority first: dependency pages, then history. Within a
-        # tier, oldest-touched (lowest seq) is evicted first. We ADD in priority order until
-        # the next item would bust the cap; everything not added is 'evicted'.
+        # tier, oldest-touched (lowest seq) is evicted first. We ADD in priority order and keep
+        # a section only if the REBUILT prompt still fits; everything else is 'evicted'.
         dep_sections = [
             _Section(f"dep:{p.path}", self._render_source(p), seq=i)
             for i, p in enumerate(dependency_pages or [])
@@ -110,18 +112,18 @@ class CapsuleBuilder:
         )
 
         included = list(floor)
-        used = floor_cost
+        prompt = floor_prompt
+        total = floor_tokens
         evicted: list[str] = []
         for sec in candidates:
-            c = self._cost(sec)
-            if used + c <= self.cap:
+            trial = self._join([*included, sec])
+            trial_tokens = self.count(trial)
+            if trial_tokens <= self.cap:
                 included.append(sec)
-                used += c
+                prompt, total = trial, trial_tokens
             else:
                 evicted.append(sec.label)
 
-        prompt = "\n\n".join(f"### {s.label}\n{s.text}" for s in included)
-        total = self.count(prompt)  # <= used <= cap, so under_cap is guaranteed
         return Capsule(
             prompt=prompt,
             input_tokens=total,
@@ -130,9 +132,9 @@ class CapsuleBuilder:
             evicted=evicted,
         )
 
-    def _cost(self, sec: _Section) -> int:
-        # the section's cost as it appears in the prompt: its rendered block plus one separator.
-        return self.count(f"### {sec.label}\n{sec.text}") + self.count("\n\n")
+    @staticmethod
+    def _join(sections: list[_Section]) -> str:
+        return "\n\n".join(f"### {s.label}\n{s.text}" for s in sections)
 
     @staticmethod
     def _render_source(page: Page) -> str:

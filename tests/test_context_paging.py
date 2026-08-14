@@ -350,3 +350,127 @@ def test_ledger_round_trips_on_disk(tmp_path):
     led.save(state)
     back = Ledger.load(state)
     assert back.revision == 3 and back.target_path == "a.py" and back.acceptance_cmd == ["pytest"]
+
+
+# ------------------------------------------------ review-hardening negative controls (PR #69)
+def test_patch_invalidates_a_prior_passing_verification(tmp_path):
+    # CRITICAL: a passing RUN_TEST is only valid for the source it ran on. After a green test, a
+    # further PATCH must reset verified -> a COMPLETE cannot ride stale verification.
+    from prototypes.context_paging.actions import Patch
+    from prototypes.context_paging.executor import Executor
+
+    root, sha0 = _make_repo(tmp_path)
+    state = tmp_path / ".pxx-paging"
+    ledger = Ledger(objective="x", acceptance_cmd=["true"], target_path="bug.py", verified=True)
+    ex = Executor(
+        root=root,
+        state_dir=state,
+        pages=PageStore(root),
+        ledger=ledger,
+        artifacts=ArtifactStore(state),
+    )
+    res = ex.execute(
+        Patch(
+            path="bug.py",
+            expected_sha=sha0,
+            old_string="return a - b  # BUG",
+            new_string="return a + b",
+        )
+    )
+    assert res.detail["applied"] is True
+    assert ledger.verified is False  # a source change dropped the stale verification
+    assert Ledger.load(state).verified is False  # and it was persisted, not in-memory only
+
+
+def test_stale_verification_cannot_complete_end_to_end(tmp_path):
+    # end-to-end: PATCH -> RUN_TEST(pass) -> PATCH again -> COMPLETE must be REJECTED (verified
+    # was invalidated by the 2nd patch), then RUN_TEST -> COMPLETE succeeds.
+    root, sha0 = _make_repo(tmp_path)
+    state = tmp_path / ".pxx-paging"
+    fixed_sha = page_hash(_FIX.encode())
+    rt = _runtime(
+        root,
+        state,
+        [
+            {
+                "type": "PATCH",
+                "path": "bug.py",
+                "expected_sha": sha0,
+                "old_string": "return a - b  # BUG",
+                "new_string": "return a + b",
+            },
+            {"type": "RUN_TEST"},  # passes
+            {
+                "type": "PATCH",
+                "path": "bug.py",
+                "expected_sha": fixed_sha,
+                "old_string": "return a + b",
+                "new_string": "return a + b  # touched",
+            },
+            {"type": "COMPLETE"},  # must be REJECTED: verified was reset by the 2nd patch
+            {"type": "RUN_TEST"},  # passes again (still returns a+b)
+            {"type": "COMPLETE"},  # now allowed
+        ],
+    )
+    terminal, receipt = rt.run()
+    assert terminal.code == "COMPLETED"
+    completes = [a for a in receipt.actions if a["type"] == "Complete"]
+    assert len(completes) == 2  # the first COMPLETE was rejected, not terminal
+
+
+def test_artifact_get_refuses_path_traversal(tmp_path):
+    # CRITICAL: ref_id comes from the model; get() must never read outside the artifact dir.
+    state = tmp_path / ".pxx-paging"
+    (tmp_path / "secret.txt").write_text("TOPSECRET")
+    store = ArtifactStore(state)
+    assert store.get("../../secret") is None
+    assert store.get("../secret.txt") is None
+    assert store.get("/etc/hosts") is None
+    ref = store.put("runtest", "ordinary log")  # a legit ref still works
+    assert store.get(ref.ref_id) == "ordinary log"
+
+
+def test_authorization_header_is_fully_scrubbed():
+    jwt = "Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.abc123signature"
+    out = scrub_secrets(jwt)
+    assert "eyJhbGciOiJIUzI1NiJ9" not in out and "signature" not in out
+
+
+def test_capsule_under_cap_holds_for_a_nonadditive_tokenizer(tmp_path):
+    # a pathological counter where count(a+b) > count(a)+count(b): admission must still measure
+    # the ACTUAL joined prompt, so under_cap is a hard guarantee (not a per-section-sum estimate).
+    def spiky(text: str) -> int:
+        return len(text) + text.count("\n") * 100  # newlines cost a lot when joined
+
+    target = Page(path="bug.py", text=_BUG, sha=page_hash(_BUG.encode()))
+    deps = [Page(path=f"d{i}.py", text="a=1\n" * 20, sha="s") for i in range(6)]
+    floor_only = CapsuleBuilder(cap_tokens=10_000_000, count_tokens=spiky).build(
+        kernel="k", contract="c", target=target, tools="t"
+    )
+    builder = CapsuleBuilder(cap_tokens=floor_only.input_tokens + 50, count_tokens=spiky)
+    cap = builder.build(
+        kernel="k",
+        contract="c",
+        target=target,
+        tools="t",
+        dependency_pages=deps,
+        history=["h\n" * 10 for _ in range(6)],
+    )
+    assert cap.under_cap  # measured on the real joined prompt, so this cannot be violated
+    assert "target:bug.py" in cap.included
+
+
+def test_non_utf8_target_blocks_fail_closed(tmp_path):
+    root = tmp_path
+    (root / "bin.py").write_bytes(b"\xff\xfe not valid utf-8 \x00")
+    state = tmp_path / ".pxx-paging"
+    ledger = Ledger(objective="x", acceptance_cmd=["true"], target_path="bin.py")
+    rt = Runtime(
+        root=root,
+        state_dir=state,
+        model=ScriptedModel([{"type": "RUN_TEST"}]),
+        ledger=ledger,
+        test_runner=_host_test(root),
+    )
+    terminal, _ = rt.run()
+    assert terminal.code == "BLOCKED" and terminal.reason == "target_not_utf8"

@@ -8,6 +8,7 @@ code. Written to disk so a run leaves proof, not a claim.
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
@@ -45,7 +46,15 @@ class Receipt:
     def to_dict(self) -> dict:
         return asdict(self)
 
-    def save(self, state_dir: Path) -> Path:
+    def save(self, state_dir: Path) -> Path | None:
+        """Best-effort: a failed receipt write is logged, never fatal — the run's terminal state
+        is already decided by the time this is called, so an audit-write error must not raise."""
         path = Path(state_dir) / "receipt.json"
-        path.write_text(json.dumps(self.to_dict(), indent=2, sort_keys=True))
-        return path
+        try:
+            path.write_text(json.dumps(self.to_dict(), indent=2, sort_keys=True))
+            return path
+        except OSError:
+            logging.getLogger("context_paging").warning(
+                "receipt write failed (non-fatal): %s", path
+            )
+            return None

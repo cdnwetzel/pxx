@@ -432,7 +432,13 @@ CHANGELOG.md; highlights:
   axis as the content-truthfulness gate. Strategic: context assembly is pxx's agent-runtime layer
   while Camelid builds this into the inference-engine layer — decide **build-native vs.
   compose-on-Camelid** (interop today via `openai-compatible`; revive the parked timtoole02 RFC).
-  Prototype + Neo (8 GB) receipt plan: `docs/context-paging-prototype.md`.
+  Prototype + Neo (8 GB) receipt plan: `docs/context-paging-prototype.md`. **v0 mechanism BUILT**
+  (`prototypes/context_paging/`, not shipped in the wheel): ledger + sha-256 source pages +
+  capsule builder (hard cap, eviction never drops the target) + typed actions + crash-safe
+  executor (idempotency + reconcile) + the loop. All **4 negative controls proven deterministically**
+  in `tests/test_context_paging.py` (stale-sha reject / kill-restart resume no-replay /
+  BLOCKED!=COMPLETED / over-budget eviction never drops target). **Still open:** the live 8 GB Neo
+  receipt with a real 4B model (`run_neo.py`), then the build-native-vs-Camelid decision.
 
 ## Later
 

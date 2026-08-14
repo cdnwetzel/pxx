@@ -118,17 +118,21 @@ same command, run on the mini.
 
 ## 4. Capture the receipt (make it a receipt, not a claim)
 
-Once you get a `COMPLETED` receipt, archive it **inside the checked-out repo** (derive the root so
-this works wherever you cloned) with a filename that labels the **hardware + model**:
+Archive **every run's receipt — `COMPLETED` *and* `BLOCKED`** (an honest `BLOCKED` is a valid
+result; cherry-picking only the COMPLETED runs would bias the record). Put it **inside the
+checked-out repo** (derive the root so this works wherever you cloned) with a filename that labels
+the **hardware + model + terminal**:
 
 ```bash
 # run this from inside your pxx checkout (any location)
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 DEST="$REPO_ROOT/prototypes/context_paging/receipts"
 mkdir -p "$DEST"
-# name it <hardware>-<model>-<date>.json so the box under test is unambiguous
+# name it <hardware>-<model>-<terminal>-<date>.json so the box + outcome are unambiguous
+# TERMINAL is the receipt's outcome, e.g. completed or blocked-target_not_utf8
+TERMINAL="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["terminal"].replace(":","-").lower())' ~/paging-neo-run/state/receipt.json)"
 cp ~/paging-neo-run/state/receipt.json \
-   "$DEST/neo-a18pro-8gb-qwen3-4b-$(date +%Y%m%d).json"
+   "$DEST/neo-a18pro-8gb-qwen3-4b-$TERMINAL-$(date +%Y%m%d).json"
 ```
 
 Then it goes through the normal gate (do NOT skip — this is the evidence):

@@ -21,15 +21,16 @@ ollama pull qwen3:4b           # the 4B/8K model (~2.5 GB)
 git clone git@github.com:cdnwetzel/pxx.git   # or: git -C ~/ai/pxx pull origin v2
 cd pxx && git checkout v2
 
-# a Python env with httpx (pxx's only core dep). Either works:
-uv sync --extra dev            # if uv is installed
-#   ...or:  python -m venv .venv && . .venv/bin/activate && pip install httpx
+# a Python env with httpx + pytest (RUN_TEST shells out to `python -m pytest`):
+uv sync --extra dev            # if uv is installed (brings httpx + pytest)
+#   ...or:  python -m venv .venv && . .venv/bin/activate && pip install httpx pytest
 ```
 
-Sanity check the model endpoint is up:
+Sanity check the model endpoint is up **and** serving the model you'll request:
 
 ```bash
-curl -s http://localhost:11434/v1/models | head -c 200   # should list qwen3:4b
+curl -fsS http://localhost:11434/v1/models | grep -q 'qwen3:4b' \
+  && echo "endpoint OK, qwen3:4b present" || echo "MODEL NOT FOUND — pull it / check the endpoint"
 ```
 
 ---
@@ -52,9 +53,11 @@ uv run --extra dev python -m prototypes.context_paging.run_neo \
   capsules, lower it (e.g. 4000). If it never has enough context, raise it.
 - `--workdir ... --keep` writes the scratch repo + `state/receipt.json` to a fixed dir you keep
   (omit both to use a temp dir that's cleaned up).
-- **Real token count (recommended for the receipt):** add `--hf-tokenizer Qwen/Qwen3-4B` (needs
-  `pip install transformers`). Without it the cap uses a documented char/4 approximation, and the
-  receipt's `tokenizer_id` says so — it never overstates fidelity.
+- **Real token count (recommended for the receipt):** add `--hf-tokenizer Qwen/Qwen3-4B`. It needs
+  `transformers` **in the same interpreter** — run `uv run --with transformers --extra dev python -m
+  prototypes.context_paging.run_neo ...` (a bare `pip install transformers` may target a different
+  Python, and `run_neo` then silently falls back). Without it the cap uses a documented char/4
+  approximation, and the receipt's `tokenizer_id` records which was used — it never overstates fidelity.
 
 ---
 
@@ -62,7 +65,7 @@ uv run --extra dev python -m prototypes.context_paging.run_neo \
 
 Console tail:
 
-```
+```text
 === TERMINAL: COMPLETED
 === actions: <n>  capsules: <n>
 === negative_controls observed: {...}
@@ -80,7 +83,9 @@ A valid receipt has:
 - `"terminal": "COMPLETED"`
 - `"verification": {"host_run": true, "passed": true}` — the host ran the ledger's test, not the model
 - `"capsules": [...]` each `"under_cap": true` — every capsule stayed within the hard cap
-- `"actions": [...]` — the trace (a `PATCH` with `expected_sha` + `applied: true`, then `RUN_TEST`, then the accepted `COMPLETE`)
+- `"actions": [...]` — the trace **ends** with an applied `PATCH` (carrying `expected_sha`), a
+  `RUN_TEST`, then the accepted `COMPLETE`. It may also contain **earlier retries** — `INVALID`
+  actions, stale/rejected patches — before the model gets there; that is normal, not a failure.
 - `"model_id"` / `"tokenizer_id"` — provenance
 
 ---
@@ -107,12 +112,16 @@ same command, run on the mini.
 
 ## 4. Capture the receipt (make it a receipt, not a claim)
 
-Once you get a `COMPLETED` receipt:
+Once you get a `COMPLETED` receipt, archive it **inside the checked-out repo** (derive the root so
+this works wherever you cloned) with a filename that labels the **hardware + model**:
 
 ```bash
-mkdir -p ~/ai/pxx/prototypes/context_paging/receipts
+REPO_ROOT="$(git -C ~/ai/pxx rev-parse --show-toplevel)"
+DEST="$REPO_ROOT/prototypes/context_paging/receipts"
+mkdir -p "$DEST"
+# name it <hardware>-<model>-<date>.json so the box under test is unambiguous
 cp ~/paging-neo-run/state/receipt.json \
-   ~/ai/pxx/prototypes/context_paging/receipts/neo-qwen3-4b-$(date +%Y%m%d).json
+   "$DEST/neo-a18pro-8gb-qwen3-4b-$(date +%Y%m%d).json"
 ```
 
 Then it goes through the normal gate (do NOT skip — this is the evidence):

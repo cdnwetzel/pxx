@@ -3,6 +3,31 @@
 All notable changes to pxx are documented here. The 1.x series history is
 preserved in git (tag `v1.3.3` and earlier).
 
+## [2.4.2] — 2026-08-14
+
+### Added
+
+- **Content-truthfulness gate (advisory) — a new axis, separate from permission.** Scope /
+  R-014 governs what the agent may *touch*; it does not catch a model that stays fully
+  in-scope and still reports something *false* about the code (quoting a comment that isn't
+  there, presenting invented code as real). The objective gates (lint/tests/diff-cap) catch
+  broken edits, not confident-but-wrong claims. This ships the **first increment: deterministic
+  quote-grounding** (`pxx/truthfulness.py`). Every non-trivial code span the model quotes in its
+  final narration must appear in content it actually read or wrote — read tool-results ∪ the
+  edit-tool args accumulated across the run. Fenced blocks are checked **line-by-line** (a model
+  that quotes a function but elides its docstring is being terse, not fabricating; a single
+  invented line is what flags); inline spans are checked only when they look like code
+  (whitespace-normalized, no model, fully deterministic).
+- Wired into the native loop's COMPLETED path as an **advisory, non-blocking, fail-safe** check:
+  an ungrounded quote emits a `content_truthfulness` event (+ a warning log) but **never**
+  changes a run's outcome — the `try/except` swallows any checker error so an advisory can't
+  break a run. Advisory-first is deliberate: the false-positive rate is measured on real runs
+  (like the reviewer's calibration) **before** the gate is ever promotable to a heal trigger.
+  Prove-before-you-call-it.
+- **Negative control (shipped in the tests):** a fabricated quote MUST flag and a real quote
+  MUST pass — a check that cannot go red is not a check. `content_truthfulness` registered in
+  the `EVENT_KINDS` allowlist.
+
 ## [2.4.1] — 2026-08-11
 
 ### Added

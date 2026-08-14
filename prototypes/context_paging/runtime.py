@@ -120,6 +120,9 @@ class Runtime:
             except ValueError:  # non-UTF-8 target — v0 handles text files only, fail closed
                 terminal = Terminal("BLOCKED", "target_not_utf8")
                 break
+            except OSError:  # removed/unreadable between exists() and read() — fail closed
+                terminal = Terminal("BLOCKED", "target_unreadable")
+                break
             try:
                 capsule = self.builder.build(
                     kernel=self.kernel,

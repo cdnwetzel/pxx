@@ -418,6 +418,43 @@ def test_stale_verification_cannot_complete_end_to_end(tmp_path):
     assert len(completes) == 2  # the first COMPLETE was rejected, not terminal
 
 
+def test_reconcile_invalidates_stale_verification_after_crash(tmp_path):
+    # CRITICAL fault injection: crash AFTER the source write but BEFORE verified=False was
+    # persisted, with verified=True on disk. reconcile must clear verified (else COMPLETE could
+    # ride a test that ran on the OLD source).
+    from prototypes.context_paging.executor import Executor
+
+    root, sha0 = _make_repo(tmp_path)
+    state = tmp_path / ".pxx-paging"
+    pages = PageStore(root)
+    ledger = Ledger(objective="x", acceptance_cmd=["true"], target_path="bug.py", verified=True)
+    ledger.save(state)
+    ex = Executor(
+        root=root, state_dir=state, pages=pages, ledger=ledger, artifacts=ArtifactStore(state)
+    )
+    planned = page_hash(_FIX.encode())
+    ex._write_inflight(
+        {
+            "key": "k",
+            "path": "bug.py",
+            "expected_sha": sha0,
+            "planned_sha": planned,
+            "pre_revision": 0,
+        }
+    )
+    pages.write("bug.py", _FIX)  # source applied; ledger on disk still has verified=True, rev 0
+
+    # fresh process reconciles
+    reloaded = Ledger.load(state)
+    assert reloaded.verified is True  # the stale value is on disk before reconcile
+    ex2 = Executor(
+        root=root, state_dir=state, pages=pages, ledger=reloaded, artifacts=ArtifactStore(state)
+    )
+    assert ex2.reconcile() == "applied"
+    assert reloaded.verified is False and reloaded.revision == 1
+    assert Ledger.load(state).verified is False  # persisted, so COMPLETE cannot ride it
+
+
 def test_artifact_get_refuses_path_traversal(tmp_path):
     # CRITICAL: ref_id comes from the model; get() must never read outside the artifact dir.
     state = tmp_path / ".pxx-paging"
@@ -431,7 +468,9 @@ def test_artifact_get_refuses_path_traversal(tmp_path):
 
 
 def test_authorization_header_is_fully_scrubbed():
-    jwt = "Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.abc123signature"
+    # a deliberately realistic JWT fixture to exercise the scrubber; suppress the governance
+    # secret-scanner on this one line (it is a test fixture, not a real credential).
+    jwt = "Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.abc123signature"  # pxx: allow jwt
     out = scrub_secrets(jwt)
     assert "eyJhbGciOiJIUzI1NiJ9" not in out and "signature" not in out
 

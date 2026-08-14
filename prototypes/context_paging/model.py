@@ -66,10 +66,14 @@ class OpenAICompatibleModel:
         }
         # base_url is the OpenAI API root INCLUDING /v1 (e.g. http://host:11434/v1); append the
         # path only, so a base already ending in /v1 does not become /v1/v1/chat/completions.
-        with httpx.Client(timeout=self.timeout) as client:
-            resp = client.post(f"{self.base_url}/chat/completions", json=payload)
-            resp.raise_for_status()
-            body = resp.json()
+        # Any network / HTTP-status / decode error is an honest stop, not a crash: fail closed.
+        try:
+            with httpx.Client(timeout=self.timeout) as client:
+                resp = client.post(f"{self.base_url}/chat/completions", json=payload)
+                resp.raise_for_status()
+                body = resp.json()
+        except (httpx.HTTPError, ValueError) as exc:  # ValueError covers a non-JSON body
+            return {"type": "BLOCKED", "reason": f"model_endpoint_error:{type(exc).__name__}"}
         try:
             content = body["choices"][0]["message"]["content"]
         except (KeyError, IndexError, TypeError):

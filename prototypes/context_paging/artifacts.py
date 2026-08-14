@@ -19,9 +19,9 @@ from .pages import page_hash
 # and key=value assignments for secret-named keys.
 _SCRUBBERS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"(https?://)[^/@\s]+@"), r"\1***@"),
-    # Authorization / Bearer: scrub the WHOLE value to end-of-line (a JWT is dotted, not one
-    # \S+ token — a token-only match would leave most of the credential in place).
-    (re.compile(r"(?im)^(\s*authorization)\s*:.*$"), r"\1: ***"),
+    # Authorization / Proxy-Authorization / Bearer: scrub the WHOLE value to end-of-line (a JWT
+    # is dotted, not one \S+ token — a token-only match would leave most of the credential in).
+    (re.compile(r"(?im)^(\s*(?:proxy-)?authorization)\s*:.*$"), r"\1: ***"),
     (re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]+"), "bearer ***"),
     (re.compile(r"(?i)\b(api[_-]?key|secret|token|password|passwd|pwd)\b\s*[=:]\s*\S+"), r"\1=***"),
     (re.compile(r"\b(sk|xoxb|ghp|gho|ghs|AKIA)[-_A-Za-z0-9]{12,}\b"), "***"),

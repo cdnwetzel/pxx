@@ -25,7 +25,7 @@ from pathlib import Path
 from .actions import Action, Blocked, Complete, Inspect, NeedContext, Patch, RunTest, Search
 from .artifacts import ArtifactStore
 from .ledger import Ledger
-from .pages import PageStore, page_hash
+from .pages import PageStore, _write_durably, page_hash
 
 # directories never worth searching (large, irrelevant, or our own state)
 _SEARCH_SKIP = {
@@ -96,7 +96,9 @@ class Executor:
     def _write_inflight(self, record: dict) -> None:
         self.state_dir.mkdir(parents=True, exist_ok=True)  # the record must land even standalone
         tmp = self._inflight_path.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps(record, sort_keys=True))
+        # fsync BEFORE the patch is applied: on power loss the record must be durable so reconcile
+        # can recover, never a patched file with no record of the in-flight action.
+        _write_durably(tmp, json.dumps(record, sort_keys=True).encode("utf-8"))
         tmp.replace(self._inflight_path)
 
     def _clear_inflight(self) -> None:
@@ -112,9 +114,17 @@ class Executor:
         rec = json.loads(self._inflight_path.read_text())
         current = self.pages.current_hash(rec["path"])
         if current == rec["planned_sha"]:
-            # applied: finish the ledger bump if the crash was between apply and save
+            # applied: the source changed, so verification is stale — invalidate it (a crash in
+            # _patch's apply→invalidate→save window could otherwise leave verified=True on disk,
+            # letting COMPLETE ride a test that ran on the OLD source). Finish the ledger bump if
+            # the crash was between apply and save; persist both under one save.
             if self.ledger.revision == rec["pre_revision"]:
+                self.ledger.verified = False
                 self.ledger.bump()
+                self.ledger.save(self.state_dir)
+            elif self.ledger.verified:
+                # bump already happened pre-crash but verification wasn't cleared — clear it now
+                self.ledger.verified = False
                 self.ledger.save(self.state_dir)
             self._clear_inflight()
             return "applied"
@@ -154,7 +164,7 @@ class Executor:
             return ExecResult(observation=f"NEED_CONTEXT rejected: no such file {a.path!r}")
         try:
             page = self.pages.read(a.path)
-        except ValueError as exc:  # non-UTF-8 file: v0 pages text only
+        except (ValueError, OSError) as exc:  # non-UTF-8, or removed/unreadable after the exists()
             return ExecResult(observation=f"NEED_CONTEXT rejected: {exc}")
         return ExecResult(
             observation=f"# path: {page.path}\n# sha256: {page.sha}\n{page.text}",
@@ -167,8 +177,10 @@ class Executor:
             return ExecResult(observation=f"PATCH rejected: no such file {a.path!r}")
         try:
             page = self.pages.read(a.path)  # read once; reused for stale-source + edit
-        except ValueError as exc:  # non-UTF-8: cannot safely patch text
-            return ExecResult(observation=f"PATCH rejected: {exc}", detail={"rejected": "not_utf8"})
+        except (ValueError, OSError) as exc:  # non-UTF-8, or removed/unreadable after current_hash
+            return ExecResult(
+                observation=f"PATCH rejected: {exc}", detail={"rejected": "unreadable"}
+            )
         if current != a.expected_sha:
             # stale: the file moved under the model. Never apply blind — page fresh source.
             self.ledger.record_failure(f"stale PATCH on {a.path} (expected {a.expected_sha[:12]})")
@@ -278,7 +290,7 @@ class Executor:
         if self.pages.exists(a.ref):
             try:
                 page = self.pages.read(a.ref)
-            except ValueError as exc:
+            except (ValueError, OSError) as exc:
                 return ExecResult(observation=f"INSPECT rejected: {exc}")
             return ExecResult(observation=f"# path: {page.path}\n# sha256: {page.sha}\n{page.text}")
         return ExecResult(observation=f"INSPECT: no artifact or file for ref {a.ref!r}")

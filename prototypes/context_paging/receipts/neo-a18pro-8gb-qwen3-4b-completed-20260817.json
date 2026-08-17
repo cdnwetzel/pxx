@@ -74,7 +74,7 @@
   "terminal": "COMPLETED",
   "tokenizer_id": "hf:Qwen/Qwen3-4B",
   "verification": {
-    "command": "/Users/cwetzel/.cache/uv/builds-v0/.tmpi6sjxG/bin/python -m pytest -q test_bug.py",
+    "command": "python -m pytest -q test_bug.py",
     "host_run": true,
     "passed": true
   }

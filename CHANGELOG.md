@@ -3,6 +3,46 @@
 All notable changes to pxx are documented here. The 1.x series history is
 preserved in git (tag `v1.3.3` and earlier).
 
+## [2.5.0] — 2026-08-17
+
+### Added
+
+- **Generalised per-role model lanes — `[roles.<name>]`.** The reviewer overlay
+  (`[roles.review]`, shipped 2.2.0) is widened to a **closed, validated role-lane
+  map**: `author`, `reviewer`, `plan`, `fast`, `verify`, `embed`. Each lane names a
+  `(provider, model, base_url, api_key)` quadruple resolved late against the coder
+  `model`, so different roles can run on different families/endpoints — the driver
+  is **family independence on the judgment axis** (the reviewer/verifier should not
+  share the author's lineage). `Settings.effective_role(name)` is the one resolver
+  role consumers call. New per-lane env parity `PXX_<ROLE>_{MODEL,PROVIDER,BASE_URL,
+  API_KEY}` (reviewer keeps `PXX_REVIEW_*`). `review` is a back-compat alias for
+  `reviewer`; `review_model` / `[roles.review]` / `PXX_REVIEW_*` / `--review-*` are
+  unchanged and the reviewer path is byte-identical (proven by the existing review
+  suite staying green). An unconfigured box is byte-identical to before — every
+  unset lane resolves to the coder `model`. The closed set is fail-closed on an
+  unknown role; opening it later is non-breaking, narrowing is not.
+- **Egress guard covers every lane.** Role routing is a data-egress surface for all
+  lanes (the diff for the reviewer, source chunks for `embed`, the prompt for any
+  lane), so the entire `[roles]` table is honoured only from user config, env, or
+  CLI — a repo-local `pxx.toml` can redirect **no** lane (ignored with a warning).
+  Every lane inherits the reviewer's exfil protection by construction. pxx owns
+  role→model **name**; endpoint/node **placement** stays a pluggable adapter (never
+  a second placement authority) — advancing the ROADMAP "model-backed boundary
+  roles" item. `embed` is reserved for the forthcoming repo code index.
+
+### Fixed
+
+- **User-config symlink trust check now uses the repo root, not just cwd.** The
+  symlink-into-project guard (which downgrades a `~/.config/pxx/config.toml`
+  symlinked to repo-editable content to untrusted) compared the target against
+  `cwd`. From a **nested** working directory, a symlink targeting a repo file that
+  is an *ancestor* of cwd escaped the check and was trusted — letting a repo file
+  smuggle `allow_ungated_shell` / `memory_capture_successes` / hooks / role-lane
+  routing past the A0b gate. Containment is now checked against the repository root
+  (`_repo_boundary`, nearest `.git` ancestor), closing the bypass; regression test
+  added. Found pre-flight by CodeRabbit while reviewing the role-lane map (whose
+  new lanes widened this guard's responsibility).
+
 ## [2.4.4] — 2026-08-16
 
 ### Changed

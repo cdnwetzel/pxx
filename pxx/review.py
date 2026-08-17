@@ -382,6 +382,11 @@ class NativeReviewer:
         payload = {
             "model": model.model,
             "stream": False,
+            # Greedy decoding: a BLOCKING/advisory gate must be reproducible. Without this the
+            # server default (Ollama = 0.8) makes the judge nondeterministic, so the same diff
+            # yields different verdicts run-to-run and `pxx calibrate` swings across its
+            # thresholds. temperature=0 pins the review so a calibrated reviewer stays calibrated.
+            "temperature": 0,
             "messages": [
                 {"role": "system", "content": self._system_prompt},
                 {"role": "user", "content": f"# Task\n\n{task}\n\n# Diff under review\n\n{diff}"},

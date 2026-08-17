@@ -3,6 +3,20 @@
 All notable changes to pxx are documented here. The 1.x series history is
 preserved in git (tag `v1.3.3` and earlier).
 
+## [2.4.3] — 2026-08-16
+
+### Fixed
+
+- **Reviewer/judge now decodes greedily (`temperature: 0`) — the review gate is reproducible.**
+  The model-backed reviewer's request omitted `temperature`, so against an Ollama endpoint the
+  server default (0.8) made the judge **nondeterministic**: the same diff produced different
+  verdicts run-to-run, and `pxx calibrate` swung across its `MIN_AGREEMENT` / `MIN_RECALL`
+  thresholds — so a calibrated reviewer couldn't be trusted to stay calibrated, and a single
+  calibration near a threshold was a coin-flip. `pxx/review.py` now sends `temperature: 0`, pinning
+  the judge to greedy decoding. Surfaced by a `reachable → unparseable → calibrate → replace`
+  reviewer diagnostic that exposed the swing. Test asserts the reviewer payload carries
+  `temperature == 0`.
+
 ## [2.4.2] — 2026-08-14
 
 ### Added

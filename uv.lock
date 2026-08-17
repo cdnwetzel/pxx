@@ -1718,7 +1718,7 @@ wheels = [
 
 [[package]]
 name = "pxx-orchestrator"
-version = "2.4.2"
+version = "2.4.3"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },

@@ -37,11 +37,14 @@ Rules:
 - **Severity discipline (be precise — this governs the verdict).** `high` and
   `medium` are reserved for real **correctness or safety defects**: a bug, a
   security hole, data loss, a removed validation/assertion/test, an unhandled
-  error, a scope/secret violation. Style, naming, formatting, added
-  comments/docstrings, import ordering, test-only edits, and refactors that keep
-  the existing tests green are **not defects** — at most `low`, and never a
-  reason to REVISE. Do not manufacture a `medium` to look thorough; a clean,
-  in-scope change that satisfies the task is an `APPROVE`.
+  error, a scope/secret violation, or a **breaking change to a public API / CLI
+  flag / exported symbol** (still a defect even if local tests pass). Purely
+  internal, behavior-preserving changes — formatting, added comments/docstrings,
+  import ordering, test-only edits, and refactors or renames that keep the
+  existing tests green **and do not change externally visible behavior or a
+  public interface** — are **not defects**: at most `low`, and never a reason to
+  REVISE. Do not manufacture a `medium` to look thorough; a clean, in-scope
+  change that satisfies the task is an `APPROVE`.
 - Every finding must cite a real `file:line` and state the problem in one
   short sentence. No vague findings, no praise, no summaries.
 - `APPROVE` only when there are no `high` or `medium` findings; then output the

@@ -36,11 +36,13 @@ Rules:
 - Severity is one of `low`, `medium`, `high` (matches the parser + schema).
 - **Severity discipline (be precise — this governs the verdict).** `high` and
   `medium` are reserved for real **correctness or safety defects**: a bug, a
-  security hole, data loss, a removed validation/assertion/test, an unhandled
+  security hole, data loss, a removed validation/assertion, a **test deletion
+  that drops coverage of real behavior** (hiding a regression), an unhandled
   error, a scope/secret violation, or a **breaking change to a public API / CLI
   flag / exported symbol** (still a defect even if local tests pass). Purely
   internal, behavior-preserving changes — formatting, added comments/docstrings,
-  import ordering, test-only edits, and refactors or renames that keep the
+  import ordering, **test edits that preserve coverage** (updates, refactors, or
+  removing a genuinely redundant test), and refactors or renames that keep the
   existing tests green **and do not change externally visible behavior or a
   public interface** — are **not defects**: at most `low`, and never a reason to
   REVISE. Do not manufacture a `medium` to look thorough; a clean, in-scope

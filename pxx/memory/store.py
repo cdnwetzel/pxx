@@ -42,10 +42,24 @@ from hashlib import sha256
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from ..errors import PxxError
+from .embeddings import embedder_identity
+
 if TYPE_CHECKING:
     from .embeddings import Embedder
 
 log = logging.getLogger("pxx.memory.store")
+
+
+class EmbeddingSpaceError(PxxError):
+    """Raised when the store's stored vectors were built with a different embedder
+    than the one now attached. Vectors from different embedding spaces are not
+    comparable, so the store fails closed (refusing to fabricate a similarity)
+    rather than silently returning confident garbage — the retrieval analogue of
+    the content-truthfulness gate. Recover with
+    :meth:`MemoryStore.reset_embedding_space` (reindex) or by repointing to the
+    original embedder."""
+
 
 #: Hybrid ranking weights (DESIGN.md: bm25 0.4 + cosine 0.6).
 W_FTS = 0.4
@@ -127,7 +141,16 @@ CREATE TRIGGER IF NOT EXISTS observations_ad AFTER DELETE ON observations BEGIN
     INSERT INTO observations_fts(observations_fts, rowid, content, tags)
     VALUES ('delete', old.id, old.content, old.tags);
 END;
+CREATE TABLE IF NOT EXISTS meta (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
 """
+
+#: meta key stamping the EMBEDDING SPACE the stored vectors were built with (see
+#: MemoryStore.set_embedder). Vectors from different embedders are not comparable,
+#: so a mismatch must fail closed rather than silently cosine across spaces.
+_EMBEDDING_IDENTITY_KEY = "embedding_identity"
 
 _FTS_TOKEN_RE = re.compile(r"\w+")
 _MAX_FTS_TOKENS = 20
@@ -283,8 +306,78 @@ class MemoryStore:
                 log.warning("legacy pxx 1.x memory db removed (backup exists)")
 
     def set_embedder(self, embedder: Embedder | None) -> None:
-        """Attach an embedder used to lazily embed on add and query on search."""
+        """Attach an embedder used to lazily embed on add and query on search.
+
+        Enforces embedding-space versioning: the store is stamped with the
+        embedder's identity the first time one is attached (or on a fresh/empty
+        store), and a later attach whose identity differs while stored vectors
+        exist raises :class:`EmbeddingSpaceError` (fail closed — cross-space
+        cosine is meaningless). Detaching (``None``) is always allowed."""
+        if embedder is not None:
+            self._assert_embedding_space(embedder)
         self._embedder = embedder
+
+    def _has_embeddings(self) -> bool:
+        return (
+            self._db.execute(
+                "SELECT 1 FROM observations WHERE embedding IS NOT NULL LIMIT 1"
+            ).fetchone()
+            is not None
+        )
+
+    def _stamped_identity(self) -> str | None:
+        row = self._db.execute(
+            "SELECT value FROM meta WHERE key = ?", (_EMBEDDING_IDENTITY_KEY,)
+        ).fetchone()
+        return row["value"] if row else None
+
+    def _stamp_identity(self, identity: str) -> None:
+        self._db.execute(
+            "INSERT INTO meta(key, value) VALUES(?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (_EMBEDDING_IDENTITY_KEY, identity),
+        )
+        self._db.commit()
+
+    def _assert_embedding_space(self, embedder: Embedder) -> None:
+        """Stamp the store's embedding space on first use, or fail closed on a
+        mismatch against existing vectors (embedding-space versioning)."""
+        current = embedder_identity(embedder)
+        stored = self._stamped_identity()
+        if stored is None:
+            # Unstamped. Pre-existing vectors predate versioning: we cannot know
+            # which embedder made them, so assume the current one (the common
+            # no-change case) and warn — reindex if the embedder actually changed.
+            if self._has_embeddings():
+                log.warning(
+                    "memory store %s has embeddings with no embedding-space stamp; "
+                    "assuming '%s' — reindex (reset_embedding_space) if the embedder changed",
+                    self.path,
+                    current,
+                )
+            self._stamp_identity(current)
+        elif stored != current:
+            if self._has_embeddings():
+                raise EmbeddingSpaceError(
+                    f"memory embedding-space mismatch: index built with '{stored}', "
+                    f"embedder is now '{current}'. Vectors from different embedders are "
+                    f"not comparable. Reindex (MemoryStore.reset_embedding_space then "
+                    f"re-add) or repoint roles.embed to the original embedder."
+                )
+            # Empty (no vectors yet): safe to adopt the new space.
+            self._stamp_identity(current)
+
+    def reset_embedding_space(self) -> None:
+        """Clear all stored vectors and the embedding-space stamp so the store can
+        be re-embedded (the reindex recovery path for an
+        :class:`EmbeddingSpaceError`). FTS text is untouched — re-add observations
+        (or re-embed) to repopulate vectors. The embedder is DETACHED so the next
+        ``set_embedder`` re-stamps the space intentionally rather than the stale
+        one silently repopulating without a fresh compatibility check."""
+        self._db.execute("UPDATE observations SET embedding = NULL")
+        self._db.execute("DELETE FROM meta WHERE key = ?", (_EMBEDDING_IDENTITY_KEY,))
+        self._db.commit()
+        self._embedder = None
 
     async def add(
         self,
@@ -361,12 +454,19 @@ class MemoryStore:
         # stronger, adopt its labels too (CodeRabbit). SQLite reads the OLD row
         # values for every RHS, so the CASE compares against the pre-update
         # evidence_confidence regardless of clause order.
+        # Refresh the embedding on recurrence so a re-add repopulates a vector the
+        # current (stamped-compatible) embedder produced — this is what makes the
+        # reset_embedding_space() -> re-add reindex path actually reindex duplicate
+        # content. COALESCE keeps the existing vector when no embedder is attached
+        # (embedding is None), so a dedup add without an embedder never WIPES one.
         self._db.execute(
             "UPDATE observations SET seen_count = seen_count + 1,"
+            " embedding = COALESCE(?, embedding),"
             " provenance = CASE WHEN ? > evidence_confidence THEN ? ELSE provenance END,"
             " validation = CASE WHEN ? > evidence_confidence THEN ? ELSE validation END,"
             " evidence_confidence = MAX(evidence_confidence, ?) WHERE hash = ?",
             (
+                embedding,
                 evidence_confidence,
                 provenance,
                 evidence_confidence,

@@ -3,6 +3,29 @@
 All notable changes to pxx are documented here. The 1.x series history is
 preserved in git (tag `v1.3.3` and earlier).
 
+## [2.5.1] — 2026-08-17
+
+### Fixed
+
+- **Embedding-space versioning for observation memory (fail-closed on embedder swap).**
+  Stored vectors carried no record of which embedder produced them, so changing the memory
+  embedder (or the `roles.embed` model) silently made `search()` compute cosine across
+  incomparable spaces — confident garbage with no error, and worst in observation memory,
+  which accumulates for months and is never reindexed. The store now stamps its
+  embedding-space identity in a `meta` table, and `set_embedder` fails closed with
+  `EmbeddingSpaceError` when a *different* identity is attached over existing vectors —
+  targeting the dangerous **same-dimension / different-model** case (a plain dimension
+  mismatch already threw). Recovery: `MemoryStore.reset_embedding_space()` clears the
+  vectors + stamp and detaches the embedder (re-add observations to re-embed under the new
+  embedder — it does not auto-reindex), or repoint to the original embedder. Empty stores
+  adopt a new embedder freely; pre-versioning
+  stores with vectors assume the current embedder (logged warning, not a hard fail).
+  Embedders now expose an `identity` (`HashEmbedder` → `hash:dim=N`, `OllamaEmbedder` →
+  `ollama:<model>`). This is the retrieval analogue of the content-truthfulness gate —
+  refusing to answer from a corrupt index is refusing to fabricate, not judging. +10 tests
+  including a same-dim/different-model negative control. Prerequisite for the forthcoming
+  repo code index; flagged by PSAIOS in coordination.
+
 ## [2.5.0] — 2026-08-17
 
 ### Added

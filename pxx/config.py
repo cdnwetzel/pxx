@@ -76,6 +76,20 @@ class Settings:
     # overlay is honoured only from user config, env, or CLI — never repo-local.
     review_overlay: tuple[tuple[str, str], ...] = ()
     review_model: ModelRef | None = None
+    # Generalised per-role model lanes (2.5): the reviewer overlay above,
+    # widened to a closed role set {author, reviewer, plan, fast, verify, embed}.
+    # ``role_overlays`` holds SPARSE overlays for the NON-reviewer lanes (keyed by
+    # canonical role name); ``roles`` is those overlays RESOLVED against the final
+    # coder ``model`` at the end of ``load_settings`` (same late-resolution contract
+    # as ``review_model``). Reviewer stays on its own ``review_overlay``/
+    # ``review_model`` pair for byte-identical back-compat; ``effective_role`` unifies
+    # lookup across both. pxx owns role->model NAME only — placement (model->endpoint/
+    # node/health/failover) stays a pluggable adapter, never resolved here. Each lane
+    # is a data-egress surface, so like the reviewer it is honoured only from user
+    # config, env, or CLI — never repo-local (the whole ``[roles]`` table is dropped
+    # from repo-local config, so every lane is exfil-guarded by construction).
+    role_overlays: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = ()
+    roles: tuple[tuple[str, ModelRef], ...] = ()
     permission: PermissionMode = PermissionMode.ASK
     scope: tuple[str, ...] = ()
     trusted_paths: tuple[str, ...] = ()
@@ -164,6 +178,22 @@ class Settings:
         with no override is byte-identical to before this field existed)."""
         return self.review_model or self.model
 
+    def effective_role(self, name: str) -> ModelRef:
+        """The model a named ROLE lane runs on: its per-role override when set,
+        else the coder ``model``. ``name`` is a canonical role or the ``review``
+        alias; an unknown role is fail-closed (a typo, not a silent fallback).
+        This is the one seam role consumers call — pxx resolves role->model NAME
+        here; endpoint/node placement stays a pluggable adapter downstream."""
+        canon = _ROLE_ALIASES.get(name, name)
+        if canon not in _ROLE_LANES:
+            raise ConfigError(f"unknown role {name!r} (known: {sorted(_ROLE_LANES)})")
+        if canon == "reviewer":
+            return self.effective_review_model
+        for role_name, ref in self.roles:
+            if role_name == canon:
+                return ref
+        return self.model
+
 
 _USER_CONFIG = Path("~/.config/pxx/config.toml").expanduser()
 _USER_ENV = Path("~/.config/pxx/env").expanduser()
@@ -206,10 +236,20 @@ _KNOWN_BUDGET_KEYS = {
 }
 _KNOWN_HOOK_KEYS = {"event", "command", "timeout", "matcher"}
 _KNOWN_MCP_KEYS = {"name", "command"}
-# Roles that may carry a per-role model overlay today. Extensible (coder,
-# planner, …) but fail-closed: an unknown role name is a typo, not a silent
-# no-op. Only the reviewer/judge role is wired through the runtime so far.
-_KNOWN_ROLE_KEYS = {"review"}
+# Canonical per-role model lanes (2.5): a CLOSED, validated set — an unknown
+# role name is a typo, not a silent no-op. "review" is a back-compat ALIAS for
+# "reviewer" (the lane shipped in 2.2.0). Reviewer is wired through the runtime
+# today; the other lanes resolve via ``Settings.effective_role`` and are adopted
+# by their consumers incrementally (e.g. ``embed`` by the repo code indexer). The
+# set is closed on purpose (testable, precise errors, schema-by-construction);
+# opening it later is non-breaking, narrowing is not.
+_ROLE_LANES = ("author", "reviewer", "plan", "fast", "verify", "embed")
+_ROLE_ALIASES = {"review": "reviewer"}
+# TOML keys accepted under [roles]: the canonical lanes plus the review alias.
+_KNOWN_ROLE_KEYS = set(_ROLE_LANES) | set(_ROLE_ALIASES)
+# Non-reviewer lanes live in role_overlays/roles; reviewer keeps its own
+# review_overlay/review_model pair (byte-identical back-compat).
+_NON_REVIEW_LANES = tuple(r for r in _ROLE_LANES if r != "reviewer")
 _ROLE_MODEL_KEYS = {"provider", "model", "base_url", "api_key"}
 _PROVIDERS = ("ollama", "openai", "vllm", "openai-compatible")
 
@@ -299,13 +339,15 @@ def _settings_from_dict(
             )
             data = {k: v for k, v in data.items() if k != key}
     if "roles" in data and not allow_exec_surfaces:
-        # Reviewer routing is a data-egress surface: `[roles.review] base_url`
-        # sends the diff (and any inherited api_key bearer token) to that
-        # endpoint. A repo-local file must not be able to redirect the review —
-        # honour the overlay only from user config, env, or CLI (same trust
-        # boundary as hooks/mcp_servers).
+        # Role routing is a data-egress surface: `[roles.<name>] base_url` sends
+        # that role's payload (the diff for the reviewer, source chunks for embed,
+        # the prompt for any lane) plus any inherited api_key bearer token to that
+        # endpoint. A repo-local file must not be able to redirect ANY lane — the
+        # whole `[roles]` table is honoured only from user config, env, or CLI
+        # (same trust boundary as hooks/mcp_servers), so every lane is
+        # exfil-guarded by construction.
         log.warning(
-            "ignoring roles in repo-local config %s (reviewer endpoint routing "
+            "ignoring roles in repo-local config %s (role endpoint routing "
             "is a data-egress surface — set it in user config, env, or CLI)",
             source,
         )
@@ -345,17 +387,40 @@ def _settings_from_dict(
         unknown = set(roles) - _KNOWN_ROLE_KEYS
         if unknown:
             raise ConfigError(f"{source}: unknown roles {sorted(unknown)}")
-        if "review" in roles:
-            entry = roles["review"]
-            if not isinstance(entry, dict):
-                raise ConfigError(f"{source}: roles.review must be a table")
-            # Accumulate a SPARSE overlay: later layers override earlier for the
-            # same field, but unset fields are NOT filled from the coder model
-            # here — that happens once, at finalize, against the *final* model
-            # (so a later PXX_MODEL/PXX_API_KEY override still propagates).
-            merged = dict(base.review_overlay)
-            merged.update(_validate_role_overlay(entry, f"{source}: roles.review"))
-            kwargs["review_overlay"] = tuple(merged.items())
+        # Reviewer lane: accept the canonical "reviewer" and the back-compat
+        # "review" alias, both feeding the SAME sparse review_overlay. Accumulate
+        # sparsely (later layers override earlier per field; unset fields are NOT
+        # filled from the coder model here — that happens once at finalize against
+        # the *final* model, so a later PXX_MODEL/PXX_API_KEY override propagates).
+        review_merged = dict(base.review_overlay)
+        review_seen = False
+        for key in ("review", "reviewer"):
+            if key in roles:
+                entry = roles[key]
+                if not isinstance(entry, dict):
+                    raise ConfigError(f"{source}: roles.{key} must be a table")
+                review_merged.update(_validate_role_overlay(entry, f"{source}: roles.{key}"))
+                review_seen = True
+        if review_seen:
+            kwargs["review_overlay"] = tuple(review_merged.items())
+        # Other lanes {author, plan, fast, verify, embed}: same sparse-overlay
+        # contract, stored per-role and resolved late. Preserve lanes from earlier
+        # layers that this source does not touch.
+        overlays = {name: dict(ov) for name, ov in base.role_overlays}
+        lanes_seen = False
+        for name in _NON_REVIEW_LANES:
+            if name in roles:
+                entry = roles[name]
+                if not isinstance(entry, dict):
+                    raise ConfigError(f"{source}: roles.{name} must be a table")
+                overlays.setdefault(name, {}).update(
+                    _validate_role_overlay(entry, f"{source}: roles.{name}")
+                )
+                lanes_seen = True
+        if lanes_seen:
+            kwargs["role_overlays"] = tuple(
+                (name, tuple(ov.items())) for name, ov in overlays.items()
+            )
     if "permission" in data:
         try:
             kwargs["permission"] = PermissionMode(str(data["permission"]))
@@ -539,16 +604,47 @@ def _settings_from_env(base: Settings) -> Settings:
         data["memory_enabled"] = False
     if scope := os.environ.get("PXX_SCOPE"):
         data["scope"] = [s.strip() for s in scope.split(",") if s.strip()]
+    roles_env: dict[str, Any] = {}
     review: dict[str, Any] = {}
     for env_key, sub in _REVIEW_ENV_MAP.items():
         value = os.environ.get(env_key)
         if value:
             review[sub] = value
     if review:
-        data["roles"] = {"review": review}
+        roles_env["review"] = review
+    # Generic per-role env parity: PXX_<ROLE>_{MODEL,PROVIDER,BASE_URL,API_KEY}
+    # for the non-reviewer lanes (reviewer keeps PXX_REVIEW_*). Env outranks TOML
+    # by the normal layering, so a lane is self-describing on the command
+    # environment without shared TOML state that can bleed between subjects.
+    for name in _NON_REVIEW_LANES:
+        entry: dict[str, Any] = {}
+        for sub in ("model", "provider", "base_url", "api_key"):
+            value = os.environ.get(f"PXX_{name.upper()}_{sub.upper()}")
+            if value:
+                entry[sub] = value
+        if entry:
+            roles_env[name] = entry
+    if roles_env:
+        data["roles"] = roles_env
     if not data:
         return base
     return _settings_from_dict(data, base, "environment")
+
+
+def _repo_boundary(root: Path) -> Path | None:
+    """The git repository root that contains ``root`` (nearest ancestor with a
+    ``.git`` entry, ``root`` included), or ``None`` when ``root`` is not inside a
+    repo. Used to decide whether a user config is repo-editable content: any
+    config whose REAL (symlink-resolved) path lands inside this boundary is
+    editable by the model in this run and must not be trusted. Checking against
+    the repo ROOT — not just ``cwd`` — closes two bypasses (CodeRabbit, security):
+    a config symlink targeting a repo file that is an *ancestor* of a nested cwd,
+    and a *parent directory* symlink that resolves the config into the repo."""
+    real = canonicalize(root)
+    for candidate in (real, *real.parents):
+        if (candidate / ".git").exists():
+            return candidate
+    return None
 
 
 def load_settings(
@@ -562,13 +658,28 @@ def load_settings(
     root = cwd or Path.cwd()
     if _USER_CONFIG.is_file():
         # The user config is a TRUSTED source (may set exec/persistence surfaces)
-        # UNLESS it is a symlink resolving into the project root — that would be
-        # repo-editable content masquerading as trusted, so it gets the same A0b
-        # restrictions as a repo-local config (a symlinked ~/.config/pxx/config.toml
-        # must not smuggle allow_ungated_shell / memory_capture_successes / hooks
-        # past the gate). Unresolvable symlink → untrusted (fail-closed). CodeRabbit.
+        # UNLESS its real content is repo-editable — that would be repo content
+        # masquerading as trusted, so it gets the same A0b restrictions as a
+        # repo-local config (a ~/.config/pxx/config.toml must not smuggle
+        # allow_ungated_shell / memory_capture_successes / hooks / role-lane
+        # routing past the gate). Two modes:
+        #   * Inside a git repo: the config's REAL (symlink-resolved) path is
+        #     checked for containment in the REPO ROOT (``_repo_boundary``). This
+        #     catches a symlinked file AND a symlinked parent directory that
+        #     resolves the config into the repo, and an ancestor-of-a-nested-cwd
+        #     target — none of which a cwd-only or file-only check would catch.
+        #   * Not in a repo: fall back to the legacy check — only a config that is
+        #     itself a symlink resolving into cwd is downgraded (a plain file the
+        #     operator placed stays trusted).
+        # Unresolvable path → untrusted (fail-closed). CodeRabbit.
         user_trusted = True
-        if _USER_CONFIG.is_symlink():
+        boundary = _repo_boundary(root)
+        if boundary is not None:
+            try:
+                user_trusted = not canonicalize(_USER_CONFIG).is_relative_to(boundary)
+            except Exception:
+                user_trusted = False
+        elif _USER_CONFIG.is_symlink():
             try:
                 user_trusted = not canonicalize(_USER_CONFIG).is_relative_to(canonicalize(root))
             except Exception:
@@ -597,6 +708,14 @@ def load_settings(
             settings,
             review_model=_merge_model_ref(
                 settings.model, dict(settings.review_overlay), "roles.review"
+            ),
+        )
+    if settings.role_overlays:
+        settings = replace(
+            settings,
+            roles=tuple(
+                (name, _merge_model_ref(settings.model, dict(ov), f"roles.{name}"))
+                for name, ov in settings.role_overlays
             ),
         )
     return settings
@@ -691,6 +810,14 @@ def _apply_settings_candidate(
                     updated,
                     review_model=_merge_model_ref(
                         updated.model, dict(updated.review_overlay), "roles.review"
+                    ),
+                )
+            if updated.role_overlays:
+                updated = replace(
+                    updated,
+                    roles=tuple(
+                        (name, _merge_model_ref(updated.model, dict(ov), f"roles.{name}"))
+                        for name, ov in updated.role_overlays
                     ),
                 )
             return updated
@@ -898,9 +1025,17 @@ def native_timeout(default: float = 300.0) -> float:
 # Every PXX_* variable some part of the ecosystem consumes. Python readers
 # stay in this module plus the server-token check; the second set is read by
 # the git hooks and the release workflow, not this process.
+#: Generic per-role env keys the lane map consumes (PXX_<ROLE>_{MODEL,PROVIDER,
+#: BASE_URL,API_KEY} for the non-reviewer lanes; reviewer uses _REVIEW_ENV_MAP).
+_ROLE_ENV_KEYS = frozenset(
+    f"PXX_{name.upper()}_{sub}"
+    for name in _NON_REVIEW_LANES
+    for sub in ("MODEL", "PROVIDER", "BASE_URL", "API_KEY")
+)
 _CONSUMED_ENV = (
     frozenset(_ENV_MAP)
     | frozenset(_REVIEW_ENV_MAP)
+    | _ROLE_ENV_KEYS
     | {
         "PXX_MEMORY_ENABLED",
         "PXX_MEMORY_DIR",

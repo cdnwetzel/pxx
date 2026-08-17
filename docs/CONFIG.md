@@ -119,8 +119,10 @@ model = "qwen3.5:9b"
 base_url = "http://localhost:11434" # judge on the Mac (e.g. via SSH tunnel)
 ```
 
-Only `review` is recognised today (an unknown role name is a fail-closed
-error). Precedence layers per field: user TOML, then env `PXX_REVIEW_*`, then the
+`review` is the back-compat alias for the `reviewer` lane (see the role-lane map
+below); both names resolve to the same overlay, and an unknown role name is a
+fail-closed error. Precedence layers per field: user TOML, then env
+`PXX_REVIEW_*`, then the
 `--review-model` / `--review-base-url` run flags (each overrides the last), and
 the overlay is resolved against the final coder model (a later
 `PXX_MODEL`/`PXX_API_KEY` still reaches the reviewer). So the split is settable
@@ -143,6 +145,55 @@ source, so it is honoured — but when a **placement or governance layer fronts
 your models** (a router that allowlists endpoints), point `base_url` at *that
 layer*, not a raw model URL, so endpoint selection stays governed by it rather
 than bypassed (see "Multi-role model routing" in ROADMAP for the placement split).
+
+## Per-role lanes — `[roles.<name>]`
+
+The reviewer overlay generalises to a **closed role-lane map**: each lane names a
+`(provider, model, base_url, api_key)` quadruple for one role, so different roles
+can run on different families and endpoints. The recognised lanes are:
+
+| Lane | Role |
+|------|------|
+| `author`   | the coder/author model that writes changes |
+| `reviewer` | the review/judge model (alias: `review`) |
+| `plan`     | the planning model |
+| `fast`     | a cheap/fast model for lightweight steps |
+| `verify`   | a verification model |
+| `embed`    | the embedding model (reserved for the forthcoming repo code index) |
+
+The set is **closed and validated** — an unknown lane name is a fail-closed error
+(a typo, not a silent no-op). Each lane follows the reviewer's exact contract:
+unspecified fields inherit the coder `model`, and the overlay is resolved against
+the *final* coder model (a later `PXX_MODEL`/`PXX_API_KEY` still reaches every
+lane). A lane with no overlay resolves to the coder `model`, so an unconfigured
+box is byte-identical to before the map existed.
+
+```toml
+model = "qwen3-coder:30b"            # the coder/author default
+
+[roles.reviewer]                      # a different-family judge
+provider = "openai-compatible"
+model = "qwen2.5:14b-instruct"
+base_url = "http://mac:11434"
+
+[roles.embed]                         # local embedder for the code index
+model = "nomic-embed-text"
+```
+
+**Env parity.** Every non-reviewer lane also reads
+`PXX_<ROLE>_{MODEL,PROVIDER,BASE_URL,API_KEY}` (e.g. `PXX_EMBED_MODEL`,
+`PXX_PLAN_BASE_URL`); the reviewer keeps `PXX_REVIEW_*`. Env outranks TOML, so a
+lane is self-describing on the command environment without shared TOML state that
+can bleed between runs.
+
+**Trust boundary (all lanes).** Role routing is a data-egress surface for *every*
+lane (the diff for the reviewer, source chunks for `embed`, the prompt for any
+lane), so the entire `[roles]` table is honoured **only from user config, env, or
+CLI** — a repo-local `pxx.toml` / `.pxx/config.toml` cannot redirect any lane
+(ignored with a warning). Every lane is exfil-guarded by construction. pxx owns
+role→model **name**; endpoint/node **placement** (health, load, failover) stays a
+pluggable adapter downstream — point a lane's `base_url` at a placement/governance
+layer when one fronts your models.
 
 ## Portable / single-box degrade
 
@@ -262,5 +313,7 @@ done-signal early-exit for a slow suite; default on),
 `PXX_GIT_TIMEOUT` (seconds; default 60 — the wall-clock bound on any single git
 subprocess, so a wedged git or a blocking git hook can't hang a run).
 Reviewer role overlay (see `[roles.review]`): `PXX_REVIEW_MODEL`,
-`PXX_REVIEW_PROVIDER`, `PXX_REVIEW_BASE_URL`, `PXX_REVIEW_API_KEY`.
+`PXX_REVIEW_PROVIDER`, `PXX_REVIEW_BASE_URL`, `PXX_REVIEW_API_KEY`. The other
+role lanes (see `[roles.<name>]`) use `PXX_<ROLE>_{MODEL,PROVIDER,BASE_URL,API_KEY}`
+— e.g. `PXX_EMBED_MODEL`, `PXX_PLAN_BASE_URL`, `PXX_VERIFY_MODEL`.
 Legacy: `PXX_OLLAMA_BASE`, `PXX_OLLAMA_MODEL`.

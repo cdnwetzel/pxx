@@ -3,6 +3,22 @@
 All notable changes to pxx are documented here. The 1.x series history is
 preserved in git (tag `v1.3.3` and earlier).
 
+## [2.4.4] — 2026-08-16
+
+### Changed
+
+- **Review prompt: severity discipline to stop small reviewers over-flagging.** The review gate's
+  system prompt (`pxx/prompts/review.md`) told the model to `APPROVE` only with "no high or medium
+  findings" but never that **style, comments, renames, test-only edits, import order, and refactors
+  that keep tests green are not defects** — so smaller judges rated acceptable-change nitpicks as
+  `medium` and voted `REVISE`. Added an explicit rule reserving `high`/`medium` for real correctness
+  or safety defects; minor/stylistic observations are `low` at most and never a reason to REVISE.
+  Measured on the calibration corpus at `temperature:0`: `qwen2.5-coder:32b` false-positive rate
+  **0.429 → 0.143** (now passes `calibration ok`) and `qwen2.5:14b-instruct` **0.429 → 0.286**,
+  with **recall unchanged at 0.857** (precision up, no loss of critical-bug detection). This makes
+  a fast, GPU-resident local model a viable blocking reviewer. NOTE: the calibration corpus is
+  small (14 cases) — treat the magnitude as indicative pending held-out validation on real diffs.
+
 ## [2.4.3] — 2026-08-16
 
 ### Fixed

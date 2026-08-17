@@ -1,0 +1,81 @@
+{
+  "actions": [
+    {
+      "applied": true,
+      "expected_sha": "85ad0c0a3e075eed381071089abf7e5b590624d041fee8cabc31fe15f235b5b2",
+      "new_sha": "fd8f73d1dde6f81aa1dfa9805162dee39931c71f776ac2f30b06ea34acc202d6",
+      "patched": "bug.py",
+      "seq": 1,
+      "type": "Patch"
+    },
+    {
+      "artifact": "runtest-bea5a77cc685",
+      "exit": 0,
+      "passed": true,
+      "run_test": true,
+      "seq": 2,
+      "type": "RunTest"
+    },
+    {
+      "seq": 3,
+      "type": "Complete"
+    }
+  ],
+  "capsules": [
+    {
+      "action_seq": 1,
+      "cap": 5500,
+      "evicted": [],
+      "input_tokens": 382,
+      "under_cap": true
+    },
+    {
+      "action_seq": 2,
+      "cap": 5500,
+      "evicted": [],
+      "input_tokens": 452,
+      "under_cap": true
+    },
+    {
+      "action_seq": 3,
+      "cap": 5500,
+      "evicted": [],
+      "input_tokens": 501,
+      "under_cap": true
+    }
+  ],
+  "model_id": "qwen3:4b@http://localhost:11434/v1",
+  "negative_controls": {
+    "blocked_not_completed": false,
+    "overflow_never_dropped_target": true,
+    "restart_resumed_no_replay": false,
+    "stale_sha_rejected": false
+  },
+  "performance": {
+    "completion_tokens_per_s": 13.75,
+    "decode_tokens_per_s": 1003.94,
+    "latency_median_s": 287.177,
+    "latency_p90_s": 293.685,
+    "model_calls": 3,
+    "model_time_s": 644.083,
+    "notes": "Rates are over the calls that reported usage (tokens_complete flags a subset). prefill/decode_tokens_per_s (stream mode) are the clean split. swap_used_delta_mb is measured on the HOST process: it reflects the box under test ONLY when host+model are co-located (--transport local). For remote/LAN runs (incl. the iPhone) it measures the control host \u2014 read the box-under-test's memory on that box / on-device instead.",
+    "prefill_tokens_per_s": 2.15,
+    "prompt_tokens_per_s": 2.12,
+    "streamed": true,
+    "swap_used_delta_mb": 1860.25,
+    "tokens_complete": true,
+    "total_completion_tokens": 8854,
+    "total_prompt_tokens": 1365,
+    "transport": "local",
+    "ttft_median_s": 279.362,
+    "wall_clock_s": 644.687
+  },
+  "task": "Fix rated_total so tax is added, not subtracted; the failing test must pass.",
+  "terminal": "COMPLETED",
+  "tokenizer_id": "hf:Qwen/Qwen3-4B",
+  "verification": {
+    "command": "python -m pytest -q test_bug.py",
+    "host_run": true,
+    "passed": true
+  }
+}

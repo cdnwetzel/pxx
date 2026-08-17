@@ -252,6 +252,8 @@ def test_native_reviewer_success(tmp_path: Path) -> None:
     assert seen["auth"] == "Bearer secret"
     messages = seen["body"]["messages"]
     assert seen["body"]["model"] == "reviewer-x"
+    # the reviewer MUST decode greedily so the gate is reproducible (calibration can't swing)
+    assert seen["body"]["temperature"] == 0
     assert messages[0]["role"] == "system"
     assert messages[0]["content"] == DEFAULT_REVIEW_PROMPT  # fallback when file missing
     assert "the-task" in messages[1]["content"]

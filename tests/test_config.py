@@ -680,7 +680,9 @@ def test_role_lanes_resolve_from_user_config(tmp_path, monkeypatch):
 def test_role_lane_reviewer_canonical_name_feeds_review_overlay(tmp_path, monkeypatch):
     # The canonical `[roles.reviewer]` and the back-compat `[roles.review]` alias
     # both drive the SAME reviewer lane.
-    _user_cfg(tmp_path, monkeypatch, '[roles.reviewer]\nmodel = "judge"\nbase_url = "http://j:11434"\n')
+    _user_cfg(
+        tmp_path, monkeypatch, '[roles.reviewer]\nmodel = "judge"\nbase_url = "http://j:11434"\n'
+    )
     s = load_settings(cwd=tmp_path)
     assert s.effective_role("reviewer").model == "judge"
     assert s.effective_review_model.model == "judge"  # alias sees the same lane

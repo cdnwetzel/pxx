@@ -120,21 +120,22 @@ surfaced two items. Both recorded honestly, including a correction.
    not a bug-fix; the greenfield-failure claim is withdrawn. Receipt: the clean reproduce +
    `_planner_settings` unit tests (plan-role wiring + coder fallback).
 
-2. **Greenfield test-gate: needs an absolute-health check [HIGH — OPEN].** The test gate is
-   *regression-relative* (`loop.py:664-680`: `baseline_failures` is set on round 1; the gate
-   blocks only failures NEW vs that baseline). For an edit of a known-good repo that is
-   correct; on GREENFIELD the round-1 baseline is the coder's own first (often broken)
-   attempt, so broken-but-not-regressing code is not caught. **Receipt (symptom, confirmed
-   on a correct run):** a node reached `outcome.json code=COMPLETED` (rounds=14,
-   review_seconds=0, lint_errors=0) on a module containing `SyntaxError: 'await' outside
-   async function`, which pytest cannot even collect — the *negative-control-for-gates*
-   failure mode (the gate did not fire on the bad case). **Honesty:** the exact path is not
-   yet fully reconstructed (per-round log lost to a harness glitch), so step 1 of the fix is
-   a clean-logged reproduce. **Fix:** on the COMPLETION path require ABSOLUTE health (suite
-   collects + passes), not merely no-regression, when the baseline is non-clean; treat
-   `exit:2`/`exit:5` as suite-cannot-run; enable the model reviewer for from-scratch work.
-   **LOE ~1 day, LOC ~40-80, Risk MEDIUM** (core gate). This is the next item after this
-   planner ship.
+2. **Greenfield test-gate vacuous-pass — INVESTIGATED, NOT A DEFECT (withdrawn 2026-08-18).**
+   The probe reported a node reaching `outcome.json code=COMPLETED` on a module containing
+   `SyntaxError: 'await' outside async function` (which pytest cannot even collect),
+   suggesting the regression-relative gate (`loop.py:664-680`) vacuously passes broken
+   greenfield code. **A deterministic reproduce disproves it:** `run_loop` driven with a
+   suite that fails from round 1 (a broken "baseline" — the greenfield case) terminates
+   `LOOP_DETECTED` / a non-success code, NEVER `COMPLETED`
+   (`tests/test_loop.py::test_greenfield_failing_baseline_never_completes`); and the actual
+   test_command returns non-zero on the broken code, so the gate sees the failure. So the
+   node's recorded `COMPLETED` was a **confound** (lost per-round log + a sandbox whose state
+   did not match the recorded outcome) — the same failure mode as the Gap B report, which
+   also dissolved. **The gate is sound; the claim is withdrawn.** A regression guard now
+   locks in that broken-from-baseline greenfield code cannot be declared done. Net: BOTH
+   greenfield "gaps" from this probe were investigation/harness artifacts, not pxx defects —
+   the real deliverables were the docs-as-framework validation and the `roles.plan` planner
+   wiring (2.5.2). Lesson reinforced: reproduce cleanly before carding a gap.
 
 - Earned enablement: run the daemon in production, accumulate the real-run
   and human-promotion counts the auto-promotion readiness bars require

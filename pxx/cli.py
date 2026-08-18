@@ -2148,9 +2148,26 @@ _GOAL_PLANNER_PROMPT = (
 )
 
 
-def _cmd_goal(args: argparse.Namespace, unknown: list[str]) -> int:
+def _planner_settings(settings):
+    """Settings for the goal planner: read-only (ASK) and on the PLAN role model.
+
+    The planner *decomposes* the goal into a task DAG; the coder *builds* it. Those
+    are different jobs, so the planner runs on the ``plan`` role lane when it is
+    configured (``[roles.plan]`` — a reasoning/planning model), and falls back to
+    the coder ``model`` when it is not (byte-identical to before this wiring). This
+    is the second consumer of the 2.5 role-lane map after the reviewer, and it
+    matches the fleet SDLC design's separate PLAN role (reasoning brain != builder).
+    """
     from dataclasses import replace
 
+    return replace(
+        settings,
+        permission=PermissionMode.ASK,
+        model=settings.effective_role("plan"),
+    )
+
+
+def _cmd_goal(args: argparse.Namespace, unknown: list[str]) -> int:
     from .goal import run_goal
 
     _handle_unknown_flags(unknown, "native")
@@ -2160,7 +2177,7 @@ def _cmd_goal(args: argparse.Namespace, unknown: list[str]) -> int:
         return EXIT_USAGE
     settings = load_settings(Path.cwd(), _cli_overrides(args, PermissionMode.AUTO))
     backend_name = _resolve_backend_name("run", args.backend, settings)
-    planner_settings = replace(settings, permission=PermissionMode.ASK)
+    planner_settings = _planner_settings(settings)
 
     async def planner(text: str) -> str:
         backend = _make_backend(backend_name, planner_settings)

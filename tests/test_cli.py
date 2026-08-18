@@ -1508,6 +1508,37 @@ def test_check_all_files_exit_2(harness, monkeypatch, capsys):
     assert "home-path" in capsys.readouterr().out
 
 
+def test_planner_settings_uses_plan_role():
+    """The goal planner runs on the plan role (read-only), the 2nd consumer of the
+    role-lane map — so a reasoning/planning model can decompose while the coder
+    builds (fleet SDLC separation: reasoning brain != builder)."""
+    from dataclasses import replace
+
+    from pxx.config import ModelRef
+    from pxx.safety import PermissionMode
+
+    base = Settings(model=ModelRef(model="coder-x"))
+    with_plan = replace(
+        base, roles=(("plan", ModelRef(model="planner-9b", base_url="http://plan:11434")),)
+    )
+    ps = cli._planner_settings(with_plan)
+    assert ps.model.model == "planner-9b"
+    assert ps.model.endpoint == "http://plan:11434"
+    assert ps.permission is PermissionMode.ASK  # read-only planner
+
+
+def test_planner_settings_falls_back_to_coder_when_plan_unset():
+    """No [roles.plan] -> the planner uses the coder model, byte-identical to
+    before this wiring existed."""
+    from pxx.config import ModelRef
+    from pxx.safety import PermissionMode
+
+    base = Settings(model=ModelRef(model="coder-x"))
+    ps = cli._planner_settings(base)
+    assert ps.model is base.model  # coder model, unchanged
+    assert ps.permission is PermissionMode.ASK
+
+
 def test_goal_completed(harness, monkeypatch, capsys):
     from pxx.goal import GoalOutcome
 

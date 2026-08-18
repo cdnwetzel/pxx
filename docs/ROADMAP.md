@@ -101,6 +101,41 @@ Waves 1–3 shipped in 2.4.0, so the near-term order is:
 Backlog candidate that emerged from the n8n work: a **first-class pxx n8n node** (vs. the
 HTTP-node pattern already proven in R-035–R-040).
 
+### Greenfield / from-scratch readiness — from the clone-from-docs probe (2026-08-18)
+
+A probe that asked pxx to build a multi-integration app **from its documentation alone**
+surfaced two items. Both recorded honestly, including a correction.
+
+1. **Planner now runs on the `roles.plan` lane — SHIPPED.** The goal planner previously ran
+   on the *coder* model; it now resolves `settings.effective_role("plan")` (a testable
+   `_planner_settings` helper in `cli.py`), so a reasoning/planning model can decompose the
+   goal while the coder builds it — the second consumer of the 2.5 role-lane map, matching
+   the fleet SDLC design's separate PLAN role (reasoning brain != builder). Falls back to
+   the coder model when `[roles.plan]` is unset (byte-identical to before).
+   **Correction (honesty):** the probe first reported the planner *failing greenfield with
+   OUT_OF_SCOPE* — that was a **HARNESS ARTIFACT** (a `uv run --directory` invocation ran the
+   planner in the wrong repository), NOT a pxx defect. A clean reproduce shows `pxx goal`
+   works greenfield end-to-end (planner -> worktree nodes -> integration-merged `stack.py`
+   + tests). So this ship is an **architectural enhancement** (reasoning-planner support),
+   not a bug-fix; the greenfield-failure claim is withdrawn. Receipt: the clean reproduce +
+   `_planner_settings` unit tests (plan-role wiring + coder fallback).
+
+2. **Greenfield test-gate: needs an absolute-health check [HIGH — OPEN].** The test gate is
+   *regression-relative* (`loop.py:664-680`: `baseline_failures` is set on round 1; the gate
+   blocks only failures NEW vs that baseline). For an edit of a known-good repo that is
+   correct; on GREENFIELD the round-1 baseline is the coder's own first (often broken)
+   attempt, so broken-but-not-regressing code is not caught. **Receipt (symptom, confirmed
+   on a correct run):** a node reached `outcome.json code=COMPLETED` (rounds=14,
+   review_seconds=0, lint_errors=0) on a module containing `SyntaxError: 'await' outside
+   async function`, which pytest cannot even collect — the *negative-control-for-gates*
+   failure mode (the gate did not fire on the bad case). **Honesty:** the exact path is not
+   yet fully reconstructed (per-round log lost to a harness glitch), so step 1 of the fix is
+   a clean-logged reproduce. **Fix:** on the COMPLETION path require ABSOLUTE health (suite
+   collects + passes), not merely no-regression, when the baseline is non-clean; treat
+   `exit:2`/`exit:5` as suite-cannot-run; enable the model reviewer for from-scratch work.
+   **LOE ~1 day, LOC ~40-80, Risk MEDIUM** (core gate). This is the next item after this
+   planner ship.
+
 - Earned enablement: run the daemon in production, accumulate the real-run
   and human-promotion counts the auto-promotion readiness bars require
   (100 real runs, 3 human promotions) — auto-promotion stays report-and-refuse

@@ -3,6 +3,21 @@
 All notable changes to pxx are documented here. The 1.x series history is
 preserved in git (tag `v1.3.3` and earlier).
 
+## [2.5.2] — 2026-08-18
+
+### Added
+
+- **Goal planner runs on the `roles.plan` lane.** `pxx goal`'s read-only planner now
+  resolves `Settings.effective_role("plan")` (via a testable `_planner_settings` helper),
+  so a reasoning/planning model can decompose the goal into the task DAG while the coder
+  builds it — the second consumer of the 2.5 role-lane map, matching a separate PLAN role
+  (reasoning brain ≠ builder). Falls back to the coder model when `[roles.plan]` is unset
+  (byte-identical to before). Surfaced by the clone-from-docs probe. NOTE (honesty): the
+  probe's initial "planner fails greenfield with OUT_OF_SCOPE" report was a **harness
+  artifact** — a `uv run --directory` invocation ran the planner in the wrong repository; a
+  clean reproduce shows `pxx goal` works greenfield end-to-end. So this is an architectural
+  enhancement (reasoning-planner support), not a bug-fix. +2 tests.
+
 ## [2.5.1] — 2026-08-17
 
 ### Fixed

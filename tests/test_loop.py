@@ -468,6 +468,51 @@ def test_regression_on_new_failures(tmp_path: Path) -> None:
     assert outcome.rounds == 2
 
 
+def test_greenfield_failing_baseline_never_completes(tmp_path: Path) -> None:
+    """A suite that fails from round 1 — the greenfield case where round 1 IS the
+    coder's own first (broken) attempt, so there is no known-good baseline — must
+    never reach COMPLETED, even though 'no NEW failures vs the broken baseline'
+    trivially holds. The gate refuses to call broken-and-not-regressing code done;
+    this is the negative control against a greenfield vacuous-pass. Runs without git
+    (no-repo mode) so the guard is unconditional, and the suite is instrumented with
+    an invocation counter to assert it was ACTUALLY executed (not skipped). (Added
+    after a probe raised the concern, which reproduced as a clean non-COMPLETED — the
+    gate is sound; this locks that in.)"""
+    work = tmp_path / "work"
+    work.mkdir()
+    counter = work / "runs.txt"
+    # a "suite" that records each invocation, then always exits 2 (broken /
+    # collection-error-like) — so round 1 already fails and never recovers.
+    (work / "check.py").write_text(
+        "from pathlib import Path\n"
+        "import sys\n"
+        "p = Path(__file__).parent / 'runs.txt'\n"
+        "p.write_text(str((int(p.read_text()) + 1) if p.exists() else 1))\n"
+        "sys.exit(2)\n"
+    )
+    factory = Factory([ScriptedBackend(edits={"a.py": f"x = {i}\n"}) for i in range(6)])
+    outcome = asyncio.run(
+        run_loop(
+            "build a thing",
+            _settings(tmp_path),
+            cwd=work,
+            backend_factory=factory,
+            test_command=f"{sys.executable} check.py",
+            max_rounds=6,
+        )
+    )
+    # the failing suite was actually invoked (the guard is not vacuous itself)
+    assert counter.exists() and int(counter.read_text()) >= 1
+    # the essential guard: broken-from-baseline code is NOT declared done
+    assert outcome.code is not TerminalCode.COMPLETED
+    # it terminates via a real non-success stop, not a silent pass
+    assert outcome.code in {
+        TerminalCode.LOOP_DETECTED,
+        TerminalCode.ROUND_CAP,
+        TerminalCode.NO_TEST_PROGRESS,
+    }
+
+
 @needs_git
 def test_same_failures_are_not_no_progress(tmp_path: Path) -> None:
     repo = tmp_path / "repo"

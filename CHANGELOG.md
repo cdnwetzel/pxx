@@ -3,6 +3,22 @@
 All notable changes to pxx are documented here. The 1.x series history is
 preserved in git (tag `v1.3.3` and earlier).
 
+## [2.5.3] — 2026-08-18
+
+### Changed
+
+- **Greenfield gate soundness locked with a regression guard.** A clone-from-docs probe
+  raised a concern that the regression-relative test gate might *vacuously pass* broken
+  greenfield code (a node appeared to reach `COMPLETED` on a module with a `SyntaxError`).
+  A **deterministic reproduce disproves it**: `run_loop` on a suite that fails from round 1
+  terminates `LOOP_DETECTED` / a non-success code, **never `COMPLETED`**
+  (`tests/test_loop.py::test_greenfield_failing_baseline_never_completes`) — the apparent
+  pass was a confound (lost per-round log + a sandbox whose state did not match the recorded
+  outcome), the same failure mode as the earlier "planner fails greenfield" report. The gate
+  is sound; a regression guard now locks that in and the roadmap claim is withdrawn. No
+  behaviour change — a test + doc correction that hold the gate to its negative-control
+  discipline (reproduce cleanly before carding a gap).
+
 ## [2.5.2] — 2026-08-18
 
 ### Added

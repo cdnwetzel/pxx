@@ -304,3 +304,71 @@ def test_run_doctor_flags_broken_aider(monkeypatch, tmp_path):
     aider_checks = [c for c in checks if c.name == "binary:aider"]
     assert aider_checks and not aider_checks[0].ok
     assert "broken" in aider_checks[0].detail
+
+
+# --- review independence (author != reviewer) --------------------------------
+#
+# The default posture — no [roles.review] overlay — resolves the reviewer to the
+# coder model, so `pxx run` blocks on a gate the same model can only self-approve.
+# These lock the check to the behaviour, including the negative control that it
+# actually FIRES on the bad case rather than passing vacuously.
+
+
+def test_review_independence_ok_with_a_distinct_reviewer():
+    from pxx.config import ModelRef, Settings
+    from pxx.doctor import _review_independence_check
+
+    settings = Settings(
+        model=ModelRef(model="qwen3-coder:30b"),
+        review_model=ModelRef(model="qwen2.5:14b-instruct-q4_k_m"),
+    )
+    check = _review_independence_check(settings)
+    assert check.ok and not check.hard
+    assert "qwen2.5:14b-instruct-q4_k_m" in check.detail
+
+
+def test_review_independence_fires_on_the_default_self_review_posture():
+    """Negative control: the bad case is the SHIPPED DEFAULT, so a check that
+    cannot fail here would be worthless."""
+    from pxx.config import ModelRef, Settings
+    from pxx.doctor import _review_independence_check
+
+    check = _review_independence_check(Settings(model=ModelRef(model="qwen2.5-coder:7b")))
+    assert not check.ok  # fires
+    assert not check.hard  # ...as a warning, not a doctor failure
+    assert "SELF-review" in check.detail
+    assert "qwen2.5-coder:7b" in check.detail
+    assert "PXX_REVIEW_MODEL" in check.detail  # the warning names the fix
+
+
+def test_review_independence_same_model_on_a_second_box_still_warns():
+    """Separate hardware is not separate judgement: identical weights carry
+    identical blind spots, so the two-box rig alone does not satisfy the
+    invariant."""
+    from pxx.config import ModelRef, Settings
+    from pxx.doctor import _review_independence_check
+
+    settings = Settings(
+        model=ModelRef(model="qwen3-coder:30b", base_url="http://a.local"),
+        review_model=ModelRef(model="qwen3-coder:30b", base_url="http://b.local"),
+    )
+    check = _review_independence_check(settings)
+    assert not check.ok and not check.hard
+    assert "separate endpoint" in check.detail
+    assert "http://b.local" in check.detail
+
+
+def test_review_independence_is_wired_into_run_doctor(monkeypatch, tmp_path):
+    """A check nobody calls is the vacuous case for the check itself."""
+    import pxx.doctor as doctor_mod
+    from pxx.config import Settings
+    from pxx.doctor import run_doctor
+
+    async def no_endpoints(settings):
+        return []
+
+    monkeypatch.setattr(doctor_mod, "_endpoint_checks", no_endpoints)
+    settings = Settings(memory_dir=tmp_path / "m", state_dir=tmp_path / "s")
+    checks = asyncio.run(run_doctor(settings, cwd=tmp_path))
+    named = [c for c in checks if c.name == "review:independence"]
+    assert len(named) == 1 and not named[0].ok

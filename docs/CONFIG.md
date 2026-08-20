@@ -136,6 +136,15 @@ pxx loop --review --model qwen3-coder:30b --base-url http://gpu-box:11434 \
 Consumed by `pxx review`, `pxx calibrate`, and the opt-in `pxx loop --review`
 gate (`--review-mode blocking|advisory`).
 
+**Independence.** Without this overlay the reviewer *is* the coder model, so the
+review gate becomes self-review: a model cannot independently review its own
+diff, and an `APPROVE` it returns is not evidence. The gate still blocks by
+default, which makes the failure quiet — it reports a pass it was never able to
+withhold. `pxx doctor` reports this as `review:independence`, and warns for a
+same-model-different-endpoint split too: separate hardware, identical weights,
+identical blind spots. Give the judge a different model — ideally a different
+family — when the gate is `blocking`.
+
 **Trust boundary.** Reviewer routing is a data-egress surface — the diff (and
 any bearer token) is sent to `base_url`. Like `[[hooks]]` and `[[mcp_servers]]`,
 `[roles.review]` is honoured **only from user config, env, or CLI**, never from

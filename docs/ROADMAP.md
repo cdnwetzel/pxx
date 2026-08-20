@@ -274,6 +274,22 @@ an external patch is a *candidate*, not a merge.
   `--review-mode blocking` — 6/6 parseable, GOOD→APPROVE, BAD→REVISE with
   file-anchored findings that block. Reasoning judges are now usable for the
   blocking gate.
+- **Review-gate independence (author != reviewer) — doctor half SHIPPED
+  (2026-08-19, 2.5.4).** A reasoning judge that *parses* is not yet a judge that
+  *is independent*: with no `[roles.review]` overlay, `effective_review_model`
+  falls back to the coder `model`, so the shipped default runs the blocking gate
+  as SELF-review — the same weights that produced the defect deciding whether the
+  defect exists. An APPROVE from that gate is not evidence, but it is recorded as
+  evidence, which is the vacuous-gate pattern this repo treats as a defect class
+  in its own right. `pxx doctor` now reports `review:independence` (distinct model
+  passes; same model warns; same model on a second endpoint *also* warns — separate
+  hardware, identical blind spots), with a negative control proving the check fires
+  on the shipped default. **Still open:** the enforcement half. Doctor tells you;
+  `pxx loop --review` does not, so a run that never invokes doctor still blocks on
+  a gate that cannot fail. Candidate: make `--review-mode blocking` refuse a
+  self-review pairing unless an explicit `allow_self_review` opt-in is set — a
+  behaviour change, so human-gated rather than autonomous. Related: `pxx calibrate`
+  builds its reviewer from the same seam and is equally silent about it.
 - **Dogfood-surfaced hardenings (2026-08-01, R-014), human-gated — the files
   are protected control plane, so these need human review, not autonomous
   edits:**

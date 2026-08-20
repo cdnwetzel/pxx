@@ -265,6 +265,63 @@ def _hook_coverage_check(settings: Settings) -> Check:
     )
 
 
+#: How to give the reviewer its own model. Named in every failing variant of
+#: the independence check, because a warning without the fix is just noise.
+_REVIEW_LANE_FIX = (
+    "give the reviewer its own model: [roles.review].model in "
+    "~/.config/pxx/config.toml, PXX_REVIEW_MODEL, or --review-model "
+    "(see docs/CONFIG.md)"
+)
+
+
+def _review_independence_check(settings: Settings) -> Check:
+    """Author != reviewer — the first separation-of-duties invariant.
+
+    ``Settings.effective_review_model`` falls back to the coder ``model`` when
+    no ``[roles.review]`` overlay is set, so the DEFAULT posture puts the same
+    model that wrote the diff in front of it as the reviewer — while the loop's
+    review gate is ``BLOCKING`` by default. A model reviewing its own output
+    shares the blind spot that produced the defect, so an ``APPROVE`` there is
+    not independent evidence: the gate reports a pass it cannot fail, which is
+    worse than no gate because it is *recorded* as one.
+
+    Compares the coder model the runtime actually constructs sessions with
+    (``settings.model`` — the ``author`` lane resolves but is not yet wired to
+    the session, so reading it here would report an independence the loop does
+    not have) against the reviewer lane. Warning only: a single-model box is a
+    legitimate, if weaker, posture, and doctor reserves hard failures for the
+    runtime itself.
+    """
+    author = settings.model
+    reviewer = settings.effective_review_model
+    if author.model != reviewer.model:
+        return Check(
+            "review:independence",
+            True,
+            f"reviewer {reviewer.model!r} is distinct from author {author.model!r}",
+            hard=False,
+        )
+    if author.endpoint != reviewer.endpoint:
+        # Separate hardware is worth noting — but weights, not hosts, are what
+        # correlate the blind spots, so this is still a warning.
+        return Check(
+            "review:independence",
+            False,
+            f"reviewer runs the SAME model as the author ({author.model!r}), only on a "
+            f"separate endpoint ({reviewer.endpoint}) — separate hardware, identical "
+            f"weights, identical blind spots. {_REVIEW_LANE_FIX}",
+            hard=False,
+        )
+    return Check(
+        "review:independence",
+        False,
+        f"reviewer IS the author model ({author.model!r}) — the review gate is "
+        "SELF-review, and it blocks by default. A model cannot independently review "
+        f"its own diff, so an APPROVE from this gate is not evidence. {_REVIEW_LANE_FIX}",
+        hard=False,
+    )
+
+
 async def run_doctor(settings: Settings, cwd: Path | None = None) -> list[Check]:
     """Run all health checks against resolved ``settings``."""
     cwd = cwd or Path.cwd()
@@ -283,6 +340,7 @@ async def run_doctor(settings: Settings, cwd: Path | None = None) -> list[Check]
     checks.append(_dir_check("memory_dir", settings.memory_dir))
     checks.append(_dir_check("state_dir", settings.state_dir))
     checks.append(_hook_coverage_check(settings))
+    checks.append(_review_independence_check(settings))
     checks.extend(await _endpoint_checks(settings))
 
     for tool, hint in (

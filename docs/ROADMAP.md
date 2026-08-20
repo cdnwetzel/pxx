@@ -15,9 +15,10 @@ provenance grade and an explicit boundary; nothing aspirational is ever stated
 as done; a compute request is framed as *scaling a proven engine*, never as
 proof we already ran at scale.
 
-**Already at the bar — do NOT re-do:** 23 evidence-gated receipts (R-001–R-023;
-grades + boundaries documented at the top of `docs/RECEIPTS.md`); published MIT
-package on PyPI (`pxx-orchestrator`, currently 2.3.2); host-enforced scope +
+**Already at the bar — do NOT re-do:** **46** evidence-gated receipts (R-001–R-046,
+no gaps; **34 Attested** on dated hardware, the rest Reproducible — grades +
+boundaries documented at the top of `docs/RECEIPTS.md`); published MIT
+package on PyPI (`pxx-orchestrator`, currently 2.5.4); host-enforced scope +
 protected control plane proven un-subvertable by the agent (R-014); role-based
 two-box routing (R-008/R-011); durable, un-gameable readiness ledger
 (R-016/R-020); zero-phantom degrade across remote/local nodes (R-023); README

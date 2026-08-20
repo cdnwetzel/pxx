@@ -144,6 +144,12 @@ card** — Approve / Abort / **Modify** — and resumes on a tap.
 handler writes that file. Point the gate's `HITL_NOTIFY` at the broker's **non-blocking**
 endpoint:
 
+> **Modify denies the call in this stack.** The card shows Approve / Abort / **Modify**,
+> but `hitl_gate.py` treats every decision other than `approve` as a deny. A Modify
+> submission is recorded with its revised scope and note, and then **stops the tool call**
+> — the revised scope is *not* fed back into the paused run. Tapping Modify is currently a
+> more descriptive Abort. Acting on it is not built; see the roadmap.
+
 ```bash
 export HITL_DIR=/tmp/pxx-hitl                                   # MUST match the broker's
 export HITL_NOTIFY=http://127.0.0.1:8490/post-approval          # NOT /request-approval

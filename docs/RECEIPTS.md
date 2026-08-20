@@ -2177,7 +2177,7 @@ deadline and denied. The bridge makes the broker honour the caller's nonce and a
 and resumes on the decision. Every failure path still denies.
 
 **Grade.** **Reproducible** (`uv run python -m pytest tests/test_hitl_gate_bridge.py
-tests/test_slack_hitl_broker.py` — 33 passed, no Slack account and no network needed).
+tests/test_slack_hitl_broker.py` — **38 passed**, no Slack account and no network needed).
 **NOT Attested:** see the boundary — the live Slack half is not re-proven here.
 
 **Environment.** macOS (Darwin 25.4.0), Python 3.12.13, pytest 9.1.1, pxx 2.5.4 working
@@ -2192,7 +2192,8 @@ transport is a loopback stub. The tests are deterministic.
 | `hitl_gate.py` | sends `origin` (card source label); docs on which endpoint to target and why |
 | `docs/examples/hitl/README.md` | stack C (the bridge), the two silent-deny misconfigurations, and what is *not* attested |
 
-**Record — 16 bridge tests, 10 of them negative controls.**
+**Record — 13 bridge test functions, 10 of them negative controls** (16 cases collected;
+row 10 is parametrized over 4 rejected nonces). The broker's own suite adds 22, for 38.
 
 | # | Test | Asserts |
 |---|---|---|
@@ -2210,6 +2211,8 @@ transport is a loopback stub. The tests are deterministic.
 | 12 | `real_session_is_blocked_when_the_gate_is_aborted` | `HOOK_DENIED`, **file not written** |
 | 13 | `real_session_is_blocked_when_the_broker_never_answers` | `HOOK_DENIED`, file not written |
 
+Rows 3–10, 12 and 13 are the ten negative controls; rows 1, 2 and 11 are the positive path.
+
 Tests 11–13 drive `pxx.session.Session` with the real `HookRunner`, the real
 `ToolRegistry`, and the real gate as a hook subprocess; only the model is scripted.
 
@@ -2220,6 +2223,24 @@ tests. Restored: 33/33 pass. The bridge is load-bearing, not decorative. An earl
 revision of the stub broker reimplemented the nonce logic instead of calling the shipped
 `resolve_nonce`, and that mutant survived the end-to-end tests — the stub was corrected so
 the suite exercises shipped code.
+
+**Second mutation, on the non-blocking property.** `/post-approval` was mutated to wait on
+the decision before returning. `test_only_the_blocking_endpoint_waits` failed; restored,
+22/22 pass. That guard exists because review (PR #80) observed that the end-to-end timing
+test measures the *stub*, which is non-blocking by construction, and so could not catch the
+shipped endpoint regressing. The guard reads the shipped source of `main()` and asserts the
+extracted `wait_for_decision` appears in exactly one of the two endpoints.
+
+**Fixed under review (PR #80), each with a test.** (1) `{"nonce": null}` was treated as an
+absent key and minted a fresh nonce — reintroducing the permanent-silent-deny through the
+back door, since a caller's serializer emitting null for an unset field is ordinary. Now
+rejected: `_MISSING` sentinel distinguishes absent from present-and-null. (2) A
+`chat_postMessage` failure surfaced as an opaque HTTP 500; a bad token or a channel the bot
+is not in was indistinguishable from a human ignoring the card. Now returned through the
+error channel. (3) The `posted` map grew once per *gated tool call* rather than once per
+n8n request and was never pruned — unbounded in a long-running broker. `finalize` now pops.
+(4) The hook command interpolated paths without quoting, so a space in the repo or tmp path
+would mis-split under `shlex`.
 
 **Security note.** The caller-supplied nonce becomes a filename, so it is a path-traversal
 surface that did not exist while the broker minted its own. `sanitize_nonce` is

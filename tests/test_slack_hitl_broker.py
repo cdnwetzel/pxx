@@ -202,3 +202,55 @@ def test_resolve_nonce_rejects_garbage_instead_of_minting_a_replacement(broker):
     for bad in ("../../etc/passwd", "short", "has space", 42, ""):
         nonce, err = broker.resolve_nonce({"nonce": bad}, lambda: "MINTED00")
         assert nonce is None and err == "invalid nonce", bad
+
+
+def test_resolve_nonce_rejects_an_explicit_null(broker):
+    """`{"nonce": null}` must NOT mint. `.get()` collapses "absent" and "present but
+    null", and a caller's JSON serializer emitting null for an unset field would then
+    silently get a fresh nonce -- the permanent-deny failure this bridge exists to
+    prevent, reintroduced through the back door. (Found by review on PR #80.)"""
+    nonce, err = broker.resolve_nonce({"nonce": None}, lambda: "MINTED00")
+    assert nonce is None and err == "invalid nonce"
+    # ...while a genuinely absent key still mints, so the n8n path is unaffected
+    assert broker.resolve_nonce({}, lambda: "MINTED00") == ("MINTED00", None)
+
+
+def test_wait_for_decision_returns_the_recorded_decision(broker, tmp_path):
+    broker.write_decision(tmp_path, "abcdefgh", "approve", "chris")
+    assert broker.wait_for_decision(tmp_path, "abcdefgh", 2.0, poll=0.01) == "approve"
+
+
+def test_wait_for_decision_times_out_fail_closed(broker, tmp_path):
+    import time as _time
+
+    started = _time.time()
+    assert broker.wait_for_decision(tmp_path, "neverever", 0.3, poll=0.01) == "timeout"
+    assert _time.time() - started >= 0.3  # it actually waited
+
+
+def test_wait_for_decision_reports_a_corrupt_spool_as_unreadable(broker, tmp_path):
+    (tmp_path / "corrupt1.decision").write_text("{not json")
+    assert broker.wait_for_decision(tmp_path, "corrupt1", 2.0, poll=0.01) == "unreadable"
+
+
+def test_only_the_blocking_endpoint_waits(broker):
+    """Guards the P4 property against regression IN THE SHIPPED CODE.
+
+    The end-to-end timing test measures the loopback stub, so it would still pass if
+    `/post-approval` became blocking (review caught this on PR #80). `post_approval` is
+    defined inside `main()` and cannot be imported, so assert on the shipped source: the
+    wait lives in exactly one endpoint.
+    """
+    import inspect
+    import re
+
+    src = inspect.getsource(broker.main)
+
+    def body_of(endpoint: str) -> str:
+        start = src.index(f'@app.post("{endpoint}")')
+        rest = src[start + 1 :]
+        nxt = re.search(r"\n    @app\.post\(|\n    # A HITL_DIR", rest)
+        return rest[: nxt.start()] if nxt else rest
+
+    assert "wait_for_decision" in body_of("/request-approval")
+    assert "wait_for_decision" not in body_of("/post-approval")

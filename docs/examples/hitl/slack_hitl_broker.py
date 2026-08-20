@@ -56,6 +56,34 @@ def decision_for_action(action_id: str) -> str | None:
     return ACTION_DECISION.get(action_id)
 
 
+#: Distinguishes "the key was absent" from "the key was present and null". `.get()`
+#: collapses those, which would make `{"nonce": null}` mint a fresh nonce — the exact
+#: permanent-silent-deny this bridge exists to prevent, and an easy thing for a caller's
+#: JSON serializer to emit for an unset field.
+_MISSING = object()
+
+
+def wait_for_decision(hitl_dir: Path, nonce: str, deadline: float, poll: float = 0.5) -> str:
+    """Block until `{nonce}.decision` appears, or `deadline` seconds elapse.
+
+    Only the BLOCKING endpoint uses this. Extracted to module level so the wait is
+    testable on its own and so a test can assert which endpoint calls it — the whole
+    difference between the two endpoints is whether this runs.
+
+    Returns the decision, "unreadable" for a corrupt spool file, or "timeout".
+    """
+    spool = hitl_dir / f"{nonce}.decision"
+    end = time.time() + deadline
+    while time.time() < end:
+        if spool.exists():
+            try:
+                return json.loads(spool.read_text()).get("decision")
+            except Exception:
+                return "unreadable"
+        time.sleep(poll)
+    return "timeout"
+
+
 def resolve_nonce(body: dict, mint) -> tuple[str | None, str | None]:
     """Decide which nonce a card is posted under. Returns (nonce, error).
 
@@ -65,14 +93,15 @@ def resolve_nonce(body: dict, mint) -> tuple[str | None, str | None]:
     - caller supplied a valid nonce -> USE IT. The pxx gate mints the nonce and blocks on
       `{nonce}.decision`; a card posted under any other name writes a file the gate never
       looks at, so it would wait out its deadline and deny. Every gated call, always.
-    - caller supplied nothing       -> mint one (the n8n path, R-044/045, unchanged).
-    - caller supplied garbage       -> REJECT. Never mint a replacement: the caller is
-      waiting on the value it sent, so a substitute could not release it either, and
-      answering 200 would hide the misconfiguration behind a deny that looks like a
-      human choosing "no".
+    - key absent entirely           -> mint one (the n8n path, R-044/045, unchanged).
+    - key present but garbage       -> REJECT, and that INCLUDES an explicit null. Never
+      mint a replacement: the caller is waiting on the value it sent, so a substitute
+      could not release it either, and answering 200 would hide the misconfiguration
+      behind a deny that looks like a human choosing "no". A caller that sends
+      `{"nonce": null}` is a caller that meant to send one.
     """
-    supplied = (body or {}).get("nonce")
-    if supplied is None:
+    supplied = (body or {}).get("nonce", _MISSING)
+    if supplied is _MISSING:
         return mint(), None
     nonce = sanitize_nonce(supplied)
     if nonce is None:
@@ -251,7 +280,10 @@ def main() -> None:
     posted: dict[str, tuple[str, str]] = {}  # nonce -> (channel, ts)
 
     def finalize(nonce: str, decision: str, user: dict, detail: str = "") -> None:
-        ch_ts = posted.get(nonce)
+        # pop, not get: a nonce is single-use, so once its card is finalized the entry is
+        # dead weight. Before the bridge this map grew once per n8n request; it now grows
+        # once per GATED TOOL CALL, which in a long-running broker is unbounded.
+        ch_ts = posted.pop(nonce, None)
         if ch_ts:
             web.chat_update(
                 channel=ch_ts[0],
@@ -310,15 +342,22 @@ def main() -> None:
         nonce, err = resolve_nonce(body, lambda: token_hex(8))
         if err:
             return None, err
-        resp = web.chat_postMessage(
-            channel=channel,
-            text="pxx approval request",
-            blocks=approval_blocks(
-                nonce,
-                body.get("summary", "(no summary)"),
-                body.get("origin", ""),  # free-text source label, shown on the card
-            ),
-        )
+        try:
+            resp = web.chat_postMessage(
+                channel=channel,
+                text="pxx approval request",
+                blocks=approval_blocks(
+                    nonce,
+                    body.get("summary", "(no summary)"),
+                    body.get("origin", ""),  # free-text source label, shown on the card
+                ),
+            )
+        except Exception as exc:
+            # The caller fails closed regardless (no card -> no decision -> deny), but an
+            # unhandled raise here becomes an opaque 500. Name the cause instead: a bad
+            # token or a channel the bot is not in looks identical to a human ignoring
+            # the card unless the broker says so.
+            return None, f"slack post failed: {exc!r:.200}"
         posted[nonce] = (resp["channel"], resp["ts"])
         return nonce, None
 
@@ -344,23 +383,17 @@ def main() -> None:
         nonce, err = post_card(body)
         if err:
             raise HTTPException(status_code=400, detail=err)
-        spool = hitl_dir / f"{nonce}.decision"
-        end = time.time() + deadline
-        while time.time() < end:
-            if spool.exists():
-                try:
-                    d = json.loads(spool.read_text()).get("decision")
-                except Exception:
-                    d = "unreadable"
-                return {"nonce": nonce, "decision": d}
-            time.sleep(0.5)
-        web.chat_update(
-            channel=posted[nonce][0],
-            ts=posted[nonce][1],
-            text="pxx approval expired (denied)",
-            blocks=outcome_blocks("timeout", ""),
-        )
-        return {"nonce": nonce, "decision": "timeout"}  # fail-closed
+        decision = wait_for_decision(hitl_dir, nonce, deadline)
+        if decision == "timeout":
+            ch_ts = posted.pop(nonce, None)
+            if ch_ts:
+                web.chat_update(
+                    channel=ch_ts[0],
+                    ts=ch_ts[1],
+                    text="pxx approval expired (denied)",
+                    blocks=outcome_blocks("timeout", ""),
+                )
+        return {"nonce": nonce, "decision": decision}  # non-approve is fail-closed
 
     # A HITL_DIR that does not match the caller's is a permanent, silent deny (see the
     # module docstring), so state it plainly rather than leaving it to be discovered.

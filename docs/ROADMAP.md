@@ -638,10 +638,11 @@ CHANGELOG.md; highlights:
     **permanently closed**: the card's buttons wrote `{broker-nonce}.decision` while the
     gate waited on `{gate-nonce}.decision`, so every gated call would have run to its
     deadline and denied. A silent, always-deny failure that looks exactly like a human
-    saying no. Evidence: 16 bridge tests, 10 of them negative controls, 3 driving a real
-    `pxx.session.Session` (real `HookRunner`, real `ToolRegistry`, real gate subprocess,
-    scripted model only) — approve → `COMPLETED` + file written; abort and no-answer →
-    `HOOK_DENIED` + file **not** written. Mutating `resolve_nonce` back to the pre-P4
+    saying no. Evidence: 13 bridge test functions (16 cases), **10 of them negative
+    controls**, 3 driving a real `pxx.session.Session` (real `HookRunner`, real
+    `ToolRegistry`, real gate subprocess, scripted model only) — approve → `COMPLETED` +
+    file written; abort and no-answer → `HOOK_DENIED` + file **not** written; 38 with the
+    broker's own suite. Mutating `resolve_nonce` back to the pre-P4
     always-mint behaviour fails 4 tests including the real-session allow path. New
     security surface handled: the caller-supplied nonce becomes a filename, so
     `sanitize_nonce` bounds it to ASCII-alphanumeric (`str.isalnum()` alone admits

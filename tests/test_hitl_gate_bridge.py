@@ -163,7 +163,14 @@ def test_approve_releases_the_gate_and_writes_a_receipt(tmp_path):
 def test_the_post_is_non_blocking(tmp_path):
     """P4's core requirement. `/request-approval` blocks for its own deadline; the gate
     POSTs with an 8s timeout and ignores the result, so a blocking endpoint would be
-    abandoned mid-request every time. The bridge endpoint must return at once."""
+    abandoned mid-request every time. The bridge endpoint must return at once.
+
+    Scope note: this measures the STUB, which is non-blocking by construction, so it
+    cannot catch `/post-approval` itself regressing to a blocking implementation. The
+    shipped endpoint is guarded separately by
+    `test_slack_hitl_broker.py::test_only_the_blocking_endpoint_waits`. (Review on PR #80
+    caught that this test alone was not enough.)
+    """
     broker = StubBroker(tmp_path, "approve")
     try:
         run_gate(tmp_path, broker.url, deadline=4.0)
@@ -283,6 +290,7 @@ def _run_gated_session(tmp_path, broker_url, deadline=4.0):
     the model is scripted.
     """
     import asyncio as _asyncio
+    from shlex import quote
 
     from pxx.backends.mock import MockBackend
     from pxx.config import Settings
@@ -292,12 +300,16 @@ def _run_gated_session(tmp_path, broker_url, deadline=4.0):
     work = tmp_path / "work"
     work.mkdir(exist_ok=True)
     spool = tmp_path  # gate + stub broker share this, as the README requires
+    # HookRunner shlex-splits the command, so every interpolated path must be quoted:
+    # a space in the repo path or in pytest's tmp dir would otherwise split into the
+    # wrong argv and fail the test for a reason unrelated to the gate.
     env_prefix = (
-        f"HITL_SECRET=test-secret HITL_DIR={spool} HITL_NOTIFY={broker_url} "
+        f"HITL_SECRET=test-secret HITL_DIR={quote(str(spool))} "
+        f"HITL_NOTIFY={quote(str(broker_url))} "
         f"HITL_DEADLINE={deadline} HITL_ORIGIN=pxx-run-test"
     )
     # `env` so the hook subprocess carries its config the way a real deployment would
-    command = f"/usr/bin/env {env_prefix} {sys.executable} {GATE}"
+    command = f"/usr/bin/env {env_prefix} {quote(sys.executable)} {quote(str(GATE))}"
     settings = Settings(
         permission=PermissionMode.EDIT,
         hooks=(Hook(event="PreToolUse", command=command, matcher="write_file", timeout=120),),

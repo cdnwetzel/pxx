@@ -13,8 +13,19 @@ Fail-closed contract (roadmap HITL item):
 - no answer / abort / unreadable / receipt-write-failure  ->  DENY (exit 2);
 - a STRICT receipt (append + fsync) must persist BEFORE an allow is released.
 
+Transports (HITL_NOTIFY): an n8n webhook, or the Slack broker's NON-BLOCKING
+`/post-approval` (docs/examples/hitl/slack_hitl_broker.py) to get the richer Block Kit
+card with Approve / Abort / Modify. Either way this hook mints the nonce and owns the
+deadline; the transport only renders the card and carries the decision back. Point it at
+`/post-approval`, never at `/request-approval` — the latter blocks for its own deadline,
+which this hook's 8s best-effort POST would abandon.
+
+HITL_DIR MUST MATCH the broker's: this hook waits on ITS OWN {nonce}.decision path, so a
+broker writing elsewhere can never release it (permanent, silent deny).
+
 Env: HITL_SECRET, HITL_DIR, HITL_LISTENER (e.g. http://127.0.0.1:8479),
-     HITL_NOTIFY (n8n webhook URL; best-effort), HITL_DEADLINE (default 60).
+     HITL_NOTIFY (n8n webhook or Slack broker /post-approval; best-effort),
+     HITL_DEADLINE (default 60), HITL_ORIGIN (card source label, default "pxx run").
 """
 from __future__ import annotations
 
@@ -34,6 +45,7 @@ HITL_DIR.mkdir(parents=True, exist_ok=True)
 LISTENER = os.environ.get("HITL_LISTENER", "http://127.0.0.1:8479")
 NOTIFY = os.environ.get("HITL_NOTIFY", "")  # n8n webhook; blank = skip routing
 DEADLINE = float(os.environ.get("HITL_DEADLINE", "60"))
+ORIGIN = os.environ.get("HITL_ORIGIN", "pxx run")
 
 DENY, ALLOW = 2, 0
 
@@ -83,6 +95,9 @@ def main() -> int:
                     "args_hash": args_hash,
                     "approve_url": approve_url,
                     "abort_url": abort_url,
+                    # Source label for the Slack card, so one approval channel can carry
+                    # requests from several places and you can tell which is which.
+                    "origin": ORIGIN,
                 }
             ).encode()
             req = urllib.request.Request(

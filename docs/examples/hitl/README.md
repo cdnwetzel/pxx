@@ -133,15 +133,54 @@ uv run --with slack_sdk --with fastapi --with uvicorn python3 slack_hitl_broker.
 Verify without a click: `curl -s -XPOST http://127.0.0.1:8490/request-approval -d '{"summary":"test"}'`
 posts a card to the channel and blocks until you tap a button (or the deadline denies).
 
-## What is proven, and the next bridge
+### C. The gate driving the Slack card directly (the bridge)
+
+Stacks A and B used to be separate: the gate delivered by signed link, and the Socket Mode
+buttons served n8n. The bridge joins them so a paused `pxx run` shows the **richer Slack
+card** — Approve / Abort / **Modify** — and resumes on a tap.
+
+**The shared nonce is the whole mechanism.** The gate mints the nonce and waits on
+`{nonce}.decision`; the broker posts the card under *that* nonce, and its Socket Mode
+handler writes that file. Point the gate's `HITL_NOTIFY` at the broker's **non-blocking**
+endpoint:
+
+```bash
+export HITL_DIR=/tmp/pxx-hitl                                   # MUST match the broker's
+export HITL_NOTIFY=http://127.0.0.1:8490/post-approval          # NOT /request-approval
+export HITL_DEADLINE=120
+export HITL_ORIGIN="pxx run"                                    # label on the card
+```
+
+and run the broker with the same `HITL_DIR`:
+
+```bash
+HITL_DIR=/tmp/pxx-hitl uv run --with slack_sdk --with fastapi --with uvicorn \
+  python3 slack_hitl_broker.py
+```
+
+The broker prints its resolved `HITL_DIR` at startup — check it matches.
+
+Two failure modes worth knowing, because both are silent and both deny forever:
+
+| Mistake | What happens |
+| --- | --- |
+| `HITL_NOTIFY` → `/request-approval` | That endpoint **blocks** for its own deadline. The gate's POST is best-effort with an 8s timeout, so it abandons the request and the two deadlines race. Use `/post-approval`. |
+| `HITL_DIR` differs between gate and broker | The tap writes a decision the gate never reads. Every gated call runs to its deadline and denies — fail-closed, but permanently shut. |
+
+Both are *safe* failures (deny, never allow), which is exactly why they are easy to miss:
+the gate looks like it is working, and every request looks like a human said no.
+
+## What is proven, and what is not
 
 - Proven live: the pxx gate (R-036), the Slack approve/abort round-trip (R-044), the Slack
   Modify modal (R-045), and the n8n orchestration patterns (R-035, R-037, R-038).
-- Not yet built: a direct bridge so `pxx run`'s PreToolUse gate drives the Slack Socket
-  Mode **buttons and modal** (rather than a signed link). Today the gate uses the
-  signed-link path (stack A) and the Socket Mode buttons serve n8n (stack B). Unifying
-  them means the gate and the Slack broker sharing one nonce, so a paused `pxx run` shows
-  the richer Slack card and resumes on a tap. That is the natural next increment.
+- The bridge (stack C): proven **end-to-end locally** against a stub transport — a real
+  `pxx run` pauses on a gated tool and resumes on the decision, with the nonce threading
+  through (`tests/test_hitl_gate_bridge.py`, 13 tests, most of them negative controls).
+  The Slack-specific leg it composes with is already live-attested by R-044/R-045.
+- **Not yet attested:** the two halves joined in one live run — a real `pxx run` released
+  by a real tap in Slack. That needs a workspace and a human thumb; it is the receipt to
+  capture next, and until it exists this bridge is Reproducible, not Attested.
 
 ## Security notes (all stacks)
 

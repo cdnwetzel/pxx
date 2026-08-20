@@ -2165,5 +2165,132 @@ invariants are unchanged and covered by the unit tests, now including the `modif
 
 ---
 
+## R-046 — the HITL gate drives the Slack card directly: one shared nonce joins the PreToolUse gate to the Socket Mode broker
+
+**Claim.** The two HITL stacks are joined. `pxx run`'s PreToolUse gate (R-036) and the
+Slack Socket Mode broker (R-044/R-045) previously could not talk: the gate minted a nonce
+and waited on `{nonce}.decision`, while the broker **minted its own** and **blocked** for
+its own deadline. Pointed at each other they would have failed *permanently closed* — the
+card's buttons writing a file the gate never reads, so every gated call ran to its
+deadline and denied. The bridge makes the broker honour the caller's nonce and adds a
+**non-blocking** `/post-approval`, so a paused real `pxx` session shows the Block Kit card
+and resumes on the decision. Every failure path still denies.
+
+**Grade.** **Reproducible** (`uv run python -m pytest tests/test_hitl_gate_bridge.py
+tests/test_slack_hitl_broker.py` — **41 passed**, no Slack account and no network needed).
+**NOT Attested:** see the boundary — the live Slack half is not re-proven here.
+
+**Environment.** macOS (Darwin 25.4.0), Python 3.12.13, pytest 9.1.1, pxx 2.5.4 working
+tree. No model, no Slack workspace, no network: the backend is `MockBackend` and the Slack
+transport is a loopback stub. The tests are deterministic.
+
+**What changed.**
+
+| File | Change |
+|---|---|
+| `slack_hitl_broker.py` | `resolve_nonce()` — use the caller's nonce, mint only when absent, **reject** garbage rather than substituting; `sanitize_nonce()` — ASCII-alnum + length bound; new non-blocking `POST /post-approval`; `HITL_DIR` printed at startup |
+| `hitl_gate.py` | sends `origin` (card source label); docs on which endpoint to target and why |
+| `docs/examples/hitl/README.md` | stack C (the bridge), the two silent-deny misconfigurations, and what is *not* attested |
+
+**Record — 13 bridge test functions, 10 of them negative controls** (16 cases collected;
+row 10 is parametrized over 4 rejected nonces). The broker's own suite adds 25, for 41.
+
+| # | Test | Asserts |
+|---|---|---|
+| 1 | `approve_releases_the_gate_and_writes_a_receipt` | exit 0; the gate's own 16-char nonce reached the broker; receipt persisted naming that nonce |
+| 2 | `the_post_is_non_blocking` | broker returned in < 1.0 s (the P4 requirement) |
+| 3 | `abort_denies` | exit 2 |
+| 4 | `decision_for_a_different_nonce_does_not_release_the_gate` | exit 2 — **this is the pre-bridge behaviour**, proven not to release |
+| 5 | `no_decision_within_the_deadline_denies` | exit 2, `timeout` |
+| 6 | `unreachable_broker_denies_rather_than_failing_open` | exit 2 — best-effort routing never becomes skip-the-gate |
+| 7 | `no_transport_configured_still_denies` | exit 2 — "nobody was asked" != "nobody objected" |
+| 8 | `malformed_decision_denies` | exit 2, `unreadable` |
+| 9 | `unreadable_stdin_denies` | exit 2 |
+| 10 | `broker_refuses_a_traversal_nonce…` | `../../tmp/pwn`, `a/b`, `with space`, `""` all rejected; nothing written |
+| 11 | `real_session_proceeds_when_the_gate_is_approved` | **real `pxx.session.Session`**: `COMPLETED`, file written |
+| 12 | `real_session_is_blocked_when_the_gate_is_aborted` | `HOOK_DENIED`, **file not written** |
+| 13 | `real_session_is_blocked_when_the_broker_never_answers` | `HOOK_DENIED`, file not written |
+
+Rows 3–10, 12 and 13 are the ten negative controls; rows 1, 2 and 11 are the positive path.
+
+Tests 11–13 drive `pxx.session.Session` with the real `HookRunner`, the real
+`ToolRegistry`, and the real gate as a hook subprocess; only the model is scripted.
+
+**Negative control on the bridge itself.** `resolve_nonce` was mutated to always mint (the
+exact pre-P4 behaviour). Four tests failed, including the real-session allow path
+(`test_real_session_proceeds_when_the_gate_is_approved`) and both `resolve_nonce` unit
+tests. Restored: 33/33 pass. The bridge is load-bearing, not decorative. An earlier
+revision of the stub broker reimplemented the nonce logic instead of calling the shipped
+`resolve_nonce`, and that mutant survived the end-to-end tests — the stub was corrected so
+the suite exercises shipped code.
+
+**Second mutation, on the non-blocking property.** `/post-approval` was mutated to wait on
+the decision before returning. `test_only_the_blocking_endpoint_waits` failed; restored,
+22/22 pass. That guard exists because review (PR #80) observed that the end-to-end timing
+test measures the *stub*, which is non-blocking by construction, and so could not catch the
+shipped endpoint regressing. The guard reads the shipped source of `main()` and asserts the
+extracted `wait_for_decision` appears in exactly one of the two endpoints.
+
+**Fixed under review (PR #80), each with a test.** (1) `{"nonce": null}` was treated as an
+absent key and minted a fresh nonce — reintroducing the permanent-silent-deny through the
+back door, since a caller's serializer emitting null for an unset field is ordinary. Now
+rejected: `_MISSING` sentinel distinguishes absent from present-and-null. (2) A
+`chat_postMessage` failure surfaced as an opaque HTTP 500; a bad token or a channel the bot
+is not in was indistinguishable from a human ignoring the card. Now returned through the
+error channel. (3) The `posted` map grew once per *gated tool call* rather than once per
+n8n request and was never pruned — unbounded in a long-running broker. `finalize` now pops.
+(4) The hook command interpolated paths without quoting, so a space in the repo or tmp path
+would mis-split under `shlex`.
+
+**A real race, found on the second review pass and measured before fixing.**
+`write_decision` created the final path with `O_EXCL` and *then* wrote into it, leaving a
+window where the decision file EXISTED but was empty or half-written. The gate polls
+`exists()` and immediately `json.loads`, so a read landing in that window parses as
+unreadable and **denies an approval the human actually gave**. Reproduced at **1 in 400**
+with a reader spinning on the path. Fixed by writing a scratch file, fsyncing it, and
+`os.link`ing it into place — atomic, and the link's fail-if-exists is what preserves the
+single-use contract `O_EXCL` used to provide.
+
+The obvious regression test — spin a reader and count partial reads — is the *wrong* test:
+at 1-in-400 it passes against broken code almost every run, which is a gate that cannot
+fail. The shipped test asserts the **property** instead, stalling the write and checking
+that the final path is not yet visible. Against the pre-fix implementation it fails
+deterministically (1 failed / 24 passed, 0.35 s); restored, 25/25. Two further tests cover
+scratch-file cleanup and single-use under 8-way contention. Also fixed: a `chat_update`
+failure in the timeout path turned a defined fail-closed `{"decision": "timeout"}` into an
+HTTP 500, so card edits are now best-effort in both the timeout and finalize paths.
+
+**Third review pass.** Two more, both real. (1) `os.link` creates a *directory entry*, and
+fsyncing the scratch file persists only its inode and contents — a crash between the two
+loses the entry, so the gate could act on a decision that does not survive recovery, which
+is exactly what this spool's durability rule exists to prevent. The parent directory is now
+fsynced before returning success. **Honest coverage note: this fix has no test.** Dropping
+the directory fsync passes all 25 tests, because crash-durability is not observable
+in-process; it is correct by construction and unverified by the suite, and saying so is
+better than a test that pretends otherwise. (2) The contention test asserted
+`sum(results) == 1`, which passes when one writer succeeds and the other seven *raise*
+before appending — `results` is `[True]`, sum is 1, green. A vacuous pass in a test written
+to guard against vacuous passes. It now asserts every writer finished and reported
+(`len(results) == 8`, no exceptions, no live threads) before judging the winner; forcing
+seven writers to die fails it.
+
+**Security note.** The caller-supplied nonce becomes a filename, so it is a path-traversal
+surface that did not exist while the broker minted its own. `sanitize_nonce` is
+ASCII-alphanumeric plus a length bound, and rejects rather than sanitizes. ASCII matters:
+`str.isalnum()` is true for non-ASCII digits and letters, so a homoglyph or an RTL-override
+character would otherwise pass.
+
+**Boundary — explicitly not claimed.** (a) **The live Slack tap is not re-proven here.**
+These tests use a loopback stub; the Slack leg they compose with is attested separately by
+R-044 (approve/abort) and R-045 (modify). The two halves **joined in one live run** — a
+real `pxx run` released by a real thumb in Slack — has **not** been performed, and until it
+is, stack C is Reproducible, not Attested. (b) The `modify` decision is written and
+readable by the gate, but the gate treats any non-`approve` as deny; *acting* on a revised
+scope is not built. (c) The broker remains a reference implementation, run on loopback, not
+a hardened service. (d) `HITL_DIR` agreement between gate and broker is documented and
+printed at startup, not enforced — a mismatch denies permanently and silently.
+
+---
+
 *Convention: entries are append-only and dated; superseded claims are
 struck through with a pointer to the superseding entry, never deleted.*

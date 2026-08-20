@@ -93,11 +93,14 @@ Waves 1–3 shipped in 2.4.0, so the near-term order is:
 1. ~~**Full-VRAM 30B benchmark**~~ **DONE 2026-08-09 (R-041–R-043):** full-VRAM 40 GB
    (69.3 tok/s) vs. 16 GB offload (31.8) ≈ 2.2×; dual-GPU NVLINK fan-out 198%; active-
    params dominate throughput. Now informs the multi-role routing assignments below.
-2. **Pluggable HITL transport** (see *Later*) — upgrades the R-036/R-038 signed callback
-   into a real remote approve/abort **and reply-with-modifications** tap. **Slack (Socket
-   Mode) is the primary transport** (richer conversational feedback preferred; no inbound
-   endpoint); self-hosted `ntfy` stays the sovereign default. Closes the HITL loop.
-3. **Live eval arms** (below) — the 2.5 headline, now *unblocked* by Wave 2.
+2. ~~**Pluggable HITL transport**~~ **DONE 2026-08-19 (R-044/045 + R-046):** Slack Socket
+   Mode approve / abort / modify, and the P4 shared-nonce bridge that lets a paused
+   `pxx run`'s PreToolUse gate drive that card directly (see *Later*). Self-hosted `ntfy`
+   remains the sovereign fallback. **One thing still owed:** a single live run joining the
+   two halves (a real `pxx run` released by a real tap in Slack) — mechanism is
+   Reproducible, the joined round-trip is not yet Attested.
+3. **Live eval arms** (below) — the 2.5 headline, *unblocked* by Wave 2 and now the head
+   of the queue.
 Backlog candidate that emerged from the n8n work: a **first-class pxx n8n node** (vs. the
 HTTP-node pattern already proven in R-035–R-040).
 
@@ -626,17 +629,35 @@ CHANGELOG.md; highlights:
     endpoint), and writes a single-use decision. Approve/abort is R-044; the Modify modal
     (a revised scope + note handed back as a structured `modify` decision) is R-045. Setup
     and architecture live at `docs/examples/hitl/README.md`.
-  - **P4 (next, not built): bridge the Slack buttons/modal to the pxx PreToolUse gate.**
-    Today the two HITL stacks are separate: the gate (`hitl_gate.py`, R-036) uses
-    signed-link delivery, and the Socket Mode buttons serve n8n pipelines (R-044/045). Wire
-    them so a paused `pxx run` itself shows the richer Slack card and resumes on a tap. The
-    bridge is a shared nonce: the gate posts `{nonce, summary}` to a *non-blocking* broker
-    endpoint, the broker posts the card carrying that nonce, its Socket Mode handler writes
-    `{nonce}.decision`, and the gate polls it (its existing fail-closed wait unchanged).
-    This touches the safety path, so it lands with its own live test (a real `pxx run`
-    pausing on a gated tool, approved from Slack) plus a receipt, not as a docs change. It
-    composes proven components, R-036 (the gate blocks on the spool) and R-044/045 (Slack
-    writes the spool); only the shared-nonce non-blocking post is new.
+  - ~~**P4 (next, not built): bridge the Slack buttons/modal to the pxx PreToolUse
+    gate.**~~ **BUILT (2026-08-19, R-046) — mechanism proven, live tap still owed.** The
+    shared-nonce bridge shipped: the broker honours the *caller's* nonce (`resolve_nonce`)
+    instead of minting its own, and a new **non-blocking** `POST /post-approval` lets the
+    gate keep sole ownership of the deadline. Worth recording *why* this was not merely a
+    wiring change — pointed at each other beforehand, the two stacks would have failed
+    **permanently closed**: the card's buttons wrote `{broker-nonce}.decision` while the
+    gate waited on `{gate-nonce}.decision`, so every gated call would have run to its
+    deadline and denied. A silent, always-deny failure that looks exactly like a human
+    saying no. Evidence: 13 bridge test functions (16 cases), **10 of them negative
+    controls**, 3 driving a real `pxx.session.Session` (real `HookRunner`, real
+    `ToolRegistry`, real gate subprocess, scripted model only) — approve → `COMPLETED` +
+    file written; abort and no-answer → `HOOK_DENIED` + file **not** written; 41 with the
+    broker's own suite. Review also surfaced a **real race** in the pre-existing
+    `write_decision` (final path created by `O_EXCL` then written into, so a reader in that
+    window saw partial JSON and denied a *granted* approval — measured 1/400); fixed with
+    scratch-file + fsync + `os.link`, guarded by a deterministic property test rather than
+    the timing test that would have passed against broken code 399 times in 400. Mutating `resolve_nonce` back to the pre-P4
+    always-mint behaviour fails 4 tests including the real-session allow path. New
+    security surface handled: the caller-supplied nonce becomes a filename, so
+    `sanitize_nonce` bounds it to ASCII-alphanumeric (`str.isalnum()` alone admits
+    homoglyphs and RTL overrides) and rejects rather than sanitizes.
+    **Still owed:** the two halves in ONE live run — a real `pxx run` released by a real
+    tap in Slack. The tests use a loopback stub; the Slack leg is attested separately by
+    R-044/045. Until that run happens the bridge is **Reproducible, not Attested**, and it
+    needs a workspace and a human thumb, so it is Chris's step. Also unbuilt: *acting* on
+    a `modify` decision (the gate writes and reads it, but treats any non-`approve` as
+    deny), and enforcement of matching `HITL_DIR` between gate and broker (documented and
+    printed at startup, not checked).
 - **Governed `web_fetch` — a fail-closed research tool (the "browser" gap).** The
   biggest capability gap vs. hosted agents is the inability to read live docs. Close
   it with a *bounded HTTP fetch*, NOT an unrestricted scripted browser — a full

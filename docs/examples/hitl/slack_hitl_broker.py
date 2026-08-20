@@ -1,14 +1,24 @@
 #!/usr/bin/env python3
 """Slack Socket Mode HITL broker (reference impl, R-036 pattern, Slack transport).
 
-Same seam as the FastAPI broker (docs/examples/hitl/hitl_broker.py): the PreToolUse
-hook POSTs {"summary","nonce"?} to /request-approval and polls the decision file. Here
-the decision comes back over Slack instead of a signed URL:
+Same seam as the FastAPI broker (docs/examples/hitl/hitl_broker.py): the caller POSTs
+{"summary","nonce"?} and the decision comes back over Slack instead of a signed URL.
 
-  POST /request-approval {summary}
-      -> post a Block Kit message (Approve / Abort / Modify buttons carrying the nonce)
-         to the channel, BLOCK up to HITL_DEADLINE, return {"nonce","decision"}.
+Two endpoints, because the two callers need opposite things:
+
+  POST /post-approval {nonce, summary, origin?}     <- the pxx PreToolUse gate (P4)
+      -> post the card carrying THE CALLER'S nonce and return IMMEDIATELY.
+         The gate runs its own fail-closed wait on {nonce}.decision; the broker must
+         not also hold the connection. This is the gate<->Slack bridge.
+
+  POST /request-approval {summary, nonce?}          <- n8n pipelines (R-044/045)
+      -> post the card, BLOCK up to HITL_DEADLINE, return {"nonce","decision"}.
          Fail-closed: no response -> "timeout" (the pipeline treats non-approve as deny).
+
+HITL_DIR MUST MATCH the caller's. The gate waits on ITS OWN {nonce}.decision path, so a
+broker writing to a different directory can never release it: every gated call would run
+to its deadline and deny. That is fail-closed but permanently shut, and silent — so the
+resolved directory is printed at startup. The gate's default is /tmp/pxx-hitl.
 
   Slack Socket Mode (inbound, app dials out -- no public endpoint)
       -> Approve/Abort: write the decision file atomically (O_EXCL, single-use), ack,
@@ -25,6 +35,7 @@ unit-test) without the dependency. Run: uv run --with slack_sdk --with fastapi -
 from __future__ import annotations
 
 import json
+import logging
 import os
 import time
 from pathlib import Path
@@ -36,10 +47,92 @@ ACTION_DECISION = {"pxx_approve": "approve", "pxx_abort": "abort"}
 MODIFY_ACTION = "pxx_modify"
 MODIFY_CALLBACK = "pxx_modify_submit"
 
+log = logging.getLogger("pxx.hitl.slack")
+
+#: Bounds on a caller-supplied nonce. The gate mints `token_hex(8)` = 16 chars; allow a
+#: little room either side without allowing anything long enough to be interesting.
+NONCE_MIN, NONCE_MAX = 8, 64
+
 
 def decision_for_action(action_id: str) -> str | None:
     """Map a Block Kit action_id to a terminal decision, or None (e.g. modify opens a modal)."""
     return ACTION_DECISION.get(action_id)
+
+
+#: Distinguishes "the key was absent" from "the key was present and null". `.get()`
+#: collapses those, which would make `{"nonce": null}` mint a fresh nonce — the exact
+#: permanent-silent-deny this bridge exists to prevent, and an easy thing for a caller's
+#: JSON serializer to emit for an unset field.
+_MISSING = object()
+
+
+def wait_for_decision(hitl_dir: Path, nonce: str, deadline: float, poll: float = 0.5) -> str:
+    """Block until `{nonce}.decision` appears, or `deadline` seconds elapse.
+
+    Only the BLOCKING endpoint uses this. Extracted to module level so the wait is
+    testable on its own and so a test can assert which endpoint calls it — the whole
+    difference between the two endpoints is whether this runs.
+
+    Returns the decision, "unreadable" for a corrupt spool file, or "timeout".
+    """
+    spool = hitl_dir / f"{nonce}.decision"
+    end = time.time() + deadline
+    while time.time() < end:
+        if spool.exists():
+            try:
+                return json.loads(spool.read_text()).get("decision")
+            except Exception:
+                return "unreadable"
+        time.sleep(poll)
+    return "timeout"
+
+
+def resolve_nonce(body: dict, mint) -> tuple[str | None, str | None]:
+    """Decide which nonce a card is posted under. Returns (nonce, error).
+
+    This is the bridge in one function, so keep it at module level where it can be tested
+    without slack_sdk:
+
+    - caller supplied a valid nonce -> USE IT. The pxx gate mints the nonce and blocks on
+      `{nonce}.decision`; a card posted under any other name writes a file the gate never
+      looks at, so it would wait out its deadline and deny. Every gated call, always.
+    - key absent entirely           -> mint one (the n8n path, R-044/045, unchanged).
+    - key present but garbage       -> REJECT, and that INCLUDES an explicit null. Never
+      mint a replacement: the caller is waiting on the value it sent, so a substitute
+      could not release it either, and answering 200 would hide the misconfiguration
+      behind a deny that looks like a human choosing "no". A caller that sends
+      `{"nonce": null}` is a caller that meant to send one.
+    """
+    supplied = (body or {}).get("nonce", _MISSING)
+    if supplied is _MISSING:
+        return mint(), None
+    nonce = sanitize_nonce(supplied)
+    if nonce is None:
+        return None, "invalid nonce"
+    return nonce, None
+
+
+def sanitize_nonce(value: object) -> str | None:
+    """Validate a CALLER-SUPPLIED nonce, or return None to reject it.
+
+    Security-critical. Before the gate bridge the broker minted every nonce itself, so
+    it was trusted by construction; now a caller sends one and it reaches the filesystem
+    as ``hitl_dir / f"{nonce}.decision"``. An unvalidated value there is a path-traversal
+    primitive — ``../../etc/cron.d/x`` would let a caller choose where the broker writes.
+    ASCII-alphanumeric only (which excludes ``/``, ``.``, NUL, and every separator) plus a
+    length bound. Rejects rather than sanitizes: a nonce that needed cleaning is a caller
+    bug or an attack, and silently rewriting it would break the gate's poll path anyway
+    (it waits on the nonce it sent, so a rewritten one could never be released).
+    """
+    if not isinstance(value, str):
+        return None
+    if not (NONCE_MIN <= len(value) <= NONCE_MAX):
+        return None
+    # `str.isalnum()` is True for non-ASCII digits/letters (e.g. "١٢٣", "ⅷ"); restrict to
+    # ASCII so the value is exactly what it looks like on the wire and in a filename.
+    if not value.isascii() or not value.isalnum():
+        return None
+    return value
 
 
 def write_decision(
@@ -51,18 +144,42 @@ def write_decision(
     """
     if decision not in ("approve", "abort", "modify") or not nonce.isalnum():
         return False
-    try:
-        fd = os.open(hitl_dir / f"{nonce}.decision", os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-    except FileExistsError:
-        return False
     record = {"nonce": nonce, "decision": decision, "by": who, "ts": time.time()}
     if extra:
         record.update(extra)
-    with os.fdopen(fd, "w") as f:
-        json.dump(record, f)
-        f.flush()
-        os.fsync(f.fileno())
-    return True
+
+    # Publish ATOMICALLY. Creating the final path with O_EXCL and then writing into it
+    # leaves a window where the file EXISTS but is empty or half-written — and the gate
+    # polls `spool.exists()` and immediately `json.loads` it, so a read landing in that
+    # window parses as unreadable and DENIES an approval the human actually gave. Measured
+    # at roughly 1 in 400 with a reader spinning on the path, which is rare enough to look
+    # like a flaky human and often enough to happen. So: write a scratch file, fsync it,
+    # then link it into place. `os.link` is atomic and fails if the destination exists,
+    # which is what preserves the single-use contract that O_EXCL used to provide.
+    final = hitl_dir / f"{nonce}.decision"
+    tmp = hitl_dir / f".{nonce}.{os.getpid()}.{token_hex(4)}.tmp"
+    try:
+        fd = os.open(tmp, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        with os.fdopen(fd, "w") as f:
+            json.dump(record, f)
+            f.flush()
+            os.fsync(f.fileno())
+        os.link(tmp, final)  # atomic; raises FileExistsError if already decided
+        # fsync the DIRECTORY too. Syncing the scratch file only persists its inode and
+        # contents; the directory entry `os.link` just created is a separate metadata
+        # write. A crash between the two loses the entry, so the gate could read and act
+        # on a decision that does not survive recovery — and this spool is precisely the
+        # thing the gate's "receipt persists BEFORE an allow is released" rule depends on.
+        dfd = os.open(hitl_dir, os.O_RDONLY)
+        try:
+            os.fsync(dfd)
+        finally:
+            os.close(dfd)
+        return True
+    except FileExistsError:
+        return False  # single-use: someone already decided this nonce
+    finally:
+        tmp.unlink(missing_ok=True)
 
 
 def approval_blocks(nonce: str, summary: str, origin: str = "") -> list:
@@ -172,7 +289,7 @@ def outcome_blocks(decision: str, user_id: str, detail: str = "") -> list:
 
 
 def main() -> None:
-    from fastapi import Body, FastAPI
+    from fastapi import Body, FastAPI, HTTPException
     from fastapi.responses import PlainTextResponse
     import uvicorn
     from slack_sdk import WebClient
@@ -190,14 +307,23 @@ def main() -> None:
     posted: dict[str, tuple[str, str]] = {}  # nonce -> (channel, ts)
 
     def finalize(nonce: str, decision: str, user: dict, detail: str = "") -> None:
-        ch_ts = posted.get(nonce)
+        # pop, not get: a nonce is single-use, so once its card is finalized the entry is
+        # dead weight. Before the bridge this map grew once per n8n request; it now grows
+        # once per GATED TOOL CALL, which in a long-running broker is unbounded.
+        ch_ts = posted.pop(nonce, None)
         if ch_ts:
-            web.chat_update(
-                channel=ch_ts[0],
-                ts=ch_ts[1],
-                text=f"pxx approval {decision}",
-                blocks=outcome_blocks(decision, user.get("id", ""), detail),
-            )
+            try:
+                web.chat_update(
+                    channel=ch_ts[0],
+                    ts=ch_ts[1],
+                    text=f"pxx approval {decision}",
+                    blocks=outcome_blocks(decision, user.get("id", ""), detail),
+                )
+            except Exception:
+                # Same reasoning as the timeout path: the DECISION is already durably
+                # written and the caller is released by the spool, not by this edit. A
+                # failed card update must not propagate into the Socket Mode handler.
+                log.warning("card update failed for %s (decision %s stands)", nonce, decision)
 
     def on_socket(client: SocketModeClient, req: SocketModeRequest) -> None:
         client.send_socket_mode_response(SocketModeResponse(envelope_id=req.envelope_id))
@@ -236,35 +362,83 @@ def main() -> None:
     def health():
         return PlainTextResponse("ok")
 
+    def post_card(body: dict):
+        """Post the approval card and register it. Returns (nonce, error).
+
+        The nonce is the CALLER'S when it sends a valid one — that is the whole bridge:
+        the pxx PreToolUse gate mints the nonce, blocks on `{nonce}.decision`, and can
+        only be released by a decision written under the name it is waiting on. A broker
+        that minted its own (as this did before) would post a card whose buttons write a
+        file the gate never looks at, so every gated call would hang to its deadline and
+        deny. Fail-closed, but permanently — the gate could never be approved at all.
+        """
+        nonce, err = resolve_nonce(body, lambda: token_hex(8))
+        if err:
+            return None, err
+        try:
+            resp = web.chat_postMessage(
+                channel=channel,
+                text="pxx approval request",
+                blocks=approval_blocks(
+                    nonce,
+                    body.get("summary", "(no summary)"),
+                    body.get("origin", ""),  # free-text source label, shown on the card
+                ),
+            )
+        except Exception as exc:
+            # The caller fails closed regardless (no card -> no decision -> deny), but an
+            # unhandled raise here becomes an opaque 500. Name the cause instead: a bad
+            # token or a channel the bot is not in looks identical to a human ignoring
+            # the card unless the broker says so.
+            return None, f"slack post failed: {exc!r:.200}"
+        posted[nonce] = (resp["channel"], resp["ts"])
+        return nonce, None
+
+    @app.post("/post-approval")
+    def post_approval(body: dict = Body(default={})):
+        """NON-BLOCKING post — the pxx gate bridge (roadmap P4).
+
+        Posts the card and returns immediately. The caller does its OWN fail-closed wait
+        on `{nonce}.decision`, so the broker must not hold the connection: the gate POSTs
+        with an 8s timeout and deliberately ignores the result, which means a blocking
+        endpoint here would be abandoned mid-request every time and the card's fate would
+        depend on whether uvicorn noticed the hangup. Returning at once keeps exactly one
+        component responsible for the deadline — the gate.
+        """
+        nonce, err = post_card(body)
+        if err:
+            raise HTTPException(status_code=400, detail=err)
+        return {"nonce": nonce, "posted": True}
+
     @app.post("/request-approval")
     def request_approval(body: dict = Body(default={})):
-        nonce = token_hex(8)
-        summary = body.get("summary", "(no summary)")
-        origin = body.get("origin", "")  # free-text source label, shown on the card
-        resp = web.chat_postMessage(
-            channel=channel,
-            text="pxx approval request",
-            blocks=approval_blocks(nonce, summary, origin),
-        )
-        posted[nonce] = (resp["channel"], resp["ts"])
-        spool = hitl_dir / f"{nonce}.decision"
-        end = time.time() + deadline
-        while time.time() < end:
-            if spool.exists():
+        """BLOCKING post — the original n8n path (R-044/045), unchanged in behaviour."""
+        nonce, err = post_card(body)
+        if err:
+            raise HTTPException(status_code=400, detail=err)
+        decision = wait_for_decision(hitl_dir, nonce, deadline)
+        if decision == "timeout":
+            ch_ts = posted.pop(nonce, None)
+            if ch_ts:
                 try:
-                    d = json.loads(spool.read_text()).get("decision")
+                    web.chat_update(
+                        channel=ch_ts[0],
+                        ts=ch_ts[1],
+                        text="pxx approval expired (denied)",
+                        blocks=outcome_blocks("timeout", ""),
+                    )
                 except Exception:
-                    d = "unreadable"
-                return {"nonce": nonce, "decision": d}
-            time.sleep(0.5)
-        web.chat_update(
-            channel=posted[nonce][0],
-            ts=posted[nonce][1],
-            text="pxx approval expired (denied)",
-            blocks=outcome_blocks("timeout", ""),
-        )
-        return {"nonce": nonce, "decision": "timeout"}  # fail-closed
+                    # Editing the card is best-effort COSMETICS. Letting it raise would
+                    # turn a defined fail-closed `{"decision": "timeout"}` into a 500 and
+                    # make the caller's timeout look like a broker crash.
+                    log.warning("card cleanup failed for %s (decision still timeout)", nonce)
+        return {"nonce": nonce, "decision": decision}  # non-approve is fail-closed
 
+    # A HITL_DIR that does not match the caller's is a permanent, silent deny (see the
+    # module docstring), so state it plainly rather than leaving it to be discovered.
+    print(f"pxx slack hitl broker: HITL_DIR={hitl_dir}  (must match the caller's)")
+    print(f"  gate bridge (non-blocking): POST http://127.0.0.1:{port}/post-approval")
+    print(f"  n8n (blocking, {deadline:.0f}s):     POST http://127.0.0.1:{port}/request-approval")
     sm.connect()  # Socket Mode listener runs in a background thread
     uvicorn.run(app, host="127.0.0.1", port=port, log_level="warning")
 

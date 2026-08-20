@@ -21,10 +21,17 @@ preserved in git (tag `v1.3.3` and earlier).
   is a legitimate if weaker posture, and doctor reserves hard failures for the runtime itself.
   The check compares `settings.model` — what `Session` actually constructs — rather than the
   `author` lane, which resolves in config but is not yet wired to the runtime; reading it
-  would report an independence the loop does not have. Negative control per repo practice:
-  all four tests fail against a mutant that returns `ok` unconditionally, including one
-  asserting the check is registered in `run_doctor` (a check nobody calls is the vacuous case
-  for the check itself). Verified on hardware both ways — a clean `HOME` with no config fires
+  would report an independence the loop does not have. Negative control per repo practice,
+  stated as the mutation matrix actually measured rather than as a summary: against a mutant
+  that always returns `ok` with a *plausible* pass detail, the **three negative-path tests
+  fail** — including the one asserting the check is registered in `run_doctor`, since a check
+  nobody calls is the vacuous case for the check itself — while the distinct-reviewer test
+  **survives**, because it is the *positive* control, not a negative one. The inverse mutant
+  (always warn) is caught by exactly that distinct-reviewer test and by nothing else. So the
+  four tests pin the check in both directions, with no single test doing both jobs. (A weaker
+  always-`ok` mutant carrying a placeholder detail string fails all four, which is why the
+  first pass of this note over-claimed a 4-of-4 kill; CodeRabbit caught it on review.)
+  Verified on hardware both ways — a clean `HOME` with no config fires
   the warning out of the box; a configured two-box coder/judge split passes.
   Docs: `docs/CONFIG.md` §`[roles.review]` gains an **Independence** note.
   *Known limit:* doctor reports this, the loop does not — a run that never invokes

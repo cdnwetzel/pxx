@@ -3,6 +3,34 @@
 All notable changes to pxx are documented here. The 1.x series history is
 preserved in git (tag `v1.3.3` and earlier).
 
+## [2.5.4] — 2026-08-19
+
+### Added
+
+- **`pxx doctor` flags self-review — the reviewer defaults to the author model.**
+  `Settings.effective_review_model` falls back to the coder `model` when no `[roles.review]`
+  overlay is set, so the *shipped default* puts the same model that wrote the diff in front
+  of it as the judge — while `pxx loop --review` runs `BLOCKING` by default. A model cannot
+  independently review its own output: it carries the blind spot that produced the defect,
+  so the gate reports a pass it was never able to withhold, and that pass is then recorded
+  as evidence. This is the vacuous-gate failure mode, and it is worse than having no gate.
+  The new `review:independence` check reports three states: a distinct reviewer model passes;
+  the same model on the same endpoint warns as `SELF-review`; the same model on a *different*
+  endpoint still warns, because separate hardware is not separate judgement — identical
+  weights carry identical blind spots. Warning-grade, never a hard failure: a single-model box
+  is a legitimate if weaker posture, and doctor reserves hard failures for the runtime itself.
+  The check compares `settings.model` — what `Session` actually constructs — rather than the
+  `author` lane, which resolves in config but is not yet wired to the runtime; reading it
+  would report an independence the loop does not have. Negative control per repo practice:
+  all four tests fail against a mutant that returns `ok` unconditionally, including one
+  asserting the check is registered in `run_doctor` (a check nobody calls is the vacuous case
+  for the check itself). Verified on hardware both ways — a clean `HOME` with no config fires
+  the warning out of the box; a configured two-box coder/judge split passes.
+  Docs: `docs/CONFIG.md` §`[roles.review]` gains an **Independence** note.
+  *Known limit:* doctor reports this, the loop does not — a run that never invokes
+  `pxx doctor` still gets a blocking gate it cannot fail. Making `BLOCKING` mode itself
+  refuse, or require an explicit `allow_self_review` opt-in, is carded and not in this release.
+
 ## [2.5.3] — 2026-08-18
 
 ### Changed

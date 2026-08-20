@@ -2177,7 +2177,7 @@ deadline and denied. The bridge makes the broker honour the caller's nonce and a
 and resumes on the decision. Every failure path still denies.
 
 **Grade.** **Reproducible** (`uv run python -m pytest tests/test_hitl_gate_bridge.py
-tests/test_slack_hitl_broker.py` — **38 passed**, no Slack account and no network needed).
+tests/test_slack_hitl_broker.py` — **41 passed**, no Slack account and no network needed).
 **NOT Attested:** see the boundary — the live Slack half is not re-proven here.
 
 **Environment.** macOS (Darwin 25.4.0), Python 3.12.13, pytest 9.1.1, pxx 2.5.4 working
@@ -2193,7 +2193,7 @@ transport is a loopback stub. The tests are deterministic.
 | `docs/examples/hitl/README.md` | stack C (the bridge), the two silent-deny misconfigurations, and what is *not* attested |
 
 **Record — 13 bridge test functions, 10 of them negative controls** (16 cases collected;
-row 10 is parametrized over 4 rejected nonces). The broker's own suite adds 22, for 38.
+row 10 is parametrized over 4 rejected nonces). The broker's own suite adds 25, for 41.
 
 | # | Test | Asserts |
 |---|---|---|
@@ -2241,6 +2241,24 @@ error channel. (3) The `posted` map grew once per *gated tool call* rather than 
 n8n request and was never pruned — unbounded in a long-running broker. `finalize` now pops.
 (4) The hook command interpolated paths without quoting, so a space in the repo or tmp path
 would mis-split under `shlex`.
+
+**A real race, found on the second review pass and measured before fixing.**
+`write_decision` created the final path with `O_EXCL` and *then* wrote into it, leaving a
+window where the decision file EXISTED but was empty or half-written. The gate polls
+`exists()` and immediately `json.loads`, so a read landing in that window parses as
+unreadable and **denies an approval the human actually gave**. Reproduced at **1 in 400**
+with a reader spinning on the path. Fixed by writing a scratch file, fsyncing it, and
+`os.link`ing it into place — atomic, and the link's fail-if-exists is what preserves the
+single-use contract `O_EXCL` used to provide.
+
+The obvious regression test — spin a reader and count partial reads — is the *wrong* test:
+at 1-in-400 it passes against broken code almost every run, which is a gate that cannot
+fail. The shipped test asserts the **property** instead, stalling the write and checking
+that the final path is not yet visible. Against the pre-fix implementation it fails
+deterministically (1 failed / 24 passed, 0.35 s); restored, 25/25. Two further tests cover
+scratch-file cleanup and single-use under 8-way contention. Also fixed: a `chat_update`
+failure in the timeout path turned a defined fail-closed `{"decision": "timeout"}` into an
+HTTP 500, so card edits are now best-effort in both the timeout and finalize paths.
 
 **Security note.** The caller-supplied nonce becomes a filename, so it is a path-traversal
 surface that did not exist while the broker minted its own. `sanitize_nonce` is

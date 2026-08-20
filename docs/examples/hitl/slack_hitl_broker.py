@@ -35,6 +35,7 @@ unit-test) without the dependency. Run: uv run --with slack_sdk --with fastapi -
 from __future__ import annotations
 
 import json
+import logging
 import os
 import time
 from pathlib import Path
@@ -45,6 +46,8 @@ from secrets import token_hex
 ACTION_DECISION = {"pxx_approve": "approve", "pxx_abort": "abort"}
 MODIFY_ACTION = "pxx_modify"
 MODIFY_CALLBACK = "pxx_modify_submit"
+
+log = logging.getLogger("pxx.hitl.slack")
 
 #: Bounds on a caller-supplied nonce. The gate mints `token_hex(8)` = 16 chars; allow a
 #: little room either side without allowing anything long enough to be interesting.
@@ -141,18 +144,32 @@ def write_decision(
     """
     if decision not in ("approve", "abort", "modify") or not nonce.isalnum():
         return False
-    try:
-        fd = os.open(hitl_dir / f"{nonce}.decision", os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-    except FileExistsError:
-        return False
     record = {"nonce": nonce, "decision": decision, "by": who, "ts": time.time()}
     if extra:
         record.update(extra)
-    with os.fdopen(fd, "w") as f:
-        json.dump(record, f)
-        f.flush()
-        os.fsync(f.fileno())
-    return True
+
+    # Publish ATOMICALLY. Creating the final path with O_EXCL and then writing into it
+    # leaves a window where the file EXISTS but is empty or half-written — and the gate
+    # polls `spool.exists()` and immediately `json.loads` it, so a read landing in that
+    # window parses as unreadable and DENIES an approval the human actually gave. Measured
+    # at roughly 1 in 400 with a reader spinning on the path, which is rare enough to look
+    # like a flaky human and often enough to happen. So: write a scratch file, fsync it,
+    # then link it into place. `os.link` is atomic and fails if the destination exists,
+    # which is what preserves the single-use contract that O_EXCL used to provide.
+    final = hitl_dir / f"{nonce}.decision"
+    tmp = hitl_dir / f".{nonce}.{os.getpid()}.{token_hex(4)}.tmp"
+    try:
+        fd = os.open(tmp, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        with os.fdopen(fd, "w") as f:
+            json.dump(record, f)
+            f.flush()
+            os.fsync(f.fileno())
+        os.link(tmp, final)  # atomic; raises FileExistsError if already decided
+        return True
+    except FileExistsError:
+        return False  # single-use: someone already decided this nonce
+    finally:
+        tmp.unlink(missing_ok=True)
 
 
 def approval_blocks(nonce: str, summary: str, origin: str = "") -> list:
@@ -285,12 +302,18 @@ def main() -> None:
         # once per GATED TOOL CALL, which in a long-running broker is unbounded.
         ch_ts = posted.pop(nonce, None)
         if ch_ts:
-            web.chat_update(
-                channel=ch_ts[0],
-                ts=ch_ts[1],
-                text=f"pxx approval {decision}",
-                blocks=outcome_blocks(decision, user.get("id", ""), detail),
-            )
+            try:
+                web.chat_update(
+                    channel=ch_ts[0],
+                    ts=ch_ts[1],
+                    text=f"pxx approval {decision}",
+                    blocks=outcome_blocks(decision, user.get("id", ""), detail),
+                )
+            except Exception:
+                # Same reasoning as the timeout path: the DECISION is already durably
+                # written and the caller is released by the spool, not by this edit. A
+                # failed card update must not propagate into the Socket Mode handler.
+                log.warning("card update failed for %s (decision %s stands)", nonce, decision)
 
     def on_socket(client: SocketModeClient, req: SocketModeRequest) -> None:
         client.send_socket_mode_response(SocketModeResponse(envelope_id=req.envelope_id))
@@ -387,12 +410,18 @@ def main() -> None:
         if decision == "timeout":
             ch_ts = posted.pop(nonce, None)
             if ch_ts:
-                web.chat_update(
-                    channel=ch_ts[0],
-                    ts=ch_ts[1],
-                    text="pxx approval expired (denied)",
-                    blocks=outcome_blocks("timeout", ""),
-                )
+                try:
+                    web.chat_update(
+                        channel=ch_ts[0],
+                        ts=ch_ts[1],
+                        text="pxx approval expired (denied)",
+                        blocks=outcome_blocks("timeout", ""),
+                    )
+                except Exception:
+                    # Editing the card is best-effort COSMETICS. Letting it raise would
+                    # turn a defined fail-closed `{"decision": "timeout"}` into a 500 and
+                    # make the caller's timeout look like a broker crash.
+                    log.warning("card cleanup failed for %s (decision still timeout)", nonce)
         return {"nonce": nonce, "decision": decision}  # non-approve is fail-closed
 
     # A HITL_DIR that does not match the caller's is a permanent, silent deny (see the

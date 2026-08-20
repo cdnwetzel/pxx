@@ -254,3 +254,75 @@ def test_only_the_blocking_endpoint_waits(broker):
 
     assert "wait_for_decision" in body_of("/request-approval")
     assert "wait_for_decision" not in body_of("/post-approval")
+
+
+# ---- atomic publication (PR #80 review) ----------------------------------------------
+
+
+def test_final_path_never_appears_before_the_content_is_complete(broker, tmp_path, monkeypatch):
+    """The atomicity property, asserted DETERMINISTICALLY.
+
+    Regression test for a real race: `write_decision` used to create the final path with
+    O_EXCL and then write into it, leaving a window where the file EXISTED but was empty
+    or half-written. The gate polls `exists()` and immediately `json.loads`, so a read
+    landing in that window parsed as unreadable and DENIED an approval the human gave.
+    Measured at ~1/400 against the pre-fix code with a reader spinning on the path.
+
+    Timing-based reproduction is the obvious test and the wrong one: at 1-in-400 it would
+    pass against broken code almost every run, which is a gate that cannot fail. So assert
+    the property instead -- stall the write and check what an observer can see. With the
+    fix the content goes to a scratch file and is `os.link`ed into place, so the final
+    path does not exist until it is complete; without it, the final path is already there
+    and empty.
+    """
+    real_dump = json.dump
+    observed = {}
+
+    def stalled_dump(obj, fp, **kw):
+        observed["final_exists_midwrite"] = (tmp_path / "slowwrite.decision").exists()
+        return real_dump(obj, fp, **kw)
+
+    monkeypatch.setattr(broker.json, "dump", stalled_dump)
+    assert broker.write_decision(tmp_path, "slowwrite", "approve", "chris") is True
+
+    assert observed["final_exists_midwrite"] is False, (
+        "the final decision path was visible while its content was still being written -- "
+        "a reader in that window sees partial JSON and denies a valid approval"
+    )
+    # and the completed file is intact
+    assert json.loads((tmp_path / "slowwrite.decision").read_text())["decision"] == "approve"
+
+
+def test_atomic_publish_still_leaves_no_scratch_files(broker, tmp_path):
+    """The temp file used for atomic publication must not litter the spool -- the gate
+    globs nothing, but an operator reading HITL_DIR should see decisions only."""
+    broker.write_decision(tmp_path, "cleanup1", "approve", "chris")
+    broker.write_decision(tmp_path, "cleanup1", "abort", "attacker")  # refused
+    names = sorted(p.name for p in tmp_path.iterdir())
+    assert names == ["cleanup1.decision"]
+
+
+def test_atomic_publish_preserves_single_use_under_contention(broker, tmp_path):
+    """Single-use is what O_EXCL gave us; `os.link` must keep it. Race several writers
+    on one nonce and assert exactly one wins and the record is that winner's."""
+    import threading
+
+    results: list[bool] = []
+    lock = threading.Lock()
+    barrier = threading.Barrier(8)
+
+    def contend(n):
+        barrier.wait()
+        ok = broker.write_decision(tmp_path, "contend1", "approve", f"writer{n}")
+        with lock:
+            results.append(ok)
+
+    threads = [threading.Thread(target=contend, args=(n,)) for n in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=10)
+
+    assert sum(results) == 1, f"expected exactly one winner, got {sum(results)}"
+    rec = json.loads((tmp_path / "contend1.decision").read_text())
+    assert rec["decision"] == "approve" and rec["by"].startswith("writer")

@@ -307,21 +307,36 @@ def test_atomic_publish_preserves_single_use_under_contention(broker, tmp_path):
     on one nonce and assert exactly one wins and the record is that winner's."""
     import threading
 
+    WRITERS = 8
     results: list[bool] = []
+    errors: list[BaseException] = []
     lock = threading.Lock()
-    barrier = threading.Barrier(8)
+    barrier = threading.Barrier(WRITERS)
 
     def contend(n):
         barrier.wait()
-        ok = broker.write_decision(tmp_path, "contend1", "approve", f"writer{n}")
+        try:
+            ok = broker.write_decision(tmp_path, "contend1", "approve", f"writer{n}")
+        except BaseException as exc:  # a raise must not masquerade as "did not win"
+            with lock:
+                errors.append(exc)
+            return
         with lock:
             results.append(ok)
 
-    threads = [threading.Thread(target=contend, args=(n,)) for n in range(8)]
+    threads = [threading.Thread(target=contend, args=(n,)) for n in range(WRITERS)]
     for t in threads:
         t.start()
     for t in threads:
         t.join(timeout=10)
+
+    # Assert every writer actually FINISHED before judging the winner count. Without this
+    # the test passes when one writer succeeds and the other seven die early: results is
+    # [True], sum == 1, green. That is a vacuous pass -- the exact failure mode this
+    # suite's negative controls exist to prevent. (Caught by review on PR #80.)
+    assert not errors, f"writers raised: {errors!r}"
+    assert not any(t.is_alive() for t in threads), "a writer thread never finished"
+    assert len(results) == WRITERS, f"only {len(results)}/{WRITERS} writers reported"
 
     assert sum(results) == 1, f"expected exactly one winner, got {sum(results)}"
     rec = json.loads((tmp_path / "contend1.decision").read_text())

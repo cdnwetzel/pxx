@@ -2260,6 +2260,20 @@ scratch-file cleanup and single-use under 8-way contention. Also fixed: a `chat_
 failure in the timeout path turned a defined fail-closed `{"decision": "timeout"}` into an
 HTTP 500, so card edits are now best-effort in both the timeout and finalize paths.
 
+**Third review pass.** Two more, both real. (1) `os.link` creates a *directory entry*, and
+fsyncing the scratch file persists only its inode and contents — a crash between the two
+loses the entry, so the gate could act on a decision that does not survive recovery, which
+is exactly what this spool's durability rule exists to prevent. The parent directory is now
+fsynced before returning success. **Honest coverage note: this fix has no test.** Dropping
+the directory fsync passes all 25 tests, because crash-durability is not observable
+in-process; it is correct by construction and unverified by the suite, and saying so is
+better than a test that pretends otherwise. (2) The contention test asserted
+`sum(results) == 1`, which passes when one writer succeeds and the other seven *raise*
+before appending — `results` is `[True]`, sum is 1, green. A vacuous pass in a test written
+to guard against vacuous passes. It now asserts every writer finished and reported
+(`len(results) == 8`, no exceptions, no live threads) before judging the winner; forcing
+seven writers to die fails it.
+
 **Security note.** The caller-supplied nonce becomes a filename, so it is a path-traversal
 surface that did not exist while the broker minted its own. `sanitize_nonce` is
 ASCII-alphanumeric plus a length bound, and rejects rather than sanitizes. ASCII matters:

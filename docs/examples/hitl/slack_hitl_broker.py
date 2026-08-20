@@ -165,6 +165,16 @@ def write_decision(
             f.flush()
             os.fsync(f.fileno())
         os.link(tmp, final)  # atomic; raises FileExistsError if already decided
+        # fsync the DIRECTORY too. Syncing the scratch file only persists its inode and
+        # contents; the directory entry `os.link` just created is a separate metadata
+        # write. A crash between the two loses the entry, so the gate could read and act
+        # on a decision that does not survive recovery — and this spool is precisely the
+        # thing the gate's "receipt persists BEFORE an allow is released" rule depends on.
+        dfd = os.open(hitl_dir, os.O_RDONLY)
+        try:
+            os.fsync(dfd)
+        finally:
+            os.close(dfd)
         return True
     except FileExistsError:
         return False  # single-use: someone already decided this nonce

@@ -84,11 +84,21 @@ confident wrong answer is still wrong, and both of these tools produce them.
 ## Before opening a PR
 
 ```bash
-uv run python -m pytest          # note: `python -m`, so cwd is on sys.path
+uv run python -m pytest              # note: `python -m`, so cwd is on sys.path
 uv run ruff check pxx tests
 uv run ruff format --check pxx tests
-uv run pxx check                 # governance scan
+uv run pxx check --all-files         # governance scan — SEE BELOW
 ```
+
+**Use `--all-files`.** Bare `pxx check` scans *staged files only*, so with nothing
+staged it scans nothing and reports `clean`. That is a pass it cannot fail, and it
+is not what CI runs — `.github/workflows/ci.yml` runs
+`pxx check --all-files --require-denylist`. A local `clean` from the bare form is
+not evidence about the tree.
+
+This is not hypothetical: a home path committed in `greptile.json` passed the bare
+local check (the file was untracked at the time, so nothing scanned it) and turned
+`v2` red for three consecutive pushes before anyone noticed.
 
 ## Releases
 

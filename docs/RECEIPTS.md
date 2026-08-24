@@ -2349,8 +2349,9 @@ Four were found by the reviewers under test, reviewing the harness that measures
 **Boundary — explicitly not claimed.**
 (a) **Coverage is unequal** (79% / 93% / 93% against the sovereign baseline's 100%). The rows
 are not strictly comparable and no reviewer was run to completion.
-(b) **n = 13.** Each case is worth ~0.077 recall; differences under ~0.15 are inside the
-noise of this corpus. Greptile's fp advantage over the sovereign baseline (0.000 vs 0.143)
+(b) **n = 13.** Recall is computed over the seven `expect=flag` cases and the false-positive
+rate over the seven `expect=clean` cases, so **one case moves either metric by ~0.143**.
+Differences smaller than that are not resolvable by this corpus at all. Greptile's fp advantage over the sovereign baseline (0.000 vs 0.143)
 sits **at** that line and is suggestive, not established.
 (c) **One run per reviewer.** No variance estimate; these services are not temperature-pinned.
 (d) The corpus is small, synthetic, context-free diffs and therefore **understates

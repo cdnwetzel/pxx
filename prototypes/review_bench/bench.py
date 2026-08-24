@@ -49,6 +49,10 @@ class Reconstructed:
     after: str
 
 
+class UnsafeDiffPath(ValueError):
+    """A diff header names a path that cannot be materialised safely."""
+
+
 def reconstruct(diff: str) -> list[Reconstructed]:
     """Rebuild the before/after text of each file's hunk region from a unified diff.
 
@@ -85,9 +89,13 @@ def reconstruct(diff: str) -> list[Reconstructed]:
             raw = raw[2:] if raw.startswith("b/") else raw
             # A deleted file renders as "+++ /dev/null"; an absolute or
             # traversing path would escape the scaffold directory entirely,
-            # since Path("out") / "/abs" discards "out". Refuse rather than
-            # write outside the tree.
-            path = None if not _safe_rel_path(raw) else raw
+            # since Path("out") / "/abs" discards "out". RAISE rather than set
+            # path=None: skipping just that hunk would leave the rest of a
+            # multi-file diff reconstructed and silently incomplete, producing a
+            # PR that does not carry the case it claims to.
+            if not _safe_rel_path(raw):
+                raise UnsafeDiffPath(raw)
+            path = raw
             continue
         if line.startswith("@@"):
             in_hunk = True
@@ -131,7 +139,11 @@ def cmd_scaffold(args) -> int:
     # pre-image. Only the path prefix differs from the corpus; the +/- content
     # lines the reviewer sees are identical.
     for case in cases:
-        files = reconstruct(case.diff)
+        try:
+            files = reconstruct(case.diff)
+        except UnsafeDiffPath as exc:
+            skipped.append((case.id, f"unsafe path in diff header: {exc}"))
+            continue
         if not files:
             skipped.append((case.id, "no reconstructable hunk"))
             continue
@@ -148,7 +160,10 @@ def cmd_scaffold(args) -> int:
     git("commit", "-q", "-m", "base: pre-image of every calibration case")
 
     for case in cases:
-        files = reconstruct(case.diff)
+        try:
+            files = reconstruct(case.diff)
+        except UnsafeDiffPath:
+            continue  # already reported in `skipped`
         if not files:
             continue
         branch = f"case/{case.id}"

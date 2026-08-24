@@ -252,14 +252,24 @@ def cmd_harvest(args) -> int:
         case_id = branch[len("case/"):]
         num = pr["number"]
         inline = _gh_json(["api", f"repos/{args.repo}/pulls/{num}/comments", "--paginate"])
-        summary = _gh_json(["api", f"repos/{args.repo}/issues/{num}/comments", "--paginate"])
+        issue_comments = _gh_json(["api", f"repos/{args.repo}/issues/{num}/comments", "--paginate"])
+        # PR REVIEW bodies live at /pulls/{n}/reviews, NOT in issue comments. A
+        # reviewer that submits a formal review (COMMENTED / CHANGES_REQUESTED)
+        # with its summary in the review body is invisible to the issue-comments
+        # endpoint — Copilot does exactly this. Missing them meant scoring on
+        # partial input while believing it was complete.
+        reviews = _gh_json(["api", f"repos/{args.repo}/pulls/{num}/reviews", "--paginate"])
         mine_inline = [c for c in inline if c["user"]["login"] == login]  # type: ignore[index]
-        mine_summary = [c for c in summary if c["user"]["login"] == login]  # type: ignore[index]
+        mine_summary = [c["body"] for c in issue_comments if c["user"]["login"] == login]  # type: ignore[index]
+        mine_summary += [
+            r["body"] for r in reviews  # type: ignore[index]
+            if r["user"]["login"] == login and (r.get("body") or "").strip()
+        ]
         if not mine_inline and not mine_summary:
             # No response recorded. Deliberately NOT written as an approval —
             # a missing capture must reach the scorer as unavailable.
             continue
-        blob = "\n".join(c["body"] for c in mine_summary)  # type: ignore[index]
+        blob = "\n".join(mine_summary)
         if not mine_inline and _NON_REVIEW.search(blob):
             # Present but not a review (rate-limited / still processing). Drop it
             # so the scorer sees an absent capture rather than a clean bill.
@@ -268,7 +278,7 @@ def cmd_harvest(args) -> int:
         captures[case_id] = {
             "pr": num,
             "inline": [{"path": c.get("path"), "body": c["body"]} for c in mine_inline],  # type: ignore[index]
-            "summary": [c["body"] for c in mine_summary],  # type: ignore[index]
+            "summary": mine_summary,
         }
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -295,7 +305,18 @@ def translate(reviewer: str, capture: dict, *, lenient_severity: str | None) -> 
 
     if reviewer == "coderabbit":
         m = _ACTIONABLE.search(summary_text)
-        n = int(m.group(1)) if m else len(inline)
+        if m is None:
+            # The pre-registered rule makes the summary count authoritative for
+            # CodeRabbit. Falling back to len(inline) would be undeclared
+            # discretion that can change an outcome — and a capture with no
+            # count line is a non-review that harvest should already have
+            # dropped. Refuse rather than guess.
+            raise ValueError(
+                "coderabbit capture has no 'Actionable comments posted' line; "
+                "it is not a completed review (re-harvest, or the response is a "
+                "rate-limit/processing notice)"
+            )
+        n = int(m.group(1))
     else:
         n = len(inline)
 
@@ -326,13 +347,23 @@ def cmd_score(args) -> int:
     cases = load_cases(CORPUS)
     by_id = {c.id: c for c in cases}
 
+    # Do not quietly drop captures the corpus does not know about: that bypasses
+    # RecordedReviewer.from_cases' divergence check and inflates the reported
+    # capture count, so a stale capture file could produce a confident score.
+    unknown = sorted(set(captures) - set(by_id))
+    if unknown:
+        print(
+            f"capture file references {len(unknown)} case id(s) absent from the corpus: "
+            f"{unknown}\nThe bench and the corpus have diverged; re-scaffold and re-harvest.",
+            file=sys.stderr,
+        )
+        return 2
+
     rows = []
     for mode in ("strict", "lenient"):
         responses = {}
         for case_id, cap in captures.items():
-            case = by_id.get(case_id)
-            if case is None:
-                continue
+            case = by_id[case_id]
             lenient = (case.min_severity or "low") if mode == "lenient" else None
             responses[case_id] = translate(reviewer_name, cap, lenient_severity=lenient)
         report = asyncio.run(

@@ -19,6 +19,7 @@ import pytest
 
 from pxx.calibration import (
     MAX_FP_RATE,
+    MIN_AGREEMENT,
     MIN_RECALL,
     CaptureMissing,
     Expect,
@@ -137,3 +138,17 @@ def test_thresholds_are_the_published_ones(cases):
     """Guards against the bench being quietly loosened to let a tool through."""
     assert MIN_RECALL == 0.75
     assert MAX_FP_RATE == 0.25
+    # MIN_AGREEMENT is part of the published bar too; locking only two of the
+    # three would leave a way to loosen the benchmark unnoticed.
+    assert MIN_AGREEMENT == 0.75
+
+
+def test_duplicate_diffs_are_rejected_not_silently_merged(cases):
+    """Replay identity is the diff (the Reviewer protocol passes no case id), so
+    two cases sharing a diff would be last-write-wins and would replay one case's
+    response for the other. Reject the ambiguity instead of resolving it."""
+    from dataclasses import replace as _replace
+
+    clash = _replace(cases[1], id="clashing-case", diff=cases[0].diff)
+    with pytest.raises(ConfigError, match="identical diff"):
+        RecordedReviewer.from_cases([*cases, clash], {})

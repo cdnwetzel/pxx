@@ -7,7 +7,7 @@ Non-shipped (`prototypes/`, excluded from the wheel). Merged is delivered; no ve
 pxx already grades a reviewer. `evals/calibration/` is 14 labelled cases (7 `expect=flag`,
 7 `expect=clean`) and `pxx/calibration.py` publishes the thresholds:
 
-```
+```text
 MIN_RECALL 0.75 · MAX_FP_RATE 0.25 · MIN_FORMAT_COMPLIANCE 0.9
 MIN_AVAILABILITY 0.75 · MIN_AGREEMENT 0.75
 ```
@@ -46,12 +46,16 @@ discretion over the outcome:
 | Greptile | ≥ 1 inline review comment on the PR | its own severity label when present |
 | Copilot | ≥ 1 inline review comment on the PR | none emitted → see dual scoring |
 
-Nitpick/duplicate/outside-diff sections are **not** counted as findings. Absence of any
-comment = APPROVE.
+Absence of any comment = APPROVE.
+
+On nitpicks: CodeRabbit's *actionable* count already excludes them, so for CodeRabbit the
+rule inherits that exclusion. Reviewers scored by inline-comment count have no nitpick
+distinction to inherit, and the harness applies **no filtering of its own** — stated plainly
+because an earlier draft of this file claimed filtering the translator does not do.
 
 ### Dual scoring, because severity vocabulary is not the thing being measured
 
-Four flag cases carry a `min_severity` (2 `high`, 3 `medium`). A tool with no severity
+Five flag cases carry a `min_severity` (2 `high`, 3 `medium`); the two `edge-*` flag cases carry none. A tool with no severity
 vocabulary would fail those on format rather than on substance, which measures the wrong
 thing. So every run reports **both**:
 
@@ -97,9 +101,13 @@ python3 prototypes/review_bench/bench.py score \
     --captures prototypes/review_bench/captures/coderabbit.json
 ```
 
-`scaffold` reconstructs each case's before/after file state from the unified diff, so the
-PR diff GitHub shows is byte-identical to the diff the sovereign reviewer was given. It
-verifies this and refuses to emit a case where it is not.
+`scaffold` reconstructs each case's before/after file state from the unified diff. It then
+compares how git renders that change against the corpus diff. A case whose rendering
+differs is still emitted — the before/after state is correct, git simply minimises where a
+hand-written diff did not — but it is flagged in the output and recorded per case as
+`rendering_differs` in `bench-manifest.json`, because that case's PR is **not**
+byte-identical to what the sovereign reviewer saw. A case with no reconstructable hunk
+(`edge-empty-diff`, which cannot be a PR at all) is reported as skipped.
 
 ## PR hygiene
 
@@ -114,6 +122,8 @@ credits.
 
 ## Captures are evidence
 
-`captures/*.json` stores each reviewer's response **verbatim** alongside the derived
-verdict, so the translation is auditable after the fact and a disputed score can be
-re-derived without re-running the reviewers.
+`captures/*.json` stores each reviewer's response **verbatim** — inline comments, issue
+comments, and PR review bodies. The derived verdict is **not** persisted; it is recomputed
+from the raw text on every `score` run. That is deliberate: the translation rule stays the
+single source of truth, so changing it cannot leave stale verdicts behind. A disputed score
+is re-derivable from the captures without re-running the reviewers.

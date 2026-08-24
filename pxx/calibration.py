@@ -281,7 +281,20 @@ class RecordedReviewer:
             # the corpus have diverged; scoring it would silently measure the
             # wrong thing.
             raise ConfigError(f"recorded responses for unknown case ids: {unknown}")
-        return cls(responses=dict(responses), _by_diff={c.diff: c.id for c in cases})
+        by_diff: dict[str, str] = {}
+        for case in cases:
+            # Replay identity is the DIFF, because the Reviewer protocol passes
+            # only (diff, task). Two cases sharing a diff would make that mapping
+            # last-write-wins and silently replay one case's response for the
+            # other. load_cases enforces unique ids but not unique diffs, so the
+            # ambiguity is rejected here rather than resolved arbitrarily.
+            if case.diff in by_diff:
+                raise ConfigError(
+                    f"cases {by_diff[case.diff]!r} and {case.id!r} share an identical diff; "
+                    "recorded replay cannot tell them apart"
+                )
+            by_diff[case.diff] = case.id
+        return cls(responses=dict(responses), _by_diff=by_diff)
 
     async def review(self, diff: str, task: str) -> str:
         case_id = self._by_diff.get(diff)

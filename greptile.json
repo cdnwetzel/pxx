@@ -2,7 +2,7 @@
   "statusCheck": false,
   "strictness": 2,
   "commentTypes": ["logic", "syntax"],
-  "triggerOnUpdates": true,
+  "triggerOnUpdates": false,
   "triggerOnDrafts": false,
   "shouldUpdateDescription": false,
   "includeConfidenceScore": true,

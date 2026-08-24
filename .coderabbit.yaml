@@ -9,6 +9,22 @@ reviews:
   auto_review:
     enabled: true
     drafts: false
+    # One review per PR, not one per PUSH. Limits are per DEVELOPER per hour
+    # (Pro = 5), not per repo, and `auto_incremental_review` defaults to true —
+    # "re-run the review on each push". A fix loop of 3-4 pushes therefore spends
+    # a whole hour's budget on a single PR, which is how the 2.4.2-2.4.4 wave hit
+    # the limit (see PR #63's "Review limit reached" notice).
+    #
+    # TRADE-OFF, and it is a real one: the status check now reflects the review
+    # of the OPENING commit. Push fixes after that and the check stays green
+    # having never read them — a gate passing on code it did not see. So this
+    # setting is only safe paired with the mandatory step in CONTRIBUTING.md:
+    # comment `@coderabbitai review` on the final push BEFORE merging.
+    auto_incremental_review: false
+    # Backstop if incremental review is ever re-enabled: pause after 2 reviewed
+    # commits rather than the default 5, so a long fix loop cannot silently
+    # consume the hourly budget.
+    auto_pause_after_reviewed_commits: 2
   path_filters:
     - "!uv.lock"
   path_instructions:

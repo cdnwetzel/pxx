@@ -24,7 +24,7 @@ import re
 import subprocess
 import sys
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
@@ -32,6 +32,14 @@ sys.path.insert(0, str(REPO_ROOT))
 CORPUS = REPO_ROOT / "evals" / "calibration"
 
 # --- diff reconstruction --------------------------------------------------------------
+
+
+def _safe_rel_path(raw: str) -> bool:
+    """True only for a relative path that stays inside the scaffold directory."""
+    if not raw or raw == "/dev/null":
+        return False
+    pure = PurePosixPath(raw)
+    return not pure.is_absolute() and ".." not in pure.parts
 
 
 @dataclass(frozen=True)
@@ -73,8 +81,13 @@ def reconstruct(diff: str) -> list[Reconstructed]:
             in_hunk = False
             continue
         if line.startswith("+++ "):
-            path = line[4:].strip()
-            path = path[2:] if path.startswith("b/") else path
+            raw = line[4:].strip()
+            raw = raw[2:] if raw.startswith("b/") else raw
+            # A deleted file renders as "+++ /dev/null"; an absolute or
+            # traversing path would escape the scaffold directory entirely,
+            # since Path("out") / "/abs" discards "out". Refuse rather than
+            # write outside the tree.
+            path = None if not _safe_rel_path(raw) else raw
             continue
         if line.startswith("@@"):
             in_hunk = True
@@ -216,6 +229,11 @@ _ACTIONABLE = re.compile(r"Actionable comments posted:\s*(\d+)", re.IGNORECASE)
 #: "Actionable comments posted: 0". Treating only the numeric form as a completed
 #: review made every clean verdict look like a non-review.
 _NO_ACTIONABLE = re.compile(r"No actionable comments", re.IGNORECASE)
+#: Proof a capture IS a completed review. Checked BEFORE the non-review patterns,
+#: because CodeRabbit renders a clean review with no inline comments and a
+#: "Review Change Stack" banner attached — dropping on the banner threw away
+#: every clean verdict and pinned coverage at 8/14 while 11 PRs had real reviews.
+_COMPLETED = re.compile(r"Actionable comments posted:\s*\d+|No actionable comments", re.IGNORECASE)
 
 #: A reviewer can post a comment that is NOT a review — a rate-limit notice, an
 #: "in progress" placeholder, an error. Captured naively these parse to zero
@@ -268,6 +286,10 @@ def cmd_harvest(args) -> int:
         # endpoint — Copilot does exactly this. Missing them meant scoring on
         # partial input while believing it was complete.
         reviews = _gh_json(["api", f"repos/{args.repo}/pulls/{num}/reviews", "--paginate"])
+        mine_states = [
+            r["state"] for r in reviews  # type: ignore[index]
+            if r["user"]["login"] in logins
+        ]
         mine_inline = [c for c in inline if c["user"]["login"] in logins]  # type: ignore[index]
         mine_summary = [
             c["body"] for c in issue_comments if c["user"]["login"] in logins  # type: ignore[index]
@@ -281,7 +303,7 @@ def cmd_harvest(args) -> int:
             # a missing capture must reach the scorer as unavailable.
             continue
         blob = "\n".join(mine_summary)
-        if not mine_inline and _NON_REVIEW.search(blob):
+        if not mine_inline and not _COMPLETED.search(blob) and _NON_REVIEW.search(blob):
             # Present but not a review (rate-limited / still processing). Drop it
             # so the scorer sees an absent capture rather than a clean bill.
             non_reviews.append(case_id)
@@ -290,6 +312,7 @@ def cmd_harvest(args) -> int:
             "pr": num,
             "inline": [{"path": c.get("path"), "body": c["body"]} for c in mine_inline],  # type: ignore[index]
             "summary": mine_summary,
+            "review_states": mine_states,
         }
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -331,7 +354,18 @@ def translate(reviewer: str, capture: dict, *, lenient_severity: str | None) -> 
             )
         n = int(m.group(1))
     else:
-        n = len(inline)
+        # A formal review STATE is machine-readable and outranks a comment count:
+        # a CHANGES_REQUESTED review carrying its findings in the body with no
+        # inline comments would otherwise count as zero findings and translate to
+        # APPROVE. Pre-registered: CHANGES_REQUESTED flags, APPROVED approves,
+        # COMMENTED falls through to the inline count.
+        states = set(capture.get("review_states", []))
+        if "CHANGES_REQUESTED" in states:
+            n = max(len(inline), 1)
+        elif states == {"APPROVED"} and not inline:
+            return "VERDICT: APPROVE"
+        else:
+            n = len(inline)
 
     if n == 0:
         return "VERDICT: APPROVE"

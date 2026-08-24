@@ -46,7 +46,16 @@ discretion over the outcome:
 | Greptile | ≥ 1 inline review comment on the PR | its own severity label when present |
 | Copilot | ≥ 1 inline review comment on the PR | none emitted → see dual scoring |
 
-Absence of any comment = APPROVE.
+A capture counts as a completed review only when it carries a completion marker —
+for CodeRabbit, `Actionable comments posted: N` or `No actionable comments`. A capture
+without one is a non-review (rate-limit notice, in-progress placeholder, or the "Review
+Change Stack" banner) and is dropped at harvest so it reaches the scorer as MISSING, not as
+a clean bill. A completed review reporting zero findings = APPROVE.
+
+For reviewers scored by inline count, a **formal review state** outranks the count:
+`CHANGES_REQUESTED` flags regardless of inline comments, `APPROVED` with no inline comments
+approves, and `COMMENTED` falls through to the count. Without that rule a review carrying
+its findings in the body and none inline would translate to APPROVE.
 
 On nitpicks: CodeRabbit's *actionable* count already excludes them, so for CodeRabbit the
 rule inherits that exclusion. Reviewers scored by inline-comment count have no nitpick

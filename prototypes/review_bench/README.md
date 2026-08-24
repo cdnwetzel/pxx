@@ -66,6 +66,19 @@ Neither is "the" number. Report both. A tool that only passes leniently has caug
 defect but cannot express urgency, which is worth knowing rather than hiding behind one
 figure.
 
+## Partial runs: coverage, not imputation
+
+`run_calibration` treats an absent response as *flagged*. That is right for a live gate —
+an unavailable reviewer must block — and **wrong for a benchmark**, where an uncaptured
+case is missing data, not a judgement the reviewer made.
+
+Observed for real on the first run: CodeRabbit was rate-limited on five `clean` cases and
+scored `fp_rate 1.000`, a figure produced entirely by absent captures. So `score` runs only
+over captured cases and prints coverage. A partial run is visibly partial.
+
+**Compare reviewers only at equal coverage.** A score at 57% coverage is not comparable to
+one at 93%, and neither is comparable to the sovereign baseline, which ran the full corpus.
+
 ## What this bench does NOT measure
 
 Stated up front, because a benchmark that oversells itself is worse than none:

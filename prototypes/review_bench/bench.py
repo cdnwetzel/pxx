@@ -212,6 +212,10 @@ _CR_SEVERITY = [
     (re.compile(r"🔵|\bTrivial\b"), "low"),
 ]
 _ACTIONABLE = re.compile(r"Actionable comments posted:\s*(\d+)", re.IGNORECASE)
+#: CodeRabbit renders a clean review as "No actionable comments", not as
+#: "Actionable comments posted: 0". Treating only the numeric form as a completed
+#: review made every clean verdict look like a non-review.
+_NO_ACTIONABLE = re.compile(r"No actionable comments", re.IGNORECASE)
 
 #: A reviewer can post a comment that is NOT a review — a rate-limit notice, an
 #: "in progress" placeholder, an error. Captured naively these parse to zero
@@ -221,14 +225,19 @@ _ACTIONABLE = re.compile(r"Actionable comments posted:\s*(\d+)", re.IGNORECASE)
 #: scorer as MISSING, i.e. unavailable and flagged.
 _NON_REVIEW = re.compile(
     r"Review limit reached|rate limited by|Currently processing new changes|"
-    r"review is currently in progress|We are unable to review",
+    r"review is currently in progress|We are unable to review|"
+    r"review_stack_entry_start|Review Change Stack",
     re.IGNORECASE,
 )
 
+#: A reviewer can post under MORE THAN ONE login. Copilot posts inline comments
+#: as "Copilot" and review bodies as "copilot-pull-request-reviewer[bot]";
+#: filtering on a single login silently dropped every inline finding and scored
+#: it at recall 0.000 — a number that was pure harness artifact.
 _REVIEWER_LOGINS = {
-    "coderabbit": "coderabbitai[bot]",
-    "greptile": "greptile-apps[bot]",
-    "copilot": "copilot-pull-request-reviewer[bot]",
+    "coderabbit": ("coderabbitai[bot]",),
+    "greptile": ("greptile-apps[bot]",),
+    "copilot": ("copilot-pull-request-reviewer[bot]", "Copilot"),
 }
 
 
@@ -240,7 +249,7 @@ def _gh_json(args: list[str]) -> object:
 
 
 def cmd_harvest(args) -> int:
-    login = _REVIEWER_LOGINS.get(args.reviewer, args.reviewer)
+    logins = _REVIEWER_LOGINS.get(args.reviewer, (args.reviewer,))
     prs = _gh_json(["pr", "list", "--repo", args.repo, "--state", "all", "--limit", "100",
                     "--json", "number,headRefName"])
     captures: dict = {}
@@ -259,11 +268,13 @@ def cmd_harvest(args) -> int:
         # endpoint — Copilot does exactly this. Missing them meant scoring on
         # partial input while believing it was complete.
         reviews = _gh_json(["api", f"repos/{args.repo}/pulls/{num}/reviews", "--paginate"])
-        mine_inline = [c for c in inline if c["user"]["login"] == login]  # type: ignore[index]
-        mine_summary = [c["body"] for c in issue_comments if c["user"]["login"] == login]  # type: ignore[index]
+        mine_inline = [c for c in inline if c["user"]["login"] in logins]  # type: ignore[index]
+        mine_summary = [
+            c["body"] for c in issue_comments if c["user"]["login"] in logins  # type: ignore[index]
+        ]
         mine_summary += [
             r["body"] for r in reviews  # type: ignore[index]
-            if r["user"]["login"] == login and (r.get("body") or "").strip()
+            if r["user"]["login"] in logins and (r.get("body") or "").strip()
         ]
         if not mine_inline and not mine_summary:
             # No response recorded. Deliberately NOT written as an approval —
@@ -284,7 +295,7 @@ def cmd_harvest(args) -> int:
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps({"reviewer": args.reviewer, "repo": args.repo,
                                "captures": captures}, indent=2) + "\n", encoding="utf-8")
-    print(f"captured {len(captures)} case responses from {login} -> {out}")
+    print(f"captured {len(captures)} case responses from {'/'.join(logins)} -> {out}")
     if non_reviews:
         print(
             f"DROPPED {len(non_reviews)} non-review comment(s) (rate-limit notice or "
@@ -305,6 +316,8 @@ def translate(reviewer: str, capture: dict, *, lenient_severity: str | None) -> 
 
     if reviewer == "coderabbit":
         m = _ACTIONABLE.search(summary_text)
+        if m is None and _NO_ACTIONABLE.search(summary_text):
+            return "VERDICT: APPROVE"
         if m is None:
             # The pre-registered rule makes the summary count authoritative for
             # CodeRabbit. Falling back to len(inline) would be undeclared
@@ -366,13 +379,26 @@ def cmd_score(args) -> int:
             case = by_id[case_id]
             lenient = (case.min_severity or "low") if mode == "lenient" else None
             responses[case_id] = translate(reviewer_name, cap, lenient_severity=lenient)
+        # Score over CAPTURED cases only. run_calibration treats an absent
+        # response as flagged, which is right for a live gate (unavailable must
+        # block) and WRONG for a benchmark: an uncaptured clean case would count
+        # as a false positive the reviewer never committed. Observed for real —
+        # CodeRabbit was rate-limited on 5 clean cases and scored fp_rate 1.000,
+        # a number produced entirely by missing data. Coverage is reported
+        # instead, so a partial run is visibly partial rather than quietly wrong.
+        scored = [c for c in cases if c.id in responses]
         report = asyncio.run(
-            run_calibration(RecordedReviewer.from_cases(cases, responses), cases)
+            run_calibration(RecordedReviewer.from_cases(cases, responses), scored)
         )
         rows.append((mode, report))
 
-    print(f"\nreviewer: {reviewer_name}   corpus: {len(cases)} cases   "
-          f"captured: {len(captures)}")
+    covered = len([c for c in cases if c.id in captures])
+    pct = 100.0 * covered / len(cases) if cases else 0.0
+    print(f"\nreviewer: {reviewer_name}   scored on {covered}/{len(cases)} cases "
+          f"({pct:.0f}% coverage)")
+    if covered < len(cases):
+        print("  PARTIAL RUN — uncaptured cases are excluded, not counted against "
+              "the reviewer. Compare across reviewers only at equal coverage.")
     print(f"{'mode':<9}{'recall':>8}{'fp_rate':>9}{'agreement':>11}  verdict")
     for mode, r in rows:
         b = breaches(r)

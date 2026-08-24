@@ -213,6 +213,18 @@ _CR_SEVERITY = [
 ]
 _ACTIONABLE = re.compile(r"Actionable comments posted:\s*(\d+)", re.IGNORECASE)
 
+#: A reviewer can post a comment that is NOT a review — a rate-limit notice, an
+#: "in progress" placeholder, an error. Captured naively these parse to zero
+#: findings and therefore to APPROVE, which is silence-as-approval through a
+#: side door: the tool never judged the diff, and would be scored as having
+#: cleared it. Any capture matching these is dropped at harvest so it reaches the
+#: scorer as MISSING, i.e. unavailable and flagged.
+_NON_REVIEW = re.compile(
+    r"Review limit reached|rate limited by|Currently processing new changes|"
+    r"review is currently in progress|We are unable to review",
+    re.IGNORECASE,
+)
+
 _REVIEWER_LOGINS = {
     "coderabbit": "coderabbitai[bot]",
     "greptile": "greptile-apps[bot]",
@@ -231,7 +243,8 @@ def cmd_harvest(args) -> int:
     login = _REVIEWER_LOGINS.get(args.reviewer, args.reviewer)
     prs = _gh_json(["pr", "list", "--repo", args.repo, "--state", "all", "--limit", "100",
                     "--json", "number,headRefName"])
-    captures = {}
+    captures: dict = {}
+    non_reviews: list[str] = []
     for pr in prs:  # type: ignore[union-attr]
         branch = pr["headRefName"]
         if not branch.startswith("case/"):
@@ -246,6 +259,12 @@ def cmd_harvest(args) -> int:
             # No response recorded. Deliberately NOT written as an approval —
             # a missing capture must reach the scorer as unavailable.
             continue
+        blob = "\n".join(c["body"] for c in mine_summary)  # type: ignore[index]
+        if not mine_inline and _NON_REVIEW.search(blob):
+            # Present but not a review (rate-limited / still processing). Drop it
+            # so the scorer sees an absent capture rather than a clean bill.
+            non_reviews.append(case_id)
+            continue
         captures[case_id] = {
             "pr": num,
             "inline": [{"path": c.get("path"), "body": c["body"]} for c in mine_inline],  # type: ignore[index]
@@ -256,6 +275,13 @@ def cmd_harvest(args) -> int:
     out.write_text(json.dumps({"reviewer": args.reviewer, "repo": args.repo,
                                "captures": captures}, indent=2) + "\n", encoding="utf-8")
     print(f"captured {len(captures)} case responses from {login} -> {out}")
+    if non_reviews:
+        print(
+            f"DROPPED {len(non_reviews)} non-review comment(s) (rate-limit notice or "
+            f"still processing) — these score as UNAVAILABLE, never as approval:"
+        )
+        for cid in non_reviews:
+            print(f"  {cid}")
     return 0
 
 

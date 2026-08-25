@@ -20,7 +20,8 @@ The sovereign reviewer has been measured against exactly this:
 | `qwen2.5-coder:32b` | 0.857 | 0.143 | passes → blocking-grade (needs >16 GB) |
 
 So an external reviewer earns a place here only by clearing the same bar. **Pre-registered
-before running anything: recall ≥ 0.857 AND fp ≤ 0.143 beats the best sovereign result.
+before running anything: recall ≥ 0.857 AND fp ≤ 0.143 MATCHES OR EXCEEDS the best
+sovereign result** (equality at this precision is a tie, not a win).
 Below 0.75 / above 0.25 fails calibration outright.**
 
 ## Why a replay adapter instead of a live one
@@ -101,9 +102,20 @@ Stated up front, because a benchmark that oversells itself is worse than none:
    you spot a defect in a diff — and an unfair one for their differentiator. That is why
    the bench is paired with the running unique-find ledger on real PRs, which has the
    opposite bias (high external validity, no ground truth).
-3. **n = 14.** Each case is worth ~0.14 recall. Two cases' difference is inside the noise.
+3. **The scaffolded files are TRUNCATED.** A case is a diff, and the corpus holds no
+   full-file source (`id`, `kind`, `diff`, `task`, `expect`, `min_severity` — nothing else).
+   Reconstruction can therefore only materialise the hunk region: the PR's file contains the
+   changed lines and their context and *nothing else* — no imports, no surrounding
+   definitions. Inventing that context would be fabricating evidence, so the bench does not.
+   The consequence is real and cuts one way: a codebase-aware reviewer may flag a truncated
+   file for problems the case never intended (an unresolved name, a missing import), which
+   **inflates the false-positive rate** for exactly the reviewers this corpus already
+   disadvantages. Treat any fp figure here as an upper bound. Raised by Greptile reviewing
+   this harness (PR #81).
+
+4. **n = 14.** Each case is worth ~0.14 recall. Two cases' difference is inside the noise.
    Treat a gap under ~0.15 as "not distinguished by this bench".
-4. **One shot per case.** No variance estimate. A model reviewer is temperature-pinned;
+5. **One shot per case.** No variance estimate. A model reviewer is temperature-pinned;
    these tools are not, and may not be deterministic.
 
 ## Running it
@@ -139,8 +151,11 @@ evaluation-readiness story, and an external evaluator reading that history shoul
 work.
 
 Pace the PRs: CodeRabbit limits are per developer per hour (Pro = 5), so 14 PRs is roughly
-three hours, or open them and let the queue drain. Greptile spends 14 of its 50 monthly
-credits.
+three hours, or open them and let the queue drain.
+
+Greptile billing inputs, since the estimate depends on them: **Starter plan, 50 credits per
+month, standard review mode**. A standard review costs 1 credit, so 13 PRs cost 13 credits.
+TREX reviews cost 3 credits each — the same run in TREX mode would cost 39, most of a month.
 
 ## Captures are evidence
 

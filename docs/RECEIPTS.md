@@ -2359,11 +2359,19 @@ Differences smaller than these steps are not resolvable by this corpus at all, a
 CodeRabbit's fp figure in particular rests on four observations. Greptile's fp advantage over the sovereign baseline (0.000 vs 0.143)
 sits **at** that line and is suggestive, not established.
 (c) **One run per reviewer.** No variance estimate; these services are not temperature-pinned.
-(d) The corpus is small, synthetic, context-free diffs and therefore **understates
+(d) **The scaffolded files are truncated, so every fp figure is an upper bound.** A case is
+a diff and the corpus holds no full-file source, so a PR's file contains the hunk region and
+nothing else — no imports, no surrounding definitions. Inventing that context would be
+fabricating evidence. A codebase-aware reviewer can therefore flag a truncated file for
+problems the case never intended, inflating its false-positive rate. This bears directly on
+the headline: Greptile's `fp 0.000` is robust to it (an upper bound of zero is zero), while
+Copilot's `0.667` and CodeRabbit's `0.250` may both be overstated. Raised by Greptile
+reviewing this harness on PR #81.
+(e) The corpus is small, synthetic, context-free diffs and therefore **understates
 codebase-aware reviewers**, whose stated advantage is whole-repo context. This measures the
 shared capability — spot a defect in a diff — and is unfair to their differentiator.
-(e) `format_compliance` and `availability` are properties of this harness, not of the tools.
-(f) Nothing here licenses promoting any reviewer to a blocking gate. A lenient-only pass at
+(f) `format_compliance` and `availability` are properties of this harness, not of the tools.
+(g) Nothing here licenses promoting any reviewer to a blocking gate. A lenient-only pass at
 unequal coverage on 13 cases is not that evidence.
 
 ---

@@ -2317,12 +2317,12 @@ severity vocabulary is not the capability under test.
 
 **Observed (2026-08-24).**
 
-| Reviewer | Coverage | Recall | FP | Agreement | Result |
+| Reviewer | Coverage | Recall (n flag) | FP (n clean) | Agreement | Result |
 |---|---|---|---|---|---|
-| Greptile (lenient) | 13/14 | 0.857 | **0.000** | 0.923 | **PASS** |
-| Greptile (strict) | 13/14 | 0.286 | 0.000 | 0.615 | fail — severity vocabulary |
-| CodeRabbit (both modes) | 11/14 | 0.857 | 0.250 | 0.818 | **PASS** |
-| Copilot (lenient) | 13/14 | **1.000** | 0.667 | 0.692 | fail — over-flags |
+| Greptile (lenient) | 13/14 | 0.857 (6/7) | **0.000 (0/6)** | 0.923 | **PASS** |
+| Greptile (strict) | 13/14 | 0.286 (2/7) | 0.000 (0/6) | 0.615 | fail — severity vocabulary |
+| CodeRabbit (both modes) | 11/14 | 0.857 (6/7) | 0.250 (1/4) | 0.818 | **PASS** |
+| Copilot (lenient) | 13/14 | **1.000 (7/7)** | 0.667 (4/6) | 0.692 | fail — over-flags |
 | *sovereign `qwen2.5-coder:32b`* | *14/14* | *0.857* | *0.143* | — | *pass* |
 
 Greptile matches the sovereign reviewer's recall at a lower false-positive rate. Copilot has
@@ -2349,9 +2349,14 @@ Four were found by the reviewers under test, reviewing the harness that measures
 **Boundary — explicitly not claimed.**
 (a) **Coverage is unequal** (79% / 93% / 93% against the sovereign baseline's 100%). The rows
 are not strictly comparable and no reviewer was run to completion.
-(b) **n = 13.** Recall is computed over the seven `expect=flag` cases and the false-positive
-rate over the seven `expect=clean` cases, so **one case moves either metric by ~0.143**.
-Differences smaller than that are not resolvable by this corpus at all. Greptile's fp advantage over the sovereign baseline (0.000 vs 0.143)
+(b) **The denominators differ per row and per class, and they are small.** The corpus holds
+seven `expect=flag` and seven `expect=clean` cases, but each reviewer was scored only over
+what it returned: every reviewer covered all 7 flag cases, while clean coverage was 6/7
+(Greptile, Copilot) and **4/7** (CodeRabbit, rate-limited). So one case moves recall by
+0.143 for every row, but moves the false-positive rate by 0.167 for Greptile and Copilot
+and by **0.250** for CodeRabbit — its `fp 0.250` is a single flagged clean case out of four.
+Differences smaller than these steps are not resolvable by this corpus at all, and
+CodeRabbit's fp figure in particular rests on four observations. Greptile's fp advantage over the sovereign baseline (0.000 vs 0.143)
 sits **at** that line and is suggestive, not established.
 (c) **One run per reviewer.** No variance estimate; these services are not temperature-pinned.
 (d) The corpus is small, synthetic, context-free diffs and therefore **understates

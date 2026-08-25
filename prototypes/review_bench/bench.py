@@ -49,6 +49,10 @@ class Reconstructed:
     after: str
 
 
+#: "@@ -a,b +c,d @@" — b and d are the hunk's old/new line counts (absent = 1).
+_HUNK_HEADER = re.compile(r"^@@ -\d+(?:,(\d+))? \+\d+(?:,(\d+))? @@")
+
+
 class UnsafeDiffPath(ValueError):
     """A diff header names a path that cannot be materialised safely."""
 
@@ -78,38 +82,50 @@ def reconstruct(diff: str) -> list[Reconstructed]:
             )
         path, before, after = None, [], []
 
-    in_hunk = False
+    # Track how many lines the hunk header says the hunk contains, so CONTENT is
+    # never mistaken for structure. A legitimate added line whose source text is
+    # "++ /dev/null" appears in the diff as "+++ /dev/null" and, parsed by prefix
+    # alone, reads as a file header — which then got rejected as an unsafe path
+    # and silently dropped the whole case. Inside a hunk, prefixes mean content;
+    # only once both counters are exhausted can a header appear.
+    old_left = new_left = 0
     for line in diff.splitlines():
-        if line.startswith("--- "):
-            flush()
-            in_hunk = False
-            continue
-        if line.startswith("+++ "):
-            raw = line[4:].strip()
-            raw = raw[2:] if raw.startswith("b/") else raw
-            # A deleted file renders as "+++ /dev/null"; an absolute or
-            # traversing path would escape the scaffold directory entirely,
-            # since Path("out") / "/abs" discards "out". RAISE rather than set
-            # path=None: skipping just that hunk would leave the rest of a
-            # multi-file diff reconstructed and silently incomplete, producing a
-            # PR that does not carry the case it claims to.
-            if not _safe_rel_path(raw):
-                raise UnsafeDiffPath(raw)
-            path = raw
-            continue
-        if line.startswith("@@"):
-            in_hunk = True
-            continue
+        in_hunk = old_left > 0 or new_left > 0
         if not in_hunk:
+            if line.startswith("--- "):
+                flush()
+                continue
+            if line.startswith("+++ "):
+                raw = line[4:].strip()
+                raw = raw[2:] if raw.startswith("b/") else raw
+                # A deleted file renders as "+++ /dev/null"; an absolute or
+                # traversing path would escape the scaffold directory, since
+                # Path("out") / "/abs" discards "out". Raise rather than skip the
+                # hunk: a partial reconstruction yields a PR that does not carry
+                # the case it claims to.
+                if not _safe_rel_path(raw):
+                    raise UnsafeDiffPath(raw)
+                path = raw
+                continue
+            m = _HUNK_HEADER.match(line)
+            if m:
+                old_left = int(m.group(1) or 1)
+                new_left = int(m.group(2) or 1)
             continue
         if line.startswith("+"):
             after.append(line[1:])
+            new_left -= 1
         elif line.startswith("-"):
             before.append(line[1:])
-        elif line.startswith(" "):
-            before.append(line[1:])
-            after.append(line[1:])
-        # any other prefix (e.g. "\\ No newline at end of file") is not content
+            old_left -= 1
+        elif line.startswith("\\"):
+            pass  # "\ No newline at end of file" is not content
+        else:
+            # context (leading space, or a bare empty line some tools emit)
+            before.append(line[1:] if line.startswith(" ") else line)
+            after.append(line[1:] if line.startswith(" ") else line)
+            old_left -= 1
+            new_left -= 1
     flush()
     return files
 

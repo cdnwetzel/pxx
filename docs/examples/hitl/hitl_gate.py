@@ -27,6 +27,7 @@ Env: HITL_SECRET, HITL_DIR, HITL_LISTENER (e.g. http://127.0.0.1:8479),
      HITL_NOTIFY (n8n webhook or Slack broker /post-approval; best-effort),
      HITL_DEADLINE (default 60), HITL_ORIGIN (card source label, default "pxx run").
 """
+
 from __future__ import annotations
 
 import hmac
@@ -130,7 +131,13 @@ def main() -> int:
         time.sleep(1)
 
     _receipt(
-        {"nonce": nonce, "tool": tool, "args_hash": args_hash, "decision": "timeout", "result": "deny"}
+        {
+            "nonce": nonce,
+            "tool": tool,
+            "args_hash": args_hash,
+            "decision": "timeout",
+            "result": "deny",
+        }
     )
     return DENY  # no answer within the deadline -> fail closed
 

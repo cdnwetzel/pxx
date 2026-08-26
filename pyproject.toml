@@ -49,6 +49,9 @@ pxx = ["prompts/*.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Repo root on sys.path for bare `pytest` (hook invocation): tests import the
+# non-shipped prototypes/ package, and conftest imports pxx.
+pythonpath = ["."]
 addopts = "-q -W error::pytest.PytestUnraisableExceptionWarning"
 
 [tool.ruff]
@@ -58,6 +61,11 @@ line-length = 100
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "ASYNC", "RUF"]
 ignore = ["E501"]
+
+[tool.ruff.lint.flake8-bugbear]
+# fastapi.Body in a parameter default is the canonical FastAPI idiom, not a
+# mutable-default bug — teach B008 it is immutable (docs/examples/hitl).
+extend-immutable-calls = ["fastapi.Body"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["pxx"]

@@ -9,6 +9,7 @@
 - POST /open-pr {title,body}  -> server-side git commit + push + gh pr create in the
   sandbox (n8n's executeCommand node is disabled by default), return {pr_url}.
 """
+
 from __future__ import annotations
 
 import hmac
@@ -51,8 +52,17 @@ def request_approval(body: dict = Body(default={})):
     approve = f"{BASE}/decision?req={nonce}&decision=approve&sig={_hmac(nonce, 'approve')}"
     abort = f"{BASE}/decision?req={nonce}&decision=abort&sig={_hmac(nonce, 'abort')}"
     with open(HITL_DIR / "pending.jsonl", "a") as f:
-        f.write(json.dumps({"nonce": nonce, "summary": body.get("summary", ""),
-                            "approve_url": approve, "abort_url": abort}) + "\n")
+        f.write(
+            json.dumps(
+                {
+                    "nonce": nonce,
+                    "summary": body.get("summary", ""),
+                    "approve_url": approve,
+                    "abort_url": abort,
+                }
+            )
+            + "\n"
+        )
     spool = HITL_DIR / f"{nonce}.decision"
     end = time.time() + DEADLINE
     while time.time() < end:
@@ -96,14 +106,30 @@ def open_pr(body: dict = Body(default={})):
     prbody = body.get("body", "opened by the n8n governed pipeline")
     br = "pxx/demo-" + token_hex(4)
     try:
+
         def run(*c):
-            return subprocess.run(c, cwd=SANDBOX, check=True, capture_output=True,
-                                  text=True, timeout=90)
+            return subprocess.run(
+                c, cwd=SANDBOX, check=True, capture_output=True, text=True, timeout=90
+            )
+
         run("git", "checkout", "-q", "-b", br)
         run("git", "-c", "user.email=demo@x", "-c", "user.name=pxx demo", "commit", "-qam", title)
         run("git", "push", "-q", "-u", "origin", br)
-        pr = run("gh", "pr", "create", "--repo", SANDBOX_REPO, "--head", br, "--base", "main",
-                 "--title", title, "--body", prbody)
+        pr = run(
+            "gh",
+            "pr",
+            "create",
+            "--repo",
+            SANDBOX_REPO,
+            "--head",
+            br,
+            "--base",
+            "main",
+            "--title",
+            title,
+            "--body",
+            prbody,
+        )
         return {"branch": br, "pr_url": pr.stdout.strip()}
     except subprocess.CalledProcessError as e:
         return JSONResponse({"error": (e.stderr or str(e))[:400], "branch": br}, status_code=500)

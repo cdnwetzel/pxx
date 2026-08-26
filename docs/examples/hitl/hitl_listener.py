@@ -12,6 +12,7 @@ Fail-closed hardening (matches the pxx roadmap HITL item):
 Env: HITL_SECRET (required), HITL_DIR (decision spool), HITL_PORT (default 8479).
 Binds 127.0.0.1 only.
 """
+
 from __future__ import annotations
 
 import hmac
@@ -60,7 +61,7 @@ class Handler(BaseHTTPRequestHandler):
             json.dump({"req": req, "decision": decision, "ts": time.time()}, f)
         self._reply(200, f"recorded: {decision}")
 
-    def do_POST(self) -> None:  # noqa: N802
+    def do_POST(self) -> None:
         path = urlparse(self.path).path
         if path == "/pending":
             # Capture the outbound approval request. In production this is n8n's
@@ -74,7 +75,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         self._decide(parse_qs(urlparse(self.path).query))
 
-    def do_GET(self) -> None:  # noqa: N802
+    def do_GET(self) -> None:
         if urlparse(self.path).path == "/health":
             self._reply(200, "ok")
             return

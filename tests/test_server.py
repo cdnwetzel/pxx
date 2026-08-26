@@ -7,6 +7,8 @@ import time
 import uuid
 
 import pytest
+
+pytest.importorskip("fastapi", reason="server extra not installed")
 from fastapi.testclient import TestClient
 
 import pxx.server as server

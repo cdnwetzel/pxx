@@ -251,7 +251,11 @@ def modify_modal(nonce: str) -> dict:
                 "block_id": "note",
                 "optional": True,
                 "label": {"type": "plain_text", "text": "Note to the agent"},
-                "element": {"type": "plain_text_input", "action_id": "note_input", "multiline": True},
+                "element": {
+                    "type": "plain_text_input",
+                    "action_id": "note_input",
+                    "multiline": True,
+                },
             },
         ],
     }
@@ -281,7 +285,10 @@ def outcome_blocks(decision: str, user_id: str, detail: str = "") -> list:
     who = f" by <@{user_id}>" if user_id else ""
     extra = f"\n{detail}" if detail else ""
     return [
-        {"type": "section", "text": {"type": "mrkdwn", "text": f"pxx approval — *{label}*{who}{extra}"}}
+        {
+            "type": "section",
+            "text": {"type": "mrkdwn", "text": f"pxx approval — *{label}*{who}{extra}"},
+        }
     ]
 
 
@@ -289,9 +296,9 @@ def outcome_blocks(decision: str, user_id: str, detail: str = "") -> list:
 
 
 def main() -> None:
+    import uvicorn
     from fastapi import Body, FastAPI, HTTPException
     from fastapi.responses import PlainTextResponse
-    import uvicorn
     from slack_sdk import WebClient
     from slack_sdk.socket_mode import SocketModeClient
     from slack_sdk.socket_mode.request import SocketModeRequest

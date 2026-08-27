@@ -21,3 +21,7 @@ temp-phase1/
 # PUBLIC; machine truth lives here and in ~/.config/pxx/env, never in tracked
 # files. Mirrors the tracked docs 1:1 so the public copy stays placeholder-only.
 /private/
+
+# fleet topology and other non-public operational notes.
+# Untracked by rule, not by luck -- this repo is public.
+private/

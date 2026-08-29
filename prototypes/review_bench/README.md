@@ -22,7 +22,7 @@ The sovereign reviewer has been measured against exactly this:
 So an external reviewer earns a place here only by clearing the same bar. **Pre-registered
 before running anything: recall ≥ 0.857 AND fp ≤ 0.143 MATCHES OR EXCEEDS the best
 sovereign result** (equality at this precision is a tie, not a win).
-Below 0.75 / above 0.25 fails calibration outright.**
+Below 0.75 / above 0.25 fails calibration outright.
 
 ## Why a replay adapter instead of a live one
 
@@ -113,8 +113,12 @@ Stated up front, because a benchmark that oversells itself is worse than none:
    disadvantages. Treat any fp figure here as an upper bound. Raised by Greptile reviewing
    this harness (PR #81).
 
-4. **n = 14.** Each case is worth ~0.14 recall. Two cases' difference is inside the noise.
-   Treat a gap under ~0.15 as "not distinguished by this bench".
+4. **n = 14, but the metrics have SEPARATE class denominators of 7 each.** Recall runs over
+   the seven `expect=flag` cases and the false-positive rate over the seven `expect=clean`
+   cases — a clean case cannot move recall and a flagged case cannot move fp. So one case
+   is worth ~0.143 on whichever metric it belongs to, and at partial coverage the fp step
+   is larger still (CodeRabbit returned 4 clean captures, so one case moves its fp by
+   0.250). Treat any gap smaller than those steps as not distinguished by this bench.
 5. **One shot per case.** No variance estimate. A model reviewer is temperature-pinned;
    these tools are not, and may not be deterministic.
 

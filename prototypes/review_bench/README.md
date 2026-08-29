@@ -116,9 +116,12 @@ Stated up front, because a benchmark that oversells itself is worse than none:
 4. **n = 14, but the metrics have SEPARATE class denominators of 7 each.** Recall runs over
    the seven `expect=flag` cases and the false-positive rate over the seven `expect=clean`
    cases — a clean case cannot move recall and a flagged case cannot move fp. So one case
-   is worth ~0.143 on whichever metric it belongs to, and at partial coverage the fp step
-   is larger still (CodeRabbit returned 4 clean captures, so one case moves its fp by
-   0.250). Treat any gap smaller than those steps as not distinguished by this bench.
+   is worth ~0.143 on whichever metric it belongs to. At partial coverage the step grows for
+   **whichever class is missing captures, and only that class** — missing flagged cases
+   coarsen recall while leaving fp at ~0.143, and vice versa. In this run every reviewer
+   returned all 7 flagged cases, so recall keeps its 0.143 step throughout; CodeRabbit
+   returned only 4 clean captures, so its fp step alone widens to 0.250. Treat any gap
+   smaller than the relevant step as not distinguished by this bench.
 5. **One shot per case.** No variance estimate. A model reviewer is temperature-pinned;
    these tools are not, and may not be deterministic.
 

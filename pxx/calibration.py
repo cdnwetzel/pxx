@@ -31,7 +31,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
-from .errors import ConfigError
+from .errors import ConfigError, PxxError
 from .review import SEVERITIES, Finding, Reviewer, Verdict, parse_review
 
 log = logging.getLogger("pxx.calibration")
@@ -241,6 +241,69 @@ def _build_report(results: tuple[CaseResult, ...]) -> CalibrationReport:
         warnings=tuple(warnings),
         agreement=agreement,
     )
+
+
+class CaptureMissing(PxxError):
+    """No recorded response exists for a case (counts as unavailable)."""
+
+
+@dataclass(frozen=True)
+class RecordedReviewer:
+    """Score an EXTERNAL reviewer from captured output, via the production path.
+
+    CodeRabbit, Greptile, and Copilot review *pull requests*; they cannot be
+    handed a diff and asked for a verdict, so they cannot implement
+    :class:`~pxx.review.Reviewer` live. Capture what they said about each case
+    once, then replay it here — ``run_calibration`` then scores them through the
+    same ``parse_review`` path, the same ``_case_passed`` rules, and the same
+    thresholds as a local model. That is the point: an external reviewer is held
+    to *exactly* the bar the sovereign reviewer is held to, with no separate
+    scoring code that could drift or flatter.
+
+    Keyed by case ``id``, resolved from the diff, because the ``Reviewer``
+    protocol passes only ``(diff, task)``.
+
+    Fail-closed: a case with no capture raises, which ``run_calibration`` counts
+    against availability and treats as flagged. A reviewer that stayed silent
+    scores as unavailable rather than as a free pass — silence is not approval.
+    """
+
+    responses: dict[str, str]
+    _by_diff: dict[str, str]
+
+    @classmethod
+    def from_cases(cls, cases: Iterable[Case], responses: dict[str, str]) -> RecordedReviewer:
+        cases = tuple(cases)
+        known = {c.id for c in cases}
+        unknown = sorted(set(responses) - known)
+        if unknown:
+            # A capture for a case that is not in the corpus means the bench and
+            # the corpus have diverged; scoring it would silently measure the
+            # wrong thing.
+            raise ConfigError(f"recorded responses for unknown case ids: {unknown}")
+        by_diff: dict[str, str] = {}
+        for case in cases:
+            # Replay identity is the DIFF, because the Reviewer protocol passes
+            # only (diff, task). Two cases sharing a diff would make that mapping
+            # last-write-wins and silently replay one case's response for the
+            # other. load_cases enforces unique ids but not unique diffs, so the
+            # ambiguity is rejected here rather than resolved arbitrarily.
+            if case.diff in by_diff:
+                raise ConfigError(
+                    f"cases {by_diff[case.diff]!r} and {case.id!r} share an identical diff; "
+                    "recorded replay cannot tell them apart"
+                )
+            by_diff[case.diff] = case.id
+        return cls(responses=dict(responses), _by_diff=by_diff)
+
+    async def review(self, diff: str, task: str) -> str:
+        case_id = self._by_diff.get(diff)
+        if case_id is None:
+            raise CaptureMissing("diff does not correspond to any loaded case")
+        try:
+            return self.responses[case_id]
+        except KeyError:
+            raise CaptureMissing(f"no recorded response for case {case_id!r}") from None
 
 
 def breaches(report: CalibrationReport) -> list[str]:

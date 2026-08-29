@@ -1,0 +1,195 @@
+{
+  "reviewer": "copilot",
+  "repo": "cdnwetzel/pxx-review-bench",
+  "captures": {
+    "noisy-whitespace-only": {
+      "pr": 13,
+      "inline": [
+        {
+          "path": "cases/noisy-whitespace-only/app/paths.py",
+          "body": "The spacing change adds extra spaces around the `+` operators, which is less readable and contradicts the PR intent to \"normalize\" spacing. Prefer standard single-spacing around operators (PEP 8) here so the change is actually a normalization rather than additional noise."
+        }
+      ],
+      "summary": [
+        "### \ud83d\udfe1 Changes recommended\n\nThe whitespace change introduces extra spacing around operators, which is less normalized/readable and conflicts with the PR\u2019s stated intent.\n\n*Once you've addressed the issues Copilot identified, you can request another Copilot review.*\n\n<details>\n<summary>Pull request overview</summary>\n\nThis PR adjusts whitespace formatting in `paths.py` with the stated goal of not changing behavior.\n\n**Changes:**\n- Modified operator spacing in `join()`\u2019s return expression in `cases/noisy-whitespace-only/app/paths.py`.\n</details>\n\n<details>\n<summary>File summaries</summary>\n\n| File | Description |\r\n| ---- | ----------- |\r\n| cases/noisy-whitespace-only/app/paths.py | Updates whitespace in `join()` string concatenation expression. |\n</details>\n\n<details>\n<summary>Review details</summary>\n\nCopilot wasn't able to review any files in this pull request.\n\n- **Files reviewed:** 0/1 changed files\n- **Comments generated:** 1\n- **Review effort level:** Lite\n</details>\n\n---\n\n\ud83d\udca1 <a href=\"/cdnwetzel/pxx-review-bench/new/main?filename=.github/skills/code-review/SKILL.md\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Add a `code-review` agent skill</a> or configure MCP servers for context-aware, tailored reviews. <a href=\"https://docs.github.com/en/copilot/how-tos/use-copilot-agents/request-a-code-review/use-code-review#mcp-servers-and-agent-skills\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn more in the docs.</a>"
+      ],
+      "review_states": [
+        "COMMENTED"
+      ]
+    },
+    "noisy-import-reorder": {
+      "pr": 12,
+      "inline": [
+        {
+          "path": "cases/noisy-import-reorder/app/main.py",
+          "body": "`os` and `sys` are imported but not used anywhere in this module; if linting is enabled this will fail (e.g., F401) and it adds noise to a formatting-only change. Remove the unused imports (or use them)."
+        }
+      ],
+      "summary": [
+        "### \ud83d\udfe1 Changes recommended\n\nThe touched import block still includes unused imports (`os`, `sys`), which commonly breaks Python linting and adds avoidable noise even for a formatting-only PR.\n\n*Once you've addressed the issues Copilot identified, you can request another Copilot review.*\n\n<details>\n<summary>Pull request overview</summary>\n\nThis PR applies a formatter-style change to `app/main.py`, reordering standard-library imports (and leaving whitespace unchanged) for the `noisy-import-reorder` bench case.\n\n**Changes:**\n- Move `import json` to the top of the import block to match typical sorted-import output.\n- Keep the surrounding whitespace consistent with the formatter\u2019s output.\n</details>\n\n<details>\n<summary>File summaries</summary>\n\n| File | Description |\r\n| ---- | ----------- |\r\n| cases/noisy-import-reorder/app/main.py | Reorders imports at the top of the module (formatter-only change). |\n</details>\n\n<details>\n<summary>Review details</summary>\n\n- **Files reviewed:** 1/1 changed files\n- **Comments generated:** 1\n- **Review effort level:** Lite\n</details>\n\n---\n\n\ud83d\udca1 <a href=\"/cdnwetzel/pxx-review-bench/new/main?filename=.github/skills/code-review/SKILL.md\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Add a `code-review` agent skill</a> or configure MCP servers for context-aware, tailored reviews. <a href=\"https://docs.github.com/en/copilot/how-tos/use-copilot-agents/request-a-code-review/use-code-review#mcp-servers-and-agent-skills\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn more in the docs.</a>"
+      ],
+      "review_states": [
+        "COMMENTED"
+      ]
+    },
+    "edge-wrong-line-number": {
+      "pr": 11,
+      "inline": [
+        {
+          "path": "cases/edge-wrong-line-number/app/retry.py",
+          "body": "This slices off the first fetched result, so the function no longer preserves all URLs' results or their order. Return the accumulated list unchanged."
+        }
+      ],
+      "summary": [
+        "### \ud83d\udfe1 Changes recommended\n\nReturn the accumulated results unchanged.\n\n*Once you've addressed the issues Copilot identified, you can request another Copilot review.*\n\n<details>\n<summary>Pull request overview</summary>\n\nUpdates `fetch_all` to return results for requested URLs.\n\n**Changes:**\n- Adjusts the returned result list in `retry.py`.\n</details>\n\n<details>\n<summary>File summaries</summary>\n\n| File | Summary |\r\n|---|---|\r\n| `cases/edge-wrong-line-number/app/retry.py` | Slices off the first fetched result, so all URLs and their order are not preserved. Critical issue (4 votes). |\n</details>\n\n<details>\n<summary>Review details</summary>\n\n- **Files reviewed:** 1/1 changed files\n- **Comments generated:** 1\n- **Review effort level:** Lite\n</details>\n\n---\n\n\ud83d\udca1 <a href=\"/cdnwetzel/pxx-review-bench/new/main?filename=.github/skills/code-review/SKILL.md\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Add a `code-review` agent skill</a> or configure MCP servers for context-aware, tailored reviews. <a href=\"https://docs.github.com/en/copilot/how-tos/use-copilot-agents/request-a-code-review/use-code-review#mcp-servers-and-agent-skills\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn more in the docs.</a>"
+      ],
+      "review_states": [
+        "COMMENTED"
+      ]
+    },
+    "edge-finding-with-line": {
+      "pr": 10,
+      "inline": [
+        {
+          "path": "cases/edge-finding-with-line/app/billing.py",
+          "body": "`total_cents` no longer accounts for item quantity; summing only `price_cents` will undercount orders with `qty > 1` (and changes behavior from line totals to unit prices)."
+        }
+      ],
+      "summary": [
+        "### \ud83d\udfe1 Changes recommended\n\nThe updated `total_cents` implementation drops quantity from the calculation, which breaks expected line-total behavior and will undercount multi-quantity items.\n\n*Once you've addressed the issues Copilot identified, you can request another Copilot review.*\n\n<details>\n<summary>Pull request overview</summary>\n\nUpdates the billing helper for the `edge-finding-with-line` case by changing how `total_cents(items)` accumulates totals.\n\n**Changes:**\n- Changed `total_cents` to sum `item.price_cents` per item rather than computing per-line totals using quantity.\n</details>\n\n<details>\n<summary>File summaries</summary>\n\n| File | Description |\r\n| ---- | ----------- |\r\n| cases/edge-finding-with-line/app/billing.py | Modifies the accumulation logic in `total_cents`, affecting how item quantities influence the returned total. |\n</details>\n\n<details>\n<summary>Review details</summary>\n\n- **Files reviewed:** 1/1 changed files\n- **Comments generated:** 1\n- **Review effort level:** Lite\n</details>\n\n---\n\n\ud83d\udca1 <a href=\"/cdnwetzel/pxx-review-bench/new/main?filename=.github/skills/code-review/SKILL.md\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Add a `code-review` agent skill</a> or configure MCP servers for context-aware, tailored reviews. <a href=\"https://docs.github.com/en/copilot/how-tos/use-copilot-agents/request-a-code-review/use-code-review#mcp-servers-and-agent-skills\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn more in the docs.</a>"
+      ],
+      "review_states": [
+        "COMMENTED"
+      ]
+    },
+    "critical-swallowed-exception": {
+      "pr": 9,
+      "inline": [
+        {
+          "path": "cases/critical-swallowed-exception/app/sync.py",
+          "body": "Catching `Exception` and immediately `pass` swallows all failures (including programming errors), and `sync_all` will still return `True` even when one or more jobs failed. If the goal is to keep the loop running, consider capturing the exception (e.g., `except Exception as e`) and tracking/reporting it (return `False` when any job fails, or raise a combined error after the loop) rather than silently ignoring it."
+        }
+      ],
+      "summary": [
+        "### \ud83d\udfe1 Changes recommended\n\nThe new `except Exception: pass` silently swallows all failures and still returns `True`, which can mask job failures and report incorrect success.\n\n*Once you've addressed the issues Copilot identified, you can request another Copilot review.*\n\n<details>\n<summary>Pull request overview</summary>\n\nThis PR aims to make `sync_all` resilient so a single job failure doesn\u2019t abort processing the remaining jobs.\n\n**Changes:**\n- Wrapped each `job.run()` call in a `try/except` to prevent the loop from crashing on exceptions.\n</details>\n\n<details>\n<summary>File summaries</summary>\n\n| File | Description |\r\n| ---- | ----------- |\r\n| cases/critical-swallowed-exception/app/sync.py | Changes failure handling in `sync_all` to continue iterating when a job raises. |\n</details>\n\n<details>\n<summary>Review details</summary>\n\n- **Files reviewed:** 1/1 changed files\n- **Comments generated:** 1\n- **Review effort level:** Lite\n</details>\n\n---\n\n\ud83d\udca1 <a href=\"/cdnwetzel/pxx-review-bench/new/main?filename=.github/skills/code-review/SKILL.md\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Add a `code-review` agent skill</a> or configure MCP servers for context-aware, tailored reviews. <a href=\"https://docs.github.com/en/copilot/how-tos/use-copilot-agents/request-a-code-review/use-code-review#mcp-servers-and-agent-skills\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn more in the docs.</a>"
+      ],
+      "review_states": [
+        "COMMENTED"
+      ]
+    },
+    "critical-removed-validation": {
+      "pr": 8,
+      "inline": [
+        {
+          "path": "cases/critical-removed-validation/app/users.py",
+          "body": "Removing input validation means create_user() can silently create invalid user records (empty name, negative age). Since this module has no other callers/guards in this case, the function itself should enforce its basic invariants to prevent bad data from propagating."
+        }
+      ],
+      "summary": [
+        "### \ud83d\udfe1 Changes recommended\n\nThe updated `create_user()` no longer enforces core invariants (non-empty name, non-negative age), allowing invalid user objects to be created silently.\n\n*Once you've addressed the issues Copilot identified, you can request another Copilot review.*\n\n<details>\n<summary>Pull request overview</summary>\n\nThis PR removes basic input validation from `create_user()` under the assumption that callers already guarantee well-formed inputs.\n\n**Changes:**\n- Removed the non-empty `name` validation.\n- Removed the non-negative `age` validation.\n</details>\n\n<details>\n<summary>File summaries</summary>\n\n| File | Description |\r\n| ---- | ----------- |\r\n| cases/critical-removed-validation/app/users.py | Simplifies `create_user()` by deleting input checks and returning the dict directly. |\n</details>\n\n<details>\n<summary>Review details</summary>\n\n- **Files reviewed:** 1/1 changed files\n- **Comments generated:** 1\n- **Review effort level:** Lite\n</details>\n\n---\n\n\ud83d\udca1 <a href=\"/cdnwetzel/pxx-review-bench/new/main?filename=.github/skills/code-review/SKILL.md\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Add a `code-review` agent skill</a> or configure MCP servers for context-aware, tailored reviews. <a href=\"https://docs.github.com/en/copilot/how-tos/use-copilot-agents/request-a-code-review/use-code-review#mcp-servers-and-agent-skills\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn more in the docs.</a>"
+      ],
+      "review_states": [
+        "COMMENTED"
+      ]
+    },
+    "critical-hardcoded-secret": {
+      "pr": 7,
+      "inline": [
+        {
+          "path": "cases/critical-hardcoded-secret/pay/client.py",
+          "body": "Hardcoding an API key in source (and explicitly suppressing secret detection) is a critical secret-leak risk. Please load the key from configuration (e.g., env var) and/or accept it via the constructor, and fail fast when it\u2019s missing instead of committing a value."
+        }
+      ],
+      "summary": [
+        "### \ud83d\udfe1 Changes recommended\n\nIt introduces a hardcoded API key (with a secret-scanner suppression), which is a critical security issue that must be removed before approval.\n\n*Once you've addressed the issues Copilot identified, you can request another Copilot review.*\n\n<details>\n<summary>Pull request overview</summary>\n\nThis PR adds a minimal `PaymentClient` stub that authenticates requests to a payment gateway by attaching an `Authorization: Bearer ...` header.\n\n**Changes:**\n- Introduces an `API_KEY` constant in `pay/client.py`.\n- Initializes default auth headers in `PaymentClient.__init__`.\n</details>\n\n<details>\n<summary>File summaries</summary>\n\n| File | Description |\r\n| ---- | ----------- |\r\n| cases/critical-hardcoded-secret/pay/client.py | Adds API key constant and wires it into an Authorization header for the client. |\n</details>\n\n<details>\n<summary>Review details</summary>\n\n- **Files reviewed:** 1/1 changed files\n- **Comments generated:** 1\n- **Review effort level:** Lite\n</details>\n\n---\n\n\ud83d\udca1 <a href=\"/cdnwetzel/pxx-review-bench/new/main?filename=.github/skills/code-review/SKILL.md\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Add a `code-review` agent skill</a> or configure MCP servers for context-aware, tailored reviews. <a href=\"https://docs.github.com/en/copilot/how-tos/use-copilot-agents/request-a-code-review/use-code-review#mcp-servers-and-agent-skills\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn more in the docs.</a>"
+      ],
+      "review_states": [
+        "COMMENTED"
+      ]
+    },
+    "critical-assertion-removed": {
+      "pr": 6,
+      "inline": [
+        {
+          "path": "cases/critical-assertion-removed/tests/test_calc.py",
+          "body": "The test was weakened by removing non-trivial assertions (2+2 and -1+1) and replacing them with only the identity case (0+0). This makes the suite far less likely to catch regressions and contradicts the PR intent of fixing add() rather than bypassing failures."
+        }
+      ],
+      "summary": [
+        "### \ud83d\udfe1 Changes recommended\n\nThe updated test suite no longer meaningfully validates `add()` behavior and effectively masks failures instead of addressing them.\n\n*Once you've addressed the issues Copilot identified, you can request another Copilot review.*\n\n<details>\n<summary>Pull request overview</summary>\n\nThis PR modifies the `critical-assertion-removed` benchmark case by changing the `test_add()` unit test; however, the change reduces test coverage/meaningfulness rather than fixing the underlying `add()` behavior as implied by the title.\n\n**Changes:**\n- Removed two non-trivial `add()` assertions and replaced them with only `add(0, 0) == 0`.\n</details>\n\n<details>\n<summary>File summaries</summary>\n\n| File | Description |\r\n| ---- | ----------- |\r\n| cases/critical-assertion-removed/tests/test_calc.py | Weakens `test_add()` by removing meaningful assertions and keeping only an identity-case check. |\n</details>\n\n<details>\n<summary>Review details</summary>\n\n- **Files reviewed:** 1/1 changed files\n- **Comments generated:** 1\n- **Review effort level:** Lite\n</details>\n\n---\n\n\ud83d\udca1 <a href=\"/cdnwetzel/pxx-review-bench/new/main?filename=.github/skills/code-review/SKILL.md\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Add a `code-review` agent skill</a> or configure MCP servers for context-aware, tailored reviews. <a href=\"https://docs.github.com/en/copilot/how-tos/use-copilot-agents/request-a-code-review/use-code-review#mcp-servers-and-agent-skills\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn more in the docs.</a>"
+      ],
+      "review_states": [
+        "COMMENTED"
+      ]
+    },
+    "acceptable-test-only-change": {
+      "pr": 5,
+      "inline": [
+        {
+          "path": "cases/acceptable-test-only-change/tests/test_math.py",
+          "body": "`clamp` is referenced in the new test but there is no import or definition for it anywhere in this repo, so the tests will raise `NameError` and fail immediately. Please add an implementation module for `clamp` (or import it from the correct existing module) and update this test to import it explicitly."
+        }
+      ],
+      "summary": [
+        "### \ud83d\udfe1 Changes recommended\n\nThe new test references `clamp` but there is no import or definition for it in the repository, so the test suite will fail with `NameError`.\n\n*Once you've addressed the issues Copilot identified, you can request another Copilot review.*\n\n<details>\n<summary>Pull request overview</summary>\n\nAdds a new unit test intended to cover clamping at the upper bound for a `clamp` helper.\n\n**Changes:**\n- Adds `test_clamp_upper_bound()` asserting values above `max` clamp to `max`.\n</details>\n\n<details>\n<summary>File summaries</summary>\n\n| File | Description |\r\n| ---- | ----------- |\r\n| cases/acceptable-test-only-change/tests/test_math.py | Adds a new test case for the upper clamp boundary. |\n</details>\n\n<details>\n<summary>Review details</summary>\n\n- **Files reviewed:** 1/1 changed files\n- **Comments generated:** 1\n- **Review effort level:** Lite\n</details>\n\n---\n\n\ud83d\udca1 <a href=\"/cdnwetzel/pxx-review-bench/new/main?filename=.github/skills/code-review/SKILL.md\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Add a `code-review` agent skill</a> or configure MCP servers for context-aware, tailored reviews. <a href=\"https://docs.github.com/en/copilot/how-tos/use-copilot-agents/request-a-code-review/use-code-review#mcp-servers-and-agent-skills\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn more in the docs.</a>"
+      ],
+      "review_states": [
+        "COMMENTED"
+      ]
+    },
+    "acceptable-rename-docstring": {
+      "pr": 4,
+      "inline": [
+        {
+          "path": "cases/acceptable-rename-docstring/app/text.py",
+          "body": "The docstring claims the output is \"URL-safe\", but the implementation only lowercases and replaces spaces with hyphens (it does not remove/escape other unsafe characters). Either adjust the docstring to match the behavior or extend the implementation to actually produce a URL-safe slug."
+        },
+        {
+          "path": "cases/acceptable-rename-docstring/tests/test_text.py",
+          "body": "The test name still references the old API (`test_slug`) even though the assertion now uses `slugify`. Renaming the test keeps the suite consistent and makes failures easier to interpret."
+        }
+      ],
+      "summary": [
+        "### \ud83d\udfe1 Changes recommended\n\nThe new docstring is currently misleading about \u201cURL-safe\u201d behavior, and the renamed API should be reflected consistently in the test name.\n\n*Once you've addressed the issues Copilot identified, you can request another Copilot review.*\n\n<details>\n<summary>Pull request overview</summary>\n\nThis PR renames the text slug helper from `slug()` to `slugify()`, adds a docstring/type hints, and updates the test to call the renamed API.\n\n**Changes:**\n- Rename `slug()` to `slugify(text: str) -> str`\n- Add a docstring describing the helper\n- Update the unit test import/call site to use `slugify`\n</details>\n\n<details>\n<summary>File summaries</summary>\n\n| File | Description |\r\n| ---- | ----------- |\r\n| cases/acceptable-rename-docstring/app/text.py | Renames slug function to `slugify`, adds type hints and a docstring. |\r\n| cases/acceptable-rename-docstring/tests/test_text.py | Updates test import and assertion to use `slugify`. |\n</details>\n\n<details>\n<summary>Review details</summary>\n\n- **Files reviewed:** 2/2 changed files\n- **Comments generated:** 2\n- **Review effort level:** Lite\n</details>\n\n---\n\n\ud83d\udca1 <a href=\"/cdnwetzel/pxx-review-bench/new/main?filename=.github/skills/code-review/SKILL.md\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Add a `code-review` agent skill</a> or configure MCP servers for context-aware, tailored reviews. <a href=\"https://docs.github.com/en/copilot/how-tos/use-copilot-agents/request-a-code-review/use-code-review#mcp-servers-and-agent-skills\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn more in the docs.</a>"
+      ],
+      "review_states": [
+        "COMMENTED"
+      ]
+    },
+    "acceptable-refactor-tests-updated": {
+      "pr": 3,
+      "inline": [],
+      "summary": [
+        "### \ud83d\udfe2 Approval recommended\n\nThe refactor preserves existing behavior and the added test provides coverage for the extracted parsing logic.\n\n<details>\n<summary>Pull request overview</summary>\n\nRefactors the CSV row parsing in `app/csvio.py` by extracting the per-line split/strip logic into a small helper, and adds a focused test to keep that behavior covered.\n\n**Changes:**\n- Introduced `_parse_row()` to encapsulate `split(\",\")` + `strip()` behavior.\n- Updated `read_rows()` to delegate row parsing to `_parse_row()`.\n- Added a unit test to validate the helper\u2019s whitespace-stripping behavior.\n</details>\n\n<details>\n<summary>File summaries</summary>\n\n| File | Description |\r\n| ---- | ----------- |\r\n| cases/acceptable-refactor-tests-updated/app/csvio.py | Extracts row parsing into `_parse_row()` and reuses it in `read_rows()` without changing behavior. |\r\n| cases/acceptable-refactor-tests-updated/tests/test_csvio.py | Updates imports and adds a new test covering the extracted helper\u2019s behavior. |\n</details>\n\n<details>\n<summary>Review details</summary>\n\n- **Files reviewed:** 2/2 changed files\n- **Comments generated:** 0\n- **Review effort level:** Lite\n</details>\n\n---\n\n\ud83d\udca1 <a href=\"/cdnwetzel/pxx-review-bench/new/main?filename=.github/skills/code-review/SKILL.md\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Add a `code-review` agent skill</a> or configure MCP servers for context-aware, tailored reviews. <a href=\"https://docs.github.com/en/copilot/how-tos/use-copilot-agents/request-a-code-review/use-code-review#mcp-servers-and-agent-skills\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn more in the docs.</a>"
+      ],
+      "review_states": [
+        "COMMENTED"
+      ]
+    },
+    "acceptable-comment-addition": {
+      "pr": 2,
+      "inline": [],
+      "summary": [
+        "### \ud83d\udfe2 Approval recommended\n\nThe change is a documentation-only comment addition that accurately describes the visible control flow (`allow()` calls `_refill()` each time).\n\n<details>\n<summary>Pull request overview</summary>\n\nThis PR adds an inline explanation of the \u201clazy refill\u201d behavior in `TokenBucket.allow`, clarifying that refills occur on demand during `allow()` calls rather than via a background timer.\n\n**Changes:**\n- Added a short comment documenting the lazy refill strategy in `TokenBucket.allow`.\n</details>\n\n<details>\n<summary>File summaries</summary>\n\n| File | Description |\r\n| ---- | ----------- |\r\n| cases/acceptable-comment-addition/app/tokenbucket.py | Adds a clarifying comment explaining that `_refill()` is performed lazily per `allow()` call. |\n</details>\n\n<details>\n<summary>Review details</summary>\n\n- **Files reviewed:** 1/1 changed files\n- **Comments generated:** 0\n- **Review effort level:** Lite\n</details>\n\n---\n\n\ud83d\udca1 <a href=\"/cdnwetzel/pxx-review-bench/new/main?filename=.github/skills/code-review/SKILL.md\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Add a `code-review` agent skill</a> or configure MCP servers for context-aware, tailored reviews. <a href=\"https://docs.github.com/en/copilot/how-tos/use-copilot-agents/request-a-code-review/use-code-review#mcp-servers-and-agent-skills\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn more in the docs.</a>"
+      ],
+      "review_states": [
+        "COMMENTED"
+      ]
+    },
+    "critical-sql-injection": {
+      "pr": 1,
+      "inline": [
+        {
+          "path": "cases/critical-sql-injection/app/users.py",
+          "body": "The query is built via string interpolation, which allows SQL injection (e.g., a name containing quotes or `OR 1=1`). Use a parameterized statement so sqlite3 handles escaping/binding safely."
+        }
+      ],
+      "summary": [
+        "### \ud83d\udfe1 Changes recommended\n\nThe new `find_user` query is constructed via string interpolation, introducing a SQL injection vulnerability that should be fixed with parameterized queries.\n\n*Once you've addressed the issues Copilot identified, you can request another Copilot review.*\n\n<details>\n<summary>Pull request overview</summary>\n\nAdds a `find_user` helper to look up a single user record by name in the `critical-sql-injection` benchmark case.\n\n**Changes:**\n- Introduced `find_user(conn, name)` to fetch one matching row from `users`.\n- Left existing `list_users(conn)` behavior unchanged.\n</details>\n\n<details>\n<summary>File summaries</summary>\n\n| File | Description |\r\n| ---- | ----------- |\r\n| cases/critical-sql-injection/app/users.py | Adds a new user-lookup query helper. |\n</details>\n\n<details>\n<summary>Review details</summary>\n\n- **Files reviewed:** 1/1 changed files\n- **Comments generated:** 1\n- **Review effort level:** Lite\n</details>\n\n---\n\n\ud83d\udca1 <a href=\"/cdnwetzel/pxx-review-bench/new/main?filename=.github/skills/code-review/SKILL.md\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Add a `code-review` agent skill</a> or configure MCP servers for context-aware, tailored reviews. <a href=\"https://docs.github.com/en/copilot/how-tos/use-copilot-agents/request-a-code-review/use-code-review#mcp-servers-and-agent-skills\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn more in the docs.</a>"
+      ],
+      "review_states": [
+        "COMMENTED"
+      ]
+    }
+  }
+}

@@ -2292,5 +2292,89 @@ printed at startup, not enforced — a mismatch denies permanently and silently.
 
 ---
 
+## R-047 — external AI reviewers measured against pxx's own calibration bar
+
+**Claim.** CodeRabbit, Greptile, and Copilot were scored against `evals/calibration/` —
+the same 14-case labelled corpus, the same `parse_review` path, and the same thresholds pxx
+applies to its own model reviewer. Two of the three clear the bar. The purpose was to decide
+whether an external reviewer earns a place here on evidence rather than on impression.
+
+**Grade.** **Attested** (2026-08-23/24; live services, real PRs, captures committed under
+`prototypes/review_bench/captures/`) + **Reproducible** (harness and corpus in-tree;
+`bench.py scaffold | harvest | score`).
+
+**Pre-registered before any data was collected.** `MIN_RECALL 0.75`, `MAX_FP_RATE 0.25`,
+`MIN_AGREEMENT 0.75` (`pxx/calibration.py`). Sovereign baseline to match or exceed:
+recall 0.857 / fp 0.143 (`qwen2.5-coder:32b`); the wired `qwen2.5:14b` sits at 0.857 / 0.286
+and is advisory-grade because it breaches `MAX_FP_RATE`.
+
+**Method.** 13 of 14 cases materialised as one pull request each in a private bench
+repository (`edge-empty-diff` cannot be a PR). Prose comments translated to verdicts by a
+mechanical rule fixed in advance, so the operator — who authored the code under review —
+held no discretion over any score. Scored in two modes: **strict** (severity as the reviewer
+marked it) and **lenient** (a flagged case credited at the case's `min_severity`), because
+severity vocabulary is not the capability under test.
+
+**Observed (2026-08-24).**
+
+| Reviewer | Coverage | Recall (n flag) | FP (n clean) | Agreement | Result |
+|---|---|---|---|---|---|
+| Greptile (lenient) | 13/14 | 0.857 (6/7) | **0.000 (0/6)** | 0.923 | **PASS** |
+| Greptile (strict) | 13/14 | 0.286 (2/7) | 0.000 (0/6) | 0.615 | fail — severity vocabulary |
+| CodeRabbit (both modes) | 11/14 | 0.857 (6/7) | 0.250 (1/4) | 0.818 | **PASS** |
+| Copilot (lenient) | 13/14 | **1.000 (7/7)** | 0.667 (4/6) | 0.692 | fail — over-flags |
+| *sovereign `qwen2.5-coder:32b`* | *14/14* | *0.857* | *0.143* | — | *pass* |
+
+Greptile matches the sovereign reviewer's recall at a lower false-positive rate. Copilot has
+the only perfect recall on this corpus and flags two thirds of clean changes.
+
+**The harness was wrong seven times before these numbers were trustworthy**, and every
+failure produced a plausible number rather than an error. Recorded because it is the
+substance of the result, not an aside:
+
+| Defect | Effect if unfixed |
+|---|---|
+| Copilot posts under two logins (`Copilot` inline, `copilot-pull-request-reviewer[bot]` for reviews) | every inline finding dropped; Copilot scored **recall 0.000** |
+| CodeRabbit renders a clean review as "No actionable comments", not "posted: 0" | every clean verdict crashed the scorer |
+| "Review Change Stack" banner captured as a review | banner would translate to APPROVE |
+| Banner filter also discarded *clean* reviews (no inline comments + banner) | coverage stuck at 8/14; **CodeRabbit scored fp 1.000** |
+| Absent capture counted as *flagged* | rate-limited clean cases became false positives the reviewer never committed |
+| `+++ /dev/null` and absolute/traversing diff paths | scaffold writes outside its directory |
+| Formal review state ignored; scored on inline count only | a `CHANGES_REQUESTED` review with findings in the body read as APPROVE |
+
+CodeRabbit's own result moved from **FAIL (fp 1.000)** to **PASS (fp 0.250)** on the fourth
+of those — a figure manufactured entirely by a filter that was discarding real verdicts.
+Four were found by the reviewers under test, reviewing the harness that measures them.
+
+**Boundary — explicitly not claimed.**
+(a) **Coverage is unequal** (79% / 93% / 93% against the sovereign baseline's 100%). The rows
+are not strictly comparable and no reviewer was run to completion.
+(b) **The denominators differ per row and per class, and they are small.** The corpus holds
+seven `expect=flag` and seven `expect=clean` cases, but each reviewer was scored only over
+what it returned: every reviewer covered all 7 flag cases, while clean coverage was 6/7
+(Greptile, Copilot) and **4/7** (CodeRabbit, rate-limited). So one case moves recall by
+0.143 for every row, but moves the false-positive rate by 0.167 for Greptile and Copilot
+and by **0.250** for CodeRabbit — its `fp 0.250` is a single flagged clean case out of four.
+Differences smaller than these steps are not resolvable by this corpus at all, and
+CodeRabbit's fp figure in particular rests on four observations. Greptile's fp advantage over the sovereign baseline (0.000 vs 0.143)
+sits **at** that line and is suggestive, not established.
+(c) **One run per reviewer.** No variance estimate; these services are not temperature-pinned.
+(d) **The scaffolded files are truncated, so every fp figure is an upper bound.** A case is
+a diff and the corpus holds no full-file source, so a PR's file contains the hunk region and
+nothing else — no imports, no surrounding definitions. Inventing that context would be
+fabricating evidence. A codebase-aware reviewer can therefore flag a truncated file for
+problems the case never intended, inflating its false-positive rate. This bears directly on
+the headline: Greptile's `fp 0.000` is robust to it (an upper bound of zero is zero), while
+Copilot's `0.667` and CodeRabbit's `0.250` may both be overstated. Raised by Greptile
+reviewing this harness on PR #81.
+(e) The corpus is small, synthetic, context-free diffs and therefore **understates
+codebase-aware reviewers**, whose stated advantage is whole-repo context. This measures the
+shared capability — spot a defect in a diff — and is unfair to their differentiator.
+(f) `format_compliance` and `availability` are properties of this harness, not of the tools.
+(g) Nothing here licenses promoting any reviewer to a blocking gate. A lenient-only pass at
+unequal coverage on 13 cases is not that evidence.
+
+---
+
 *Convention: entries are append-only and dated; superseded claims are
 struck through with a pointer to the superseding entry, never deleted.*

@@ -57,9 +57,20 @@ pxx-shaped work over Camelid-shaped evidence. Neither project can do it alone.
 
 `pxx/manifest.py::probe_model_fingerprint` already runs at session start
 (`session.py:193`), is best-effort, degrades to empty on any failure, and feeds run
-telemetry. The capability probe runs **on the session path, in the same `httpx` client and
-connection**, under the same 2s budget. It is a single cheap GET; it is not the expensive F2
-generation probe (§4.4).
+telemetry. The capability probe runs **on the session path**, under one shared session-start
+budget. It is a single cheap GET; it is not the expensive F2 generation probe (§4.4).
+
+**This requires a contract change to the existing probe.** `probe_model_fingerprint` today
+constructs and closes its own client (`async with httpx.AsyncClient(...)` in
+`manifest.py`), so "reuse the client" is not implementable against it as written. Both
+probes must instead accept a **caller-owned `httpx.AsyncClient`** created once by the
+session and passed in. A test should assert both probes received the same client object,
+since nothing else would catch a regression to two clients.
+
+Precisely: what is shared is the **connection pool**, not a socket. Two requests through one
+`AsyncClient` may still use different sockets, particularly if issued concurrently. The
+benefit claimed here is avoiding a second client construction and TLS/connection setup, not
+literal single-socket reuse — the earlier wording said "same connection" and overstated it.
 
 ```python
 async def probe_engine_capabilities(
@@ -322,6 +333,9 @@ Behavioural, `httpx.MockTransport`, no network — matching `tests/test_doctor.p
    OpenAI-compatible form) must NOT produce `/v1/api/capabilities`.
 7. **Shared deadline.** With both probes stubbed to hang, total session-start probe time
    stays within the single budget rather than 2x it.
+7b. **Shared client.** Both probes receive the *same* `httpx.AsyncClient` instance — assert
+    object identity. Nothing else catches a regression to two clients, since two clients
+    behave identically apart from setup cost.
 
 **Negative controls**
 8. declared `false`, no F2 record, native backend → refuse; `CONFIGURATION_INVALID` +
@@ -386,7 +400,9 @@ Recorded because "adopt their whole approach" was considered and rejected in par
 - [ ] `probe_engine_capabilities` + `EngineCapabilities` with tri-state `tool_capable`,
       the three-valued `status`, and immutable `raw_json`
 - [ ] Session-start gate on the composite backend criterion (§4.2), not `capabilities.tools`
-- [ ] Root-path URL derivation stripping a trailing `/v1`, and a shared probe deadline
+- [ ] Root-path URL derivation stripping a trailing `/v1`; one shared probe deadline;
+      and `probe_model_fingerprint` refactored to accept a caller-owned client (contract
+      change — it constructs its own today)
 - [ ] F2 override record requiring `tool_called: true`, plus fingerprint + TTL
       invalidation (§4.4)
 - [ ] `on_declared_incapable` ("refuse"|"warn"), single key, non-repo-local

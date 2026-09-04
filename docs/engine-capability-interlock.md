@@ -90,6 +90,15 @@ async def probe_engine_capabilities(
     neither creates nor closes it. Tests inject a MockTransport through this
     client, which is why there is no separate `transport` argument.
 
+    LIFECYCLE: the SESSION owns the client and closes it exactly once, after
+    every probe task has settled — including on probe error, deadline expiry,
+    and cancellation. `async with httpx.AsyncClient(...)` around the probe
+    block, not a bare construct-and-forget: "neither probe closes it" is only
+    safe if something else definitely does, and today's code closes per-probe
+    precisely because each probe owns its own. Moving ownership up without
+    moving the close would leak a connection pool per session — the class of
+    defect this repo already fixed once in the git helpers (2.3.6/R-030).
+
     `deadline` is the SHARED session-start budget, not a fresh per-probe
     timeout: this runs alongside probe_model_fingerprint, and two independent
     2s timeouts would let startup spend 4s while claiming a 2s budget. The
@@ -346,6 +355,11 @@ Behavioural, `httpx.MockTransport`, no network — matching `tests/test_doctor.p
 7b. **Shared client.** Both probes receive the *same* `httpx.AsyncClient` instance — assert
     object identity. Nothing else catches a regression to two clients, since two clients
     behave identically apart from setup cost.
+7c. **Close lifecycle, parameterised over outcomes.** The session closes the client exactly
+    once — asserted via `is_closed` (or a close-counting spy) — on each of: both probes
+    succeeding, a probe raising, the deadline expiring, and the session being cancelled
+    mid-probe. Testing only the success path would leave the leak paths uncovered, which is
+    where a leak actually lives.
 
 **Negative controls**
 8. declared `false`, no F2 record, native backend → refuse; `CONFIGURATION_INVALID` +
@@ -413,6 +427,8 @@ Recorded because "adopt their whole approach" was considered and rejected in par
 - [ ] Root-path URL derivation stripping a trailing `/v1`; one shared probe deadline;
       and `probe_model_fingerprint` refactored to accept a caller-owned client (contract
       change — it constructs its own today)
+- [ ] Session owns and closes that client exactly once after all probes settle, including
+      on error, deadline expiry, and cancellation (§4.1) — with the four lifecycle tests
 - [ ] F2 override record requiring `tool_called: true`, plus fingerprint + TTL
       invalidation (§4.4)
 - [ ] `on_declared_incapable` ("refuse"|"warn"), single key, non-repo-local

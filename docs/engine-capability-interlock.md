@@ -63,12 +63,21 @@ generation probe (§4.4).
 
 ```python
 async def probe_engine_capabilities(
-    model: ModelRef, *, transport=None, timeout: float = 2.0
+    model: ModelRef, *, transport=None, deadline: Deadline
 ) -> EngineCapabilities:
     """Best-effort probe of an engine's self-declared capabilities.
 
-    Camelid serves this at GET /api/capabilities — NOT under /v1/ (see §6.1).
-    Any failure, any unrecognised shape, returns EngineCapabilities.unknown().
+    Camelid serves this at GET {root}/api/capabilities — NOT under /v1/ (§6.1).
+    `root` is `ModelRef.endpoint` with a trailing `/v1` REMOVED: an
+    OpenAI-compatible base_url conventionally ends in /v1 (the fleet's own
+    coder endpoint does), and naive joining would probe /v1/api/capabilities,
+    which 404s forever and silently disables the interlock. Both endpoint forms
+    are tested.
+
+    `deadline` is the SHARED session-start budget, not a fresh per-probe
+    timeout: this runs alongside probe_model_fingerprint, and two independent
+    2s timeouts would let startup spend 4s while claiming a 2s budget. The
+    remaining time is passed down; an exhausted deadline yields failed().
     """
 ```
 
@@ -87,11 +96,24 @@ class EngineCapabilities:
     #: recorded. A string is deeply immutable by construction and still verbatim
     #: enough to re-parse for the receipt.
     raw_json: str = ""
+    #: Why there is no declaration. "declared" | "undeclared" | "probe_failed".
+    #: These MUST NOT be collapsed: an engine that answered and said nothing
+    #: about tools is a normal Ollama box (record `tool_capable: null`), while a
+    #: probe that could not complete means the gate did not run at all (record
+    #: `capabilities_probe_failed`, §4.6). Both proceed, and both must remain
+    #: distinguishable afterwards — otherwise a skipped gate is indistinguishable
+    #: from a passed one, which is the failure mode this repo keeps finding.
+    status: str = "undeclared"
 
     @classmethod
-    def unknown(cls) -> EngineCapabilities:
-        """The engine said nothing recognisable. Every field default; `declared` False."""
-        return cls()
+    def undeclared(cls) -> EngineCapabilities:
+        """The engine answered but declared nothing recognisable."""
+        return cls(status="undeclared")
+
+    @classmethod
+    def failed(cls) -> EngineCapabilities:
+        """The probe could not complete — unreachable, 401/404, timeout, bad shape."""
+        return cls(status="probe_failed")
 
     @property
     def declared(self) -> bool:
@@ -136,8 +158,8 @@ safety flag — which trains people to switch off safety flags.
 | `false` | none | **Refuse to start.** Typed error naming the row and the engine's own `tool_capable_rows`. |
 | `false` | a fresh probe **did** tool-call | **Proceed**, and record an `engine_under_claim` finding for upstream. |
 | `true` | any | Proceed. Record the declaration. |
-| not declared (`null`) | any | Proceed, unchanged. Record `tool_capable: null` — **not** `false`. |
-| capabilities probe failed | any | Proceed, unchanged. Record `capabilities_probe_failed`. See §4.6. |
+| not declared (`status="undeclared"`) | any | Proceed, unchanged. Record `tool_capable: null` — **not** `false`. |
+| probe failed (`status="probe_failed"`) | any | Proceed, unchanged. Record `capabilities_probe_failed`. **Distinct from the row above** — the gate did not run, rather than ran and found nothing. See §4.6. |
 
 **We fail closed on a declaration of incapability, not on the absence of one.** Absence is
 the norm rather than a risk signal; a gate that fired on absence would fire on almost every
@@ -165,6 +187,12 @@ what it describes is a way to override a current declaration with a stale observ
 
 Stored under `state_dir` (never the repo). A record is used **only** when all hold:
 
+0. `tool_called` is present and exactly `true`. A record with `tool_called: false`,
+   a missing field, or a malformed body is **not evidence** and must not satisfy the
+   override. Omitting this check was a fail-open introduced by an earlier revision of
+   this section: every other condition below is about *freshness*, and a stale-but-fresh
+   negative record would have passed all of them and unblocked the very run the
+   declaration was refusing;
 1. `endpoint` and `model` match the resolved `ModelRef` exactly;
 2. `served_fingerprint` matches the fingerprint `probe_model_fingerprint` returns **for this
    session** — so a model swap behind an unchanged name invalidates it, which is the case
@@ -197,10 +225,10 @@ If `/api/capabilities` is unreachable, slow, or auth-gated while generation stil
 gate does not fire and the run proceeds. That is a **fail-open on the probe path**, and it is
 a deliberate consequence of §4.3's rule that absence of a declaration is not a risk signal —
 but it means the interlock cannot be relied on to *stop* anything. An operator who wants past
-it can firewall one route, or set `allow_uncertified_tools`.
+it can firewall one route, or set `on_declared_incapable = "warn"`.
 
 Mitigations, none of which change that conclusion:
-- the outcome records `capabilities_probe_failed`, so a run that skipped the gate is
+- the outcome records `capabilities_probe_failed` (distinct from `undeclared`), so a run that skipped the gate is
   identifiable after the fact rather than silently indistinguishable from a gated one;
 - `doctor` reports when an endpoint that previously declared capabilities has stopped doing
   so, which is the signal that something changed.
@@ -212,18 +240,23 @@ wrong, and the earlier draft of this document did not say so.
 
 ```toml
 [engine]
-refuse_declared_incapable = true   # refuse ONLY on an explicit tool_capable=false
-allow_uncertified_tools   = false  # explicit risk-acceptance escape hatch
+on_declared_incapable = "refuse"   # "refuse" (default) | "warn"
 ```
 
-The first key was originally `require_declared_tools`, which inverted its own meaning — the
+**One key, not two.** An earlier revision had `refuse_declared_incapable` *and*
+`allow_uncertified_tools`, which express the same decision twice and leave their interaction
+undefined — what does `refuse_declared_incapable=false` plus `allow_uncertified_tools=false`
+mean? A single enumerated setting removes the question rather than documenting an answer to
+it. `"warn"` is the risk-acceptance value: the run proceeds and the finding is logged.
+
+The key was originally named `require_declared_tools`, which inverted its own meaning — the
 name reads as *a declaration is required*, while the behaviour is *absence proceeds, only an
 explicit false refuses*. An implementer working from the old name would have blocked every
 undeclared engine, i.e. every Ollama user: the exact tri-state collapse §4.1 forbids.
 
-`allow_uncertified_tools` downgrades the refusal to a warning. Honoured only from user
-config, env, or CLI — **never repo-local**, the same A0b treatment as `allow_ungated_shell`
-and the `[roles]` lanes, because a checked-in file must not be able to switch off a gate.
+Honoured only from user config, env, or CLI — **never repo-local**, the same A0b treatment
+as `allow_ungated_shell` and the `[roles]` lanes, because a checked-in file must not be able
+to switch off a gate.
 
 ### 4.8 Doctor — declaration vs probe as a cross-check
 
@@ -259,9 +292,16 @@ fingerprint:
   "row_id": "qwen3_4b_instruct_q8_0",
   "support_level": "supported_exact_row_smoke",
   "tool_capable": true,
-  "captured_utc": "…Z"
+  "captured_utc": "…Z",
+  "raw_json": "{…}"
 }
 ```
+
+`raw_json` is stored alongside the parsed fields, not instead of them. The parsed fields are
+what the gate acted on; `raw_json` is the payload exactly as served, so a later reader can
+re-derive them and check that pxx read the declaration correctly. Storing only the parsed
+view would make the receipt unfalsifiable against the engine's actual response — which is the
+whole reason §4.1 keeps it immutable.
 
 ## 5. Tests
 
@@ -273,26 +313,38 @@ Behavioural, `httpx.MockTransport`, no network — matching `tests/test_doctor.p
    `tool_capable: null`, not `false` (the regression guard for every non-Camelid user).
 3. capabilities probe raises → session starts; `capabilities_probe_failed` recorded; no
    crash, and **no `MODEL_UNAVAILABLE`**.
-4. unrecognised payload shape → `EngineCapabilities.unknown()`, never an exception.
+4. unrecognised payload shape → `status="probe_failed"`, never an exception.
+5. **A probe failure and an undeclared engine are distinguishable in the record**: the first
+   yields `status="probe_failed"`, the second `status="undeclared"` with `tool_capable: null`.
+   Both proceed; asserting only "both proceed" would let the two collapse.
+6. **URL normalisation, both endpoint forms.** `base_url` with and without a trailing `/v1`
+   must both probe `{root}/api/capabilities`. A `/v1`-suffixed endpoint (the common
+   OpenAI-compatible form) must NOT produce `/v1/api/capabilities`.
+7. **Shared deadline.** With both probes stubbed to hang, total session-start probe time
+   stays within the single budget rather than 2x it.
 
 **Negative controls**
-5. declared `false`, no F2 record, native backend → refuse; `CONFIGURATION_INVALID` +
+8. declared `false`, no F2 record, native backend → refuse; `CONFIGURATION_INVALID` +
    `ENGINE_TOOLS_UNCERTIFIED`; error names the row **and** the alternatives.
-6. declared `false` + **fresh** F2 record showing a tool call → **proceeds**, under-claim
+9. declared `false` + **fresh** F2 record showing a tool call → **proceeds**, under-claim
    finding recorded. (Guards §4.3: a conservative declaration must not block a working setup.)
-7. declared `false` + F2 record whose `served_fingerprint` no longer matches → **refuses**.
-8. declared `false` + F2 record older than the TTL → **refuses**.
-9. declared `false` + `allow_uncertified_tools=true` → proceeds with a warning.
-10. **Parameterised over every non-`native` backend** (`aider`, `mock`, `replay`) with
+10. declared `false` + F2 record whose `served_fingerprint` no longer matches → **refuses**.
+11. declared `false` + F2 record older than the TTL → **refuses**.
+12. declared `false` + `on_declared_incapable="warn"` → proceeds with a warning.
+13. **Parameterised over every non-`native` backend** (`aider`, `mock`, `replay`) with
     declared `false` → all **proceed**. Guards §4.2: `mock` and `replay` report
     `capabilities.tools=True` yet must not be gated.
-11. `allow_uncertified_tools` from a repo-local `pxx.toml` → **ignored, with a warning**
+14. `on_declared_incapable` from a repo-local `pxx.toml` → **ignored, with a warning**
     (mirrors the existing A0b tests).
-12. **Mutation:** stub the gate to always allow → tests 5, 7, 8 and 11 fail.
+15. declared `false` + F2 record with **`tool_called: false`** (fresh, matching fingerprint,
+    within TTL) → **refuses**. Guards the §4.4 fail-open directly: every freshness condition
+    passes and the record still is not evidence.
+15b. same with `tool_called` absent or the body malformed → **refuses**.
+15c. **Mutation:** stub the gate to always allow → tests 8, 10, 11, 14 and 15 fail.
 
 **Doctor**
-13. declared true + prose probe → over-claim warning fires.
-14. declared false + tool-calling probe → under-claim warning fires.
+16. declared true + prose probe → over-claim warning fires.
+17. declared false + tool-calling probe → under-claim warning fires.
 
 ## 6. Risks and open questions
 
@@ -303,8 +355,8 @@ Behavioural, `httpx.MockTransport`, no network — matching `tests/test_doctor.p
    Unconfirmed against a **running instance**: auth requirements, and whether the served
    payload matches the bundled one. Verify during implementation; do not skip it.
 2. **Schema stability.** `execution_plan` / `model_compatibility` are not a published contract
-   for third parties. Parsing must be defensive and degrade to `unknown()` on any shape
-   surprise, never raise. Worth asking whether Tim would version it.
+   for third parties. Parsing must be defensive and degrade to `undeclared()` / `failed()` on any
+   shape surprise, never raise. Worth asking whether Tim would version it.
 3. **Under-claim friction.** 59/65 rows are `false`, some conservatively. §4.3 exists to stop
    that becoming a hard block, but a user with no F2 record still gets refused. The doctor
    under-claim row converts the friction into an upstream signal; watch for complaints.
@@ -332,12 +384,15 @@ Recorded because "adopt their whole approach" was considered and rejected in par
 
 - [ ] `/api/capabilities` verified against a running Camelid (auth, payload) — risk 1
 - [ ] `probe_engine_capabilities` + `EngineCapabilities` with tri-state `tool_capable`,
-      `unknown()`, and immutable `raw_json`
+      the three-valued `status`, and immutable `raw_json`
 - [ ] Session-start gate on the composite backend criterion (§4.2), not `capabilities.tools`
-- [ ] F2 override record with fingerprint + TTL invalidation (§4.4)
-- [ ] `refuse_declared_incapable` / `allow_uncertified_tools`, non-repo-local
+- [ ] Root-path URL derivation stripping a trailing `/v1`, and a shared probe deadline
+- [ ] F2 override record requiring `tool_called: true`, plus fingerprint + TTL
+      invalidation (§4.4)
+- [ ] `on_declared_incapable` ("refuse"|"warn"), single key, non-repo-local
 - [ ] Doctor declaration-vs-probe cross-check
-- [ ] 14 tests incl. the mutation control and the all-backends parameterisation
+- [ ] 17+ tests incl. the mutation control, the all-backends parameterisation, the
+      probe-failed-vs-undeclared distinction, and the `tool_called: false` control
 - [ ] Declaration recorded in the run record — **not** `manifest.json` (§4.9)
 - [ ] `docs/CONFIG.md` `[engine]` section, stating the §4.6 limitation
 - [ ] A receipt whose boundary states what was verified live and what was not

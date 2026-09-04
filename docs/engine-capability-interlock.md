@@ -74,7 +74,7 @@ literal single-socket reuse — the earlier wording said "same connection" and o
 
 ```python
 async def probe_engine_capabilities(
-    model: ModelRef, *, transport=None, deadline: Deadline
+    model: ModelRef, *, client: httpx.AsyncClient, deadline: Deadline
 ) -> EngineCapabilities:
     """Best-effort probe of an engine's self-declared capabilities.
 
@@ -85,11 +85,21 @@ async def probe_engine_capabilities(
     which 404s forever and silently disables the interlock. Both endpoint forms
     are tested.
 
+    `client` is CALLER-OWNED and shared with probe_model_fingerprint (which
+    must be refactored to accept one — it constructs its own today). The probe
+    neither creates nor closes it. Tests inject a MockTransport through this
+    client, which is why there is no separate `transport` argument.
+
     `deadline` is the SHARED session-start budget, not a fresh per-probe
     timeout: this runs alongside probe_model_fingerprint, and two independent
     2s timeouts would let startup spend 4s while claiming a 2s budget. The
     remaining time is passed down; an exhausted deadline yields failed().
     """
+
+# and, correspondingly, the existing probe's contract changes to:
+#   async def probe_model_fingerprint(
+#       model: ModelRef, *, client: httpx.AsyncClient, deadline: Deadline
+#   ) -> ModelFingerprint
 ```
 
 ```python

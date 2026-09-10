@@ -104,8 +104,8 @@ def test_compat_known_subcommand_untouched():
 
 
 def test_exit_code_mapping():
-    def oc(code):
-        return RunOutcome(code=code, summary="x")
+    def oc(code, files_changed=0):
+        return RunOutcome(code=code, summary="x", files_changed=files_changed)
 
     assert cli.exit_code_for(oc(TerminalCode.COMPLETED)) == 0
     for code in (
@@ -119,7 +119,25 @@ def test_exit_code_mapping():
     ):
         assert cli.exit_code_for(oc(code)) == 2, code
     assert cli.exit_code_for(oc(TerminalCode.INTERRUPTED)) == 130
-    assert cli.exit_code_for(oc(TerminalCode.MODEL_UNAVAILABLE)) == 1
+
+    # Setup/config/model refusals (HOOKS_MISSING, MODEL_UNAVAILABLE,
+    # CONFIGURATION_INVALID): a clean refusal that touched nothing is 2; a
+    # refusal that still left an edit on disk is 3 — the honest signal that
+    # there is real, unverified work to inspect. HOOKS_MISSING moved out of
+    # _GATE_CODES; MODEL_UNAVAILABLE/CONFIGURATION_INVALID moved off the
+    # catch-all 1 onto this contract.
+    for code in (
+        TerminalCode.HOOKS_MISSING,
+        TerminalCode.MODEL_UNAVAILABLE,
+        TerminalCode.CONFIGURATION_INVALID,
+    ):
+        assert cli.exit_code_for(oc(code, files_changed=0)) == 2, code
+        assert cli.exit_code_for(oc(code, files_changed=1)) == 3, code
+
+    # The files_changed split is scoped to setup codes only: a true quality
+    # gate that stopped a run which produced an edit is still a gate stop (2),
+    # never promoted to 3.
+    assert cli.exit_code_for(oc(TerminalCode.DIFF_CAP, files_changed=5)) == 2
 
 
 # ---------------------------------------------------------------------------
@@ -213,8 +231,17 @@ def test_gate_outcome_exit_2(harness):
     assert cli.main(["run", "-m", "x"]) == 2
 
 
-def test_backend_error_exit_1(harness):
+def test_setup_refusal_without_edit_exit_2(harness):
+    # honest-green #2: a setup/model refusal that touched nothing is a clean
+    # stop (2), not a generic failure (1). With an edit on disk it would be 3;
+    # exit_code_for owns that split and is unit-tested in test_exit_code_mapping.
     FakeSession.outcome = RunOutcome(code=TerminalCode.MODEL_UNAVAILABLE, summary="boom")
+    assert cli.main(["run", "-m", "x"]) == 2
+
+
+def test_backend_error_exit_1(harness):
+    # a genuine execution failure (the edit leg blew up) still exits 1.
+    FakeSession.outcome = RunOutcome(code=TerminalCode.EDIT_FAILED, summary="boom")
     assert cli.main(["run", "-m", "x"]) == 1
 
 

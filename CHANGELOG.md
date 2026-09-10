@@ -3,6 +3,47 @@
 All notable changes to pxx are documented here. The 1.x series history is
 preserved in git (tag `v1.3.3` and earlier).
 
+## [Unreleased]
+
+### Changed
+
+- **Honest green: an abort that already wrote code no longer reports as a clean
+  task failure.** Two coupled fixes close the gap between what a run *did* and
+  what its exit code *said*.
+  1. `Session._report_worktree_mutations` now fills the returned outcome's
+     `files_changed` from the measured worktree delta when a backend left it at
+     zero — symmetric with the existing `diff_lines` fill. The terminal audit
+     record already carried the projected `files_changed`; only the *returned*
+     outcome, the one `exit_code_for` reads, was throwing it away. An abort that
+     landed an edit now returns the true count.
+  2. `exit_code_for` gains a `_SETUP_CODES` class (`HOOKS_MISSING`,
+     `MODEL_UNAVAILABLE`, `CONFIGURATION_INVALID`) — the "boundary / config /
+     model" refusals, distinct from a quality gate that stopped a run which
+     actually executed. A setup refusal that touched nothing is a clean stop
+     (**2**); one that still left an unverified edit on disk is **3**, the honest
+     signal that there is real work to inspect. `HOOKS_MISSING` moved out of
+     `_GATE_CODES`; `MODEL_UNAVAILABLE` / `CONFIGURATION_INVALID` moved off the
+     catch-all **1** onto this contract. Genuine execution failures (the edit,
+     test, or review legs) still exit **1**; true gates still exit **2**; the
+     `files_changed` split is scoped to setup codes only and never promotes a
+     gate stop to 3.
+
+  Exit-code contract, after this change:
+
+  | code | meaning |
+  |------|---------|
+  | 0 | `COMPLETED` |
+  | 2 | a gate stopped an executing run, or a setup refusal that wrote nothing |
+  | 3 | a setup/config/model refusal that left an edit on disk (honest green) |
+  | 130 | `INTERRUPTED` |
+  | 1 | a genuine execution failure |
+
+  Cross-repo property: dx-orchestrator maps *any* non-zero pxx exit to its own
+  `EXIT_TASK_FAILED` and derives its user message from the git-produced diff, not
+  from pxx's specific code. dx's suite already pins codes `1, 2, 3, 42, 127` to
+  that mapping, so this change is payload-honest without altering the dx↔pxx
+  contract — verified by re-running dx's full suite against this branch.
+
 ## [2.5.4] — 2026-08-19
 
 ### Added

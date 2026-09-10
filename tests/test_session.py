@@ -228,6 +228,10 @@ def test_hook_denied_after_writes_reports_landed_mutation(tmp_path):
     assert outcome.code is TerminalCode.HOOK_DENIED
     assert (repo / "new.txt").exists()  # the writes really landed
     assert outcome.diff_lines == 2
+    # honest-green #1: the *returned* outcome carries the true files_changed,
+    # not a zero — so exit_code_for can tell an abort that left an edit on disk
+    # from one that touched nothing.
+    assert outcome.files_changed == 1
     assert "1 file already modified: new.txt" in outcome.summary
 
 

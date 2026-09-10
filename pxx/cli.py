@@ -85,7 +85,6 @@ _GATE_CODES = {
     TerminalCode.DIFF_CAP,
     TerminalCode.OUT_OF_SCOPE,
     TerminalCode.HOOK_DENIED,
-    TerminalCode.HOOKS_MISSING,
     TerminalCode.NO_TEST_PROGRESS,
     TerminalCode.CLARIFICATION_REQUIRED,
     TerminalCode.TEST_RUN_FAILED,
@@ -99,6 +98,16 @@ _GATE_CODES = {
     TerminalCode.MERGE_CONFLICT,
 }
 
+# Setup/config/model refusals — the run could not properly begin or a
+# precondition failed. Distinct from _GATE_CODES (a quality gate that stopped
+# a run which DID execute). When such a refusal nonetheless left an edit on
+# disk, exit_code_for reports it honestly (3) instead of as a clean stop (2).
+_SETUP_CODES = {
+    TerminalCode.HOOKS_MISSING,
+    TerminalCode.MODEL_UNAVAILABLE,
+    TerminalCode.CONFIGURATION_INVALID,
+}
+
 _LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
 
 _SELF_TEST_TASK = "Run the project test suite, diagnose any failures, and fix them."
@@ -109,6 +118,11 @@ def exit_code_for(outcome: RunOutcome) -> int:
     """Map a terminal code to a process exit code."""
     if outcome.code is TerminalCode.COMPLETED:
         return 0
+    if outcome.code in _SETUP_CODES:
+        # A setup/config refusal that still wrote an edit is exit 3 — the
+        # honest signal that there is real, unverified work on disk to inspect;
+        # a refusal that touched nothing is a clean stop (2).
+        return 3 if outcome.files_changed else 2
     if outcome.code in _GATE_CODES:
         return 2
     if outcome.code is TerminalCode.INTERRUPTED:

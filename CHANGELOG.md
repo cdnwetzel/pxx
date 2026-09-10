@@ -3,7 +3,7 @@
 All notable changes to pxx are documented here. The 1.x series history is
 preserved in git (tag `v1.3.3` and earlier).
 
-## [Unreleased]
+## [2.5.5] — 2026-09-10
 
 ### Changed
 

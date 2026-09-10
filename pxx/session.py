@@ -733,6 +733,15 @@ class Session:
                 )
         if outcome.diff_lines == 0:
             outcome = replace(outcome, diff_lines=landed_lines)
+        # The returned outcome must carry a truthful files_changed — the count
+        # of files this run left different from the worktree start — otherwise
+        # an abort that wrote to disk returns files_changed=0, and
+        # ``exit_code_for`` cannot tell "wrote an unverified edit" from "did
+        # nothing". A backend-reported nonzero count still wins, mirroring the
+        # diff_lines fill above. (The terminal record projects its own count
+        # from the event stream; both measure the same writes.)
+        if outcome.files_changed == 0:
+            outcome = replace(outcome, files_changed=len(changed))
         if outcome.code is not TerminalCode.COMPLETED:
             count = len(changed)
             noun = "file" if count == 1 else "files"

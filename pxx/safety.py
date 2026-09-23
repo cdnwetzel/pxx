@@ -170,12 +170,19 @@ class HookRunner:
         except TimeoutError as exc:
             proc.kill()
             await proc.wait()  # reap the child: never leak the transport
-            raise HookDenied(f"hook timed out ({hook.timeout}s): {hook.command}") from exc
+            # The message can reach the model (hook_denial = "refuse_tool") and the
+            # audit log; a hook command is an arbitrary shell string and may carry
+            # credentials, so it is never part of the message.
+            raise HookDenied(f"hook timed out ({hook.timeout}s) [{hook.event}]") from exc
         if proc.returncode == 0:
             return
         detail = stderr.decode(errors="replace").strip()[:300]
         raise HookDenied(
-            f"hook denied ({hook.event}, exit {proc.returncode}): {hook.command} {detail} "
+            # No hook command here: the message can reach the model
+            # (hook_denial = "refuse_tool") and the audit log, and a hook
+            # command is an arbitrary shell string that may carry credentials.
+            # The hook's own stderr is its documented feedback channel.
+            f"hook denied ({hook.event}, exit {proc.returncode}): {detail} "
             "— adjust or remove the hook in pxx.toml (see docs/CONFIG.md §hooks)"
         )
 

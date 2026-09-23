@@ -17,9 +17,11 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import logging
 import os
 import re
+import tempfile
 import time
 import uuid
 from collections.abc import Callable
@@ -31,6 +33,7 @@ from .config import Settings
 from .errors import BudgetExceeded
 from .events import Event, EventBus
 from .gitenv import communicate_bounded, git_env
+from .manifest import RunDirWriter
 from .outcome import RunOutcome, TerminalCode
 from .review import (
     Finding,
@@ -43,6 +46,7 @@ from .review import (
 )
 from .safety import BudgetGuard, ScopeGate
 from .session import Session
+from .tools.shell import sandbox_argv
 
 log = logging.getLogger("pxx.loop")
 
@@ -157,6 +161,59 @@ async def _diff_since(root: Path, pre_sha: str | None) -> str:
     return out or ""
 
 
+async def _record_diff(root: Path, pre_sha: str | None) -> str:
+    """The loop's work as a patch ``git apply`` can replay: tracked changes
+    against the pre-loop state PLUS every untracked file as a new-file hunk.
+
+    ``git diff <sha>`` alone omits files the run created -- for a
+    from-scratch task that is most of the work. Untracked files are diffed
+    with ``--no-index`` against /dev/null, which reads the tree and mutates
+    nothing (no intent-to-add in the index). Read-only by construction; a
+    recorder must not change what it records. Capped at 1 MiB like the
+    session's diff; '' past that, never a truncated patch.
+    """
+    # --binary so a created or changed binary file is replayable, not a
+    # "Binary files differ" stub that `git apply` cannot use.
+    ref = pre_sha or "HEAD"
+    tracked = await _git(root, "diff", "--no-renames", "--binary", ref)
+    parts = [tracked or ""]
+    listed = await _git(root, "ls-files", "--others", "--exclude-standard", "-z")
+    for rel in (listed or "").split("\0"):
+        # Generated artifacts (__pycache__, .pytest_cache, ...) are not the
+        # run's work and can eat the 1 MiB budget -- the same filter the
+        # loop's own accounting applies.
+        if not rel or _is_generated_artifact(rel):
+            continue
+        # --no-index exits 1 when the files differ; _git returns None on a
+        # non-zero exit, so run it directly and keep whatever it printed.
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "git",
+                "diff",
+                "--no-index",
+                "--no-renames",
+                "--binary",
+                "--",
+                "/dev/null",
+                rel,
+                cwd=str(root),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+                env=git_env(),
+            )
+        except OSError:
+            continue
+        try:
+            out, _ = await asyncio.wait_for(proc.communicate(), timeout=15.0)
+        except TimeoutError:
+            proc.kill()
+            await proc.wait()  # reap it: never leak a child on the way past
+            continue
+        parts.append(out.decode(errors="replace"))
+    text = "".join(p for p in parts if p)
+    return text if len(text) <= 1_000_000 else ""
+
+
 def _diff_line_count(diff: str) -> int:
     n = 0
     for line in diff.splitlines():
@@ -173,17 +230,48 @@ _FAILURE_RES = (
 )
 
 
-async def _run_tests(root: Path, command: str) -> tuple[bool, set[str], str]:
-    """Run the test command; return (passed, failing-set, output tail)."""
+async def _run_tests(
+    root: Path, command: str, *, sandbox: bool = False
+) -> tuple[bool, set[str], str]:
+    """Run the test command; return (passed, failing-set, output tail).
+
+    With ``sandbox`` the command runs under the same confinement ``run_shell``
+    uses (``tools.shell.sandbox_argv``): the tests are code the model wrote,
+    and until 2.5.5+ps2 the loop ran them on the host with the harness's own
+    reach while the model's *own* shell calls were confined. Fail-closed: a
+    sandbox that was asked for but is not available means the suite does not
+    run, and that is reported as an infrastructure failure, never as green.
+    """
+    tmp: tempfile.TemporaryDirectory[str] | None = None
     try:
-        proc = await asyncio.create_subprocess_shell(
-            command,
-            cwd=root,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-        )
+        if sandbox:
+            tmp = tempfile.TemporaryDirectory(prefix="pxx-loop-sandbox-")
+            argv = sandbox_argv(root, command, Path(tmp.name))
+            if argv is None:
+                return (
+                    False,
+                    {f"spawn-error:sandbox-unavailable:{command}"},
+                    "sandbox_shell is set but no sandboxer (bwrap / sandbox-exec) "
+                    "is available; the test command was NOT run",
+                )
+            proc = await asyncio.create_subprocess_exec(
+                *argv,
+                cwd=root,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+        else:
+            proc = await asyncio.create_subprocess_shell(
+                command,
+                cwd=root,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
     except OSError as exc:
         return False, {f"spawn-error:{command}"}, f"could not run test command: {exc}"
+    finally:
+        if tmp is not None and "proc" not in locals():
+            tmp.cleanup()
     try:
         out, _ = await asyncio.wait_for(proc.communicate(), TEST_TIMEOUT_SECONDS)
     except TimeoutError:
@@ -191,7 +279,16 @@ async def _run_tests(root: Path, command: str) -> tuple[bool, set[str], str]:
         await proc.wait()
         tail = f"test command timed out after {TEST_TIMEOUT_SECONDS:.0f}s"
         return False, {f"timeout:{command}"}, tail
+    finally:
+        if tmp is not None:
+            tmp.cleanup()
     text = out.decode(errors="replace")
+    if sandbox and proc.returncode != 0 and _sandbox_setup_failed(text):
+        # The sandboxer itself could not start (no user namespaces, seccomp
+        # refused...): the command never ran. Infrastructure, not a failing
+        # suite -- the loop must not take it as the test baseline.
+        first = (text.strip().splitlines() or ["sandbox failed to start"])[0][:80]
+        return False, {f"spawn-error:sandbox-setup:{first}"}, text.strip()[-1500:]
     failing: set[str] = set()
     if proc.returncode != 0:
         for rx in _FAILURE_RES:
@@ -199,6 +296,11 @@ async def _run_tests(root: Path, command: str) -> tuple[bool, set[str], str]:
         if not failing:
             failing.add(f"exit:{proc.returncode}")
     return proc.returncode == 0, failing, text.strip()[-1500:]
+
+
+def _sandbox_setup_failed(output: str) -> bool:
+    """Whether the sandboxer, not the command, produced the failure."""
+    return output.lstrip()[:200].startswith(("bwrap:", "sandbox-exec:"))
 
 
 async def _edit_objectively_done(
@@ -210,6 +312,7 @@ async def _edit_objectively_done(
     max_diff_lines: int,
     command: str | None,
     lint_command: str | None,
+    sandbox: bool = False,
 ) -> bool:
     """Whether the current on-disk edit passes every OBJECTIVE mandatory gate a
     completing round enforces — scope, diff budget, lint, tests — i.e. everything
@@ -231,7 +334,7 @@ async def _edit_objectively_done(
         lint_ok, _ = await _run_lint(root, lint_command)
         if not lint_ok:
             return False  # would be LINT_BLOCKED
-    passed, _failing, _tail = await _run_tests(root, command)
+    passed, _failing, _tail = await _run_tests(root, command, sandbox=sandbox)
     return passed
 
 
@@ -247,6 +350,7 @@ async def _overwork_salvageable(
     task: str,
     reviewer: Reviewer | None,
     review_mode: ReviewMode,
+    sandbox: bool = False,
 ) -> bool:
     """Whether an over-worked run's diff is complete AND passes every mandatory
     guard, so a session that ran out of its per-turn budget (BUDGET_EXCEEDED) can
@@ -263,6 +367,7 @@ async def _overwork_salvageable(
         max_diff_lines=max_diff_lines,
         command=command,
         lint_command=lint_command,
+        sandbox=sandbox,
     ):
         return False
     if reviewer is not None:
@@ -341,6 +446,22 @@ async def run_loop(
     # that orchestrate their own loops (goal nodes) pass safety_net=False:
     # per-node nets spam shared tag refs and race under parallelism.
     net_enabled = settings.safety_net if safety_net is None else safety_net
+    # The loop's OWN run record (2.5.5+ps3). Each round's Session writes its
+    # own runs/<id>/, but the loop's gates -- tests, review, budget, the
+    # safety-net restore -- were emitted on the parent bus and persisted
+    # nowhere: a consumer reading the run directories saw "COMPLETED"
+    # sessions and no test gate at all for a loop that ended TEST_REGRESSION
+    # (seen 2026-09-22 on a downstream orchestrator). This directory carries every parent-bus
+    # event, the loop's outcome with its telemetry legs, and the whole-loop
+    # diff written BEFORE the net resets the tree.
+    loop_run_id = f"{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}-loop-{uuid.uuid4().hex[:8]}"
+    loop_writer = RunDirWriter.open(settings.state_dir, loop_run_id)
+
+    async def _persist(event: Event) -> None:
+        loop_writer.append_event(json.loads(event.to_json()))
+
+    parent_bus.subscribe(_persist)
+
     net = None
     if in_repo and net_enabled:
         from .safety_net import tie_safety_net
@@ -356,6 +477,19 @@ async def run_loop(
                     "stash": net.stash_message or "",
                 },
             )
+    loop_writer.write_task(
+        {
+            "mode": "loop",
+            "run_id": loop_run_id,
+            "task_preview": task[:200],
+            "root": str(root),
+            "test_command": command,
+            "sandbox_shell": settings.sandbox_shell,
+            "max_rounds": max_rounds,
+            "safety_net": {"tag": net.tag, "stash": net.stash_message} if net else None,
+        }
+    )
+
     net_suffix = ""
     if net is not None:
         net_suffix = f" [net: {net.tag or 'no-tag'}{'+stash' if net.stash_message else ''}]"
@@ -373,6 +507,8 @@ async def run_loop(
     # Per-round sessions never commit mid-loop: auto_commit fires ONCE at the
     # end of a completed loop (B1.4), not per round.
     round_settings = replace(settings, auto_commit=False)
+
+    loop_started = time.time()
 
     # Done-signal early-exit oracle: when enabled, each per-round coder session
     # gets an objective "already done?" check. A local coder often keeps calling
@@ -396,12 +532,41 @@ async def run_loop(
                 max_diff_lines=settings.budgets.max_diff_lines,
                 command=command,
                 lint_command=lint_command,
+                sandbox=settings.sandbox_shell,
             )
 
         done_check = _run_done_check
 
     async def _complete(outcome: RunOutcome) -> RunOutcome:
         """End-of-loop commit when --commit is on (once per completed loop)."""
+        # Record first, act second: the diff and the outcome are written
+        # while the tree still holds the loop's work, so a restore below
+        # discards nothing that was not already on disk under runs/.
+        try:
+            loop_diff = await _record_diff(root, pre_sha)
+            if loop_diff.strip():
+                loop_writer.write_diff(loop_diff)
+        except Exception:
+            log.exception("loop diff write failed (best-effort)")
+        loop_writer.write_outcome(
+            {
+                "mode": "loop",
+                "run_id": loop_run_id,
+                "ts": loop_started,
+                "code": str(outcome.code),
+                "summary": outcome.summary[:500],
+                "rounds": outcome.rounds,
+                "tokens": outcome.tokens,
+                "diff_lines": outcome.diff_lines,
+                "cost_usd": outcome.cost_usd,
+                "contributing_codes": list(outcome.contributing_codes),
+                "findings_by_severity": dict(outcome.findings_by_severity),
+                "test_command": command,
+                "sandbox_shell": settings.sandbox_shell,
+                **legs,
+                "safety_net": {"tag": net.tag, "stash": net.stash_message} if net else None,
+            }
+        )
         if settings.auto_commit and outcome.code is TerminalCode.COMPLETED:
             from .safety_net import commit_session_work
             from .worktree import worktree_delta
@@ -564,6 +729,7 @@ async def run_loop(
                     task=task,
                     reviewer=reviewer,
                     review_mode=review_mode,
+                    sandbox=settings.sandbox_shell,
                 ):
                     # Record the salvaged run's diff telemetry (the normal
                     # scope/diff guards, which populate these, were bypassed).
@@ -643,7 +809,9 @@ async def run_loop(
         # Guard 3: tests with monotonic failing-set progress.
         if command:
             test_start = time.monotonic()
-            passed, failing, test_tail = await _run_tests(root, command)
+            passed, failing, test_tail = await _run_tests(
+                root, command, sandbox=settings.sandbox_shell
+            )
             legs["test_seconds"] += time.monotonic() - test_start
             infra = {
                 f
@@ -675,6 +843,7 @@ async def run_loop(
                     "passed": passed,
                     "failing": len(failing),
                     "new_failures": new_failures[:10],
+                    "sandboxed": settings.sandbox_shell,
                 },
             )
             if new_failures:

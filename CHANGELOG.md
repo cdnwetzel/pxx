@@ -3,6 +3,45 @@
 All notable changes to pxx are documented here. The 1.x series history is
 preserved in git (tag `v1.3.3` and earlier).
 
+## [2.6.0] — 2026-09-23
+
+### Added
+
+- **`hook_denial = "refuse_tool"`.** A PreToolUse hook's denial can be returned
+  to the model as a tool error (`error: refused by policy: …`) and the session
+  continues, with a `tool_denied` event on the bus. Default stays `"abort"` —
+  the existing behaviour, byte for byte. For a fail-closed policy engine behind
+  the hook, a denial is information the model can act on; ending the run reset
+  finished edits over one refused `ls`.
+- **The loop's own test run is sandboxed.** With `sandbox_shell`, `pxx loop`
+  runs `test_command` under the same confinement profile as `run_shell`
+  (`tools.shell.sandbox_argv`, bwrap / seatbelt) instead of on the host. Asked
+  for and absent, the suite is not run and the round ends `TEST_RUN_FAILED` —
+  never a pass that was never measured. The tests `gate_decision` event carries
+  `sandboxed`.
+- **The loop writes its own run record.** `runs/<ts>-loop-<id>/` holds
+  `task.json` (mode, test command, sandbox flag, round cap, net), every
+  parent-bus event (the loop's gates were previously persisted nowhere),
+  `outcome.json` with the telemetry legs, and `diff.patch` — the whole-loop
+  diff including untracked files, written before the safety net resets the
+  tree, replayable with `git apply`.
+- **Bounded retry of transient transport failures.** The native backend
+  retries 502/503/504, and connect/timeout errors when no fallback endpoint
+  exists, up to three times (5/10/15 s) within the same round, each recorded
+  as a `transport_retry` gate decision. One router timeout no longer ends a
+  run as `MODEL_UNAVAILABLE`. HTTP 500 and all other statuses are unchanged.
+
+### Fixed
+
+- **A project under `/tmp` is now visible inside the sandbox.** The bubblewrap
+  profile mounted its tmpfs on `/tmp` *after* binding the project, which hid
+  a project that lives there (pytest's `tmp_path` does) from `run_shell` and
+  from the loop's test run. The tmpfs is mounted first.
+- **A `PreToolUse` denial no longer quotes the hook's command line** in the
+  message the model or the audit log can see; the hook's own stderr remains
+  the feedback channel. The `tool_denied` event carries argument names and
+  sizes and a denial category, never argument values.
+
 ## [2.5.5] — 2026-09-10
 
 ### Changed

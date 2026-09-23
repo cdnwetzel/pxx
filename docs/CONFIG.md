@@ -20,8 +20,9 @@ Precedence (highest wins): CLI flags → `PXX_*` env vars → `./pxx.toml` or
 | `memory_dir` | path | `~/.pxx` | memory db + archives |
 | `state_dir` | path | `$XDG_STATE_HOME/pxx` | audit logs |
 | `test_command` | string | — | used by `pxx loop` |
-| `sandbox_shell` | bool | `false` | wrap `run_shell` in sandbox-exec/bubblewrap |
+| `sandbox_shell` | bool | `false` | wrap `run_shell` — and, in `pxx loop`, the `test_command` run — in sandbox-exec/bubblewrap; fail-closed when set and no sandboxer is installed |
 | `allow_ungated_shell` | bool | `false` | explicitly permit `run_shell` with no hook/sandbox (see `[[hooks]]`) |
+| `hook_denial` | `"abort"` \| `"refuse_tool"` | `"abort"` | what a `PreToolUse` denial does: end the run (default) or return `error: refused by policy: …` to the model and continue (see `[[hooks]]`) |
 | `safety_net` | bool | `true` | stash + `pxx-pre/<ts>` tag on edit-capable session starts (git repos) |
 | `loop_review` | bool | `false` | per-box default for the `pxx loop` model-backed review gate (see below) |
 | `done_signal` | bool | `true` | in `pxx loop`, stop a coder session once its edit passes the objective gates (scope/diff/lint/tests) instead of running to the budget cap; set `false` for slow suites (`PXX_DONE_SIGNAL`) |
@@ -253,6 +254,16 @@ receives JSON on stdin; exit 0 allows, anything else denies (fail-closed).
 `"result_preview"`). The hook is spawned with pxx's working directory (**the
 project root**) and environment. The verdict is the exit code: `0` allow,
 non-zero deny (fail-closed — a timeout or crash denies).
+
+**Denial.** By default a `PreToolUse` denial ends the run (`HookDenied`) and
+the safety net resets the tree — right when the hook is the last line of
+defence. With `hook_denial = "refuse_tool"` the denial is returned to the
+model as the tool's result (`error: refused by policy: <hook stderr>`), a
+`tool_denied` event is recorded, and the session continues; what the hook
+denies still never runs. Use it when a fail-closed policy engine sits
+behind the hook and a denial is information the model can act on — a
+model that reaches for one refused `ls` before its final edit should lose
+the `ls`, not the edit.
 
 **Path contract — read this before writing a scope/boundary hook.** The
 filesystem tools (`read_file` / `write_file` / `edit_file` / `list_files` /

@@ -151,3 +151,15 @@ def test_repo_local_hooks_are_not_honored(tmp_path: Path, caplog) -> None:
         settings = load_settings(repo)
     assert settings.hooks == ()
     assert any("ignoring hooks" in r.message for r in caplog.records)
+
+
+def test_repo_local_hook_denial_is_not_honored(tmp_path: Path, caplog) -> None:
+    """A repo-local `hook_denial = "refuse_tool"` would let the guarded tree
+    decide that a hook denial no longer ends the run. Ignored, loudly."""
+    repo = tmp_path / "repo"
+    repo.mkdir()  # no git needed: a repo-local pxx.toml is untrusted with or without .git
+    (repo / "pxx.toml").write_text('hook_denial = "refuse_tool"\n')
+    with caplog.at_level("WARNING", logger="pxx.config"):
+        settings = load_settings(repo)
+    assert settings.hook_denial == "abort"
+    assert any("ignoring hook_denial" in r.message for r in caplog.records)

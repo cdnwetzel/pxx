@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
-from ..errors import GateError
+from ..errors import GateError, HookDenied
 from ..events import EventBus
 from ..safety import HookRunner, PermissionMode, ScopeGate
 
@@ -66,6 +66,9 @@ class ToolContext:
     sandbox_shell: bool = False
     allow_ungated_shell: bool = False  # explicit opt-in to an unhooked/unsandboxed shell
     profile: Any = None  # pxx.broker.PermissionProfile (lazy to avoid cycle)
+    #: Settings.hook_denial == "refuse_tool": a hook denial is returned to the
+    #: model as the tool's result instead of ending the run.
+    refuse_denied_tools: bool = False
 
 
 @runtime_checkable
@@ -138,7 +141,43 @@ class ToolRegistry:
         # tool_action_proposed / policy_decision events all live in the broker.
         # Denials raise ScopeViolation/HookDenied and propagate.
         action = classify(name, tool.spec, args)
-        await broker.authorize(action, ctx)
+        try:
+            await broker.authorize(action, ctx)
+        except HookDenied as exc:
+            if not ctx.refuse_denied_tools:
+                raise
+            # The refusal is data for the model. The call was NOT executed;
+            # the model is told what was refused and why, so it can do the
+            # work another way (or not), and the run goes on. Before this,
+            # one refused `ls` after a hundred lines of correct edits ended
+            # the session and the safety net reset the tree.
+            error = f"error: refused by policy: {exc}"
+            # Metadata only: which tool, which argument names and sizes, and a
+            # denial category. Never the argument values (a denied write_file
+            # carries the file body) and never the hook's text -- the model
+            # sees that in the tool result; the audit log records that it
+            # happened.
+            await ctx.bus.emit(
+                "tool_denied",
+                {
+                    "tool": name,
+                    "arg_names": sorted(args),
+                    "arg_sizes": {k: len(str(v)) for k, v in args.items()},
+                    "reason": "hook_denied",
+                },
+                session_id=ctx.session_id,
+            )
+            await ctx.bus.emit(
+                "tool_result",
+                {
+                    "tool": name,
+                    "result_preview": error[:EVENT_PREVIEW_CHARS],
+                    "error": True,
+                    "denied": True,
+                },
+                session_id=ctx.session_id,
+            )
+            return error
 
         await ctx.bus.emit(
             "tool_call",

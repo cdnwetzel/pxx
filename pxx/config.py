@@ -116,6 +116,17 @@ class Settings:
     #: unconfined by ``scope`` (it has no path target), so a write-capable run
     #: must gate it with a hook, ``sandbox_shell``, or this explicit opt-in.
     allow_ungated_shell: bool = False
+    #: What a PreToolUse hook DENIAL does to the run. "abort" (the default,
+    #: and the only behaviour before 2.5.5+ps1): the session ends HOOK_DENIED
+    #: and the safety net resets the tree. "refuse_tool": the denied call is
+    #: not executed, the model is told it was refused and why, a
+    #: ``tool_denied`` event is emitted, and the run continues. Nothing is
+    #: widened -- a denied action still never runs; only whether one refusal
+    #: ends the whole run changes. Measured 2026-09-22 across eight governed
+    #: runs of one task: every one ended on a refusal of a command the model
+    #: did not need (mkdir before write_file, cd to its own cwd, ls) AFTER the
+    #: work was written, and the reset discarded it each time.
+    hook_denial: str = "abort"
     mcp_servers: tuple[McpServerSpec, ...] = ()
     safety_net: bool = True  # K5: stash + pxx-pre/<ts> tag on edit-capable starts
     auto_commit: bool = False  # opt-in: commit session work on COMPLETED (the undo tag still points at pre-session HEAD)
@@ -217,6 +228,7 @@ _KNOWN_KEYS = {
     "test_command",
     "sandbox_shell",
     "allow_ungated_shell",
+    "hook_denial",
     "safety_net",
     "auto_commit",
     "loop_review",
@@ -328,7 +340,15 @@ def _settings_from_dict(
     let it enable persistent memory writes (a model that edits the repo could
     seed later sessions' context) — so both are honoured only from user config,
     env, or CLI."""
-    for key in ("hooks", "mcp_servers", "allow_ungated_shell", "memory_capture_successes"):
+    for key in (
+        "hooks",
+        "mcp_servers",
+        "allow_ungated_shell",
+        "memory_capture_successes",
+        # 2.6.0: whether a hook denial ENDS the run is part of the gate, so
+        # the repo being guarded must not be able to soften it either.
+        "hook_denial",
+    ):
         if key in data and not allow_exec_surfaces:
             log.warning(
                 "ignoring %s in repo-local config %s (exec surfaces are honored "
@@ -464,6 +484,13 @@ def _settings_from_dict(
         if not isinstance(value, bool):
             raise ConfigError(f"{source}: loop_review must be a boolean")
         kwargs["loop_review"] = value
+    if "hook_denial" in data:
+        value = data["hook_denial"]
+        if value not in ("abort", "refuse_tool"):
+            raise ConfigError(
+                f'{source}: hook_denial must be "abort" or "refuse_tool", got {value!r}'
+            )
+        kwargs["hook_denial"] = value
     if "done_signal" in data:
         # Strict boolean (same fail-open reasoning as loop_review): a quoted
         # "false" must not silently truthy-coerce to True.

@@ -15,6 +15,7 @@ tool count) — never prompt bodies.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -30,6 +31,41 @@ from ..safety import PermissionMode
 from ..truthfulness import check_quote_grounding
 from .base import BackendCapabilities, SessionContext
 from .mock import make_tool_context
+
+#: 2.5.5+ps4 — bounded retry of transient transport failures within one round.
+#: Three tries with 5/10/15 s backoff: long enough for a router to recover or
+#: an upstream to finish restarting, short against a run's wall budget.
+TRANSIENT_STATUSES = frozenset({502, 503, 504})
+TRANSIENT_RETRIES = 3
+TRANSIENT_BACKOFF_S = 5.0
+
+
+def _endpoint_id(url: str) -> str:
+    """scheme://host[:port] and nothing else. Userinfo, path, query and
+    fragment are all places a proxy URL can carry a credential
+    (``https://proxy/KEY/v1``, ``?token=``), and an event is persisted."""
+    from urllib.parse import urlsplit
+
+    u = urlsplit(url)
+    host = u.hostname or ""
+    if u.port:
+        host = f"{host}:{u.port}"
+    return f"{u.scheme}://{host}" if u.scheme and host else "(opaque)"
+
+
+async def _retry_wait(ctx: SessionContext, delay: float) -> None:
+    """Sleep ``delay`` seconds, but wake at once on cancellation and never
+    past the wall-clock budget: the loop's next ``check_clock`` must not
+    wait behind a 15 s backoff to fire."""
+    remaining = ctx.budgets.remaining_seconds()
+    wait = min(delay, remaining)
+    if wait <= 0:
+        return
+    try:
+        await asyncio.wait_for(ctx.cancel_event.wait(), timeout=wait)
+    except TimeoutError:
+        pass
+
 
 log = logging.getLogger("pxx.backends.native")
 
@@ -222,7 +258,8 @@ class NativeBackend:
             {"role": "system", "content": system_message},
             {"role": "user", "content": task},
         ]
-        active = 0  # index into the fallback chain
+        active = 0
+        transient_left = TRANSIENT_RETRIES  # bounded transport retry, reset per round
         rounds = 0
         tokens = 0
         prose_nudges = 0
@@ -263,6 +300,25 @@ class NativeBackend:
                     f"{model.endpoint}/v1/chat/completions", json=payload, headers=headers
                 )
             except (httpx.ConnectError, httpx.TimeoutException) as exc:
+                if transient_left > 0 and active + 1 >= len(models):
+                    # No fallback endpoint: retry THIS one a bounded number of
+                    # times before giving up. A single transport hiccup used to
+                    # end a whole run as MODEL_UNAVAILABLE (seen 2026-09-22 on a downstream orchestrator).
+                    transient_left -= 1
+                    delay = TRANSIENT_BACKOFF_S * (TRANSIENT_RETRIES - transient_left)
+                    await ctx.bus.emit(
+                        "gate_decision",
+                        {
+                            "gate": "transport_retry",
+                            "endpoint": _endpoint_id(model.endpoint),
+                            "reason": type(exc).__name__,
+                            "retries_left": transient_left,
+                            "delay_s": delay,
+                        },
+                        session_id=ctx.session_id,
+                    )
+                    await _retry_wait(ctx, delay)
+                    continue
                 if active + 1 < len(models):
                     active += 1
                     log.warning("endpoint %s unreachable (%s); falling back", model.endpoint, exc)
@@ -280,6 +336,24 @@ class NativeBackend:
                 raise BackendError(
                     f"all endpoints unreachable (last: {model.endpoint}): {exc}"
                 ) from exc
+            if resp.status_code in TRANSIENT_STATUSES and transient_left > 0:
+                # 502/503/504 from the serving layer (a router timeout, a
+                # restarting upstream) is transport, not a model verdict.
+                transient_left -= 1
+                delay = TRANSIENT_BACKOFF_S * (TRANSIENT_RETRIES - transient_left)
+                await ctx.bus.emit(
+                    "gate_decision",
+                    {
+                        "gate": "transport_retry",
+                        "endpoint": _endpoint_id(model.endpoint),
+                        "reason": f"http_{resp.status_code}",
+                        "retries_left": transient_left,
+                        "delay_s": delay,
+                    },
+                    session_id=ctx.session_id,
+                )
+                await _retry_wait(ctx, delay)
+                continue
             if resp.status_code != 200:
                 body = resp.text[:300]
                 if resp.status_code == 400 and "exceed_context_size" in resp.text:
@@ -316,6 +390,9 @@ class NativeBackend:
                     )
                     continue
                 raise BackendError(f"{model.endpoint} returned HTTP {resp.status_code}: {body}")
+            # A response landed: the transient allowance is per round, not per
+            # run, so an early hiccup does not leave a later round with none.
+            transient_left = TRANSIENT_RETRIES
             try:
                 data = resp.json()
                 choice = data["choices"][0]

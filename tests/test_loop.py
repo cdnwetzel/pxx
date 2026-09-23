@@ -12,6 +12,7 @@ built in parallel, so they are stubbed in sys.modules for these tests.
 from __future__ import annotations
 
 import asyncio
+import json
 import shutil
 import subprocess
 import sys
@@ -628,6 +629,217 @@ def test_test_run_failed_on_spawn_error(tmp_path: Path) -> None:
         )
     )
     assert outcome.code is TerminalCode.TEST_RUN_FAILED
+
+
+@needs_git
+def test_sandboxed_test_gate_fails_closed_without_a_sandboxer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """2.5.5+ps2: ``sandbox_shell`` confines the loop's OWN test run. Asked for
+    and absent, the suite is not run and the round ends TEST_RUN_FAILED — a
+    test command that would have passed on the host must not be reported green."""
+    monkeypatch.setattr("pxx.loop.sandbox_argv", lambda *a, **k: None)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_repo(repo)
+    outcome = asyncio.run(
+        run_loop(
+            "task",
+            _settings(tmp_path, sandbox_shell=True),
+            cwd=repo,
+            backend_factory=Factory([ScriptedBackend(edits={"a.py": "x\n"})]),
+            test_command="true",
+        )
+    )
+    assert outcome.code is TerminalCode.TEST_RUN_FAILED
+    assert "sandbox-unavailable" in outcome.summary
+
+
+@needs_git
+def test_tests_gate_event_says_whether_it_was_sandboxed(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_repo(repo)
+    bus = EventBus()
+    asyncio.run(
+        run_loop(
+            "task",
+            _settings(tmp_path),
+            cwd=repo,
+            backend_factory=Factory([ScriptedBackend(edits={"a.py": "x = 1\n"})]),
+            test_command="true",
+            reviewer=ScriptedReviewer(["VERDICT: APPROVE"]),
+            bus=bus,
+        )
+    )
+    tests = _gate_events(bus, "tests")
+    assert tests and tests[0]["sandboxed"] is False
+
+
+def _loop_run_dirs(tmp_path: Path) -> list[Path]:
+    runs = tmp_path / "state" / "runs"
+    return sorted(d for d in runs.iterdir() if "-loop-" in d.name) if runs.is_dir() else []
+
+
+@needs_git
+def test_loop_writes_its_own_run_record_with_the_tests_gate(tmp_path: Path) -> None:
+    """2.5.5+ps3: the loop's gates were emitted on the parent bus and persisted
+    nowhere; a reader of runs/ saw COMPLETED sessions and no test gate for a
+    loop that ended TEST_REGRESSION. The loop now has its own runs/<id>/."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_repo(repo)
+    outcome = asyncio.run(
+        run_loop(
+            "task",
+            _settings(tmp_path),
+            cwd=repo,
+            backend_factory=Factory([ScriptedBackend(edits={"a.py": "x = 1\n"})]),
+            test_command="true",
+            reviewer=ScriptedReviewer(["VERDICT: APPROVE"]),
+        )
+    )
+    assert outcome.code is TerminalCode.COMPLETED
+    dirs = _loop_run_dirs(tmp_path)
+    assert len(dirs) == 1, dirs
+    d = dirs[0]
+    task = json.loads((d / "task.json").read_text())
+    assert task["mode"] == "loop" and task["test_command"] == "true"
+    events = [json.loads(line) for line in (d / "events.jsonl").read_text().splitlines()]
+    gates = [e for e in events if e["kind"] == "gate_decision" and e["data"].get("gate") == "tests"]
+    assert gates and gates[-1]["data"]["passed"] is True
+    rec = json.loads((d / "outcome.json").read_text())
+    assert rec["mode"] == "loop" and rec["code"] == "COMPLETED"
+    assert rec["terminal_failures"] == 0 and rec["test_command"] == "true"
+    assert (d / "diff.patch").read_text().startswith("diff --git")
+
+
+@needs_git
+def test_loop_record_keeps_the_diff_a_restore_discards(tmp_path: Path) -> None:
+    """A failing loop resets the tree; its diff and outcome are on disk first."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_repo(repo, files={"a.py": "x = 0\n"})
+    outcome = asyncio.run(
+        run_loop(
+            "task",
+            _settings(tmp_path),
+            cwd=repo,
+            backend_factory=Factory([ScriptedBackend(edits={"a.py": "x = 1\n"})]),
+            test_command="false",
+            max_rounds=1,
+        )
+    )
+    assert outcome.code is not TerminalCode.COMPLETED
+    assert (repo / "a.py").read_text() == "x = 0\n", "the net should have restored the tree"
+    d = _loop_run_dirs(tmp_path)[0]
+    assert "+x = 1" in (d / "diff.patch").read_text()
+    rec = json.loads((d / "outcome.json").read_text())
+    assert rec["code"] == str(outcome.code) and rec["terminal_failures"] >= 1
+
+
+def test_loop_record_and_tests_gate_without_a_git_repository(tmp_path: Path) -> None:
+    """No repository at all: the loop still runs the test gate, still writes
+    its own record, and the gate event still says whether it was sandboxed."""
+    work = tmp_path / "plain"
+    work.mkdir()
+    bus = EventBus()
+    outcome = asyncio.run(
+        run_loop(
+            "task",
+            _settings(tmp_path),
+            cwd=work,
+            backend_factory=Factory([ScriptedBackend(edits={"a.py": "x = 1\n"})]),
+            test_command="true",
+            reviewer=ScriptedReviewer(["VERDICT: APPROVE"]),
+            bus=bus,
+        )
+    )
+    assert outcome.code is TerminalCode.COMPLETED
+    gates = _gate_events(bus, "tests")
+    assert gates and gates[-1]["passed"] is True and gates[-1]["sandboxed"] is False
+    d = _loop_run_dirs(tmp_path)[0]
+    rec = json.loads((d / "outcome.json").read_text())
+    assert rec["mode"] == "loop" and rec["code"] == "COMPLETED"
+    events = [json.loads(line) for line in (d / "events.jsonl").read_text().splitlines()]
+    assert any(e["kind"] == "gate_decision" and e["data"].get("gate") == "tests" for e in events)
+
+
+def test_sandboxed_gate_without_a_repository_fails_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("pxx.loop.sandbox_argv", lambda *a, **k: None)
+    work = tmp_path / "plain"
+    work.mkdir()
+    outcome = asyncio.run(
+        run_loop(
+            "task",
+            _settings(tmp_path, sandbox_shell=True),
+            cwd=work,
+            backend_factory=Factory([ScriptedBackend(edits={"a.py": "x\n"})]),
+            test_command="true",
+        )
+    )
+    assert outcome.code is TerminalCode.TEST_RUN_FAILED
+
+
+@needs_git
+def test_loop_record_captures_the_safety_net_gate(tmp_path: Path) -> None:
+    """The net is tied before the first round; its gate event must be in the
+    loop's own record, which means the writer subscribes before it fires."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_repo(repo)
+    asyncio.run(
+        run_loop(
+            "task",
+            _settings(tmp_path),
+            cwd=repo,
+            backend_factory=Factory([ScriptedBackend(edits={"a.py": "x = 1\n"})]),
+            test_command="true",
+            reviewer=ScriptedReviewer(["VERDICT: APPROVE"]),
+        )
+    )
+    d = _loop_run_dirs(tmp_path)[0]
+    events = [json.loads(line) for line in (d / "events.jsonl").read_text().splitlines()]
+    nets = [
+        e for e in events if e["kind"] == "gate_decision" and e["data"].get("gate") == "safety_net"
+    ]
+    assert nets and nets[0]["data"].get("tag", "").startswith("pxx-pre/")
+    task = json.loads((d / "task.json").read_text())
+    assert task["safety_net"]["tag"] == nets[0]["data"]["tag"]
+
+
+@needs_git
+def test_loop_record_diff_skips_generated_artifacts_and_carries_binaries(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_repo(repo, files={"a.py": "x = 0\n"})
+    outcome = asyncio.run(
+        run_loop(
+            "task",
+            _settings(tmp_path),
+            cwd=repo,
+            backend_factory=Factory(
+                [
+                    ScriptedBackend(
+                        edits={
+                            "a.py": "x = 1\n",
+                            "__pycache__/a.cpython-312.pyc": "junk",
+                            "blob.bin": "\x00\x01\x02\xff",
+                        }
+                    )
+                ]
+            ),
+            test_command="false",
+            max_rounds=1,
+        )
+    )
+    assert outcome.code is not TerminalCode.COMPLETED
+    patch = (_loop_run_dirs(tmp_path)[0] / "diff.patch").read_text(errors="replace")
+    assert "+x = 1" in patch
+    assert "__pycache__" not in patch
+    assert "blob.bin" in patch and "GIT binary patch" in patch
 
 
 @needs_git

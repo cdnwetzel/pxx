@@ -66,9 +66,11 @@ def seatbelt_profile(root: Path) -> str:
     )
 
 
-def _wrap_sandbox(ctx: ToolContext, command: str, profile_dir: Path) -> list[str]:
-    """Build the argv for a sandboxed invocation, or plain /bin/sh -c."""
-    root = ctx.scope.root
+def sandbox_argv(root: Path, command: str, profile_dir: Path) -> list[str] | None:
+    """The argv that runs ``command`` confined to ``root``, or ``None`` when no
+    sandboxer is present. Shared by ``run_shell`` and the loop's own test run:
+    one confinement profile, so "the tests passed" is a claim about the same
+    box the model's shell commands run in (2.5.5+ps2)."""
     if sys.platform == "darwin" and shutil.which("sandbox-exec"):
         profile = profile_dir / "pxx-seatbelt.sb"
         profile.write_text(seatbelt_profile(root))
@@ -79,11 +81,14 @@ def _wrap_sandbox(ctx: ToolContext, command: str, profile_dir: Path) -> list[str
             "--ro-bind",
             "/",
             "/",
+            # tmpfs on /tmp BEFORE the root bind: mounts apply in order, and a
+            # tmpfs mounted after the bind would hide a project that lives
+            # under /tmp (pytest's tmp_path does).
+            "--tmpfs",
+            "/tmp",
             "--bind",
             str(root),
             str(root),
-            "--tmpfs",
-            "/tmp",
             "--proc",
             "/proc",
             "--dev",
@@ -93,6 +98,14 @@ def _wrap_sandbox(ctx: ToolContext, command: str, profile_dir: Path) -> list[str
             "-c",
             command,
         ]
+    return None
+
+
+def _wrap_sandbox(ctx: ToolContext, command: str, profile_dir: Path) -> list[str]:
+    """Build the argv for a sandboxed invocation, or plain /bin/sh -c."""
+    argv = sandbox_argv(ctx.scope.root, command, profile_dir)
+    if argv is not None:
+        return argv
     # sandbox requested but no sandboxer available: run unsandboxed.
     return ["/bin/sh", "-c", command]
 

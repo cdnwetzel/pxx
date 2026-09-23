@@ -20,6 +20,7 @@ import hashlib
 import logging
 import os
 import re
+import tempfile
 import time
 import uuid
 from collections.abc import Callable
@@ -32,6 +33,7 @@ from .errors import BudgetExceeded
 from .events import Event, EventBus
 from .gitenv import communicate_bounded, git_env
 from .outcome import RunOutcome, TerminalCode
+from .tools.shell import sandbox_argv
 from .review import (
     Finding,
     Reviewer,
@@ -173,17 +175,48 @@ _FAILURE_RES = (
 )
 
 
-async def _run_tests(root: Path, command: str) -> tuple[bool, set[str], str]:
-    """Run the test command; return (passed, failing-set, output tail)."""
+async def _run_tests(
+    root: Path, command: str, *, sandbox: bool = False
+) -> tuple[bool, set[str], str]:
+    """Run the test command; return (passed, failing-set, output tail).
+
+    With ``sandbox`` the command runs under the same confinement ``run_shell``
+    uses (``tools.shell.sandbox_argv``): the tests are code the model wrote,
+    and until 2.5.5+ps2 the loop ran them on the host with the harness's own
+    reach while the model's *own* shell calls were confined. Fail-closed: a
+    sandbox that was asked for but is not available means the suite does not
+    run, and that is reported as an infrastructure failure, never as green.
+    """
+    tmp: tempfile.TemporaryDirectory[str] | None = None
     try:
-        proc = await asyncio.create_subprocess_shell(
-            command,
-            cwd=root,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-        )
+        if sandbox:
+            tmp = tempfile.TemporaryDirectory(prefix="pxx-loop-sandbox-")
+            argv = sandbox_argv(root, command, Path(tmp.name))
+            if argv is None:
+                return (
+                    False,
+                    {f"spawn-error:sandbox-unavailable:{command}"},
+                    "sandbox_shell is set but no sandboxer (bwrap / sandbox-exec) "
+                    "is available; the test command was NOT run",
+                )
+            proc = await asyncio.create_subprocess_exec(
+                *argv,
+                cwd=root,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+        else:
+            proc = await asyncio.create_subprocess_shell(
+                command,
+                cwd=root,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
     except OSError as exc:
         return False, {f"spawn-error:{command}"}, f"could not run test command: {exc}"
+    finally:
+        if tmp is not None and "proc" not in locals():
+            tmp.cleanup()
     try:
         out, _ = await asyncio.wait_for(proc.communicate(), TEST_TIMEOUT_SECONDS)
     except TimeoutError:
@@ -191,7 +224,16 @@ async def _run_tests(root: Path, command: str) -> tuple[bool, set[str], str]:
         await proc.wait()
         tail = f"test command timed out after {TEST_TIMEOUT_SECONDS:.0f}s"
         return False, {f"timeout:{command}"}, tail
+    finally:
+        if tmp is not None:
+            tmp.cleanup()
     text = out.decode(errors="replace")
+    if sandbox and proc.returncode != 0 and _sandbox_setup_failed(text):
+        # The sandboxer itself could not start (no user namespaces, seccomp
+        # refused...): the command never ran. Infrastructure, not a failing
+        # suite -- the loop must not take it as the test baseline.
+        first = (text.strip().splitlines() or ["sandbox failed to start"])[0][:80]
+        return False, {f"spawn-error:sandbox-setup:{first}"}, text.strip()[-1500:]
     failing: set[str] = set()
     if proc.returncode != 0:
         for rx in _FAILURE_RES:
@@ -199,6 +241,11 @@ async def _run_tests(root: Path, command: str) -> tuple[bool, set[str], str]:
         if not failing:
             failing.add(f"exit:{proc.returncode}")
     return proc.returncode == 0, failing, text.strip()[-1500:]
+
+
+def _sandbox_setup_failed(output: str) -> bool:
+    """Whether the sandboxer, not the command, produced the failure."""
+    return output.lstrip()[:200].startswith(("bwrap:", "sandbox-exec:"))
 
 
 async def _edit_objectively_done(
@@ -210,6 +257,7 @@ async def _edit_objectively_done(
     max_diff_lines: int,
     command: str | None,
     lint_command: str | None,
+    sandbox: bool = False,
 ) -> bool:
     """Whether the current on-disk edit passes every OBJECTIVE mandatory gate a
     completing round enforces — scope, diff budget, lint, tests — i.e. everything
@@ -231,7 +279,7 @@ async def _edit_objectively_done(
         lint_ok, _ = await _run_lint(root, lint_command)
         if not lint_ok:
             return False  # would be LINT_BLOCKED
-    passed, _failing, _tail = await _run_tests(root, command)
+    passed, _failing, _tail = await _run_tests(root, command, sandbox=sandbox)
     return passed
 
 
@@ -247,6 +295,7 @@ async def _overwork_salvageable(
     task: str,
     reviewer: Reviewer | None,
     review_mode: ReviewMode,
+    sandbox: bool = False,
 ) -> bool:
     """Whether an over-worked run's diff is complete AND passes every mandatory
     guard, so a session that ran out of its per-turn budget (BUDGET_EXCEEDED) can
@@ -263,6 +312,7 @@ async def _overwork_salvageable(
         max_diff_lines=max_diff_lines,
         command=command,
         lint_command=lint_command,
+        sandbox=sandbox,
     ):
         return False
     if reviewer is not None:
@@ -396,6 +446,7 @@ async def run_loop(
                 max_diff_lines=settings.budgets.max_diff_lines,
                 command=command,
                 lint_command=lint_command,
+                sandbox=settings.sandbox_shell,
             )
 
         done_check = _run_done_check
@@ -564,6 +615,7 @@ async def run_loop(
                     task=task,
                     reviewer=reviewer,
                     review_mode=review_mode,
+                    sandbox=settings.sandbox_shell,
                 ):
                     # Record the salvaged run's diff telemetry (the normal
                     # scope/diff guards, which populate these, were bypassed).
@@ -643,7 +695,9 @@ async def run_loop(
         # Guard 3: tests with monotonic failing-set progress.
         if command:
             test_start = time.monotonic()
-            passed, failing, test_tail = await _run_tests(root, command)
+            passed, failing, test_tail = await _run_tests(
+                root, command, sandbox=settings.sandbox_shell
+            )
             legs["test_seconds"] += time.monotonic() - test_start
             infra = {
                 f
@@ -675,6 +729,7 @@ async def run_loop(
                     "passed": passed,
                     "failing": len(failing),
                     "new_failures": new_failures[:10],
+                    "sandboxed": settings.sandbox_shell,
                 },
             )
             if new_failures:

@@ -631,6 +631,51 @@ def test_test_run_failed_on_spawn_error(tmp_path: Path) -> None:
 
 
 @needs_git
+def test_sandboxed_test_gate_fails_closed_without_a_sandboxer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """2.5.5+ps2: ``sandbox_shell`` confines the loop's OWN test run. Asked for
+    and absent, the suite is not run and the round ends TEST_RUN_FAILED — a
+    test command that would have passed on the host must not be reported green."""
+    monkeypatch.setattr("pxx.loop.sandbox_argv", lambda *a, **k: None)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_repo(repo)
+    outcome = asyncio.run(
+        run_loop(
+            "task",
+            _settings(tmp_path, sandbox_shell=True),
+            cwd=repo,
+            backend_factory=Factory([ScriptedBackend(edits={"a.py": "x\n"})]),
+            test_command="true",
+        )
+    )
+    assert outcome.code is TerminalCode.TEST_RUN_FAILED
+    assert "sandbox-unavailable" in outcome.summary
+
+
+@needs_git
+def test_tests_gate_event_says_whether_it_was_sandboxed(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_repo(repo)
+    bus = EventBus()
+    asyncio.run(
+        run_loop(
+            "task",
+            _settings(tmp_path),
+            cwd=repo,
+            backend_factory=Factory([ScriptedBackend(edits={"a.py": "x = 1\n"})]),
+            test_command="true",
+            reviewer=ScriptedReviewer(["VERDICT: APPROVE"]),
+            bus=bus,
+        )
+    )
+    tests = _gate_events(bus, "tests")
+    assert tests and tests[0]["sandboxed"] is False
+
+
+@needs_git
 def test_lint_blocked_when_lint_command_fails(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()

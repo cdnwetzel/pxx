@@ -704,3 +704,161 @@ def test_content_truthfulness_plain_prose_no_event(tmp_path):
     ctx = make_ctx(tmp_path)
     asyncio.run(make_backend(handler).run("do it", ctx))
     assert [e for e in ctx.bus.history if e.kind == "content_truthfulness"] == []
+
+
+# --- 2.5.5+ps4: bounded transient-transport retry ------------------------------
+
+
+def test_transient_502_is_retried_then_succeeds(tmp_path, monkeypatch):
+    """A router timeout (502) on one turn used to end the whole run as
+    MODEL_UNAVAILABLE (seen 2026-09-22 on a downstream orchestrator). It is transport: retry, bounded."""
+    from pxx.backends import native as nmod
+
+    monkeypatch.setattr(nmod, "TRANSIENT_BACKOFF_S", 0.0)
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        if calls["n"] <= 2:
+            return httpx.Response(502, json={"error": "upstream forward failed: "})
+        return httpx.Response(200, json=completion("done"))
+
+    ctx = make_ctx(tmp_path)
+    outcome = asyncio.run(make_backend(handler).run("task", ctx))
+    assert outcome.code is TerminalCode.COMPLETED
+    assert calls["n"] == 3
+    retries = [
+        e
+        for e in ctx.bus.history
+        if e.kind == "gate_decision" and e.data.get("gate") == "transport_retry"
+    ]
+    assert [e.data["reason"] for e in retries] == ["http_502", "http_502"]
+    assert [e.data["retries_left"] for e in retries] == [2, 1]
+
+
+def test_persistent_502_still_raises_after_bounded_retries(tmp_path, monkeypatch):
+    from pxx.backends import native as nmod
+
+    monkeypatch.setattr(nmod, "TRANSIENT_BACKOFF_S", 0.0)
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        return httpx.Response(503, text="restarting")
+
+    with pytest.raises(BackendError, match="HTTP 503"):
+        asyncio.run(make_backend(handler).run("task", make_ctx(tmp_path)))
+    assert calls["n"] == nmod.TRANSIENT_RETRIES + 1
+
+
+def test_500_is_not_transient(tmp_path, monkeypatch):
+    from pxx.backends import native as nmod
+
+    monkeypatch.setattr(nmod, "TRANSIENT_BACKOFF_S", 0.0)
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        return httpx.Response(500, text="internal boom")
+
+    with pytest.raises(BackendError, match="HTTP 500"):
+        asyncio.run(make_backend(handler).run("task", make_ctx(tmp_path)))
+    assert calls["n"] == 1
+
+
+def test_transient_allowance_resets_each_round(tmp_path, monkeypatch):
+    """Two 502s in round 1 and two more in round 2 must both be absorbed:
+    the allowance is per successful response, not per run."""
+    from pxx.backends import native as nmod
+
+    monkeypatch.setattr(nmod, "TRANSIENT_BACKOFF_S", 0.0)
+    script = iter([502, 502, "tool", 502, 502, "done"])
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        step = next(script)
+        if step == 502:
+            return httpx.Response(502, json={"error": "upstream forward failed: "})
+        if step == "tool":
+            return httpx.Response(200, json=tool_call_round("c1", "read_file", '{"path": "x.py"}'))
+        return httpx.Response(200, json=completion("done"))
+
+    tools = FakeRegistry(result="contents")
+    ctx = make_ctx(tmp_path, tools)
+    outcome = asyncio.run(make_backend(handler).run("task", ctx))
+    assert outcome.code is TerminalCode.COMPLETED
+    assert outcome.rounds == 2
+    retries = [
+        e
+        for e in ctx.bus.history
+        if e.kind == "gate_decision" and e.data.get("gate") == "transport_retry"
+    ]
+    assert [e.data["retries_left"] for e in retries] == [2, 1, 2, 1]
+
+
+def test_retry_events_carry_no_url_secrets(tmp_path, monkeypatch):
+    from pxx.backends import native as nmod
+    from pxx.config import ModelRef
+
+    monkeypatch.setattr(nmod, "TRANSIENT_BACKOFF_S", 0.0)
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return httpx.Response(503, text="restarting")
+        return httpx.Response(200, json=completion("done"))
+
+    ctx = make_ctx(
+        tmp_path,
+        settings=Settings(
+            model=ModelRef(base_url="http://user:hunter2@host.example:8080/v1?token=secret#frag")
+        ),
+    )
+    asyncio.run(make_backend(handler).run("task", ctx))
+    ev = next(
+        e
+        for e in ctx.bus.history
+        if e.kind == "gate_decision" and e.data.get("gate") == "transport_retry"
+    )
+    assert ev.data["endpoint"] == "http://host.example:8080"
+    for leak in ("hunter2", "secret", "frag", "user:", "/v1"):
+        assert leak not in json.dumps(ev.data)
+    # A path segment is a credential slot too (https://proxy/KEY/v1).
+    assert nmod._endpoint_id("http://a:b@h/KEY/v1?x=1") == "http://h"
+    assert "KEY" not in nmod._endpoint_id("https://proxy.example/KEY/v1")
+    assert nmod._endpoint_id("not a url") == "(opaque)"
+
+
+def test_transport_retry_wait_wakes_on_cancel_and_respects_the_clock(tmp_path, monkeypatch):
+    """A retry backoff must not hold the run: cancellation wakes it at once,
+    and it never sleeps past the wall-clock budget."""
+    import time
+
+    from pxx.backends import native as nmod
+
+    monkeypatch.setattr(nmod, "TRANSIENT_BACKOFF_S", 30.0)
+
+    def always_503(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(503, text="restarting")
+
+    ctx = make_ctx(tmp_path, settings=Settings(model=ModelRef(base_url="http://h/v1")))
+
+    async def cancel_soon() -> None:
+        await asyncio.sleep(0.05)
+        ctx.cancel_event.set()
+
+    async def run_both():
+        asyncio.get_running_loop().create_task(cancel_soon())
+        return await make_backend(always_503).run("task", ctx)
+
+    t0 = time.monotonic()
+    outcome = asyncio.run(run_both())
+    assert time.monotonic() - t0 < 5.0, "backoff ignored cancellation"
+    assert outcome.code is TerminalCode.INTERRUPTED
+
+    # Clock cap: with no wall budget left the wait returns immediately.
+    ctx2 = make_ctx(tmp_path, settings=Settings(model=ModelRef(base_url="http://h/v1")))
+    monkeypatch.setattr(ctx2.budgets, "remaining_seconds", lambda: 0.0)
+    t0 = time.monotonic()
+    asyncio.run(nmod._retry_wait(ctx2, 30.0))
+    assert time.monotonic() - t0 < 1.0

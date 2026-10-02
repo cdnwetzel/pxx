@@ -144,7 +144,8 @@ class DeleteFile:
         # protected-path gate have already been applied to it by the broker
         # (action class DELETE, HIGH tier). check_write here is the same gate,
         # applied again on the canonical path we are about to move.
-        path = ctx.scope.check_write(str(args.get("path", "")), ctx.permission)
+        raw = str(args.get("path", ""))
+        path = ctx.scope.check_write(raw, ctx.permission)
         reason = str(args.get("reason", "")).strip()[:200]
         if ctx.delete_staging is None:
             return _err(
@@ -152,21 +153,44 @@ class DeleteFile:
                 "by the operator). Leave the file in place and state in your summary "
                 "which files should be removed and why; a human will remove them."
             )
+        from ..safety import canonicalize
+
+        root = ctx.scope.root
+        # check_write resolves symlinks, so for a symlink `path` is the TARGET.
+        # Moving the target would leave a dangling link in the project and
+        # stage a file the model never named. The link itself is not removed
+        # either: a removal here is a move of exactly the named regular file.
+        link = (root / raw) if not Path(raw).is_absolute() else Path(raw)
+        if link.is_symlink():
+            return _err(f"symbolic links are not removed (points at {path}): {raw}")
         if not path.exists():
             return _err(f"no such file: {path}")
         if not path.is_file():
             return _err(f"not a regular file (directories are not removed): {path}")
-        from ..safety import canonicalize
-
         staging = canonicalize(ctx.delete_staging)
-        root = ctx.scope.root
+        # Staging inside the project would put the "removed" file back in the
+        # tree the model edits, and in scope for a later delete of its own.
+        if staging == root or root in staging.parents:
+            return _err(
+                f"delete_staging {staging} is inside the project root {root}; the "
+                f"operator must stage outside the project"
+            )
         try:
             rel = path.relative_to(root)
         except ValueError:
             return _err(f"{path} is not under the project root {root}")
         dest = staging / root.name / rel
+        # A repeat removal of the same path keeps every copy: nothing staged is
+        # ever overwritten, whatever the clock says.
         if dest.exists():
-            dest = dest.with_name(f"{dest.name}.{int(time.time())}")
+            stamp = int(time.time())
+            n = 0
+            while True:
+                candidate = dest.with_name(f"{dest.name}.{stamp}" + (f".{n}" if n else ""))
+                if not candidate.exists():
+                    dest = candidate
+                    break
+                n += 1
         # The destination is built from a single directory name and a
         # root-relative path, so it cannot leave staging; assert it anyway so a
         # future change to the construction cannot silently make it so.

@@ -24,7 +24,7 @@ from pxx.tools import ToolContext, default_registry
 
 
 def run(coro):
-    return asyncio.new_event_loop().run_until_complete(coro)
+    return asyncio.run(coro)
 
 
 def _project(tmp_path: Path) -> Path:
@@ -78,15 +78,40 @@ def test_a_removal_is_a_move_into_staging_keeping_the_relative_path(tmp_path):
     assert changed[-1].data["reason"] == "superseded"
 
 
-def test_a_second_removal_of_the_same_path_does_not_overwrite_the_first(tmp_path):
+def test_repeated_removals_of_the_same_path_keep_every_copy(tmp_path):
+    """Three removals within one clock second: the first lands at the plain
+    name, the next two at timestamped names that never collide. Nothing
+    staged is ever overwritten -- that promise is the tool's whole point."""
     root = _project(tmp_path)
     staging = tmp_path / "_DELETE_THIS"
     ctx = _ctx(root, staging)
-    run(default_registry().call("delete_file", {"path": "src/old.py"}, ctx))
-    (root / "src" / "old.py").write_text("second\n")
-    run(default_registry().call("delete_file", {"path": "src/old.py"}, ctx))
-    kept = sorted(p.name for p in (staging / "proj" / "src").iterdir())
-    assert kept[0] == "old.py" and len(kept) == 2 and kept[1].startswith("old.py.")
+    for body in ("first\n", "second\n", "third\n"):
+        (root / "src" / "old.py").write_text(body)
+        run(default_registry().call("delete_file", {"path": "src/old.py"}, ctx))
+    kept = sorted(staging.joinpath("proj", "src").iterdir())
+    assert len(kept) == 3
+    assert sorted(p.read_text() for p in kept) == ["first\n", "second\n", "third\n"]
+    assert kept[0].name == "old.py" and all(p.name.startswith("old.py.") for p in kept[1:])
+
+
+def test_a_symlink_is_not_removed_and_its_target_is_untouched(tmp_path):
+    root = _project(tmp_path)
+    staging = tmp_path / "_DELETE_THIS"
+    (root / "link.py").symlink_to(root / "keep.py")
+    out = run(default_registry().call("delete_file", {"path": "link.py"}, _ctx(root, staging)))
+    assert out.startswith("error: symbolic links are not removed")
+    assert (root / "link.py").is_symlink() and (root / "keep.py").is_file()
+    assert not staging.exists()
+
+
+def test_staging_inside_the_project_is_refused(tmp_path):
+    root = _project(tmp_path)
+    for staging in (root, root / "trash"):
+        out = run(
+            default_registry().call("delete_file", {"path": "src/old.py"}, _ctx(root, staging))
+        )
+        assert out.startswith("error: delete_staging") and "inside the project root" in out
+        assert (root / "src" / "old.py").exists()
 
 
 def test_disabled_without_a_staging_root_and_nothing_moves(tmp_path):

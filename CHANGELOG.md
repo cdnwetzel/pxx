@@ -12,7 +12,8 @@ preserved in git (tag `v1.3.3` and earlier).
   the session continues, with a `tool_denied` event on the bus — the
   `hook_denial` treatment, applied to the scope gate. Default stays `"abort"`:
   the session ends `OUT_OF_SCOPE`, byte for byte as before. Honoured from
-  trusted config only (user config, env, CLI), like `hook_denial`. The two
+  the user config only, never from a repo-local file, like `hook_denial`. The
+  `tool_denied` event's `reason` says `scope_violation`. The two
   settings are independent, and the refused call is never executed under
   either. On a
   governed run the model named a file it had just edited with a leading slash

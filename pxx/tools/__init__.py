@@ -179,7 +179,9 @@ class ToolRegistry:
                     "tool": name,
                     "arg_names": sorted(args),
                     "arg_sizes": {k: len(str(v)) for k, v in args.items()},
-                    "reason": "hook_denied",
+                    "reason": (
+                        "scope_violation" if isinstance(exc, ScopeViolation) else "hook_denied"
+                    ),
                 },
                 session_id=ctx.session_id,
             )

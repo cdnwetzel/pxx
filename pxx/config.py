@@ -134,8 +134,8 @@ class Settings:
     #: ``tool_denied`` event is emitted, and the run continues -- exactly the
     #: hook_denial treatment. Nothing is widened: the path is still never
     #: touched, and a PreToolUse hook remains the second layer. Honoured from
-    #: trusted config only (user config, env, CLI), like hook_denial: the
-    #: repo being guarded must not soften its own gate. Observed on a
+    #: the user config only, never from a repo-local file, like hook_denial:
+    #: the repo being guarded must not soften its own gate. Observed on a
     #: governed run: after one correct edit the model named the same file
     #: with a leading slash it invented; the gate was right to refuse it, and
     #: wrong to end a run whose only other calls were correct.

@@ -40,11 +40,18 @@ def _ctx(tmp_path: Path, refuse: bool, bus: EventBus) -> ToolContext:
     )
 
 
+def _outside(tmp_path: Path) -> str:
+    """An absolute path under tmp_path but outside the project root."""
+    return str(tmp_path / "outside" / "a.txt")
+
+
 def test_default_is_unchanged_a_violation_ends_the_run(tmp_path):
     ctx = _ctx(tmp_path, refuse=False, bus=EventBus())
     with pytest.raises(ScopeViolation):
-        run(default_registry().call("write_file", {"path": "/src/a.txt", "content": "x"}, ctx))
-    assert not Path("/src/a.txt").exists()
+        run(
+            default_registry().call("write_file", {"path": _outside(tmp_path), "content": "x"}, ctx)
+        )
+    assert not Path(_outside(tmp_path)).exists()
 
 
 def test_refuse_tool_returns_the_violation_to_the_model_and_does_not_execute(tmp_path):
@@ -56,13 +63,19 @@ def test_refuse_tool_returns_the_violation_to_the_model_and_does_not_execute(tmp
 
     bus.subscribe(_record)
     ctx = _ctx(tmp_path, refuse=True, bus=bus)
-    result = run(default_registry().call("write_file", {"path": "/src/a.txt", "content": "x"}, ctx))
+    result = run(
+        default_registry().call("write_file", {"path": _outside(tmp_path), "content": "x"}, ctx)
+    )
     assert result.startswith("error: refused by policy:")
     assert "outside scope" in result
-    assert not Path("/src/a.txt").exists()
-    assert not (tmp_path / "proj" / "src" / "a.txt").exists()
+    assert not Path(_outside(tmp_path)).exists()
+    assert not (tmp_path / "proj" / "outside" / "a.txt").exists()
     kinds = [e.kind for e in events]
     assert "tool_denied" in kinds
+    # the audit category names the gate that refused, not the hook path
+    denied_ev = [e for e in events if e.kind == "tool_denied"][-1]
+    assert denied_ev.data["reason"] == "scope_violation"
+    assert "content" in denied_ev.data["arg_names"] and "x" not in str(denied_ev.data)
     assert "tool_call" not in kinds  # never dispatched
     denied = [e for e in events if e.kind == "tool_result"]
     assert denied and denied[-1].data.get("denied") is True
@@ -70,7 +83,7 @@ def test_refuse_tool_returns_the_violation_to_the_model_and_does_not_execute(tmp
 
 def test_an_in_scope_call_still_runs_after_a_refusal(tmp_path):
     ctx = _ctx(tmp_path, refuse=True, bus=EventBus())
-    run(default_registry().call("write_file", {"path": "/src/a.txt", "content": "x"}, ctx))
+    run(default_registry().call("write_file", {"path": _outside(tmp_path), "content": "x"}, ctx))
     out = run(default_registry().call("write_file", {"path": "a.txt", "content": "ok"}, ctx))
     assert not out.startswith("error")
     assert (tmp_path / "proj" / "a.txt").read_text() == "ok"
@@ -91,7 +104,9 @@ def test_hook_denial_setting_does_not_govern_scope(tmp_path):
         refuse_denied_tools=True,
     )
     with pytest.raises(ScopeViolation):
-        run(default_registry().call("write_file", {"path": "/src/a.txt", "content": "x"}, ctx))
+        run(
+            default_registry().call("write_file", {"path": _outside(tmp_path), "content": "x"}, ctx)
+        )
 
 
 def test_the_setting_parses_strictly_and_only_from_trusted_config(tmp_path, monkeypatch):

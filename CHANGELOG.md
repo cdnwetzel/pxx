@@ -3,6 +3,23 @@
 All notable changes to pxx are documented here. The 1.x series history is
 preserved in git (tag `v1.3.3` and earlier).
 
+## [Unreleased]
+
+### Added
+
+- **`scope_violation = "refuse_tool"`.** An authorize-time scope violation can
+  be returned to the model as a tool error (`error: refused by policy: …`) and
+  the session continues, with a `tool_denied` event on the bus — the
+  `hook_denial` treatment, applied to the scope gate. Default stays `"abort"`:
+  the session ends `OUT_OF_SCOPE`, byte for byte as before. Honoured from
+  the user config only, never from a repo-local file, like `hook_denial`. The
+  `tool_denied` event's `reason` says `scope_violation`. The two
+  settings are independent, and the refused call is never executed under
+  either. On a
+  governed run the model named a file it had just edited with a leading slash
+  it invented; the gate was right to refuse the call and wrong to discard a
+  run whose every other call was correct.
+
 ## [2.6.0] — 2026-09-23
 
 ### Added

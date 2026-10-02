@@ -41,6 +41,7 @@ def make_tool_context(ctx: SessionContext) -> Any:
         allow_ungated_shell=ctx.settings.allow_ungated_shell,
         profile=ctx.profile,
         refuse_denied_tools=ctx.settings.hook_denial == "refuse_tool",
+        refuse_scope_violations=ctx.settings.scope_violation == "refuse_tool",
     )
 
 

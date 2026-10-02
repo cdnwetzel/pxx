@@ -23,7 +23,6 @@ with ``monkeypatch`` as the config tests already do.
 from __future__ import annotations
 
 import os
-from pathlib import Path
 
 import pytest
 
@@ -37,10 +36,26 @@ def _scrub_inherited_git_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
-def _isolate_operator_config(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """No test reads the operator's pxx config, env file or ``PXX_*`` variables."""
-    absent = tmp_path / "no-operator-config"
+def _isolate_operator_config(
+    monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    """No test reads the operator's pxx config, env file or ``PXX_*`` variables.
+
+    The stand-in paths live in their own temp directory, not in the test's
+    ``tmp_path``: tests that assert on the contents of ``tmp_path`` must not
+    find this fixture's directories there."""
+    base = tmp_path_factory.mktemp("operator-isolation")
+    absent = base / "no-operator-config"
     monkeypatch.setattr("pxx.config._USER_CONFIG", absent / "config.toml")
     monkeypatch.setattr("pxx.config._USER_ENV", absent / "env")
     for var in [v for v in os.environ if v.startswith("PXX_")]:
+        monkeypatch.delenv(var, raising=False)
+    # The two paths that bypass those globals -- `governance.load_denylist`
+    # reads ``Path.home()/.config/pxx/public-denylist`` and the state dir
+    # honours XDG_STATE_HOME -- are closed the same way: an empty HOME under
+    # tmp_path and no XDG overrides, so no test reads the operator's files.
+    home = base / "no-operator-home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    for var in ("XDG_STATE_HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME"):
         monkeypatch.delenv(var, raising=False)

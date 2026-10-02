@@ -3,7 +3,7 @@
 All notable changes to pxx are documented here. The 1.x series history is
 preserved in git (tag `v1.3.3` and earlier).
 
-## [Unreleased]
+## [2.6.1] — 2026-10-02
 
 ### Added
 
@@ -30,6 +30,14 @@ preserved in git (tag `v1.3.3` and earlier).
   CLI) — a repo must not choose where its own files are moved to — and with
   it unset the tool answers with an error telling the model to leave the file
   and say so. Tool count 8 → 9.
+
+### Changed
+
+- **The test suite reads nothing of the operator's.** An autouse fixture gives
+  every test an empty `HOME`, no `~/.config/pxx/config.toml` or `env`, no
+  `PXX_*` variables and no XDG overrides. On a host with a real pxx config the
+  suite inherited that operator's hooks and routes, and one test failed for
+  it; CI, having none, never saw the leak.
 
 ## [2.6.0] — 2026-09-23
 

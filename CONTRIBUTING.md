@@ -51,18 +51,8 @@ bill into an unbounded one, and agentic workflows produce exactly the large,
 frequent diffs that make that expensive. Reducing consumption per PR — which is
 what this configuration does — recovers the capacity without spending more.
 
-## Greptile (advisory)
-
-Greptile runs as a **second, independent reviewer** and is configured in
-`greptile.json` with `statusCheck: false` — it does not gate merges. It reviews
-once per PR on open, for the same quota reason (Starter tier: 50 credits/month).
-
-Its value is disagreement. A finding one reviewer raises and the other misses is
-worth more than either reviewer's aggregate score, because a single reviewer's
-hit-rate has no denominator: you cannot see what it missed.
-
-Verify every finding from either reviewer against the code before acting. A
-confident wrong answer is still wrong, and both of these tools produce them.
+Verify every finding against the code before acting. A confident wrong answer
+is still wrong, and this tool produces them.
 
 ## Standards that apply to every change
 

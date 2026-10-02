@@ -85,6 +85,7 @@ _TOOL_CLASSES: dict[str, tuple[ActionClass, Any]] = {
     "search_files": (ActionClass.READ, _targets_optional_path),
     "write_file": (ActionClass.WRITE, _targets_path),
     "edit_file": (ActionClass.WRITE, _targets_path),
+    "delete_file": (ActionClass.DELETE, _targets_path),
     "run_shell": (ActionClass.SHELL, lambda args: ()),
     "recall_memory": (ActionClass.READ, lambda args: ()),
     "remember": (ActionClass.MEMORY, lambda args: ()),
@@ -150,7 +151,11 @@ class PermissionProfile:
             {
                 "ask": frozenset({"read", "memory"}),
                 "plan": frozenset({"read", "memory"}),
-                "edit": frozenset({"read", "write", "memory", "shell"}),
+                # "delete" is delete_file only (2.6.1): a STAGED move into the
+                # operator's delete_staging, never an unlink; HIGH tier, so the
+                # boundary role records it, and the scope + protected-path gates
+                # still apply to the source path.
+                "edit": frozenset({"read", "write", "memory", "shell", "delete"}),
                 "auto": frozenset(ACTION_CLASSES),
             }
         )

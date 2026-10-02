@@ -77,6 +77,9 @@ class ToolContext:
     #: violation is returned to the model as the tool's result instead of
     #: ending the run (2.6.1).
     refuse_scope_violations: bool = False
+    #: Settings.delete_staging: where ``delete_file`` moves a file instead of
+    #: unlinking it. None = the tool is disabled (2.6.1).
+    delete_staging: Path | None = None
 
 
 @runtime_checkable
@@ -229,7 +232,7 @@ class ToolRegistry:
 
 def default_registry() -> ToolRegistry:
     """Registry with all built-in tools (~8; small models degrade past ~10)."""
-    from .fs import EditFile, ListFiles, ReadFile, SearchFiles, WriteFile
+    from .fs import DeleteFile, EditFile, ListFiles, ReadFile, SearchFiles, WriteFile
     from .memory_tools import RecallMemory, Remember
     from .shell import RunShell
 
@@ -238,6 +241,7 @@ def default_registry() -> ToolRegistry:
         ReadFile(),
         WriteFile(),
         EditFile(),
+        DeleteFile(),
         ListFiles(),
         SearchFiles(),
         RunShell(),

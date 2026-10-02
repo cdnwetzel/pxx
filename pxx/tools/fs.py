@@ -1,9 +1,12 @@
-"""Filesystem tools: read_file, write_file, edit_file, list_files, search_files.
+"""Filesystem tools: read_file, write_file, edit_file, delete_file, list_files, search_files.
 
 Every path from the model is untrusted input: all go through the scope gate
 (canonicalized, symlink-resolved) before any I/O. Reads (read_file, list_files,
 search_files) use ``check_read`` — anywhere under the project root; writes
-(write_file, edit_file) use ``check_write`` — only within ``scope``. Expected
+(write_file, edit_file, delete_file) use ``check_write`` — only within ``scope``.
+delete_file never unlinks: it STAGES the file under the operator's
+``delete_staging`` (2.6.1), keeping the project-relative path, so a
+removal is always recoverable and a human purges staging. Expected
 failures (missing file, ambiguous edit, bad regex) are returned as error
 strings for the model; gate errors propagate.
 """
@@ -13,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import re
 import shutil
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -114,6 +118,79 @@ class WriteFile:
             session_id=ctx.session_id,
         )
         return f"wrote {path} ({len(content.splitlines())} lines)"
+
+
+class DeleteFile:
+    spec = ToolSpec(
+        name="delete_file",
+        description=(
+            "Remove a file from the project by staging it: the file is moved to the "
+            "operator's delete staging area (kept, recoverable), never deleted outright. "
+            "Use when a file should no longer exist in the project (moved, obsolete, "
+            "superseded). Directories are not removed."
+        ),
+        parameters=tool_schema(
+            {
+                "path": {"type": "string", "description": "File path (relative to project root)."},
+                "reason": {"type": "string", "description": "One line: why the file should go."},
+            },
+            required=["path"],
+        ),
+        mutating=True,
+    )
+
+    async def run(self, args: dict[str, Any], ctx: ToolContext) -> str:
+        # The SOURCE is the governed target: scope, permission mode and the
+        # protected-path gate have already been applied to it by the broker
+        # (action class DELETE, HIGH tier). check_write here is the same gate,
+        # applied again on the canonical path we are about to move.
+        path = ctx.scope.check_write(str(args.get("path", "")), ctx.permission)
+        reason = str(args.get("reason", "")).strip()[:200]
+        if ctx.delete_staging is None:
+            return _err(
+                "delete_file is not enabled on this host (no delete_staging configured "
+                "by the operator). Leave the file in place and state in your summary "
+                "which files should be removed and why; a human will remove them."
+            )
+        if not path.exists():
+            return _err(f"no such file: {path}")
+        if not path.is_file():
+            return _err(f"not a regular file (directories are not removed): {path}")
+        from ..safety import canonicalize
+
+        staging = canonicalize(ctx.delete_staging)
+        root = ctx.scope.root
+        try:
+            rel = path.relative_to(root)
+        except ValueError:
+            return _err(f"{path} is not under the project root {root}")
+        dest = staging / root.name / rel
+        if dest.exists():
+            dest = dest.with_name(f"{dest.name}.{int(time.time())}")
+        # The destination is built from a single directory name and a
+        # root-relative path, so it cannot leave staging; assert it anyway so a
+        # future change to the construction cannot silently make it so.
+        if staging not in canonicalize(dest).parents:
+            return _err(f"refusing to stage outside {staging}")
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        size = path.stat().st_size
+        shutil.move(str(path), str(dest))
+        await ctx.bus.emit(
+            "file_changed",
+            {
+                "path": str(path),
+                "tool": "delete_file",
+                "action": "staged_delete",
+                "staged_to": str(dest),
+                "bytes": size,
+                "reason": reason,
+            },
+            session_id=ctx.session_id,
+        )
+        return (
+            f"staged for removal: {rel} -> {dest} ({size} bytes; recoverable, the "
+            f"operator purges staging)"
+        )
 
 
 class EditFile:

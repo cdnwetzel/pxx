@@ -140,6 +140,14 @@ class Settings:
     #: with a leading slash it invented; the gate was right to refuse it, and
     #: wrong to end a run whose only other calls were correct.
     scope_violation: str = "abort"
+    #: Where ``delete_file`` STAGES a removed file instead of unlinking it
+    #: (2.6.1). Empty (the default) disables the tool: it answers with an
+    #: error telling the model to leave the file and say so. Set from TRUSTED
+    #: config only (user config, env, CLI) -- like ``hooks``: a repo must not
+    #: choose where its own files are moved to. The staged copy keeps the
+    #: project-relative path under ``<delete_staging>/<project dir name>/``,
+    #: so nothing is ever unrecoverable; a human purges the staging area.
+    delete_staging: str = ""
     mcp_servers: tuple[McpServerSpec, ...] = ()
     safety_net: bool = True  # K5: stash + pxx-pre/<ts> tag on edit-capable starts
     auto_commit: bool = False  # opt-in: commit session work on COMPLETED (the undo tag still points at pre-session HEAD)
@@ -243,6 +251,7 @@ _KNOWN_KEYS = {
     "allow_ungated_shell",
     "hook_denial",
     "scope_violation",
+    "delete_staging",
     "safety_net",
     "auto_commit",
     "loop_review",
@@ -364,6 +373,9 @@ def _settings_from_dict(
         "hook_denial",
         # 2.6.1: the same reasoning for the scope gate's own setting.
         "scope_violation",
+        # 2.6.1: where delete_file stages a removed file is the operator's
+        # choice; a repo must not choose where its own files are moved to.
+        "delete_staging",
     ):
         if key in data and not allow_exec_surfaces:
             log.warning(
@@ -514,6 +526,11 @@ def _settings_from_dict(
                 f'{source}: scope_violation must be "abort" or "refuse_tool", got {value!r}'
             )
         kwargs["scope_violation"] = value
+    if "delete_staging" in data:
+        value = data["delete_staging"]
+        if not isinstance(value, str):
+            raise ConfigError(f"{source}: delete_staging must be a path string")
+        kwargs["delete_staging"] = str(Path(value).expanduser()) if value else ""
     if "done_signal" in data:
         # Strict boolean (same fail-open reasoning as loop_review): a quoted
         # "false" must not silently truthy-coerce to True.

@@ -92,13 +92,14 @@ def test_default_registry_has_builtins() -> None:
         "read_file",
         "write_file",
         "edit_file",
+        "delete_file",  # 2.6.1: a staged move, never an unlink
         "list_files",
         "search_files",
         "run_shell",
         "recall_memory",
         "remember",
     }
-    assert len(reg) == 8
+    assert len(reg) == 9  # 2.6.1 added delete_file
 
 
 def test_call_unknown_tool_returns_error_string(tmp_path: Path) -> None:

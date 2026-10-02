@@ -116,7 +116,10 @@ _MATRIX = [
     (ActionClass.NETWORK, PermissionMode.ASK, False),
     (ActionClass.NETWORK, PermissionMode.EDIT, False),
     (ActionClass.NETWORK, PermissionMode.AUTO, True),
-    (ActionClass.DELETE, PermissionMode.EDIT, False),
+    # 2.6.1: DELETE is delete_file only, a staged move into the operator's
+    # delete_staging (never an unlink), HIGH tier; allowed in edit, still not in plan/ask
+    (ActionClass.DELETE, PermissionMode.PLAN, False),
+    (ActionClass.DELETE, PermissionMode.EDIT, True),
     (ActionClass.DELETE, PermissionMode.AUTO, True),
 ]
 

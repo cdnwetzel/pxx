@@ -127,6 +127,19 @@ class Settings:
     #: did not need (mkdir before write_file, cd to its own cwd, ls) AFTER the
     #: work was written, and the reset discarded it each time.
     hook_denial: str = "abort"
+    #: What a SCOPE VIOLATION at authorize time does to the run. "abort" (the
+    #: default, and the only behaviour before 2.6.1): the session ends
+    #: OUT_OF_SCOPE and the safety net resets the tree. "refuse_tool": the
+    #: call is not executed, the model is told it was refused and why, a
+    #: ``tool_denied`` event is emitted, and the run continues -- exactly the
+    #: hook_denial treatment. Nothing is widened: the path is still never
+    #: touched, and a PreToolUse hook remains the second layer. Honoured from
+    #: trusted config only (user config, env, CLI), like hook_denial: the
+    #: repo being guarded must not soften its own gate. Observed on a
+    #: governed run: after one correct edit the model named the same file
+    #: with a leading slash it invented; the gate was right to refuse it, and
+    #: wrong to end a run whose only other calls were correct.
+    scope_violation: str = "abort"
     mcp_servers: tuple[McpServerSpec, ...] = ()
     safety_net: bool = True  # K5: stash + pxx-pre/<ts> tag on edit-capable starts
     auto_commit: bool = False  # opt-in: commit session work on COMPLETED (the undo tag still points at pre-session HEAD)
@@ -229,6 +242,7 @@ _KNOWN_KEYS = {
     "sandbox_shell",
     "allow_ungated_shell",
     "hook_denial",
+    "scope_violation",
     "safety_net",
     "auto_commit",
     "loop_review",
@@ -348,6 +362,8 @@ def _settings_from_dict(
         # 2.6.0: whether a hook denial ENDS the run is part of the gate, so
         # the repo being guarded must not be able to soften it either.
         "hook_denial",
+        # 2.6.1: the same reasoning for the scope gate's own setting.
+        "scope_violation",
     ):
         if key in data and not allow_exec_surfaces:
             log.warning(
@@ -491,6 +507,13 @@ def _settings_from_dict(
                 f'{source}: hook_denial must be "abort" or "refuse_tool", got {value!r}'
             )
         kwargs["hook_denial"] = value
+    if "scope_violation" in data:
+        value = data["scope_violation"]
+        if value not in ("abort", "refuse_tool"):
+            raise ConfigError(
+                f'{source}: scope_violation must be "abort" or "refuse_tool", got {value!r}'
+            )
+        kwargs["scope_violation"] = value
     if "done_signal" in data:
         # Strict boolean (same fail-open reasoning as loop_review): a quoted
         # "false" must not silently truthy-coerce to True.

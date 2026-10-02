@@ -109,6 +109,8 @@ class Settings:
     hooks: tuple[Hook, ...] = ()
     test_command: str | None = None
     sandbox_shell: bool = False
+    hook_denial: str = "abort"                        # | "refuse_tool": a hook denial is returned to the model
+    scope_violation: str = "abort"                    # | "refuse_tool": a scope violation is returned to the model
     mcp_servers: tuple[McpServerSpec, ...] = ()
 ```
 - `load_settings(cwd, cli_overrides) -> Settings`: precedence =
@@ -274,6 +276,13 @@ class ToolRegistry:  # register(tool), specs() -> [openai tool schema],
 - `fs.py`: read_file (offset/limit), write_file (permission>=EDIT, in-scope),
   edit_file (exact old/new string replace, unique match), list_files (glob),
   search_files (ripgrep if on PATH else pure-python fallback).
+- Authorize-time denials: `ScopeViolation` and `HookDenied` end the run by
+  default. With `scope_violation = "refuse_tool"` / `hook_denial =
+  "refuse_tool"` the refused call is instead returned to the model as
+  `error: refused by policy: …` with a `tool_denied` event, and the session
+  continues. Both are honoured from trusted config only (user config, env,
+  CLI), never from a repo-local file. The two settings are independent; the
+  call is never executed either way, and the path is never touched.
 - `broker.py`: the single authorization authority. `ToolRegistry.call`
   classifies every call into a `ToolAction` (action class READ/WRITE/DELETE/
   SHELL/NETWORK/MEMORY, risk tier, canonicalized targets) and routes it

@@ -11,7 +11,11 @@ execute model tool calls directly — everything goes through
 
 Tool *failures* (missing file, bad regex, non-zero exit) are returned as
 strings — they are data for the model, not crashes. Gate errors
-(``ScopeViolation`` / ``HookDenied`` / ``BudgetExceeded``) always propagate.
+(``ScopeViolation`` / ``HookDenied`` / ``BudgetExceeded``) propagate and end
+the run, except that an authorize-time ``HookDenied`` (``hook_denial =
+"refuse_tool"``, 2.6.0) or ``ScopeViolation`` (``scope_violation =
+"refuse_tool"``, 2.6.1) is returned to the model as the tool's result
+instead; the refused call is never executed either way.
 """
 
 from __future__ import annotations
@@ -21,7 +25,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
-from ..errors import GateError, HookDenied
+from ..errors import GateError, HookDenied, ScopeViolation
 from ..events import EventBus
 from ..safety import HookRunner, PermissionMode, ScopeGate
 
@@ -69,6 +73,10 @@ class ToolContext:
     #: Settings.hook_denial == "refuse_tool": a hook denial is returned to the
     #: model as the tool's result instead of ending the run.
     refuse_denied_tools: bool = False
+    #: Settings.scope_violation == "refuse_tool": an authorize-time scope
+    #: violation is returned to the model as the tool's result instead of
+    #: ending the run (2.6.1).
+    refuse_scope_violations: bool = False
 
 
 @runtime_checkable
@@ -139,12 +147,20 @@ class ToolRegistry:
         broker = ActionBroker(profile)
         # classify + authorize: profile check, scope, PreToolUse hooks, and the
         # tool_action_proposed / policy_decision events all live in the broker.
-        # Denials raise ScopeViolation/HookDenied and propagate.
+        # Denials raise ScopeViolation/HookDenied. They propagate (the run
+        # ends) unless the matching setting says to refuse the call back to
+        # the model: hook_denial for hooks (2.6.0), scope_violation for the
+        # scope gate (2.6.1). Either way the call is never executed.
         action = classify(name, tool.spec, args)
         try:
             await broker.authorize(action, ctx)
-        except HookDenied as exc:
-            if not ctx.refuse_denied_tools:
+        except (HookDenied, ScopeViolation) as exc:
+            refuse = (
+                ctx.refuse_scope_violations
+                if isinstance(exc, ScopeViolation)
+                else ctx.refuse_denied_tools
+            )
+            if not refuse:
                 raise
             # The refusal is data for the model. The call was NOT executed;
             # the model is told what was refused and why, so it can do the

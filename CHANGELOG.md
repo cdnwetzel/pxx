@@ -19,6 +19,17 @@ preserved in git (tag `v1.3.3` and earlier).
   governed run the model named a file it had just edited with a leading slash
   it invented; the gate was right to refuse the call and wrong to discard a
   run whose every other call was correct.
+- **`delete_file`: a removal is a staged move, never an unlink.** The model
+  can retire a file with one call; it is moved to
+  `<delete_staging>/<project dir>/<relative path>` (a repeat keeps both), the
+  `file_changed` event says `staged_delete` with `staged_to`, and the model is
+  told the copy is recoverable. The source goes through the same scope,
+  permission and protected-path gates as a write (action class DELETE, HIGH
+  tier, allowed in `edit`, not in `plan`/`ask`). Directories are refused.
+  `delete_staging` is honoured from trusted config only (user config, env,
+  CLI) — a repo must not choose where its own files are moved to — and with
+  it unset the tool answers with an error telling the model to leave the file
+  and say so. Tool count 8 → 9.
 
 ## [2.6.0] — 2026-09-23
 

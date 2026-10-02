@@ -53,7 +53,7 @@ pxx/
     inject.py          # deterministic session-start context builder
   tools/
     __init__.py        # Tool protocol, ToolRegistry, ToolContext
-    fs.py              # read_file, write_file, edit_file, list_files, search_files
+    fs.py              # read_file, write_file, edit_file, delete_file, list_files, search_files
     shell.py           # run_shell (scope-gated, optional sandbox-exec)
     memory_tools.py    # recall_memory, remember
   backends/
@@ -111,6 +111,7 @@ class Settings:
     sandbox_shell: bool = False
     hook_denial: str = "abort"                        # | "refuse_tool": a hook denial is returned to the model
     scope_violation: str = "abort"                    # | "refuse_tool": a scope violation is returned to the model
+    delete_staging: str = ""                          # trusted config only; "" disables delete_file
     mcp_servers: tuple[McpServerSpec, ...] = ()
 ```
 - `load_settings(cwd, cli_overrides) -> Settings`: precedence =
@@ -274,8 +275,12 @@ class ToolRegistry:  # register(tool), specs() -> [openai tool schema],
                      # async call(name, args_json) -> str
 ```
 - `fs.py`: read_file (offset/limit), write_file (permission>=EDIT, in-scope),
-  edit_file (exact old/new string replace, unique match), list_files (glob),
-  search_files (ripgrep if on PATH else pure-python fallback).
+  edit_file (exact old/new string replace, unique match), delete_file (a
+  STAGED move of one in-scope regular file to
+  `<delete_staging>/<project dir>/<relative path>`, never an unlink; action
+  class DELETE, HIGH tier, allowed in EDIT; disabled with an error for the
+  model when `delete_staging` is unset), list_files (glob), search_files
+  (ripgrep if on PATH else pure-python fallback).
 - Authorize-time denials: `ScopeViolation` and `HookDenied` end the run by
   default. With `scope_violation = "refuse_tool"` / `hook_denial =
   "refuse_tool"` the refused call is instead returned to the model as

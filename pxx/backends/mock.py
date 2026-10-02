@@ -14,6 +14,7 @@ them to terminal codes.
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import Any, ClassVar
 
 from ..errors import BackendError
@@ -42,6 +43,7 @@ def make_tool_context(ctx: SessionContext) -> Any:
         profile=ctx.profile,
         refuse_denied_tools=ctx.settings.hook_denial == "refuse_tool",
         refuse_scope_violations=ctx.settings.scope_violation == "refuse_tool",
+        delete_staging=Path(ctx.settings.delete_staging) if ctx.settings.delete_staging else None,
     )
 
 

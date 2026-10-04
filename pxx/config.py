@@ -165,6 +165,19 @@ class Settings:
     #: running to its budget (e.g. when the suite is slow enough that a mid-session
     #: probe costs more than the rounds it saves).
     done_signal: bool = True
+    #: Ambiguity gate (``clarify.py``) on/off. Default ON: an underspecified
+    #: task stops with a clarifying question BEFORE any backend round. Set
+    #: false only for single-shot, no-tool, contract-gated invocations whose
+    #: caller supplies its own fail-closed validation (e.g. ACP's isolated
+    #: drill workers, which schema-validate and gate every artifact
+    #: themselves). Disabling never widens scope, permissions, budgets,
+    #: hooks, routing, or memory — it only skips the question — so it is
+    #: honoured from every config layer including repo-local (unlike exec
+    #: surfaces: a repo that disables it exposes only itself to a guessed-at
+    #: task, and every action remains gated downstream). The skip is recorded
+    #: as a metadata-only ``gate_decision`` event so evidence shows the gate
+    #: was deliberately disabled, not silently absent.
+    clarity_gate: bool = True
     #: How many hybrid-search hits session-start memory injection may include
     #: (``pxx.memory.inject.build_context``). The default equals inject.py's
     #: historical hardcoded ``_SEARCH_HITS``, so an unconfigured box is
@@ -256,6 +269,7 @@ _KNOWN_KEYS = {
     "auto_commit",
     "loop_review",
     "done_signal",
+    "clarity_gate",
     "memory_retrieval_limit",
     "memory_capture_successes",
     "budgets",
@@ -538,6 +552,13 @@ def _settings_from_dict(
         if not isinstance(value, bool):
             raise ConfigError(f"{source}: done_signal must be a boolean")
         kwargs["done_signal"] = value
+    if "clarity_gate" in data:
+        # Strict boolean (same fail-open reasoning as done_signal): a quoted
+        # "false" must not silently truthy-coerce to True.
+        value = data["clarity_gate"]
+        if not isinstance(value, bool):
+            raise ConfigError(f"{source}: clarity_gate must be a boolean")
+        kwargs["clarity_gate"] = value
     if "memory_retrieval_limit" in data:
         # Strict: positive int only. bool is an int subclass — reject it
         # explicitly so `memory_retrieval_limit = true` can't pass as 1.

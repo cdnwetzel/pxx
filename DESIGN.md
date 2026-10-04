@@ -304,6 +304,15 @@ class ToolRegistry:  # register(tool), specs() -> [openai tool schema],
 - `clarify.py`: the ambiguity gate. `ready_to_act` runs before the first
   backend round (session entry + loop round 1); ambiguous tasks stop with
   `CLARIFICATION_REQUIRED` and a surfaced question, without editing.
+  `Settings.clarity_gate` (default ON, strict boolean, config-only — no env
+  var or CLI flag) disables the check for single-shot, no-tool,
+  contract-gated callers that supply their own fail-closed validation (e.g.
+  ACP's isolated drill workers). It is honoured from every config layer
+  including repo-local — it is not an exec surface: disabling never widens
+  scope, permissions, budgets, hooks, routing, or memory, it only skips the
+  clarifying question. The skip is recorded as a metadata-only
+  `gate_decision` event (`state: DISABLED_BY_CONFIG`) so evidence shows the
+  gate was deliberately disabled, not silently absent.
 - `audit_sampling.py`: deterministic human-audit flags (100% promotions /
   high-risk, ~20% ordinary, sha256 of run_id — no RNG).
 - `shell.py`: run_shell — allowed in AUTO; in EDIT only if a PreToolUse hook

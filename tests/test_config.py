@@ -295,6 +295,24 @@ def test_done_signal_non_boolean_toml_rejected(tmp_path):
         load_settings(cwd=tmp_path)
 
 
+def test_clarity_gate_defaults_on(tmp_path):
+    (tmp_path / "pxx.toml").write_text('model = "x"\n')
+    assert load_settings(cwd=tmp_path).clarity_gate is True
+
+
+def test_clarity_gate_from_toml(tmp_path):
+    # Honoured from repo-local config like done_signal: it is not an exec
+    # surface — disabling it never widens scope/permissions/budgets/routing.
+    (tmp_path / "pxx.toml").write_text("clarity_gate = false\n")
+    assert load_settings(cwd=tmp_path).clarity_gate is False
+
+
+def test_clarity_gate_non_boolean_toml_rejected(tmp_path):
+    (tmp_path / "pxx.toml").write_text('clarity_gate = "false"\n')
+    with pytest.raises(ConfigError, match="clarity_gate must be a boolean"):
+        load_settings(cwd=tmp_path)
+
+
 def test_invalid_toml_rejected(tmp_path):
     (tmp_path / "pxx.toml").write_text("not = = toml\n")
     with pytest.raises(ConfigError, match="invalid TOML"):

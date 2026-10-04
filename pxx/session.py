@@ -104,7 +104,22 @@ class Session:
 
         # Ambiguity gate (Phase 14): stop underspecified tasks BEFORE any
         # backend round. Uncertain never guesses — it asks.
-        if check_clarity:
+        if check_clarity and not settings.clarity_gate:
+            # Explicit config opt-out (Settings.clarity_gate) for single-shot,
+            # no-tool, contract-gated callers: record the skip metadata-only
+            # so the evidence shows the gate was deliberately disabled for
+            # this invocation, not silently absent.
+            await self.bus.emit(
+                "gate_decision",
+                {
+                    "gate": "clarification",
+                    "allowed": True,
+                    "state": "DISABLED_BY_CONFIG",
+                    "question": "",
+                },
+                session_id=self.session_id,
+            )
+        if check_clarity and settings.clarity_gate:
             from .clarify import ReadyState, ready_to_act
 
             clarity = ready_to_act(task, cwd=self.cwd, test_command=settings.test_command)

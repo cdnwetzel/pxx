@@ -183,3 +183,30 @@ def test_healing_round_skips_clarity_check(tmp_path: Path) -> None:
     session = Session(_settings(tmp_path), backend, cwd=tmp_path)
     outcome = asyncio.run(session.run("fix the bug in src/missing.py", check_clarity=False))
     assert outcome.code is TerminalCode.COMPLETED
+
+
+def test_clarity_gate_disabled_by_config_runs_backend(tmp_path: Path) -> None:
+    """Settings.clarity_gate=False (explicit opt-out for single-shot, no-tool,
+    contract-gated callers): an otherwise-gated task proceeds, and the skip is
+    recorded metadata-only so evidence shows the gate was deliberately
+    disabled, not silently absent."""
+    backend = MockBackend([{"done": "ok"}])
+    session = Session(_settings(tmp_path, clarity_gate=False), backend, cwd=tmp_path)
+    outcome = asyncio.run(session.run("fix the bug in src/missing.py"))
+    assert outcome.code is TerminalCode.COMPLETED
+    gate = next(e for e in session.bus.history if e.kind == "gate_decision")
+    assert gate.data["gate"] == "clarification"
+    assert gate.data["allowed"] is True
+    assert gate.data["state"] == "DISABLED_BY_CONFIG"
+
+
+def test_clarity_gate_default_on_still_stops(tmp_path: Path) -> None:
+    """Default behaviour is unchanged: with clarity_gate unset (True) an
+    ambiguous task still stops with CLARIFICATION_REQUIRED before editing."""
+    backend = MockBackend(
+        [{"tool": "write_file", "args": {"path": "out.txt", "content": "x"}}, {"done": "wrote"}]
+    )
+    session = Session(_settings(tmp_path), backend, cwd=tmp_path)
+    outcome = asyncio.run(session.run("fix the bug in src/missing.py"))
+    assert outcome.code is TerminalCode.CLARIFICATION_REQUIRED
+    assert not (tmp_path / "out.txt").exists()

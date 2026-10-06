@@ -305,6 +305,12 @@ class NativeBackend:
             payload: dict[str, Any] = {"model": model.model, "messages": messages}
             if tools:
                 payload["tools"] = tools
+            if ctx.settings.temperature is not None:
+                # Settings.temperature: deterministic generation surface for
+                # strict textual contracts. Sent only when configured — unset
+                # leaves the serving layer's default (and the payload shape)
+                # untouched.
+                payload["temperature"] = ctx.settings.temperature
             headers = {"Authorization": f"Bearer {model.api_key}"} if model.api_key else {}
             await ctx.bus.emit(
                 "model_request",
@@ -322,6 +328,7 @@ class NativeBackend:
                     "system_message_present": not bare,
                     "tools_key_present": "tools" in payload,
                     "tool_count": len(tools),
+                    "temperature": ctx.settings.temperature,
                 },
                 session_id=ctx.session_id,
             )

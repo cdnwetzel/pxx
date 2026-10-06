@@ -336,6 +336,18 @@ class ToolRegistry:  # register(tool), specs() -> [openai tool schema],
   construction. Audit stays truthful and body-free: `prompt_rendered` and
   every `model_request` event carry `payload_mode` (`"bare"`/`"default"`),
   `system_message_present`, `tools_key_present`, and `tool_count`.
+  `Settings.temperature` (default UNSET, strict real in [0.0, 2.0],
+  config-only) is sent as the payload's `temperature` key only when
+  configured; unset, the key is absent and the serving layer's default
+  applies, so an unconfigured box is byte-identical to before the key
+  existed. It exists for callers that need a deterministic generation
+  surface for strict textual contracts (ACP's contract-bound phases:
+  temperature-1.0 produced repeated byte-level formatting defects — casing
+  slips, missing table pipes — caught fail-closed across 2026-10-04..06).
+  It changes generation only — never scope, permissions, budgets, hooks,
+  routing, memory policy, or audit — so it is honoured from every config
+  layer including repo-local. `model_request` events carry the configured
+  value (or null) alongside the payload-mode fields.
 - `audit_sampling.py`: deterministic human-audit flags (100% promotions /
   high-risk, ~20% ordinary, sha256 of run_id — no RNG).
 - `shell.py`: run_shell — allowed in AUTO; in EDIT only if a PreToolUse hook

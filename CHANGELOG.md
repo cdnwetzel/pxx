@@ -3,6 +3,27 @@
 All notable changes to pxx are documented here. The 1.x series history is
 preserved in git (tag `v1.3.3` and earlier).
 
+## [2.6.4] — 2026-10-06
+
+### Added
+
+- **`temperature`: deterministic generation surface for strict contracts.**
+  New optional `Settings.temperature` (config-only, strict real in
+  [0.0, 2.0] — bools and strings are `ConfigError`). When set, the native
+  backend sends it as the request payload's `temperature` key; when unset,
+  the key is absent and the serving layer's default applies, so an
+  unconfigured box is byte-identical to before the key existed (the golden
+  default-payload fixture pins this). It composes with bare mode — a bare
+  single-user-message payload plus `temperature = 0` is the shape
+  contract-gated pipelines asked for after temperature-1.0 produced
+  repeated byte-level formatting defects (casing slips, missing table
+  pipes) caught fail-closed by ACP's gates across 2026-10-04..06. The key
+  changes generation only — never scope, permissions, budgets, hooks,
+  routing, memory policy, or audit — so it is honoured from every config
+  layer including repo-local. `model_request` audit events carry the
+  configured value (or null) alongside the payload-mode fields. Tests in
+  `tests/test_temperature.py`; documented in DESIGN.md and CONFIG.md.
+
 ## [2.6.3] — 2026-10-06
 
 ### Added

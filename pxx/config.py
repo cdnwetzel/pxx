@@ -192,6 +192,18 @@ class Settings:
     #: any other mode fails with ConfigError before the first model request
     #: (``Session.run`` entry). Strict boolean.
     bare: bool = False
+    #: Sampling temperature sent in the native backend's chat-completions
+    #: payload. Default UNSET (None): the key is not sent and the serving
+    #: layer's own default applies — an unconfigured box is byte-identical to
+    #: before this key existed. Exists for callers that need a deterministic
+    #: generation surface for strict textual contracts (e.g. ACP's
+    #: contract-bound phases, where temperature-1.0 produced repeated
+    #: byte-level formatting defects — see docs/bare-mode/). Carries no
+    #: safety semantics: it changes generation, never scope, permissions,
+    #: budgets, hooks, routing, memory policy, or audit, so it is honoured
+    #: from every config layer including repo-local. Strict: a real number in
+    #: [0.0, 2.0] — bools and strings are ConfigError.
+    temperature: float | None = None
     #: How many hybrid-search hits session-start memory injection may include
     #: (``pxx.memory.inject.build_context``). The default equals inject.py's
     #: historical hardcoded ``_SEARCH_HITS``, so an unconfigured box is
@@ -285,6 +297,7 @@ _KNOWN_KEYS = {
     "done_signal",
     "clarity_gate",
     "bare",
+    "temperature",
     "memory_retrieval_limit",
     "memory_capture_successes",
     "budgets",
@@ -581,6 +594,18 @@ def _settings_from_dict(
         if not isinstance(value, bool):
             raise ConfigError(f"{source}: bare must be a boolean")
         kwargs["bare"] = value
+    if "temperature" in data:
+        # Strict real number in [0.0, 2.0]. bool is an int subclass — reject
+        # it explicitly so `temperature = true` can't pass as 1.0; a quoted
+        # "0" must not silently coerce either.
+        value = data["temperature"]
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not 0.0 <= value <= 2.0
+        ):
+            raise ConfigError(f"{source}: temperature must be a number in [0.0, 2.0]")
+        kwargs["temperature"] = float(value)
     if "memory_retrieval_limit" in data:
         # Strict: positive int only. bool is an int subclass — reject it
         # explicitly so `memory_retrieval_limit = true` can't pass as 1.

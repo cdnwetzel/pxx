@@ -16,8 +16,7 @@ from pathlib import Path
 DOCS = Path(__file__).resolve().parent.parent / "docs" / "bare-mode"
 TEMPLATES = DOCS / "templates"
 
-HEADER_FIELDS = ("purpose", "output contract", "validated against",
-                 "measured result", "status")
+HEADER_FIELDS = ("purpose", "output contract", "validated against", "measured result", "status")
 STATUS_LABELS = ("UNVALIDATED", "VALIDATED-AT-SOURCE", "VALIDATED")
 JSON_FENCE = re.compile(r"```json\n(.*?)```", re.DOTALL)
 

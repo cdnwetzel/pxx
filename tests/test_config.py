@@ -313,6 +313,24 @@ def test_clarity_gate_non_boolean_toml_rejected(tmp_path):
         load_settings(cwd=tmp_path)
 
 
+def test_bare_defaults_off(tmp_path):
+    (tmp_path / "pxx.toml").write_text('model = "x"\n')
+    assert load_settings(cwd=tmp_path).bare is False
+
+
+def test_bare_from_toml(tmp_path):
+    # Honoured from repo-local config like clarity_gate: it is not an exec
+    # surface — it only shrinks the request payload, never widens any gate.
+    (tmp_path / "pxx.toml").write_text("bare = true\n")
+    assert load_settings(cwd=tmp_path).bare is True
+
+
+def test_bare_non_boolean_toml_rejected(tmp_path):
+    (tmp_path / "pxx.toml").write_text('bare = "false"\n')
+    with pytest.raises(ConfigError, match="bare must be a boolean"):
+        load_settings(cwd=tmp_path)
+
+
 def test_invalid_toml_rejected(tmp_path):
     (tmp_path / "pxx.toml").write_text("not = = toml\n")
     with pytest.raises(ConfigError, match="invalid TOML"):

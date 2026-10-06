@@ -744,7 +744,8 @@ def _cmd_run_like(args: argparse.Namespace, unknown: list[str]) -> int:
     outcome = _run_session(settings, backend, task)
     print(
         f"[{outcome.code}] {outcome.summary} "
-        f"(rounds={outcome.rounds} tokens={outcome.tokens} diff_lines={outcome.diff_lines})"
+        f"(rounds={outcome.rounds} tokens={outcome.tokens} diff_lines={outcome.diff_lines} "
+        f"session={outcome.session_id})"
     )
     return exit_code_for(outcome)
 
@@ -847,7 +848,10 @@ def _cmd_chat(args: argparse.Namespace, unknown: list[str]) -> int:
             continue
         outcome = asyncio.run(session.run(line))
         if not outcome.ok:
-            print(f"[{outcome.code}] {outcome.summary}", file=sys.stderr)
+            print(
+                f"[{outcome.code}] {outcome.summary} (session={outcome.session_id})",
+                file=sys.stderr,
+            )
     return 0
 
 

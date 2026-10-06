@@ -60,7 +60,7 @@ jobs:
           fi
 
       - name: Install
-        run: uv venv && uv pip install -e ".[dev,server]" --python .venv/bin/python
+        run: uv sync --extra server
 
       - name: Lint
         run: |

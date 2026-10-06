@@ -240,24 +240,47 @@ class NativeBackend:
         models: tuple[ModelRef, ...],
     ) -> RunOutcome:
         tool_ctx = make_tool_context(ctx)
-        tools = list(ctx.tools.specs() or [])
-        tool_names = frozenset(str((t.get("function") or {}).get("name") or "") for t in tools) - {
-            ""
-        }
-        system_message = _system_message(ctx)
+        bare = ctx.settings.bare
+        if bare:
+            # Bare payload mode (Settings.bare): single-shot, no-tool,
+            # contract-gated callers only. The request is the task alone — no
+            # system message, no ``tools`` key — and ``specs()`` is never
+            # called, so no tool schemas (built-in or MCP) are even
+            # constructed. Tool-mediated gates (scope/hook inside
+            # ``ToolRegistry.call``) are structurally unreachable here: no
+            # tools are advertised, so no tool call can occur. Everything else
+            # — budgets, retry/fallback, advisory truthfulness — is unchanged.
+            tools: list[dict[str, Any]] = []
+            tool_names: frozenset[str] = frozenset()
+            system_message = ""
+        else:
+            tools = list(ctx.tools.specs() or [])
+            tool_names = frozenset(
+                str((t.get("function") or {}).get("name") or "") for t in tools
+            ) - {""}
+            system_message = _system_message(ctx)
         await ctx.bus.emit(
             "prompt_rendered",
             {
                 "system_chars": len(system_message),
                 "tools": len(tools),
                 "memory_context": bool(ctx.memory_context),
+                # Body-free payload-mode audit fields: evidence can show WHICH
+                # shape was sent without carrying any prompt content.
+                "payload_mode": "bare" if bare else "default",
+                "system_message_present": not bare,
+                "tools_key_present": bool(tools),
+                "tool_count": len(tools),
             },
             session_id=ctx.session_id,
         )
-        messages: list[dict[str, Any]] = [
-            {"role": "system", "content": system_message},
-            {"role": "user", "content": task},
-        ]
+        if bare:
+            messages: list[dict[str, Any]] = [{"role": "user", "content": task}]
+        else:
+            messages = [
+                {"role": "system", "content": system_message},
+                {"role": "user", "content": task},
+            ]
         active = 0
         transient_left = TRANSIENT_RETRIES  # bounded transport retry, reset per round
         rounds = 0
@@ -292,6 +315,13 @@ class NativeBackend:
                     "messages": len(messages),
                     "tools": len(tools),
                     "round": rounds + 1,
+                    # Same body-free payload-mode audit fields as
+                    # prompt_rendered, per request (the payload can differ
+                    # per round once rounds accumulate).
+                    "payload_mode": "bare" if bare else "default",
+                    "system_message_present": not bare,
+                    "tools_key_present": "tools" in payload,
+                    "tool_count": len(tools),
                 },
                 session_id=ctx.session_id,
             )
@@ -428,7 +458,11 @@ class NativeBackend:
             messages.append(_assistant_message(message))
             if not tool_calls:
                 summary = (message.get("content") or "").strip()
-                if _prose_tool_call(summary, tool_names):
+                # Bare mode skips the prose-tool-call nudge entirely: there is
+                # no tools API to nudge toward, and a contract caller's JSON
+                # answer could false-positive _prose_tool_call. The first
+                # response without tool_calls completes the run, as today.
+                if not bare and _prose_tool_call(summary, tool_names):
                     prose_nudges += 1
                     log.warning(
                         "tool call returned as prose by %s (nudge %d/%d)",

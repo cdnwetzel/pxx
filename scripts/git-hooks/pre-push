@@ -16,7 +16,7 @@ else
     # NOTE: this branch is REVIEWED, NOT PROVEN — every machine in the current
     # loop has uv on PATH, so it has never fired in a live push (2026-07-22).
     echo "pre-push: no ruff found (.venv/bin/ruff or uv) — refusing to push blind."
-    echo "  set up the venv: uv venv && uv pip install -e '.[dev,server]'"
+    echo "  set up the venv: uv sync --extra server"
     echo "  or bypass once, deliberately: git push --no-verify"
     exit 1
 fi

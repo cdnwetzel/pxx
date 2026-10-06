@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pxx-orchestrator"
-version = "2.6.1"
+version = "2.6.2"
 description = "Local-first AI coding agent runtime: async backends (native + aider), persistent memory, MCP, fail-closed safety gates."
 readme = "README.md"
 license = { text = "MIT" }
@@ -28,6 +28,12 @@ dependencies = ["httpx>=0.27"]
 # aider's dependency chain (pydub -> audioop) requires Python < 3.13.
 aider = ["aider-chat==0.86.2; python_version < '3.13'"]
 server = ["fastapi>=0.110", "uvicorn>=0.29"]
+
+# PEP 735: the dev tooling (pytest, ruff) is a dependency GROUP, not an
+# extra — plain `uv sync` / `uv run pytest` include it by default (uv treats
+# the `dev` group as default), so the locked env can never silently fall back
+# to whatever pytest/ruff happens to be on PATH.
+[dependency-groups]
 dev = ["pytest>=8", "ruff>=0.6"]
 
 [project.scripts]

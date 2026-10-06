@@ -40,7 +40,7 @@ from .events import AuditLog, Event, EventBus
 from .gitenv import git_env
 from .manifest import RunDirWriter, build_manifest
 from .outcome import RunOutcome, TerminalCode
-from .safety import BudgetGuard, HookRunner, ScopeGate
+from .safety import BudgetGuard, HookRunner, PermissionMode, ScopeGate
 
 log = logging.getLogger("pxx.session")
 
@@ -99,6 +99,20 @@ class Session:
         from .tools import ToolRegistry, default_registry
 
         settings = self.settings
+
+        # Bare payload mode is read-only-only: a write-capable mode with
+        # bare = true is a configuration mistake, refused here — at session
+        # entry, BEFORE any model request — so CLI, serve, and library
+        # callers share one check.
+        if settings.bare and settings.permission not in (
+            PermissionMode.ASK,
+            PermissionMode.PLAN,
+        ):
+            raise ConfigError(
+                f"bare mode is valid only for read-only permission modes "
+                f"(ask, plan); got {settings.permission}"
+            )
+
         audit = AuditLog(settings.state_dir, self.session_id)
         audit.subscribe_to(self.bus)
 

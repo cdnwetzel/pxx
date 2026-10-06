@@ -3,6 +3,48 @@
 All notable changes to pxx are documented here. The 1.x series history is
 preserved in git (tag `v1.3.3` and earlier).
 
+## [2.6.2] — 2026-10-05
+
+### Added
+
+- **`bare = true`: payload-only bare mode for contract-gated callers.** The
+  native backend's chat-completions request is reduced to the task itself —
+  no system message and no `tools` key, and `ToolRegistry.specs()` is never
+  called, so no tool schemas (built-in or MCP) are even constructed. For
+  single-shot, no-tool, contract-gated callers (e.g. ACP's isolated drill
+  workers) whose own fail-closed validation makes the coding-agent
+  scaffolding a measured degradant: at fixed model/task/temperature a bare
+  prompt scored 12/12 contract-conformant where the system prompt (with or
+  without the 9 tool schemas) scored 2/6. Default OFF, strict boolean,
+  honoured from every config layer (it is not an exec surface: it never
+  widens or weakens scope, permissions, budgets, hooks, clarity, routing,
+  memory policy, or audit). Valid only for the read-only modes ASK and PLAN
+  — any other mode with `bare = true` fails with ConfigError at
+  `Session.run` entry, before the first model request, so CLI, serve, and
+  library callers share one check. The prose-tool-call nudge is skipped in
+  bare mode (there is no tools API to nudge toward, and a contract JSON
+  answer could false-positive the detector). Tool-mediated gates are
+  structurally unreachable in bare mode — no tools advertised, no tool call
+  possible — so their enforcement is preserved by construction.
+- **Payload-mode audit fields.** `prompt_rendered` and every `model_request`
+  event now carry `payload_mode` (`"bare"`/`"default"`),
+  `system_message_present`, `tools_key_present`, and `tool_count` — body-free
+  as always, so evidence shows which payload shape was sent without carrying
+  prompt content.
+- **The single-shot outcome line names its session.** `pxx ask/edit/plan/run`
+  now print `session=<id>` in the outcome line (and `pxx chat` on a failed
+  turn), so a caller can locate the run's audit events in
+  `state_dir/audit/<date>.jsonl`.
+
+### Changed
+
+- **Dev tooling is a PEP 735 dependency group, not an extra.** `dev`
+  (pytest, ruff) moved from `[project.optional-dependencies]` to
+  `[dependency-groups]`, so plain `uv sync` / `uv run pytest` sync them into
+  the locked project env by default instead of silently falling back to
+  whatever pytest/ruff is on PATH. CI and the release workflow install with
+  `uv sync --extra server`; the `dev` extra no longer exists.
+
 ## [2.6.1] — 2026-10-02
 
 ### Added

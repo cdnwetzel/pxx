@@ -1718,7 +1718,7 @@ wheels = [
 
 [[package]]
 name = "pxx-orchestrator"
-version = "2.6.1"
+version = "2.6.2"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },
@@ -1728,13 +1728,15 @@ dependencies = [
 aider = [
     { name = "aider-chat", marker = "python_full_version < '3.13'" },
 ]
-dev = [
-    { name = "pytest" },
-    { name = "ruff" },
-]
 server = [
     { name = "fastapi" },
     { name = "uvicorn" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "pytest" },
+    { name = "ruff" },
 ]
 
 [package.metadata]
@@ -1742,11 +1744,15 @@ requires-dist = [
     { name = "aider-chat", marker = "python_full_version < '3.13' and extra == 'aider'", specifier = "==0.86.2" },
     { name = "fastapi", marker = "extra == 'server'", specifier = ">=0.110" },
     { name = "httpx", specifier = ">=0.27" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8" },
-    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.6" },
     { name = "uvicorn", marker = "extra == 'server'", specifier = ">=0.29" },
 ]
-provides-extras = ["aider", "server", "dev"]
+provides-extras = ["aider", "server"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "pytest", specifier = ">=8" },
+    { name = "ruff", specifier = ">=0.6" },
+]
 
 [[package]]
 name = "pycodestyle"

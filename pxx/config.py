@@ -178,6 +178,20 @@ class Settings:
     #: as a metadata-only ``gate_decision`` event so evidence shows the gate
     #: was deliberately disabled, not silently absent.
     clarity_gate: bool = True
+    #: Bare request payload (native backend) on/off. Default OFF. For the same
+    #: single-shot, no-tool, contract-gated callers as ``clarity_gate``: the
+    #: chat-completions request is reduced to the task itself — no system
+    #: message and no ``tools`` key (tool schemas are never constructed, so
+    #: no MCP tools attach either). Measured at fixed model/task/temperature:
+    #: a bare prompt was 12/12 contract-conformant where the agent system
+    #: prompt (with or without the 9 tool schemas) managed 2/6. Bare reduces
+    #: ONLY the request payload: it never widens or weakens scope,
+    #: permissions, budgets, hooks, clarity, routing, memory policy, or audit,
+    #: so it is honoured from every config layer including repo-local (it is
+    #: not an exec surface). Valid only for the read-only modes ASK and PLAN —
+    #: any other mode fails with ConfigError before the first model request
+    #: (``Session.run`` entry). Strict boolean.
+    bare: bool = False
     #: How many hybrid-search hits session-start memory injection may include
     #: (``pxx.memory.inject.build_context``). The default equals inject.py's
     #: historical hardcoded ``_SEARCH_HITS``, so an unconfigured box is
@@ -270,6 +284,7 @@ _KNOWN_KEYS = {
     "loop_review",
     "done_signal",
     "clarity_gate",
+    "bare",
     "memory_retrieval_limit",
     "memory_capture_successes",
     "budgets",
@@ -559,6 +574,13 @@ def _settings_from_dict(
         if not isinstance(value, bool):
             raise ConfigError(f"{source}: clarity_gate must be a boolean")
         kwargs["clarity_gate"] = value
+    if "bare" in data:
+        # Strict boolean (same fail-open reasoning as clarity_gate): a quoted
+        # "false" must not silently truthy-coerce to True.
+        value = data["bare"]
+        if not isinstance(value, bool):
+            raise ConfigError(f"{source}: bare must be a boolean")
+        kwargs["bare"] = value
     if "memory_retrieval_limit" in data:
         # Strict: positive int only. bool is an int subclass — reject it
         # explicitly so `memory_retrieval_limit = true` can't pass as 1.

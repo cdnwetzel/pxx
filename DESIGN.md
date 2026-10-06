@@ -313,6 +313,24 @@ class ToolRegistry:  # register(tool), specs() -> [openai tool schema],
   clarifying question. The skip is recorded as a metadata-only
   `gate_decision` event (`state: DISABLED_BY_CONFIG`) so evidence shows the
   gate was deliberately disabled, not silently absent.
+  `Settings.bare` (default OFF, strict boolean, config-only — no env var or
+  CLI flag) reduces the native backend's request PAYLOAD to the task itself
+  for the same single-shot, no-tool, contract-gated callers: no system
+  message and no `tools` key, and `specs()` is never called, so no tool
+  schemas (built-in or MCP) are even constructed. Measured at fixed
+  model/task/temperature, the agent scaffolding was a contract-conformance
+  degradant (bare 12/12, with system prompt 2/6). Bare never widens or
+  weakens scope, permissions, budgets, hooks, clarity, routing, memory
+  policy, or audit, so it is honoured from every config layer including
+  repo-local — it is not an exec surface. It is valid only for the read-only
+  modes ASK and PLAN; any other mode fails with ConfigError at `Session.run`
+  entry, before the first model request (one check covers CLI, serve, and
+  library callers). Tool-mediated gates are structurally unreachable in bare
+  mode: no tools are advertised, so no tool call can occur, so
+  `ToolRegistry.call` cannot be invoked — enforcement is preserved by
+  construction. Audit stays truthful and body-free: `prompt_rendered` and
+  every `model_request` event carry `payload_mode` (`"bare"`/`"default"`),
+  `system_message_present`, `tools_key_present`, and `tool_count`.
 - `audit_sampling.py`: deterministic human-audit flags (100% promotions /
   high-risk, ~20% ordinary, sha256 of run_id — no RNG).
 - `shell.py`: run_shell — allowed in AUTO; in EDIT only if a PreToolUse hook
@@ -404,8 +422,9 @@ warning. `--self-test/--self-lint/--doctor` map to new subcommands.
 ## Conventions
 
 - Python >= 3.11, no upper bound. Deps (core): `httpx>=0.27` only.
-  Extras: `aider` (aider-chat, python <3.13 only), `server` (fastapi+uvicorn),
-  `dev` (pytest, ruff).
+  Extras: `aider` (aider-chat, python <3.13 only), `server` (fastapi+uvicorn).
+  Dev tooling (pytest, ruff) is the `dev` PEP 735 dependency group, synced by
+  default — not an extra.
 - Style: ruff defaults (E/F/W), target py311, `from __future__ import
   annotations` everywhere, dataclasses over dicts, StrEnum for enums, no
   print() outside cli/doctor (use `logging.getLogger("pxx")`).

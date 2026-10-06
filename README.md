@@ -305,7 +305,7 @@ With 2.0 on PyPI:
 - **uv tool**: `uv tool upgrade pxx-orchestrator`
 - **pipx**: `pipx upgrade pxx-orchestrator`
 - **pip**: `pip install -U pxx-orchestrator`
-- **from source**: `git pull && uv sync --extra dev --extra server`
+- **from source**: `git pull && uv sync --extra server`
 - **in-place**: `pxx upgrade` - upgrades the pxx install (detects uv tool /
   pipx / pip automatically)
 
@@ -316,7 +316,7 @@ run (see [docs/MIGRATION.md](https://github.com/cdnwetzel/pxx/blob/v2/docs/MIGRA
 
 ```sh
 git clone https://github.com/cdnwetzel/pxx && cd pxx   # the 2.0 tree (branch v2)
-uv sync --extra dev --extra server
+uv sync --extra server   # the dev group (pytest, ruff) syncs by default
 uv run pytest          # 870+ tests, no network/Ollama/aider required
 uv run ruff check
 ```

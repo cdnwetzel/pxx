@@ -3,6 +3,36 @@
 All notable changes to pxx are documented here. The 1.x series history is
 preserved in git (tag `v1.3.3` and earlier).
 
+## [2.6.3] — 2026-10-06
+
+### Added
+
+- **Bare-mode documentation and prompt templates.** New
+  `docs/bare-mode/` — what `bare = true` does, when to use it, the measured
+  evidence with its bounds, and starter prompt templates
+  (`templates/json-contract.md`, `templates/bounded-codegen.md`,
+  `templates/extraction.md`). README and CONFIG.md gained bare-mode entries;
+  `tests/test_bare_mode_docs.py` validates the template headers and JSON
+  fences. No behavior change.
+
+### Changed
+
+- **The bare-mode evidence claim is restated with its follow-up measurement.**
+  The 2.6.2 entry reported the 2026-10-04 diagnosis (bare prompt 12/12
+  contract-conformant vs the system-prompt path 2/6). Follow-up isolation
+  arms run through pxx 2.6.2 on 2026-10-05 (12 samples per arm, interleaved,
+  same model/prompt/serving process) measured **bare 11/12, default 10/12,
+  with a 24/24 payload-receipt cross-check**. The default path's recovery
+  between windows is unexplained except by small-sample variance at
+  temperature 1.0, so the corrected claim is narrower: bare mode is
+  live-verified and suitable for contract-gated callers, and the measurements
+  support the correction operationally, but they do not prove scaffolding
+  was the sole cause of the earlier contract defects. Bare mode's durable
+  merits are payload integrity (nothing injected between caller and model),
+  size (~85 vs ~2000 prompt tokens for the measured prompt class), and
+  auditable per-request payload receipts. DESIGN.md carries the same
+  annotation; the 2.6.2 entry above is left as the historical record.
+
 ## [2.6.2] — 2026-10-05
 
 ### Added

@@ -223,6 +223,21 @@ command = ["npx", "-y", "@modelcontextprotocol/server-filesystem", "."]
 1.x `PXX_OLLAMA_BASE` / `PXX_OLLAMA_MODEL` env vars and `~/.config/pxx/env`
 still work.
 
+### Bare mode (`bare = true`)
+
+For single-shot, no-tool, contract-gated callers (e.g. a pipeline that
+supplies its own prompt, output contract, and fail-closed validation),
+`bare = true` reduces the `pxx ask` / `pxx plan` request payload to the task
+itself: one user message, no system prompt, no `tools` key — tool schemas are
+never even constructed. Scope, permissions, hooks, budgets, clarity, routing,
+memory policy, and audit are unchanged, and every request records body-free
+payload receipt fields (`payload_mode`, `system_message_present`,
+`tools_key_present`, `tool_count`) so the caller can reconcile what was
+actually sent. Default OFF; any mode other than ASK/PLAN fails with
+`ConfigError` before the first model request. See
+[docs/bare-mode/](docs/bare-mode/README.md) for the measured evidence,
+the bounded claim behind it, and prompt templates.
+
 ## Headless API
 
 ```sh

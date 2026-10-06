@@ -319,7 +319,12 @@ class ToolRegistry:  # register(tool), specs() -> [openai tool schema],
   message and no `tools` key, and `specs()` is never called, so no tool
   schemas (built-in or MCP) are even constructed. Measured at fixed
   model/task/temperature, the agent scaffolding was a contract-conformance
-  degradant (bare 12/12, with system prompt 2/6). Bare never widens or
+  degradant (bare 12/12, with system prompt 2/6). Follow-up arms through
+  pxx 2.6.2 (2026-10-05, 12 samples/arm, same serving process across both
+  windows) measured bare 11/12 and default 10/12 with a 24/24 payload-receipt
+  cross-check: the correction stands operationally, but the sample is too
+  small to prove scaffolding was the sole degradant — bare's durable merits
+  are payload integrity, size, and receipts (see docs/bare-mode/). Bare never widens or
   weakens scope, permissions, budgets, hooks, clarity, routing, memory
   policy, or audit, so it is honoured from every config layer including
   repo-local — it is not an exec surface. It is valid only for the read-only

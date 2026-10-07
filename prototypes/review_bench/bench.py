@@ -140,7 +140,9 @@ def cmd_scaffold(args) -> int:
     out.mkdir(parents=True, exist_ok=True)
 
     def git(*a, **kw):
-        return subprocess.run(["git", "-C", str(out), *a], check=True, capture_output=True, text=True, **kw)
+        return subprocess.run(
+            ["git", "-C", str(out), *a], check=True, capture_output=True, text=True, **kw
+        )
 
     git("init", "-q", "-b", "main")
     git("config", "user.email", "bench@localhost")
@@ -208,12 +210,13 @@ def cmd_scaffold(args) -> int:
         "corpus": str(CORPUS.relative_to(REPO_ROOT)),
         "cases_total": len(cases),
         "branches": [
-            {"case_id": c, "branch": b, "task": t, "rendering_differs": d}
-            for c, b, t, d in built
+            {"case_id": c, "branch": b, "task": t, "rendering_differs": d} for c, b, t, d in built
         ],
         "skipped": [{"case_id": c, "reason": r} for c, r in skipped],
     }
-    (out / "bench-manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    (out / "bench-manifest.json").write_text(
+        json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
+    )
 
     differing = [c for c, _, _, d in built if d]
     print(f"scaffolded {len(built)}/{len(cases)} cases into {out}")
@@ -299,15 +302,27 @@ def _gh_json(args: list[str]) -> object:
 
 def cmd_harvest(args) -> int:
     logins = _REVIEWER_LOGINS.get(args.reviewer, (args.reviewer,))
-    prs = _gh_json(["pr", "list", "--repo", args.repo, "--state", "all", "--limit", "100",
-                    "--json", "number,headRefName"])
+    prs = _gh_json(
+        [
+            "pr",
+            "list",
+            "--repo",
+            args.repo,
+            "--state",
+            "all",
+            "--limit",
+            "100",
+            "--json",
+            "number,headRefName",
+        ]
+    )
     captures: dict = {}
     non_reviews: list[str] = []
     for pr in prs:  # type: ignore[union-attr]
         branch = pr["headRefName"]
         if not branch.startswith("case/"):
             continue
-        case_id = branch[len("case/"):]
+        case_id = branch[len("case/") :]
         num = pr["number"]
         inline = _gh_json(["api", f"repos/{args.repo}/pulls/{num}/comments", "--paginate"])
         issue_comments = _gh_json(["api", f"repos/{args.repo}/issues/{num}/comments", "--paginate"])
@@ -318,15 +333,19 @@ def cmd_harvest(args) -> int:
         # partial input while believing it was complete.
         reviews = _gh_json(["api", f"repos/{args.repo}/pulls/{num}/reviews", "--paginate"])
         mine_states = [
-            r["state"] for r in reviews  # type: ignore[index]
+            r["state"]
+            for r in reviews  # type: ignore[index]
             if r["user"]["login"] in logins
         ]
         mine_inline = [c for c in inline if c["user"]["login"] in logins]  # type: ignore[index]
         mine_summary = [
-            c["body"] for c in issue_comments if c["user"]["login"] in logins  # type: ignore[index]
+            c["body"]
+            for c in issue_comments
+            if c["user"]["login"] in logins  # type: ignore[index]
         ]
         mine_summary += [
-            r["body"] for r in reviews  # type: ignore[index]
+            r["body"]
+            for r in reviews  # type: ignore[index]
             if r["user"]["login"] in logins and (r.get("body") or "").strip()
         ]
         if not mine_inline and not mine_summary:
@@ -347,8 +366,11 @@ def cmd_harvest(args) -> int:
         }
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps({"reviewer": args.reviewer, "repo": args.repo,
-                               "captures": captures}, indent=2) + "\n", encoding="utf-8")
+    out.write_text(
+        json.dumps({"reviewer": args.reviewer, "repo": args.repo, "captures": captures}, indent=2)
+        + "\n",
+        encoding="utf-8",
+    )
     print(f"captured {len(captures)} case responses from {'/'.join(logins)} -> {out}")
     if non_reviews:
         print(
@@ -452,31 +474,37 @@ def cmd_score(args) -> int:
         # a number produced entirely by missing data. Coverage is reported
         # instead, so a partial run is visibly partial rather than quietly wrong.
         scored = [c for c in cases if c.id in responses]
-        report = asyncio.run(
-            run_calibration(RecordedReviewer.from_cases(cases, responses), scored)
-        )
+        report = asyncio.run(run_calibration(RecordedReviewer.from_cases(cases, responses), scored))
         rows.append((mode, report))
 
     covered = len([c for c in cases if c.id in captures])
     pct = 100.0 * covered / len(cases) if cases else 0.0
-    print(f"\nreviewer: {reviewer_name}   scored on {covered}/{len(cases)} cases "
-          f"({pct:.0f}% coverage)")
+    print(
+        f"\nreviewer: {reviewer_name}   scored on {covered}/{len(cases)} cases "
+        f"({pct:.0f}% coverage)"
+    )
     if covered < len(cases):
-        print("  PARTIAL RUN — uncaptured cases are excluded, not counted against "
-              "the reviewer. Compare across reviewers only at equal coverage.")
+        print(
+            "  PARTIAL RUN — uncaptured cases are excluded, not counted against "
+            "the reviewer. Compare across reviewers only at equal coverage."
+        )
     print(f"{'mode':<9}{'recall':>8}{'fp_rate':>9}{'agreement':>11}  verdict")
     for mode, r in rows:
         b = breaches(r)
         # Only recall / fp / agreement are meaningful for an external reviewer;
         # format_compliance and availability describe this harness (README §2).
         meaningful = [x for x in b if x.split()[0] in ("recall", "fp_rate", "agreement")]
-        print(f"{mode:<9}{r.recall:>8.3f}{r.fp_rate:>9.3f}{r.agreement:>11.3f}  "
-              f"{'PASS' if not meaningful else 'FAIL: ' + '; '.join(meaningful)}")
+        print(
+            f"{mode:<9}{r.recall:>8.3f}{r.fp_rate:>9.3f}{r.agreement:>11.3f}  "
+            f"{'PASS' if not meaningful else 'FAIL: ' + '; '.join(meaningful)}"
+        )
 
     missing = [c.id for c in cases if c.id not in captures]
     if missing:
-        print(f"\nNO RESPONSE CAPTURED for {len(missing)} case(s) — scored as unavailable, "
-              f"never as approval:")
+        print(
+            f"\nNO RESPONSE CAPTURED for {len(missing)} case(s) — scored as unavailable, "
+            f"never as approval:"
+        )
         for m in missing:
             print(f"  {m}")
     print("\nSovereign baseline to beat: recall 0.857 / fp 0.143 (qwen2.5-coder:32b)")
@@ -494,8 +522,7 @@ def main() -> int:
 
     h = sub.add_parser("harvest", help="record a reviewer's PR comments")
     h.add_argument("--repo", required=True, help="owner/repo of the bench repository")
-    h.add_argument("--reviewer", required=True,
-                   choices=[*sorted(_REVIEWER_LOGINS), "other"])
+    h.add_argument("--reviewer", required=True, choices=[*sorted(_REVIEWER_LOGINS), "other"])
     h.add_argument("--out", required=True)
     h.set_defaults(fn=cmd_harvest)
 

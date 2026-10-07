@@ -1,25 +1,26 @@
 # Next session — working plan
 
-_Handoff pointer, rewritten 2026-10-06. Durable priorities stay in `docs/ROADMAP.md`;
+_Handoff pointer, rewritten 2026-10-07. Durable priorities stay in `docs/ROADMAP.md`;
 release history in `CHANGELOG.md`. This file says only where things stand._
 
-## State (2026-10-06)
+## State (2026-10-07)
 
-- `v2` is the release branch. **2.6.4 is published** (tag `v2.6.4`, PyPI):
-  `Settings.temperature` — a config-only deterministic generation surface
-  (strict [0.0, 2.0], unset = key not sent). 2.6.3 carried the bare-mode
-  docs + prompt templates (`docs/bare-mode/`) with the restated,
-  bounded measurement claim; 2.6.2 carried `bare = true` itself (payload-only
-  mode for contract-gated `ask`/`plan`). Read `docs/bare-mode/README.md`
-  before citing the conformance numbers — the 2.6.2-era claim was narrowed
-  by the 2026-10-05 follow-up arms, and the templates' generalized forms
-  are UNVALIDATED.
-- ACP (the first bare-mode consumer) is mid temperature experiment: temp-1.0
-  strict textual contracts produced repeated byte-level formatting defects
-  (casing slips, missing table pipes) caught fail-closed by ACP's gates;
-  `temperature = 0` + bare is the candidate deterministic surface. If ACP
-  asks for serving-layer structured output next, that's a new design
-  conversation, not a bugfix.
+- `v2` is the release branch. **2.6.5 is published** (tag `v2.6.5`, PyPI):
+  `Settings.chat_template_kwargs` — a config-only passthrough for
+  serving-layer chat template switches (strict JSON-safe TOML table, unset =
+  key not sent). The motivating case, Nemotron's `enable_thinking = false`,
+  was exercised same-day by ACP's reviewer probes. 2.6.4 carried
+  `Settings.temperature` (deterministic generation surface); 2.6.3 the
+  bare-mode docs + prompt templates; 2.6.2 `bare = true` itself. Read
+  `docs/bare-mode/README.md` before citing the conformance numbers — the
+  2.6.2-era claim was narrowed by the 2026-10-05 follow-up arms, and the
+  templates' generalized forms are UNVALIDATED.
+- ACP (the first bare-mode consumer) resolved its contract-reliability arc:
+  `temperature = 0` + bare is the locked surface for contract-bound phases
+  (temp-1.0 produced repeated byte-level formatting defects, caught
+  fail-closed). Its witnessed human VALIDATE was approved 2026-10-07,
+  scope-limited to the drill procedure. If ACP asks for serving-layer
+  structured output next, that's a new design conversation, not a bugfix.
 - Both gate-softening settings (`hook_denial`, `scope_violation`) are honoured from the user
   config only, never from a repo-local file; `delete_staging` likewise. `bare`,
   `clarity_gate`, and `temperature` are honoured from every layer (they are

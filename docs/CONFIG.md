@@ -26,6 +26,7 @@ Precedence (highest wins): CLI flags → `PXX_*` env vars → `./pxx.toml` or
 | `safety_net` | bool | `true` | stash + `pxx-pre/<ts>` tag on edit-capable session starts (git repos) |
 | `bare` | bool | `false` | payload-only mode for `ask`/`plan`: single user message, no system prompt, no `tools` key, no tool schemas constructed — for contract-gated callers; everything else unchanged (see [bare-mode/](bare-mode/README.md)) |
 | `temperature` | float | unset | sampling temperature sent in the request payload, strict range [0.0, 2.0]; unset = key not sent, server default applies; deterministic generation surface for strict textual contracts |
+| `chat_template_kwargs` | table | unset | vLLM-style template switches sent in the request payload (e.g. `{ enable_thinking = false }` for Nemotron's no-reasoning mode); must be a JSON-serializable TOML table; unset = key not sent; generation only, no safety semantics |
 | `loop_review` | bool | `false` | per-box default for the `pxx loop` model-backed review gate (see below) |
 | `done_signal` | bool | `true` | in `pxx loop`, stop a coder session once its edit passes the objective gates (scope/diff/lint/tests) instead of running to the budget cap; set `false` for slow suites (`PXX_DONE_SIGNAL`) |
 | `memory_retrieval_limit` | int | `8` | how many hybrid-search hits session-start memory injection may include (positive int; `<= 0` is a `ConfigError`) |

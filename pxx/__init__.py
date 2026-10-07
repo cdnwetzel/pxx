@@ -1,3 +1,3 @@
 """pxx 2.0 — local-first AI coding agent runtime."""
 
-__version__ = "2.6.4"
+__version__ = "2.6.5"

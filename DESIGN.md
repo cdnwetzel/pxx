@@ -348,6 +348,19 @@ class ToolRegistry:  # register(tool), specs() -> [openai tool schema],
   routing, memory policy, or audit — so it is honoured from every config
   layer including repo-local. `model_request` events carry the configured
   value (or null) alongside the payload-mode fields.
+  `Settings.chat_template_kwargs` (default UNSET, strict JSON-serializable
+  TOML table, config-only) is sent as the payload's `chat_template_kwargs`
+  key only when configured; unset, the key is absent and the payload shape
+  is byte-identical to before the key existed. It exists for serving layers
+  that gate generation behaviour behind chat template switches — e.g.
+  Nemotron's `enable_thinking = false`, which takes the model out of its
+  long-reasoning mode (measured 2026-10-06: reasoning-ON collapsed strict
+  VERIFY-table conformance to 3/6 with 18k-token rambles; thinking-DISABLED
+  hit 6/6 at near-deterministic token counts). Like temperature it changes
+  generation only — never scope, permissions, budgets, hooks, routing,
+  memory policy, or audit — so it is honoured from every config layer
+  including repo-local. `model_request` events carry the configured table
+  (or null) alongside the payload-mode fields.
 - `audit_sampling.py`: deterministic human-audit flags (100% promotions /
   high-risk, ~20% ordinary, sha256 of run_id — no RNG).
 - `shell.py`: run_shell — allowed in AUTO; in EDIT only if a PreToolUse hook

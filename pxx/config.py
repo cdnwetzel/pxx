@@ -12,6 +12,7 @@ Nothing here runs at import time.
 
 from __future__ import annotations
 
+import json
 import logging
 import math
 import os
@@ -204,6 +205,18 @@ class Settings:
     #: from every config layer including repo-local. Strict: a real number in
     #: [0.0, 2.0] — bools and strings are ConfigError.
     temperature: float | None = None
+    #: vLLM-style ``chat_template_kwargs`` sent in the native backend's
+    #: chat-completions payload. Default UNSET (None): the key is not sent —
+    #: an unconfigured box is byte-identical to before this key existed.
+    #: Exists for serving layers that gate generation behaviour behind chat
+    #: template switches (e.g. Nemotron's ``enable_thinking = false``, which
+    #: takes the model out of its long-reasoning mode for strict textual
+    #: contracts). Carries no safety semantics: it changes generation, never
+    #: scope, permissions, budgets, hooks, routing, memory policy, or audit,
+    #: so it is honoured from every config layer including repo-local.
+    #: Strict: a TOML table whose value round-trips through JSON (TOML
+    #: datetimes and other non-JSON values are ConfigError).
+    chat_template_kwargs: dict[str, Any] | None = None
     #: How many hybrid-search hits session-start memory injection may include
     #: (``pxx.memory.inject.build_context``). The default equals inject.py's
     #: historical hardcoded ``_SEARCH_HITS``, so an unconfigured box is
@@ -298,6 +311,7 @@ _KNOWN_KEYS = {
     "clarity_gate",
     "bare",
     "temperature",
+    "chat_template_kwargs",
     "memory_retrieval_limit",
     "memory_capture_successes",
     "budgets",
@@ -606,6 +620,20 @@ def _settings_from_dict(
         ):
             raise ConfigError(f"{source}: temperature must be a number in [0.0, 2.0]")
         kwargs["temperature"] = float(value)
+    if "chat_template_kwargs" in data:
+        # Strict table of JSON-safe values (vLLM-style template switches such
+        # as enable_thinking). Must round-trip through JSON — TOML datetimes
+        # and other non-JSON values are ConfigError.
+        value = data["chat_template_kwargs"]
+        if not isinstance(value, dict):
+            raise ConfigError(f"{source}: chat_template_kwargs must be a table")
+        try:
+            json.dumps(value)
+        except (TypeError, ValueError) as exc:
+            raise ConfigError(
+                f"{source}: chat_template_kwargs must be JSON-serializable ({exc})"
+            ) from exc
+        kwargs["chat_template_kwargs"] = value
     if "memory_retrieval_limit" in data:
         # Strict: positive int only. bool is an int subclass — reject it
         # explicitly so `memory_retrieval_limit = true` can't pass as 1.

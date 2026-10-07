@@ -3,6 +3,29 @@
 All notable changes to pxx are documented here. The 1.x series history is
 preserved in git (tag `v1.3.3` and earlier).
 
+## [2.6.5] — 2026-10-07
+
+### Added
+
+- **`chat_template_kwargs`: serving-layer template switches.** New optional
+  `Settings.chat_template_kwargs` (config-only, strict JSON-serializable
+  TOML table — non-tables and non-JSON values are `ConfigError`). When set,
+  the native backend sends it as the request payload's
+  `chat_template_kwargs` key; when unset, the key is absent, so an
+  unconfigured box is byte-identical to before the key existed (the golden
+  default-payload fixture pins this). It exists for serving layers that gate
+  generation behaviour behind chat template switches — the motivating case
+  is Nemotron's `enable_thinking = false`: reasoning-ON collapsed strict
+  contract conformance to 3/6 with 18k-token rambles, thinking-DISABLED hit
+  6/6 at near-deterministic token counts (measured 2026-10-06). It composes
+  with bare mode and `temperature`. The key changes generation only —
+  never scope, permissions, budgets, hooks, routing, memory policy, or
+  audit — so it is honoured from every config layer including repo-local.
+  `model_request` audit events carry the configured table (or null)
+  alongside the payload-mode and temperature fields. Tests in
+  `tests/test_chat_template_kwargs.py`; documented in DESIGN.md and
+  CONFIG.md.
+
 ## [2.6.4] — 2026-10-06
 
 ### Added

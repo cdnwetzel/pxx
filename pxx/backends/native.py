@@ -311,6 +311,11 @@ class NativeBackend:
                 # leaves the serving layer's default (and the payload shape)
                 # untouched.
                 payload["temperature"] = ctx.settings.temperature
+            if ctx.settings.chat_template_kwargs is not None:
+                # Settings.chat_template_kwargs: vLLM-style template switches
+                # (e.g. Nemotron enable_thinking = false). Sent only when
+                # configured; unset leaves the payload shape untouched.
+                payload["chat_template_kwargs"] = dict(ctx.settings.chat_template_kwargs)
             headers = {"Authorization": f"Bearer {model.api_key}"} if model.api_key else {}
             await ctx.bus.emit(
                 "model_request",
@@ -329,6 +334,13 @@ class NativeBackend:
                     "tools_key_present": "tools" in payload,
                     "tool_count": len(tools),
                     "temperature": ctx.settings.temperature,
+                    # Config keys/values only — no prompt content (same
+                    # body-free rule as temperature above).
+                    "chat_template_kwargs": (
+                        dict(ctx.settings.chat_template_kwargs)
+                        if ctx.settings.chat_template_kwargs is not None
+                        else None
+                    ),
                 },
                 session_id=ctx.session_id,
             )

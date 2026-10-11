@@ -16,6 +16,7 @@ tool count) — never prompt bodies.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import re
@@ -259,6 +260,18 @@ class NativeBackend:
                 str((t.get("function") or {}).get("name") or "") for t in tools
             ) - {""}
             system_message = _system_message(ctx)
+        # Structured output (Settings.response_format, 2.7.0): the wire name
+        # is the schema's own ``title`` (else a fixed default); the receipt
+        # hash is over the CANONICAL schema bytes (sorted keys, tight
+        # separators) so callers recompute it byte-identically.
+        rf_schema = ctx.settings.response_format
+        rf_name: str | None = None
+        rf_sha256: str | None = None
+        if rf_schema is not None:
+            rf_name = str(rf_schema.get("title") or "pxx_response")
+            rf_sha256 = hashlib.sha256(
+                json.dumps(rf_schema, sort_keys=True, separators=(",", ":")).encode()
+            ).hexdigest()
         await ctx.bus.emit(
             "prompt_rendered",
             {
@@ -271,6 +284,9 @@ class NativeBackend:
                 "system_message_present": not bare,
                 "tools_key_present": bool(tools),
                 "tool_count": len(tools),
+                "response_format_present": rf_schema is not None,
+                "response_format_sha256": rf_sha256,
+                "json_schema_name": rf_name,
             },
             session_id=ctx.session_id,
         )
@@ -305,6 +321,18 @@ class NativeBackend:
             payload: dict[str, Any] = {"model": model.model, "messages": messages}
             if tools:
                 payload["tools"] = tools
+            if rf_schema is not None:
+                # Structured output (Settings.response_format): provider-
+                # enforced JSON-schema decoding. Sent only when configured —
+                # unset leaves the payload shape byte-identical to before.
+                payload["response_format"] = {
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": rf_name,
+                        "strict": True,
+                        "schema": rf_schema,
+                    },
+                }
             if ctx.settings.temperature is not None:
                 # Settings.temperature: deterministic generation surface for
                 # strict textual contracts. Sent only when configured — unset
@@ -341,6 +369,9 @@ class NativeBackend:
                         if ctx.settings.chat_template_kwargs is not None
                         else None
                     ),
+                    "response_format_present": rf_schema is not None,
+                    "response_format_sha256": rf_sha256,
+                    "json_schema_name": rf_name,
                 },
                 session_id=ctx.session_id,
             )
@@ -448,6 +479,24 @@ class NativeBackend:
                 message = choice["message"]
             except (ValueError, KeyError, IndexError) as exc:
                 raise BackendError(f"malformed response from {model.endpoint}: {exc}") from exc
+            if rf_schema is not None:
+                # Structured output (owner decision 2026-10-10, ACP F-001):
+                # invalid JSON or a truncated completion is a hard failure —
+                # never markdown recovery, never partial reinterpretation.
+                if choice.get("finish_reason") == "length":
+                    raise BackendError(
+                        f"structured-output response from {model.endpoint} was "
+                        f"truncated (finish_reason=length) — raise the token "
+                        f"budget or shrink the prompt/schema; partial JSON is "
+                        f"never accepted"
+                    )
+                try:
+                    json.loads(message.get("content") or "")
+                except ValueError as exc:
+                    raise BackendError(
+                        f"structured-output response from {model.endpoint} is "
+                        f"not valid JSON ({exc}) — no markdown fallback"
+                    ) from exc
 
             usage = data.get("usage") or {}
             prompt_t = int(usage.get("prompt_tokens") or 0)

@@ -113,6 +113,23 @@ class Session:
                 f"(ask, plan); got {settings.permission}"
             )
 
+        # Structured output (Settings.response_format, 2.7.0): ask-mode AND
+        # bare-payload only — the tools + response_format interaction is
+        # deliberately unsupported. Same entry-point enforcement as bare
+        # above: one check at session entry, BEFORE any model request, so
+        # CLI, serve, and library callers share it. No markdown fallback.
+        if settings.response_format is not None:
+            if settings.permission is not PermissionMode.ASK:
+                raise ConfigError(
+                    f"response_format (structured output) is valid only for "
+                    f"ask mode; got {settings.permission}"
+                )
+            if not settings.bare:
+                raise ConfigError(
+                    "response_format requires bare mode (bare = true): "
+                    "structured single-shot JSON is a bare-ask surface"
+                )
+
         audit = AuditLog(settings.state_dir, self.session_id)
         audit.subscribe_to(self.bus)
 

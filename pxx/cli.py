@@ -27,7 +27,7 @@ from pathlib import Path
 
 from . import __version__
 from .config import apply_stable_overlay, load_settings
-from .errors import PxxError
+from .errors import ConfigError, PxxError
 from .events import AuditLog, Event
 from .gitenv import git_env
 from .outcome import RunOutcome, TerminalCode
@@ -272,7 +272,18 @@ def _build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
 
     for name in ("ask", "edit", "plan", "run", "chat"):
-        _add_run_options(sub.add_parser(name), files=name != "run")
+        run_p = sub.add_parser(name)
+        _add_run_options(run_p, files=name != "run")
+        if name == "ask":
+            run_p.add_argument(
+                "--response-format",
+                metavar="SCHEMA_JSON",
+                help="JSON Schema file for provider-enforced structured output "
+                "(ask mode only; requires bare = true). The request carries an "
+                "OpenAI-style response_format json_schema object; a reply that "
+                "is not valid JSON, or is truncated (finish_reason=length), is "
+                "a hard failure — never a markdown fallback.",
+            )
     loop_p = sub.add_parser("loop")
     _add_run_options(loop_p, files=False)
     loop_p.add_argument(
@@ -607,8 +618,41 @@ def _make_backend(name: str, settings):
         raise PxxError(f"backend '{name}' unavailable: {exc}") from exc
 
 
+#: Hard cap on --response-format schema files (owner, 2026-10-10): a schema
+#: is a small contract document; anything past this is a mistake or an
+#: attack on payload size — fail closed before the session starts.
+_RESPONSE_FORMAT_MAX_BYTES = 65536
+
+
+def _load_response_format(path: str) -> dict:
+    """Resolve and validate the ``--response-format`` JSON Schema file BEFORE
+    any session or model work: missing, unreadable, oversized, non-JSON, or
+    non-object schema are all ConfigError — there is no fallback."""
+    import json
+
+    try:
+        raw = Path(path).read_bytes()
+    except OSError as exc:
+        raise ConfigError(f"--response-format: cannot read {path}: {exc}") from exc
+    if len(raw) > _RESPONSE_FORMAT_MAX_BYTES:
+        raise ConfigError(
+            f"--response-format: {path} is {len(raw)} bytes (cap {_RESPONSE_FORMAT_MAX_BYTES})"
+        )
+    try:
+        doc = json.loads(raw)
+    except ValueError as exc:
+        raise ConfigError(f"--response-format: {path} is not valid JSON: {exc}") from exc
+    if not isinstance(doc, dict) or not doc:
+        raise ConfigError(
+            f"--response-format: {path} must be a non-empty JSON object (a JSON Schema)"
+        )
+    return doc
+
+
 def _cli_overrides(args: argparse.Namespace, permission: PermissionMode) -> dict:
     overrides: dict = {"permission": str(permission)}
+    if getattr(args, "response_format", None):
+        overrides["response_format"] = _load_response_format(args.response_format)
     if args.model:
         overrides["model"] = args.model
     if args.provider:
@@ -2229,6 +2273,20 @@ def main(argv: list[str] | None = None) -> int:
         parser.print_help()
         return 0
     argv = _compat_rewrite(argv)
+    # --response-format is registered on the ask subparser ONLY. Because the
+    # 1.x shim warns-and-ignores unknown flags, an explicit guard is required
+    # here: on any other verb the flag must be a hard usage error, never a
+    # silently ignored structured-output request (owner, 2026-10-10).
+    if any(t == "--response-format" or t.startswith("--response-format=") for t in argv):
+        command_token = argv[0] if argv else ""
+        if command_token != "ask":
+            print(
+                f"pxx: usage: --response-format is valid only for `pxx ask` "
+                f"(got `pxx {command_token}`) — structured output is an "
+                f"ask-mode, bare-payload surface with no fallback",
+                file=sys.stderr,
+            )
+            raise SystemExit(EXIT_USAGE)
     args, unknown = parser.parse_known_args(argv)
     command = args.command
     try:

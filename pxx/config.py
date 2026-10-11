@@ -217,6 +217,21 @@ class Settings:
     #: Strict: a TOML table whose value round-trips through JSON (TOML
     #: datetimes and other non-JSON values are ConfigError).
     chat_template_kwargs: dict[str, Any] | None = None
+    #: Structured-output JSON Schema (OpenAI ``response_format`` /
+    #: ``json_schema``) for single-shot contract callers (e.g. ACP VERIFY —
+    #: markdown table contracts failed the same formatting class across two
+    #: prompt revisions and two temperatures; the contract moves into
+    #: provider-enforced decoding). Default UNSET (None): the key is not
+    #: sent and the payload is byte-identical to before this field existed.
+    #: The value is the PARSED schema document (a dict) — CLI/library only:
+    #: ``pxx ask --response-format schema.json`` resolves and validates the
+    #: file before the session starts; a TOML ``response_format`` key is a
+    #: deliberate unknown-key ConfigError (a schema is a file, not config
+    #: text). Valid only in ASK mode AND with ``bare = true`` — enforced at
+    #: ``Session.run`` entry before any model request; there is no markdown
+    #: fallback. Carries no safety semantics: generation only, never scope,
+    #: permissions, budgets, hooks, routing, memory policy, or audit.
+    response_format: dict[str, Any] | None = None
     #: How many hybrid-search hits session-start memory injection may include
     #: (``pxx.memory.inject.build_context``). The default equals inject.py's
     #: historical hardcoded ``_SEARCH_HITS``, so an unconfigured box is

@@ -3,6 +3,34 @@
 All notable changes to pxx are documented here. The 1.x series history is
 preserved in git (tag `v1.3.3` and earlier).
 
+## [2.7.0] — 2026-10-10
+
+### Added
+
+- **`--response-format`: provider-enforced structured output for `pxx
+  ask`.** New optional `Settings.response_format` (CLI/library only — a
+  TOML `response_format` key is a deliberate unknown-key `ConfigError`).
+  `pxx ask --response-format schema.json` resolves and validates the JSON
+  Schema file before the session starts (missing, unreadable, >64 KiB,
+  non-JSON, or non-object are all `ConfigError`); the native backend then
+  sends `response_format: {type: "json_schema", json_schema: {name,
+  strict: true, schema}}` in the chat-completions payload. Unset, the
+  payload is byte-identical to before the key existed. Valid only for ask
+  mode AND `bare = true` — refused with `ConfigError` at `Session.run`
+  entry before any model request, and `main()` hard-refuses the flag on
+  any non-ask verb (the 1.x shim's warn-and-ignore does not apply). Loud
+  failure, never markdown fallback: `finish_reason=length` or a non-JSON
+  reply body is a `BackendError`. Motivation (ACP F-001): markdown-table
+  output contracts failed the same formatting class across two prompt
+  revisions and two temperatures; schema-constrained decoding eliminates
+  that class structurally. Note: schema constrains STRUCTURE, not string
+  content — verbatim guarantees still need a caller-side gate.
+- **Body-free audit stamps** for the new mode: `prompt_rendered` and
+  `model_request` events carry `response_format_present`,
+  `response_format_sha256` (canonical JSON — sorted keys, tight
+  separators), and `json_schema_name` (the schema's `title`, else
+  `pxx_response`).
+
 ## [2.6.5] — 2026-10-07
 
 ### Added

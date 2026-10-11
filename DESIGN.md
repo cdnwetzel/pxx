@@ -361,6 +361,30 @@ class ToolRegistry:  # register(tool), specs() -> [openai tool schema],
   memory policy, or audit — so it is honoured from every config layer
   including repo-local. `model_request` events carry the configured table
   (or null) alongside the payload-mode fields.
+  `Settings.response_format` (2.7.0, default UNSET) enables provider-
+  enforced structured output: `pxx ask --response-format schema.json`
+  resolves and validates a JSON Schema file before the session starts
+  (missing/unreadable/>64KiB/non-JSON/non-object are ConfigError; a TOML
+  `response_format` key is a deliberate unknown-key ConfigError — a schema
+  is a file, not config text). When set, the native backend sends
+  `response_format: {type: "json_schema", json_schema: {name, strict:
+  true, schema}}`; unset, the payload is byte-identical to before the key
+  existed. Motivation (ACP F-001): markdown-table output contracts failed
+  the same formatting class across two prompt revisions and two
+  temperatures; schema-constrained decoding eliminates that class
+  structurally (probed live on Ollama 0.30.5 `/v1/chat/completions`,
+  2026-10-10). Valid ONLY for ask mode AND bare payload — one refusal at
+  `Session.run` entry covers CLI, serve, and library callers; the tools +
+  response_format interaction is deliberately unsupported, and the 1.x
+  shim's warn-and-ignore is overridden by a hard usage error in `main()`
+  for any non-ask verb. Loud failure, never fallback: finish_reason=length
+  or a non-JSON reply body is a BackendError. Audit stays body-free:
+  `prompt_rendered` and `model_request` carry `response_format_present`,
+  `response_format_sha256` (canonical JSON: sorted keys, tight separators),
+  and `json_schema_name` (the schema's `title`, else `pxx_response`).
+  Schema constrains STRUCTURE, not string content — callers that need
+  verbatim guarantees (ACP's byte-exact criterion check) still gate the
+  parsed JSON themselves.
 - `audit_sampling.py`: deterministic human-audit flags (100% promotions /
   high-risk, ~20% ordinary, sha256 of run_id — no RNG).
 - `shell.py`: run_shell — allowed in AUTO; in EDIT only if a PreToolUse hook

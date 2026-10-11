@@ -649,6 +649,14 @@ def _settings_from_dict(
                 f"{source}: chat_template_kwargs must be JSON-serializable ({exc})"
             ) from exc
         kwargs["chat_template_kwargs"] = value
+    if "response_format" in data:
+        # CLI/library only (pxx ask --response-format): the value is the
+        # PARSED schema document, already validated by the CLI loader. TOML
+        # never reaches here — the key is unknown to the TOML validator.
+        value = data["response_format"]
+        if not isinstance(value, dict) or not value:
+            raise ConfigError(f"{source}: response_format must be a parsed JSON Schema object")
+        kwargs["response_format"] = value
     if "memory_retrieval_limit" in data:
         # Strict: positive int only. bool is an int subclass — reject it
         # explicitly so `memory_retrieval_limit = true` can't pass as 1.

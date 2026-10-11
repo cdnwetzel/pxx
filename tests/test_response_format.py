@@ -122,6 +122,16 @@ def test_response_format_toml_key_rejected(tmp_path: Path) -> None:
         load_settings(cwd=tmp_path)
 
 
+def test_cli_override_reaches_settings(tmp_path: Path) -> None:
+    """Regression (first 2.7.0 live probe, 2026-10-10): the flag parsed and
+    the session ran, but _settings_from_dict had no response_format handler,
+    so the override was SILENTLY DROPPED and the payload went out
+    unstructured (the audit receipt honestly showed
+    response_format_present=false — the receipt is what caught it)."""
+    settings = load_settings(cwd=tmp_path, cli_overrides={"response_format": SCHEMA})
+    assert settings.response_format == SCHEMA
+
+
 # --- session refusal (before any request) --------------------------------------
 
 

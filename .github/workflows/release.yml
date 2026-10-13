@@ -32,9 +32,16 @@ jobs:
           set -euo pipefail
           PYPROJECT=$(python3 -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
           PKG=$(python3 -c "import sys; sys.path.insert(0, '.'); import pxx; print(pxx.__version__)")
-          echo "event=$GITHUB_EVENT_NAME ref=$GITHUB_REF_NAME pyproject=$PYPROJECT package=$PKG"
+          LOCK=$(python3 -c "import tomllib; print(next(p['version'] for p in tomllib.load(open('uv.lock','rb'))['package'] if p['name'] == 'pxx-orchestrator'))")
+          echo "event=$GITHUB_EVENT_NAME ref=$GITHUB_REF_NAME pyproject=$PYPROJECT package=$PKG lock=$LOCK"
           if [ "$PYPROJECT" != "$PKG" ]; then
             echo "::error::version mismatch: pyproject=$PYPROJECT package=$PKG"
+            exit 1
+          fi
+          # the lock's own-package entry is written from pyproject by `uv lock`;
+          # a bump that skipped the lock ships a lock describing the previous release
+          if [ "$PYPROJECT" != "$LOCK" ]; then
+            echo "::error::version mismatch: pyproject=$PYPROJECT uv.lock=$LOCK (run: uv lock)"
             exit 1
           fi
           if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then

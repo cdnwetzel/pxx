@@ -5,6 +5,10 @@ preserved in git (tag `v1.3.3` and earlier).
 
 ## [Unreleased]
 
+_Nothing yet._
+
+## [2.8.0] — 2026-10-12
+
 ### Added
 
 - **Run-intent marker (`--intent`, `run_intent` config key), metadata-only.**

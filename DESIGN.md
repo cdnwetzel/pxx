@@ -34,6 +34,7 @@ agent loop and aider is one pluggable backend.
 pxx/
   __init__.py          # __version__ = "2.0.0"  (no side effects at import!)
   config.py            # Settings, layered config resolution
+  intent.py            # run-intent marker: vocabulary + provenance resolution
   events.py            # Event model, EventBus, AuditLog (hash-chained JSONL)
   outcome.py           # TerminalCode enum, RunOutcome
   safety.py            # PermissionMode, ScopeGate, HookRunner, BudgetGuard
@@ -113,6 +114,7 @@ class Settings:
     scope_violation: str = "abort"                    # | "refuse_tool": a scope violation is returned to the model
     delete_staging: str = ""                          # trusted config only; "" disables delete_file
     mcp_servers: tuple[McpServerSpec, ...] = ()
+    run_intent: str | None = None                   # declared run intent; None -> "unknown" recorded
 ```
 - `load_settings(cwd, cli_overrides) -> Settings`: precedence =
   CLI flags > `PXX_*` env vars > `./pxx.toml` / `./.pxx/config.toml` >
@@ -127,6 +129,53 @@ class Settings:
   ROADMAP "model-backed boundary roles" item builds on — the reviewer/judge
   can run on a different endpoint than the coder (a GPU-box coder + a Mac
   judge) while a run with no overlay stays byte-identical to before.
+
+### intent.py
+
+Run-intent marker (RUN-INTENT-SPEC-20261012, pxx half): a declared launcher
+intent recorded metadata-only so future probe/eval/drill traffic is
+distinguishable from operational runs in recorded run metadata.
+
+- `RunIntent(StrEnum)`: `operational | probe | eval | drill | unknown`.
+  **Default is `unknown`** — `operational` exists only by explicit
+  declaration; legacy/unmarked runs are `unknown`, never implicitly
+  operational, never implicitly probe. Unrecognized recorded values read as
+  `unknown` (fail-safe, forward-compatible).
+- `resolve_run_intent(declared, internal) -> (intent, provenance | None)`:
+  the ONE pair computed at session construction. Provenance is assigned by
+  pxx from the call site — `first-party` (pxx-internal `Session(run_intent=
+  ...)` kwarg) or `declared` (CLI `--intent` / `run_intent` config key,
+  unverified) — and is ABSENT when the intent is `unknown`. Callers never
+  supply provenance: a provenance-claiming CLI flag
+  (`--run-intent-provenance`, `--intent-provenance`, `--provenance`) is a
+  hard usage error in `main()`; a `run_intent_provenance` config key is a
+  `ConfigError` (TOML and CLI-override/library paths alike).
+- Recording: `Session.__init__` resolves the pair once; `task.json` and the
+  `session_start` event carry it IDENTICALLY (divergence means hand-edit or
+  torn write). The loop verb's own run record (`mode: "loop"` task.json)
+  carries the same pair resolved from settings.
+- **Hard invariant: intent is never consulted by any gate, budget, hook,
+  route, or outcome** — a run cannot alter its own gating by declaring an
+  intent (metadata-only, AGENTS.md rule 3). `run_intent` is therefore not an
+  exec surface: honored from every config layer including repo-local, with
+  the usual CLI > env > project > user precedence (no `PXX_RUN_INTENT` env
+  var — ambient environment declarations would blur the call-site boundary).
+  Declaration is strict (a misspelled value is a `ConfigError`; "unknown" is
+  not declarable); reading stays fail-safe. `_settings_hash` excludes it:
+  intent never changes `agent_version_id`.
+- **First-party call sites: none produce run records today** (investigated
+  2026-10-12). The eval harness (`pxx/eval/harness.py`) materializes cases
+  and runs patch+check arms in tmp git repos — it constructs no `Session`
+  and writes no run dir, so there is nothing to mark; `run_case`'s
+  `backend_factory` seam returns a diff string, and no in-repo caller drives
+  sessions through it. `pxx doctor` / smoke / connectivity probes are raw
+  httpx checks — no `Session`, no run dir. Per spec §2 these paths declare
+  `eval` / `probe` first-party *at session construction*; with no session
+  construction there is no first-party record. When pxx gains a
+  session-producing internal path (a live eval arm, a session-driving
+  probe), it passes `RunIntent.EVAL` / `RunIntent.PROBE` through the
+  internal kwarg — and ONLY such paths may record `first-party`
+  (tests/test_intent.py pins the empty call-site set).
 
 ### events.py
 ```python
@@ -434,6 +483,9 @@ opens MemoryStore, builds ToolRegistry (+ MCP client tools when configured),
 injects memory context into the task prompt, installs SIGINT handling
 (-> TerminalCode.INTERRUPTED), enforces wall-clock deadline, runs post-session
 memory capture, writes terminal audit record, returns `RunOutcome`.
+At construction it resolves the one run-intent pair (see `intent.py`) and
+records it identically in `task.json` and the `session_start` event;
+`Session(run_intent=...)` is the pxx-internal first-party seam.
 
 ### loop.py / review.py
 - `run_loop(task, settings, ...) -> RunOutcome`: bounded rounds
@@ -468,6 +520,10 @@ Self-improvement verbs (see DESIGN-ROADMAP.md "### CLI additions"):
 `docs {check}`. Fail-closed verdicts exit 2; usage errors
 (unknown command, empty task, invalid candidate, missing evidence/approver,
 empty corpus) exit 64 — CI keying "2 = a gate fired" can rely on the split.
+Every session verb (ask/edit/plan/run/chat/loop, via `_add_run_options`)
+accepts `--intent <operational|probe|eval|drill>` — a declared run-intent
+marker, metadata-only (see `intent.py`); provenance-claiming flags are a
+usage error (64).
 **1.x compat shim**: bare `pxx` == `pxx ask`; `--edit` == `pxx edit`;
 `--with-memory` == default-on now (no service needed); unknown flags forward
 to aider **only** when the aider backend is selected, with a deprecation

@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from .errors import ConfigError
+from .intent import DECLARED_INTENTS
 from .safety import Budgets, Hook, PermissionMode, canonicalize
 
 # Providers that run on the operator's own hardware, where a token has no
@@ -249,6 +250,18 @@ class Settings:
     #: skill/playbook graduation ladder can also learn from gate-verified
     #: successes. Failed-session capture is unaffected either way.
     memory_capture_successes: bool = False
+    #: Declared run intent (RUN-INTENT-SPEC-20261012): one of "operational",
+    #: "probe", "eval", "drill". Default UNSET (None): the run records
+    #: ``run_intent = "unknown"`` with no provenance — never implicitly
+    #: operational. Recorded metadata-only in task.json and the
+    #: ``session_start`` event (provenance "declared" for CLI/config);
+    #: NEVER consulted by any gate, budget, hook, route, or outcome, so it
+    #: is honoured from every config layer including repo-local (it is not
+    #: an exec surface). Provenance is assigned by pxx from the call site —
+    #: a config key attempting to set it (``run_intent_provenance``) is a
+    #: ConfigError. Strict: a string in the declarable set; "unknown" is the
+    #: absence of a declaration, not a declarable value.
+    run_intent: str | None = None
 
     @property
     def effective_budgets(self) -> Budgets:
@@ -329,6 +342,7 @@ _KNOWN_KEYS = {
     "chat_template_kwargs",
     "memory_retrieval_limit",
     "memory_capture_successes",
+    "run_intent",
     "budgets",
     "hooks",
     "mcp_servers",
@@ -340,6 +354,10 @@ _KNOWN_BUDGET_KEYS = {
     "max_wall_seconds",
     "max_diff_lines",
 }
+#: Provenance is assigned by pxx from the call site (pxx/intent.py); a config
+#: key attempting to SET it is a caller-supplied first-party claim — rejected
+#: with a pointed ConfigError rather than the generic unknown-key one.
+_PROVENANCE_CONFIG_KEYS = ("run_intent_provenance",)
 _KNOWN_HOOK_KEYS = {"event", "command", "timeout", "matcher"}
 _KNOWN_MCP_KEYS = {"name", "command"}
 # Canonical per-role model lanes (2.5): a CLOSED, validated set — an unknown
@@ -411,6 +429,12 @@ def _read_toml(path: Path) -> dict[str, Any]:
             data = tomllib.load(fh)
     except tomllib.TOMLDecodeError as exc:
         raise ConfigError(f"invalid TOML in {path}: {exc}") from exc
+    for key in _PROVENANCE_CONFIG_KEYS:
+        if key in data:
+            raise ConfigError(
+                f"{path}: {key} is assigned by pxx from the call site — "
+                "callers never supply provenance (declare run_intent only)"
+            )
     unknown = set(data) - _KNOWN_KEYS
     if unknown:
         raise ConfigError(f"unknown config keys in {path}: {sorted(unknown)}")
@@ -434,6 +458,14 @@ def _settings_from_dict(
     let it enable persistent memory writes (a model that edits the repo could
     seed later sessions' context) — so both are honoured only from user config,
     env, or CLI."""
+    for key in _PROVENANCE_CONFIG_KEYS:
+        if key in data:
+            # Covers the CLI-override/library path (TOML is caught earlier in
+            # _read_toml): provenance is pxx-assigned, never caller-supplied.
+            raise ConfigError(
+                f"{source}: {key} is assigned by pxx from the call site — "
+                "callers never supply provenance (declare run_intent only)"
+            )
     for key in (
         "hooks",
         "mcp_servers",
@@ -671,6 +703,18 @@ def _settings_from_dict(
         if not isinstance(value, bool):
             raise ConfigError(f"{source}: memory_capture_successes must be a boolean")
         kwargs["memory_capture_successes"] = value
+    if "run_intent" in data:
+        # Strict declaration (fail-closed on typos, like every other config
+        # key): one of the declarable values. "unknown" is NOT declarable —
+        # it is the absence of a declaration. Reading an unrecognized
+        # RECORDED value stays fail-safe (pxx.intent.resolve_run_intent).
+        value = data["run_intent"]
+        if not isinstance(value, str) or value not in DECLARED_INTENTS:
+            raise ConfigError(
+                f"{source}: run_intent must be one of "
+                f"{sorted(str(v) for v in DECLARED_INTENTS)}, got {value!r}"
+            )
+        kwargs["run_intent"] = value
     if "budgets" in data:
         b = data["budgets"]
         unknown = set(b) - _KNOWN_BUDGET_KEYS

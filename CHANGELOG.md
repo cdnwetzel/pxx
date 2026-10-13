@@ -3,6 +3,39 @@
 All notable changes to pxx are documented here. The 1.x series history is
 preserved in git (tag `v1.3.3` and earlier).
 
+## [Unreleased]
+
+### Added
+
+- **Run-intent marker (`--intent`, `run_intent` config key), metadata-only.**
+  Every session verb (ask/edit/plan/run/chat/loop — one flag in
+  `_add_run_options`) accepts `--intent <operational|probe|eval|drill>`, and
+  `run_intent` is honored in the layered config with the usual precedence
+  (not an exec surface: repo-local layers may set it). At session
+  construction pxx resolves one `(run_intent, run_intent_provenance)` pair
+  (new `pxx/intent.py`) and records it IDENTICALLY in `task.json` and the
+  `session_start` event data; the loop verb's own run record carries the
+  same pair. Undeclared runs record `unknown` with provenance ABSENT —
+  never implicitly operational; unrecognized recorded values read as
+  `unknown` (fail-safe, forward-compatible). Provenance is assigned by pxx
+  from the call site: CLI/config declarations record `declared`; only
+  pxx-internal call sites (`Session(run_intent=...)`) record `first-party`.
+  Callers never supply provenance: `--run-intent-provenance` /
+  `--intent-provenance` / `--provenance` are a hard usage error (64), and a
+  `run_intent_provenance` config key is a `ConfigError` on every path.
+  Hard invariant: intent is NEVER consulted by any gate, budget, hook,
+  route, or outcome — a run cannot alter its own gating by declaring an
+  intent (T7: equivalent execution semantics across intents for every
+  session verb, pinned in tests/test_intent.py). First-party call sites:
+  none produce run records today — the eval harness runs patch+check arms
+  with no Session, and doctor/smoke/connectivity probes are raw httpx; the
+  first-party seam exists for the future session-producing internal paths
+  (live eval arm -> `eval`, session-driving probe -> `probe`). Motivation
+  (RUN-INTENT-SPEC-20261012): detector evidence was dominated by
+  non-operational traffic with no declared intent in run metadata.
+  `_settings_hash` excludes `run_intent`: intent never changes
+  `agent_version_id`.
+
 ## [2.7.0] — 2026-10-10
 
 ### Added

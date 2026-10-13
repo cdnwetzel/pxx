@@ -38,6 +38,7 @@ from .errors import (
 )
 from .events import AuditLog, Event, EventBus
 from .gitenv import git_env
+from .intent import RunIntent, resolve_run_intent
 from .manifest import RunDirWriter, build_manifest
 from .outcome import RunOutcome, TerminalCode
 from .safety import BudgetGuard, HookRunner, PermissionMode, ScopeGate
@@ -65,6 +66,7 @@ class Session:
         bus: EventBus | None = None,
         review_mode: str = "blocking",
         safety_net: bool | None = None,
+        run_intent: RunIntent | None = None,
     ) -> None:
         self.settings = settings
         self.backend = backend
@@ -73,6 +75,15 @@ class Session:
         self.session_id = uuid.uuid4().hex[:12]
         self.bus = bus or EventBus()
         self.review_mode = review_mode
+        # Run-intent marker (metadata-only, never consulted by any gate,
+        # budget, hook, route, or outcome): one (intent, provenance) pair
+        # computed ONCE here, recorded identically in task.json and the
+        # session_start event. ``run_intent`` is the pxx-INTERNAL call-site
+        # seam (provenance first-party); CLI/config declarations arrive via
+        # Settings.run_intent (provenance declared); nothing -> unknown.
+        self.run_intent, self.run_intent_provenance = resolve_run_intent(
+            settings.run_intent, run_intent
+        )
         # K5: None resolves from config; run_loop passes False for its
         # per-round sessions (the loop ties its own net once).
         self._safety_net = settings.safety_net if safety_net is None else safety_net
@@ -268,6 +279,7 @@ class Session:
                     "task_id": self.task_id,
                     "repository_fingerprint": self.repository_fingerprint,
                     "starting_commit": self.starting_commit,
+                    **self._run_intent_fields(),
                 },
                 session_id=self.session_id,
             )
@@ -490,6 +502,15 @@ class Session:
                 log.exception("SIGINT handler removal failed (best-effort)")
             self._sigint_loop = None
 
+    def _run_intent_fields(self) -> dict[str, str]:
+        """The recorded run-intent marker as event/task fields. Provenance is
+        ABSENT when the intent is unknown (there is no declaration to
+        provenance) — never a caller-supplied value."""
+        fields = {"run_intent": self.run_intent}
+        if self.run_intent_provenance is not None:
+            fields["run_intent_provenance"] = self.run_intent_provenance
+        return fields
+
     async def _clarification_stop(self, decision) -> None:
         """Telemetry for a run stopped at the clarification gate (metadata-only)."""
         await self.bus.emit(
@@ -500,6 +521,7 @@ class Session:
                 "provider": self.settings.model.provider,
                 "project": self.project,
                 "clarification_gate": True,
+                **self._run_intent_fields(),
             },
             session_id=self.session_id,
         )
@@ -612,6 +634,7 @@ class Session:
                     "ts": time.time(),
                     "memory": memory,
                     "memory_context_bytes": memory_context_bytes,
+                    **self._run_intent_fields(),
                 }
             )
 

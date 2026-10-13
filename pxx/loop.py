@@ -33,6 +33,7 @@ from .config import Settings
 from .errors import BudgetExceeded
 from .events import Event, EventBus
 from .gitenv import communicate_bounded, git_env
+from .intent import resolve_run_intent
 from .manifest import RunDirWriter
 from .outcome import RunOutcome, TerminalCode
 from .review import (
@@ -457,6 +458,16 @@ async def run_loop(
     loop_run_id = f"{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}-loop-{uuid.uuid4().hex[:8]}"
     loop_writer = RunDirWriter.open(settings.state_dir, loop_run_id)
 
+    # Run-intent marker (metadata-only): the loop's own run record carries the
+    # same (intent, provenance) pair its per-round sessions record, resolved
+    # from settings (the loop is not a first-party call site — no internal
+    # override), so no run dir mixes a marked session_start with an unmarked
+    # task.json.
+    loop_intent, loop_intent_provenance = resolve_run_intent(settings.run_intent, None)
+    loop_intent_fields = {"run_intent": loop_intent}
+    if loop_intent_provenance is not None:
+        loop_intent_fields["run_intent_provenance"] = loop_intent_provenance
+
     async def _persist(event: Event) -> None:
         loop_writer.append_event(json.loads(event.to_json()))
 
@@ -487,6 +498,7 @@ async def run_loop(
             "sandbox_shell": settings.sandbox_shell,
             "max_rounds": max_rounds,
             "safety_net": {"tag": net.tag, "stash": net.stash_message} if net else None,
+            **loop_intent_fields,
         }
     )
 

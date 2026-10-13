@@ -31,6 +31,7 @@ Precedence (highest wins): CLI flags → `PXX_*` env vars → `./pxx.toml` or
 | `done_signal` | bool | `true` | in `pxx loop`, stop a coder session once its edit passes the objective gates (scope/diff/lint/tests) instead of running to the budget cap; set `false` for slow suites (`PXX_DONE_SIGNAL`) |
 | `memory_retrieval_limit` | int | `8` | how many hybrid-search hits session-start memory injection may include (positive int; `<= 0` is a `ConfigError`) |
 | `memory_capture_successes` | bool | `false` | opt-in: COMPLETED sessions write exactly one compact `session_outcome` exemplar to episodic memory (see below) |
+| `run_intent` | string | unset | declared run intent: `operational` / `probe` / `eval` / `drill`; unset = the run records `unknown` with no provenance; metadata-only (recorded in `task.json` + `session_start`, never consulted by any gate, budget, hook, route, or outcome); CLI: `--intent` on every session verb; provenance is pxx-assigned — a `run_intent_provenance` key is a `ConfigError` |
 
 **Promoted stable-channel overlay.** `pxx improve` promotes validated settings
 candidates (`memory_retrieval_limit`, tighten-only `budgets`, `model`,

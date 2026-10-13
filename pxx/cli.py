@@ -110,6 +110,11 @@ _SETUP_CODES = {
 
 _LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
 
+#: Intent-adjacent flags that would CLAIM a provenance. Provenance is assigned
+#: by pxx from the call site (pxx/intent.py) — a caller supplying one is a
+#: hard usage error, never the 1.x shim's warn-and-ignore (spec A1).
+_PROVENANCE_FLAGS = ("--run-intent-provenance", "--intent-provenance", "--provenance")
+
 _SELF_TEST_TASK = "Run the project test suite, diagnose any failures, and fix them."
 _SELF_LINT_TASK = "Run the project linter and fix all findings."
 
@@ -263,6 +268,15 @@ def _add_run_options(parser: argparse.ArgumentParser, *, files: bool = True) -> 
         choices=["auto", "native", "aider"],
         default=None,
         help="execution backend (default: auto for ask/edit/plan/chat, native for run/loop)",
+    )
+    parser.add_argument(
+        "--intent",
+        choices=["operational", "probe", "eval", "drill"],
+        default=None,
+        help="declare this run's intent (metadata-only: recorded in task.json "
+        "and the session_start event with provenance 'declared'; never "
+        "consulted by any gate, budget, hook, route, or outcome). "
+        "Absent -> recorded as 'unknown'",
     )
 
 
@@ -655,6 +669,8 @@ def _cli_overrides(args: argparse.Namespace, permission: PermissionMode) -> dict
         overrides["response_format"] = _load_response_format(args.response_format)
     if args.model:
         overrides["model"] = args.model
+    if getattr(args, "intent", None):
+        overrides["run_intent"] = args.intent
     if args.provider:
         overrides["provider"] = args.provider
     if args.base_url:
@@ -2284,6 +2300,18 @@ def main(argv: list[str] | None = None) -> int:
                 f"pxx: usage: --response-format is valid only for `pxx ask` "
                 f"(got `pxx {command_token}`) — structured output is an "
                 f"ask-mode, bare-payload surface with no fallback",
+                file=sys.stderr,
+            )
+            raise SystemExit(EXIT_USAGE)
+    # Same explicit-guard reasoning as --response-format: a provenance-claiming
+    # flag must never fall through to the 1.x shim's warn-and-ignore (or worse,
+    # get forwarded to aider). Provenance is pxx-assigned from the call site.
+    for token in argv:
+        if any(token == f or token.startswith(f + "=") for f in _PROVENANCE_FLAGS):
+            print(
+                f"pxx: usage: {token.partition('=')[0]} is not a valid flag — "
+                "run-intent provenance is assigned by pxx from the call site; "
+                "callers declare only --intent <operational|probe|eval|drill>",
                 file=sys.stderr,
             )
             raise SystemExit(EXIT_USAGE)

@@ -157,9 +157,10 @@ distinguishable from operational runs in recorded run metadata.
 - **Hard invariant: intent is never consulted by any gate, budget, hook,
   route, or outcome** — a run cannot alter its own gating by declaring an
   intent (metadata-only, AGENTS.md rule 3). `run_intent` is therefore not an
-  exec surface: honored from every config layer including repo-local, with
-  the usual CLI > env > project > user precedence (no `PXX_RUN_INTENT` env
-  var — ambient environment declarations would blur the call-site boundary).
+  exec surface: honored from the TOML config layers including repo-local and
+  from CLI `--intent` (CLI > project > user between those layers). There is
+  deliberately no `PXX_RUN_INTENT` env var — ambient environment declarations
+  would blur the call-site boundary provenance is assigned from.
   Declaration is strict (a misspelled value is a `ConfigError`; "unknown" is
   not declarable); reading stays fail-safe. `_settings_hash` excludes it:
   intent never changes `agent_version_id`.

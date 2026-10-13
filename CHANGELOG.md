@@ -10,8 +10,9 @@ preserved in git (tag `v1.3.3` and earlier).
 - **Run-intent marker (`--intent`, `run_intent` config key), metadata-only.**
   Every session verb (ask/edit/plan/run/chat/loop — one flag in
   `_add_run_options`) accepts `--intent <operational|probe|eval|drill>`, and
-  `run_intent` is honored in the layered config with the usual precedence
-  (not an exec surface: repo-local layers may set it). At session
+  `run_intent` is honored from the TOML config layers including repo-local
+  (CLI > project > user; deliberately no `PXX_RUN_INTENT` env var — not an
+  exec surface). At session
   construction pxx resolves one `(run_intent, run_intent_provenance)` pair
   (new `pxx/intent.py`) and records it IDENTICALLY in `task.json` and the
   `session_start` event data; the loop verb's own run record carries the

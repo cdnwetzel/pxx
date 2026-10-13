@@ -87,7 +87,8 @@ def test_config_run_intent_honored_from_project_toml(tmp_path, monkeypatch):
     (tmp_path / "pxx.toml").write_text('run_intent = "drill"\n')
     monkeypatch.chdir(tmp_path)
     settings = load_settings(tmp_path)
-    # Not an exec surface: honored from every layer including repo-local.
+    # Not an exec surface: honored from the TOML layers including repo-local
+    # (no PXX_RUN_INTENT env var by design).
     assert settings.run_intent == "drill"
 
 

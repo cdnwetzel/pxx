@@ -256,8 +256,11 @@ class Settings:
     #: operational. Recorded metadata-only in task.json and the
     #: ``session_start`` event (provenance "declared" for CLI/config);
     #: NEVER consulted by any gate, budget, hook, route, or outcome, so it
-    #: is honoured from every config layer including repo-local (it is not
-    #: an exec surface). Provenance is assigned by pxx from the call site —
+    #: is honoured from the TOML config layers including repo-local and from
+    #: CLI ``--intent`` (it is not an exec surface). There is deliberately NO
+    #: ``PXX_RUN_INTENT`` env var — ambient environment declarations would
+    #: blur the call-site boundary provenance is assigned from. Provenance is
+    #: assigned by pxx from the call site —
     #: a config key attempting to set it (``run_intent_provenance``) is a
     #: ConfigError. Strict: a string in the declarable set; "unknown" is the
     #: absence of a declaration, not a declarable value.

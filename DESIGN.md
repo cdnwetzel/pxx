@@ -486,7 +486,9 @@ class AgentBackend(Protocol):
   Session's and loop's helpers): tracked edits plus created files,
   pre-existing dirt excluded. If HEAD moves anyway (an aider that ignores the
   flags) the run says so on every exit — `EDIT_FAILED` with an undo hint,
-  or in an `INTERRUPTED` summary; pxx never rewrites history. The one reset
+  in an `INTERRUPTED` summary, or as an `observation` (`source:
+  "aider_head_moved"`) when the task itself is cancelled; pxx never rewrites
+  history. The one reset
   is the K2b scope fence: when ANY edit is out of scope, `reset --hard` to
   the (unchanged) pre-run HEAD, never over pre-existing dirt, and a failed
   reset is reported as failed, never as a revert.

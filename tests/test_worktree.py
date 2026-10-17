@@ -203,3 +203,29 @@ def test_delta_sees_edits_hidden_behind_index_flags(tmp_path: Path, flag: str) -
     assert _git(repo, "status", "--porcelain") == ""  # git itself sees nothing
     changed, _ = run(worktree_delta(repo, start))
     assert changed == ["a.py"]
+
+
+@needs_git
+@pytest.mark.parametrize("flag", ["--assume-unchanged", "--skip-worktree"])
+def test_delta_sees_a_deletion_behind_an_index_flag(tmp_path: Path, flag: str) -> None:
+    # Codex review (2.9.1 r6): every missing flagged file was skipped, so a
+    # deletion during the run was invisible.
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    _git(repo, "update-index", flag, "a.py")
+    start = run(worktree_snapshot(repo))
+    (repo / "a.py").unlink()
+    changed, _ = run(worktree_delta(repo, start))
+    assert changed == ["a.py"]
+
+
+@needs_git
+def test_a_sparse_skip_worktree_file_absent_throughout_is_not_a_change(tmp_path: Path) -> None:
+    # the legitimate case the old "missing = skip" rule protected
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    _git(repo, "update-index", "--skip-worktree", "a.py")
+    (repo / "a.py").unlink()  # absent before the run, as in a sparse checkout
+    start = run(worktree_snapshot(repo))
+    changed, _ = run(worktree_delta(repo, start))
+    assert changed == []

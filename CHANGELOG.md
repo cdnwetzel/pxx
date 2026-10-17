@@ -25,9 +25,13 @@ preserved in git (tag `v1.3.3` and earlier).
   index flags are seen.** Every safety-net git command runs with
   `--no-replace-objects`, and a restore also requires the start commit's tree
   to be unchanged. Tracked files flagged `assume-unchanged` or
-  `skip-worktree` — which git reports as clean — are compared against their
-  index blob, so an edit behind the flag reaches the scope fence, the loop's
-  re-check and the session's delta. Names are never stripped, so a file named
+  `skip-worktree` — which git reports as clean — are fingerprinted at the
+  run's start and compared at the end, so an edit or a deletion behind the
+  flag reaches the scope fence, the loop's re-check and the session's delta
+  (a sparse-checkout file absent throughout is not a change); because `git
+  diff` cannot show such an edit, the loop treats it as incomplete evidence
+  and blocks the round (`REVIEW_UNAVAILABLE`) rather than reviewing around
+  it. Names are never stripped, so a file named
   with only whitespace is not dropped.
 - **The goal path's boundary review now sees every file the artifact
   touches.** Node patches merge with `git apply`, which leaves created files
@@ -56,9 +60,9 @@ preserved in git (tag `v1.3.3` and earlier).
   the `pxx-pre` tag no longer points at the run's start (a run that can run
   git can move it), and it pops the net's own stash by commit SHA, never a
   newer stash that reuses the message. `SafetyNet` gains optional
-  `head_sha` / `head_ref` / `stash_sha` fields (`head_moved_since()` is
-  public). The aider backend also treats a branch switch at the same commit
-  as a moved HEAD. (`SafetyNet` also records `head_tree`.)
+  `head_sha` / `head_ref` / `stash_sha` / `head_tree` fields
+  (`head_moved_since()` is public). The aider backend also treats a branch
+  switch at the same commit as a moved HEAD.
 - **aider's scope fence blocks a run with ANY out-of-scope edit,** not only
   one whose edits are all out of scope — an extra in-scope edit used to carry
   an out-of-scope file through, and `--commit` committed it. The loop's

@@ -1767,8 +1767,69 @@ def test_changed_paths_see_flagged_edits_and_whitespace_names(tmp_path: Path) ->
         [GIT, "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True
     ).stdout.strip()
     _git(repo, "update-index", "--assume-unchanged", "a.py")
+    from pxx.worktree import flagged_state
+
+    flagged_start = asyncio.run(flagged_state(repo))  # the loop's baseline moment
     (repo / "a.py").write_text("a = 'hidden'\n")
     (repo / " ").write_text("space\n")
     _git(repo, "add", " ")
-    changed = asyncio.run(loop_mod._changed_paths_checked(repo, pre))
+    changed = asyncio.run(loop_mod._changed_paths_checked(repo, pre, flagged_start))
     assert "a.py" in changed and " " in changed
+
+
+@needs_git
+def test_an_edit_behind_an_index_flag_blocks_before_review(tmp_path: Path) -> None:
+    # Codex review (2.9.1 r6): a flagged edit reached the path check but not
+    # the reviewer or the budget (git diff omits it) -- COMPLETED, 0 lines.
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_repo(repo, {"a.py": "a = 1\n"})
+    _git(repo, "update-index", "--assume-unchanged", "a.py")
+    reviewer = ScriptedReviewer(["VERDICT: APPROVE"])
+    outcome = asyncio.run(
+        run_loop(
+            "edit a.py",
+            _settings(tmp_path),
+            cwd=repo,
+            backend_factory=Factory([ScriptedBackend(edits={"a.py": "a = 'hidden'\n"})]),
+            reviewer=reviewer,
+        )
+    )
+    assert outcome.code is TerminalCode.REVIEW_UNAVAILABLE
+    assert reviewer.calls == []
+
+
+@needs_git
+@pytest.mark.parametrize("failure", ["tracked-diff", "listing", "patch"])
+def test_the_recorded_patch_is_marked_for_every_kind_of_failure(
+    tmp_path: Path, monkeypatch, failure: str
+) -> None:
+    # Codex review (2.9.1 r6, P2): a failed tracked diff became "" unmarked.
+    import pxx.loop as loop_mod
+    import pxx.worktree as wt
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_repo(repo, {"a.py": "a = 1\n"})
+    (repo / "new.py").write_text("n = 1\n")
+    if failure == "tracked-diff":
+        real = loop_mod._git
+
+        async def no_diff(root, *args, **kw):
+            return None if args[:1] == ("diff",) else await real(root, *args, **kw)
+
+        monkeypatch.setattr(loop_mod, "_git", no_diff)
+    elif failure == "listing":
+
+        async def no_listing(cwd):
+            return None
+
+        monkeypatch.setattr(wt, "untracked_paths", no_listing)
+    else:
+
+        async def no_patch(cwd, rel, *, binary=False):
+            return ""
+
+        monkeypatch.setattr(wt, "new_file_patch", no_patch)
+    patch = asyncio.run(loop_mod._record_diff(repo, None, {}))
+    assert loop_mod._INCOMPLETE_DIFF_MARK in patch.splitlines()

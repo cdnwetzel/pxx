@@ -117,7 +117,9 @@ def _is_generated_artifact(rel_path: str) -> bool:
     return rel_path.endswith(_GENERATED_ARTIFACT_SUFFIXES)
 
 
-async def _changed_paths_checked(root: Path, pre_sha: str | None = None) -> list[str] | None:
+async def _changed_paths_checked(
+    root: Path, pre_sha: str | None = None, flagged_start: dict[str, str] | None = None
+) -> list[str] | None:
     """Repo-relative paths changed vs the pre-loop state.
 
     Covers committed work (``pre_sha``..working tree), staged/unstaged
@@ -140,12 +142,15 @@ async def _changed_paths_checked(root: Path, pre_sha: str | None = None) -> list
     out = await _git(root, "status", "--porcelain", "--no-renames", "--untracked-files=all", "-z")
     if out is None:
         return None
-    from .worktree import flagged_modified_paths
+    if flagged_start is not None:
+        # Edits and deletions behind assume-unchanged / skip-worktree flags,
+        # which git reports as clean (2.9.1 reviews).
+        from .worktree import flagged_changed, flagged_state
 
-    hidden = await flagged_modified_paths(root)  # edits git reports as clean
-    if hidden is None:
-        return None
-    paths.update(hidden)
+        flagged_now = await flagged_state(root)
+        if flagged_now is None:
+            return None
+        paths.update(flagged_changed(flagged_start, flagged_now))
     if not out:
         return sorted(p for p in paths if not _is_generated_artifact(p))
     for entry in out.split("\0"):
@@ -179,7 +184,10 @@ def _diff_incomplete(diff: str) -> bool:
 
 
 async def _diff_since(
-    root: Path, pre_sha: str | None, new_since: dict[str, str | None] | None = None
+    root: Path,
+    pre_sha: str | None,
+    new_since: dict[str, str | None] | None = None,
+    flagged_start: dict[str, str] | None = None,
 ) -> str:
     """Diff of the working tree against the pre-loop state (renames expanded
     to delete+add so a rename can't shrink the accounted diff), PLUS a
@@ -217,11 +225,37 @@ async def _diff_since(
                 log.warning("loop: could not read the patch for created file %s", rel)
                 patch = _INCOMPLETE_DIFF_MARK + "\n"
             text = (text + "\n" if text and not text.endswith("\n") else text) + patch
+    if flagged_start is not None and await _flagged_edits_unreviewable(root, flagged_start):
+        text = (
+            (text + "\n" if text and not text.endswith("\n") else text)
+            + _INCOMPLETE_DIFF_MARK
+            + "\n"
+        )
     return text
 
 
+async def _flagged_edits_unreviewable(root: Path, flagged_start: dict[str, str]) -> bool:
+    """True when a file behind an assume-unchanged/skip-worktree flag changed
+    (or the flags cannot be read): `git diff` omits such edits, so the diff
+    cannot show them to the reviewer or the budget -- treated as incomplete
+    evidence rather than silently left out (2.9.1 review)."""
+    from .worktree import flagged_changed, flagged_state
+
+    now = await flagged_state(root)
+    if now is None:
+        log.warning("loop: could not read index flags; the diff may be incomplete")
+        return True
+    changed = flagged_changed(flagged_start, now)
+    if changed:
+        log.warning("loop: edits behind index flags cannot be diffed: %s", ", ".join(changed[:5]))
+    return bool(changed)
+
+
 async def _record_diff(
-    root: Path, pre_sha: str | None, new_since: dict[str, str | None] | None = None
+    root: Path,
+    pre_sha: str | None,
+    new_since: dict[str, str | None] | None = None,
+    flagged_start: dict[str, str] | None = None,
 ) -> str:
     """The loop's work as a patch ``git apply`` can replay: tracked changes
     against the pre-loop state PLUS every untracked file as a new-file hunk.
@@ -237,7 +271,11 @@ async def _record_diff(
     # "Binary files differ" stub that `git apply` cannot use.
     ref = pre_sha or "HEAD"
     tracked = await _git(root, "diff", "--no-renames", "--binary", ref)
-    parts = [tracked or ""]
+    # Never a patch that LOOKS complete: a failed tracked diff, or edits behind
+    # index flags, are marked (2.9.1 reviews).
+    parts = [tracked if tracked is not None else _INCOMPLETE_DIFF_MARK + "\n"]
+    if flagged_start is not None and await _flagged_edits_unreviewable(root, flagged_start):
+        parts.append("\n" + _INCOMPLETE_DIFF_MARK + "\n")
     from .worktree import new_file_patch, new_files_since
 
     # Generated artifacts (__pycache__, .pytest_cache, ...) are not the run's
@@ -550,10 +588,16 @@ async def run_loop(
     # listing becomes an empty baseline -- over-counting is visible, hiding
     # every created file is not.
     untracked_start: dict[str, str | None] | None = None
+    flagged_start: dict[str, str] | None = None
     if in_repo:
         from .worktree import untracked_fingerprints
 
         untracked_start = await untracked_fingerprints(root) or {}
+        from .worktree import flagged_state
+
+        # Index-flag states, same moment and same reason (fail closed: an
+        # unreadable state is an empty baseline, so any flagged file counts).
+        flagged_start = await flagged_state(root) or {}
 
     net_suffix = ""
     if net is not None:
@@ -588,7 +632,7 @@ async def run_loop(
     if in_repo and command and settings.done_signal:
 
         async def _run_done_check() -> bool:
-            diff_now = await _diff_since(root, pre_sha, untracked_start)
+            diff_now = await _diff_since(root, pre_sha, untracked_start, flagged_start)
             if _diff_incomplete(diff_now):
                 return False  # never "done" on evidence that may be missing files
             return await _edit_objectively_done(
@@ -610,7 +654,7 @@ async def run_loop(
         # while the tree still holds the loop's work, so a restore below
         # discards nothing that was not already on disk under runs/.
         try:
-            loop_diff = await _record_diff(root, pre_sha, untracked_start)
+            loop_diff = await _record_diff(root, pre_sha, untracked_start, flagged_start)
             if loop_diff.strip():
                 loop_writer.write_diff(loop_diff)
         except Exception:
@@ -802,7 +846,9 @@ async def run_loop(
             # block), the task IS done → COMPLETED. Fail-closed otherwise; never
             # heals (the budget is spent) and never rescues a failing run.
             if outcome.code is TerminalCode.BUDGET_EXCEEDED and in_repo:
-                salvage_diff = (await _diff_since(root, pre_sha, untracked_start)).strip()
+                salvage_diff = (
+                    await _diff_since(root, pre_sha, untracked_start, flagged_start)
+                ).strip()
                 # No salvage on an incomplete diff (2.9.1 review): recovery
                 # must not approve what the main path would block.
                 if (
@@ -850,7 +896,7 @@ async def run_loop(
 
         # Guard 1: scope re-check (backend commits can bypass hooks).
         if in_repo:
-            changed_or_none = await _changed_paths_checked(root, pre_sha)
+            changed_or_none = await _changed_paths_checked(root, pre_sha, flagged_start)
             if changed_or_none is None:
                 # Fail closed (2.9.1 review): a scope re-check that cannot list
                 # the round's changes must not read as "all in scope".
@@ -894,7 +940,7 @@ async def run_loop(
         # Guard 2: diff accounting against the pre-loop git state.
         diff_text = ""
         if in_repo:
-            diff_text = await _diff_since(root, pre_sha, untracked_start)
+            diff_text = await _diff_since(root, pre_sha, untracked_start, flagged_start)
             if _diff_incomplete(diff_text):
                 # Fail closed (2.9.1 review): a diff that cannot list the
                 # files the round created can be neither budgeted nor
@@ -1072,7 +1118,7 @@ async def run_loop(
                         "current_head": head_now.strip()[:12],
                     },
                 )
-                diff_text = await _diff_since(root, pre_sha, untracked_start)
+                diff_text = await _diff_since(root, pre_sha, untracked_start, flagged_start)
                 if _diff_incomplete(diff_text):
                     await parent_bus.emit(
                         "gate_decision",

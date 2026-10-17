@@ -174,8 +174,8 @@ def load_denylist(path: Path | None = None) -> tuple[str, ...]:
 
 
 def scan_staged(*, cwd: Path | None = None, denylist: tuple[str, ...] = ()) -> list[Finding]:
-    """Scan what is STAGED in git -- the index blobs, i.e. the exact bytes a
-    commit will record.
+    """Scan what is STAGED in git -- each changed index entry's blob, i.e. the
+    exact bytes a commit of the index would record.
 
     FAIL-CLOSED: raises :class:`PxxError` when the staged fileset cannot be
     determined (not a git repository, git missing, index/lock error) or a
@@ -183,37 +183,76 @@ def scan_staged(*, cwd: Path | None = None, denylist: tuple[str, ...] = ()) -> l
     and must never read as one. Rename detection is disabled so a staged
     rename can't hide its source; deletions have no blob and are not read.
 
-    Names come NUL-separated (``-z``) and are never stripped, and content is
-    read from the index rather than the working tree (2.9.1 review): git
-    quotes unusual names in plain output, so a quoted name was "unreadable"
-    and skipped -- a secret in ``café.txt`` was committed -- and a clean
-    filter could commit bytes the working-tree read never saw."""
+    Entries come from ``git diff-index --cached -z`` -- NUL-separated names
+    (never quoted, never stripped) with each entry's blob SHA -- and blobs
+    are read BY SHA with replace refs ignored (2.9.1 reviews): a quoted name
+    was "unreadable" and skipped, a clean filter or a `git replace` could
+    show the scan different bytes from the commit, and a name like
+    ``0:notes.txt`` parsed as an index-stage revision of another file."""
     root = cwd or Path.cwd()
-    listing = _git_bytes(
-        root, "diff", "--cached", "--name-only", "--no-renames", "-z", "--diff-filter=d"
+    head = _git_bytes_or_none(root, "rev-parse", "--verify", "-q", "HEAD")
+    entries: list[tuple[str, str]] = []
+    if head:
+        raw = _git_bytes(root, "diff-index", "--cached", "-z", "--no-renames", "HEAD")
+        fields = raw.decode("utf-8", "surrogateescape").split("\0")
+        # ":<old mode> <new mode> <old sha> <new sha> <status>" NUL "<path>" NUL
+        for meta, name in zip(fields[0::2], fields[1::2], strict=False):
+            parts = meta.lstrip(":").split()
+            if len(parts) == 5 and parts[4] != "D":
+                entries.append((name, parts[1] + " " + parts[3]))
+    else:  # no commit yet: everything in the index is staged
+        raw = _git_bytes(root, "ls-files", "-s", "-z")
+        for record in raw.decode("utf-8", "surrogateescape").split("\0"):
+            meta, _, name = record.partition("\t")
+            parts = meta.split()
+            if len(parts) == 3 and name:
+                entries.append((name, parts[0] + " " + parts[1]))
+    return scan_blobs(
+        root,
+        [(name, ms.split()[1]) for name, ms in entries if not ms.startswith("160000")],
+        denylist=denylist,
     )
-    names = [n for n in listing.decode("utf-8", "surrogateescape").split("\0") if n]
+
+
+def scan_blobs(
+    root: Path, blobs: list[tuple[str, str]], *, denylist: tuple[str, ...] = ()
+) -> list[Finding]:
+    """Scan git blobs BY SHA -- ``[(repo-relative name, blob sha)]`` -- with
+    replace refs ignored, so the bytes scanned are the bytes a commit built
+    from those SHAs records. Lockfiles, binary-ish and non-UTF-8 blobs are
+    skipped (as for files); an unreadable blob raises :class:`PxxError`
+    (fail-closed). The name is only a label and an attribute key -- never
+    parsed as a revision."""
     findings: list[Finding] = []
-    for name in names:
+    for name, sha in blobs:
         if Path(name).name in LOCKFILE_NAMES:
             continue
-        data = _git_bytes(root, "cat-file", "blob", f":{name}")
+        data = _git_bytes(root, "cat-file", "blob", sha)
         if _is_binaryish(data):
             continue
         try:
             text = data.decode("utf-8")
         except UnicodeDecodeError:
-            log.debug("governance: skipping non-utf-8 staged file %s", name)
+            log.debug("governance: skipping non-utf-8 blob %s", name)
             continue
         findings.extend(scan_text(text, str(root / name), denylist=denylist))
     return findings
+
+
+def _git_bytes_or_none(root: Path, *args: str) -> bytes | None:
+    try:
+        return _git_bytes(root, *args)
+    except PxxError:
+        return None
 
 
 def _git_bytes(root: Path, *args: str) -> bytes:
     """Run git; return raw stdout. Raises PxxError on any failure (fail-closed)."""
     try:
         proc = subprocess.run(
-            ["git", *args],
+            # replace refs ignored and no fsmonitor hook: the scan must see
+            # the real objects, and must not run repository-controlled code
+            ["git", "--no-replace-objects", "-c", "core.fsmonitor=false", *args],
             cwd=root,
             capture_output=True,
             timeout=15,

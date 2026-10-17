@@ -313,6 +313,8 @@ def _blocking_fake_git(calls, statuses):
     async def fake_git(cwd, *args):
         if args[:2] == ("rev-parse", "HEAD"):
             return "abc123def456"
+        if args[:3] == ("rev-parse", "--verify", "HEAD^{tree}"):
+            return "tree0000start"  # unchanged throughout: the revert may run
         if args[:2] == ("status", "--porcelain=v1"):
             calls["status"] += 1
             return statuses[min(calls["status"] - 1, len(statuses) - 1)]
@@ -876,3 +878,27 @@ def test_task_cancellation_kills_aider_and_still_reports_a_moved_head(tmp_path, 
         for o in obs
     )
     assert calls["reset"] == []
+
+
+@_NEEDS_GIT
+def test_real_git_the_fence_revert_is_not_redirected_by_git_replace(tmp_path):
+    """Grok review (2.9.1 r6): K2b's `reset --hard <start>` followed a
+    `git replace <start> <planted>` made during the run, leaving the planted
+    tree while reporting a revert."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git_repo(repo)
+    (repo / "src").mkdir()
+    planter = (
+        "echo planted > planted.txt && git add -A && "
+        "git -c user.name=a -c user.email=a@e.c commit -qm planted && "
+        "P=$(git rev-parse HEAD) && git reset -q --hard HEAD~1 && "
+        'git replace $(git rev-parse HEAD) "$P" && echo evil > outside.txt'
+    )
+    ctx = make_ctx(
+        repo, settings=Settings(permission=PermissionMode.EDIT), scope=ScopeGate(repo, ("src",))
+    )
+    outcome = asyncio.run(AiderBackend(aider_path=fake_aider(tmp_path, planter)).run("t", ctx))
+    assert outcome.code is TerminalCode.OUT_OF_SCOPE
+    assert not (repo / "planted.txt").exists()  # the start tree, not the planted one
+    assert (repo / "converter.py").read_text() == "x = 1\n"

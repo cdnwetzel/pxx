@@ -15,14 +15,32 @@ preserved in git (tag `v1.3.3` and earlier).
   filter could commit bytes the scan never saw. It now lists names with
   `-z` (never stripped) and scans each staged **index blob**; a blob it
   cannot read fails the scan closed (no commit).
+- **pxx's commit records exactly the bytes it scanned.** `--commit` used to
+  `git add` each path, scan the index, then `git commit -- <paths>` — which
+  re-read the working tree after the scan: an `assume-unchanged` file's add
+  did nothing (the scan saw the old blob, the commit took the secret), a
+  clean filter could run differently the second time, and a `git replace`
+  could show the scan different bytes. Now each session path is read once and
+  hashed once (`git hash-object -w --stdin --path=…`, so clean filters such as
+  LFS still apply), those blob SHAs are scanned (by SHA, replace refs ignored)
+  and the commit is built from them in a temporary index with `commit-tree`,
+  then `update-ref` (old HEAD checked). The operator's index is updated only
+  for the committed paths. `scan_staged` (`pxx check`) likewise reads staged
+  blobs by SHA from `diff-index --cached -z` — a filename is never parsed as
+  a revision, so a file named `0:notes.txt` is scanned as itself, not as
+  stage 0 of `notes.txt`. All of these git calls ignore replace refs and run
+  no `core.fsmonitor` hook.
 - **pxx's own commit runs no repository hooks.** A hook written during the
   run (`.git/hooks` is invisible to every scope check) could add paths or
   bytes after the secrets scan; `--commit` now commits with `--no-verify` and
-  `core.hooksPath=/dev/null` — pxx's gate is the check for that commit.
+  `core.hooksPath=/dev/null` — pxx's gate is the check for that commit (it is
+  now built with `commit-tree`, which runs no hooks at all).
   Behaviour change: repository pre-commit/commit-msg hooks no longer run on
   pxx's auto-commits.
-- **The safety net is not fooled by `git replace`, and edits hidden behind
-  index flags are seen.** Every safety-net git command runs with
+- **The safety net and aider's scope fence are not fooled by `git replace`,
+  and edits hidden behind index flags are seen.** The fence's revert runs only
+  when HEAD's tree is still the start tree and is reported only once the tree
+  is verified afterwards. Every safety-net git command runs with
   `--no-replace-objects`, and a restore also requires the start commit's tree
   to be unchanged. Tracked files flagged `assume-unchanged` or
   `skip-worktree` — which git reports as clean — are fingerprinted at the

@@ -91,8 +91,19 @@ class AiderBackend:
     async def _git(self, cwd: Path, *args: str) -> str | None:
         """Run a git command; return stdout or None when unavailable/failed."""
         try:
+            # Replace refs ignored and no fsmonitor hook (2.9.1 review): what
+            # a SHA means -- and what `reset --hard` checks out -- must not be
+            # redirectable by a `git replace` made during the run.
             proc = await asyncio.create_subprocess_exec(
-                "git", *args, cwd=cwd, stdout=PIPE, stderr=PIPE, env=git_env()
+                "git",
+                "--no-replace-objects",
+                "-c",
+                "core.fsmonitor=false",
+                *args,
+                cwd=cwd,
+                stdout=PIPE,
+                stderr=PIPE,
+                env=git_env(),
             )
             out, _ = await proc.communicate()
         except OSError:
@@ -185,6 +196,11 @@ class AiderBackend:
         # The branch too: a switch to another branch at the SAME commit moves
         # no SHA but would still put any later reset on the wrong branch.
         pre_ref = (await self._git(ctx.cwd, "symbolic-ref", "-q", "HEAD") or "") if use_git else ""
+        pre_tree = (
+            (await self._git(ctx.cwd, "rev-parse", "--verify", "HEAD^{tree}") or "")
+            if use_git
+            else ""
+        )
         untracked_start: set[str] = set()
         tracked_dirty_start = False
         snapshot: dict | None = None
@@ -278,11 +294,23 @@ class AiderBackend:
                         f"revert manually: git reset --hard {pre_head[:7]}"
                     )
                 else:
-                    reset = await self._git(ctx.cwd, "reset", "--hard", pre_head)
-                    if reset is None:  # never report a revert that did not happen
-                        not_reverted = (
-                            f"revert FAILED (git reset --hard {pre_head[:7]} did not "
-                            f"succeed); revert manually: git reset --hard {pre_head[:7]}"
+                    # Only revert to a start whose tree is still the start's,
+                    # and claim it only once the tree is verified afterwards.
+                    tree_now = await self._git(ctx.cwd, "rev-parse", "--verify", "HEAD^{tree}")
+                    reset = (
+                        await self._git(ctx.cwd, "reset", "--hard", pre_head)
+                        if pre_tree and tree_now == pre_tree
+                        else None
+                    )
+                    tree_after = (
+                        await self._git(ctx.cwd, "rev-parse", "--verify", "HEAD^{tree}")
+                        if reset is not None
+                        else None
+                    )
+                    if reset is None or tree_after != pre_tree:
+                        not_reverted = (  # never report a revert that did not happen
+                            f"revert FAILED (git reset --hard {pre_head[:7]} could not be "
+                            f"verified); revert manually: git reset --hard {pre_head[:7]}"
                         )
                     else:
                         reverted_to = pre_head[:7]

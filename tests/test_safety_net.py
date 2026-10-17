@@ -99,7 +99,8 @@ def test_commit_blocked_when_staged_delta_contains_secret(tmp_path: Path) -> Non
 @needs_git
 def test_commit_blocked_when_scan_indeterminable(tmp_path: Path, monkeypatch) -> None:
     """A scan that cannot run is NOT a clean scan (governance doctrine):
-    PxxError from scan_staged also skips the commit and keeps the work."""
+    PxxError from the scan (scan_blobs, since the commit scans the exact
+    blobs it records) also skips the commit and keeps the work."""
     import pxx.governance
     from pxx.errors import PxxError
 
@@ -108,10 +109,10 @@ def test_commit_blocked_when_scan_indeterminable(tmp_path: Path, monkeypatch) ->
     before = _git(repo, "rev-parse", "HEAD")
     (repo / "a.py").write_text("x = 2\n")
 
-    def boom(*, cwd, denylist):
+    def boom(cwd, blobs, *, denylist):
         raise PxxError("governance: cannot scan staged files: simulated index lock")
 
-    monkeypatch.setattr(pxx.governance, "scan_staged", boom)
+    monkeypatch.setattr(pxx.governance, "scan_blobs", boom)
     assert run(commit_session_work(repo, task_preview="x", net_tag=None)) is None
     assert _git(repo, "rev-parse", "HEAD") == before  # no commit happened
     assert (repo / "a.py").read_text() == "x = 2\n"  # work remains
@@ -462,3 +463,78 @@ def test_pxx_commit_ignores_a_hook_written_during_the_run(tmp_path: Path) -> Non
     assert sha
     assert _git(repo, "show", "--name-only", "--format=", "HEAD").split() == ["ok.py"]
     assert (repo / "pxx" / "safety.py").read_text() == "SAFE = True\n"  # the hook never ran
+
+
+_SECRET = "api_key = 'sk-live-0123456789abcdef0123456789abcdef'\n"
+
+
+def _no_secret_committed(repo: Path) -> bool:
+    names = _git(repo, "ls-tree", "-r", "--name-only", "HEAD").splitlines()
+    return all("sk-live" not in _git(repo, "show", f"HEAD:{n}") for n in names if n)
+
+
+@needs_git
+def test_commit_never_ships_a_secret_behind_assume_unchanged(tmp_path: Path) -> None:
+    """Grok review (2.9.1 r6, P0): `git add` of an assume-unchanged file did
+    nothing, the scan saw the old index blob, `git commit -- path` committed
+    the worktree secret."""
+    repo = tmp_path / "repo"
+    _init_repo(repo, files={"ok.py": "x = 1\n"})
+    _git(repo, "update-index", "--assume-unchanged", "ok.py")
+    (repo / "ok.py").write_text(_SECRET)
+    assert run(commit_session_work(repo, task_preview="t", net_tag=None, only={"ok.py"})) is None
+    assert _no_secret_committed(repo)
+
+
+@needs_git
+def test_commit_records_exactly_the_bytes_it_scanned(tmp_path: Path) -> None:
+    """Grok review (2.9.1 r6, P0): a clean filter that redacts on its FIRST
+    run only -- the scan saw the redacted blob, the commit's second filter run
+    stored the secret. The worktree is now hashed once and that blob is both
+    scanned and committed."""
+    repo = tmp_path / "repo"
+    _init_repo(repo, files={"ok.py": "x = 1\n"})
+    counter = tmp_path / "runs"
+    script = tmp_path / "filter.sh"
+    script.write_text(
+        f"#!/bin/sh\nn=$(cat {counter} 2>/dev/null || echo 0); echo $((n+1)) > {counter}\n"
+        'if [ "$n" = 0 ]; then cat >/dev/null; echo "x = 1"; else cat; fi\n'
+    )
+    script.chmod(0o755)
+    _git(repo, "config", "filter.twophase.clean", str(script))
+    (repo / ".gitattributes").write_text("*.py filter=twophase\n")
+    _git(repo, "add", ".gitattributes")
+    _ident(repo, "commit", "-q", "-m", "attrs")
+    (repo / "ok.py").write_text(_SECRET)
+    run(commit_session_work(repo, task_preview="t", net_tag=None, only={"ok.py"}))
+    assert _no_secret_committed(repo)
+
+
+@needs_git
+def test_a_name_that_looks_like_an_index_stage_is_scanned_as_itself(tmp_path: Path) -> None:
+    """Grok review (2.9.1 r6, P0): `cat-file blob :0:notes.txt` read stage 0
+    of notes.txt, so a secret in a file named `0:notes.txt` was scanned as the
+    clean decoy and committed."""
+    repo = tmp_path / "repo"
+    _init_repo(repo, files={"notes.txt": "clean\n"})
+    (repo / "0:notes.txt").write_text(_SECRET)
+    assert (
+        run(commit_session_work(repo, task_preview="t", net_tag=None, only={"0:notes.txt"})) is None
+    )
+    assert _no_secret_committed(repo)
+
+
+@needs_git
+def test_scan_staged_ignores_git_replace(tmp_path: Path) -> None:
+    """Grok review (2.9.1 r6, P0): with the staged secret blob replaced by a
+    clean one, the scanner (following replace refs) saw clean bytes."""
+    from pxx.governance import scan_staged
+
+    repo = tmp_path / "repo"
+    _init_repo(repo, files={"ok.py": "x = 1\n"})
+    (repo / "ok.py").write_text(_SECRET)
+    _git(repo, "add", "ok.py")
+    secret_blob = _git(repo, "rev-parse", ":ok.py")
+    clean_blob = _git(repo, "rev-parse", "HEAD:ok.py")
+    _git(repo, "replace", secret_blob, clean_blob)
+    assert scan_staged(cwd=repo), "the replace ref hid the staged secret"

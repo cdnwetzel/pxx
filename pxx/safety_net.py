@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+import tempfile
 import time
 from asyncio.subprocess import PIPE
 from dataclasses import dataclass
@@ -47,6 +49,38 @@ class SafetyNet:
     head_tree: str | None = None
 
 
+#: Every safety-net / commit git command: replace refs ignored (a `git
+#: replace` made during the run must not redirect what a SHA means) and no
+#: fsmonitor hook (repository-controlled code) -- 2.9.1 reviews.
+_GIT_BASE = ("git", "--no-replace-objects", "-c", "core.fsmonitor=false")
+
+
+async def _git_io(
+    cwd: Path,
+    *args: str,
+    stdin: bytes | None = None,
+    index_file: str | None = None,
+    raw: bool = False,
+) -> str | None:
+    """Like :func:`_git`, with optional stdin bytes and an alternate index
+    (``GIT_INDEX_FILE``) -- the commit is built in a temporary index so the
+    operator's real index is never the staging area for pxx's commit."""
+    env = git_env()
+    if index_file is not None:
+        env["GIT_INDEX_FILE"] = index_file
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *_GIT_BASE, *args, cwd=cwd, stdin=PIPE, stdout=PIPE, stderr=PIPE, env=env
+        )
+        out, _ = await communicate_bounded(proc, stdin, label=args[0] if args else "")
+    except (OSError, TimeoutError):
+        return None
+    if proc.returncode != 0:
+        return None
+    text = out.decode(errors="surrogateescape")
+    return text if raw else text.strip()  # raw: NUL-separated output keeps its spaces
+
+
 async def _git(cwd: Path, *args: str) -> str | None:
     """Run a git command; return stdout or None when unavailable/failed. Bounded
     by git_timeout(): a wedged git or a blocking hook can't hang the safety-net
@@ -56,7 +90,7 @@ async def _git(cwd: Path, *args: str) -> str | None:
         # redirect what a SHA means to the guard or to `reset --hard` (2.9.1
         # review) -- every safety-net command sees the real objects.
         proc = await asyncio.create_subprocess_exec(
-            "git", "--no-replace-objects", *args, cwd=cwd, stdout=PIPE, stderr=PIPE, env=git_env()
+            *_GIT_BASE, *args, cwd=cwd, stdout=PIPE, stderr=PIPE, env=git_env()
         )
         out, _ = await communicate_bounded(proc, label=args[0] if args else "")
     except (OSError, TimeoutError):
@@ -233,38 +267,73 @@ async def commit_session_work(
     """
     if only is not None and not only:
         return None  # the session changed nothing
-    staged: list[str] = []
-    if only is not None:
-        for rel in sorted(only):
-            # --literal-pathspecs: a filename is a NAME, never a pattern -- a
-            # legal file called `*.py` must not stage every .py (2.9.1 review).
-            if await _git(cwd, "--literal-pathspecs", "add", "--", rel) is not None:
-                staged.append(rel)
-            elif (
-                not (cwd / rel).exists()
-                and await _git(cwd, "cat-file", "-e", f"HEAD:{rel}") is not None
-            ):
-                # A deletion already staged (e.g. the source of a `git mv`):
-                # `git add` cannot re-add a path gone from index and tree, but
-                # it is still the session's change -- keep it in the commit,
-                # or a rename is committed as half an add (2.9.1 review).
-                staged.append(rel)
-        if not staged:
-            log.warning("auto-commit: nothing stageable in the session's delta")
+    # The commit is built from blobs pxx hashed ONCE and scanned, in a
+    # temporary index, with `commit-tree` (2.9.1 reviews): `git commit --
+    # <paths>` re-read the working tree (and re-ran clean filters) AFTER the
+    # scan, an assume-unchanged file's `git add` did nothing, a name like
+    # `0:x` parsed as a revision, and repository hooks ran. Here nothing is
+    # read twice, no name is parsed as a revision, no hook runs, and the
+    # operator's real index is only updated for the committed paths, after
+    # the fact.
+    head = await _git(cwd, "rev-parse", "--verify", "-q", "HEAD")
+    if only is None:
+        listing = await _git_io(
+            cwd, "status", "--porcelain=v1", "-z", "--no-renames", "--untracked-files=all", raw=True
+        )
+        if listing is None:
             return None
+        names = {e[3:] for e in listing.split("\0") if len(e) > 3}
     else:
-        status = await _git(cwd, "status", "--porcelain=v1", "--untracked-files=all")
-        if not status:
-            return None  # nothing to commit
-        if await _git(cwd, "add", "-A") is None:
-            log.warning("auto-commit: git add failed; leaving work uncommitted")
+        names = set(only)
+    entries: list[tuple[str, str, str]] = []  # (mode, sha, path); mode "0" = delete
+    for rel in sorted(names):
+        target = cwd / rel
+        if target.is_symlink():
+            sha = await _git_io(
+                cwd,
+                "hash-object",
+                "-w",
+                "--stdin",
+                "--no-filters",
+                stdin=os.fsencode(os.readlink(target)),
+            )
+            mode = "120000"
+        elif target.is_file():
+            try:
+                data = target.read_bytes()  # the ONE read of these bytes
+            except OSError:
+                return None
+            sha = await _git_io(cwd, "hash-object", "-w", "--stdin", f"--path={rel}", stdin=data)
+            mode = "100755" if target.stat().st_mode & 0o111 else "100644"
+        elif not target.exists():
+            tracked = head and await _git_io(
+                cwd,
+                "ls-tree",
+                "-z",
+                "--full-tree",
+                "HEAD",
+                "--",
+                rel,
+            )
+            if not tracked:
+                continue  # never existed in HEAD: nothing to delete
+            sha, mode = "", "0"
+        else:
+            continue  # a directory (e.g. a submodule): not the session's file
+        if mode != "0" and not sha:
+            log.warning("auto-commit: could not hash %s; leaving work uncommitted", rel)
             return None
-    # Fail-closed secrets gate (staged delta, before commit). Lazy import to
-    # avoid an import cycle (session.py imports this module lazily too).
-    from .governance import load_denylist, scan_staged
+        entries.append((mode, sha, rel))
+    if not entries:
+        log.warning("auto-commit: nothing stageable in the session's delta")
+        return None
+    # Fail-closed secrets gate on the EXACT blobs the commit will record.
+    from .governance import load_denylist, scan_blobs
 
     try:
-        findings = scan_staged(cwd=cwd, denylist=load_denylist())
+        findings = scan_blobs(
+            cwd, [(rel, sha) for mode, sha, rel in entries if mode != "0"], denylist=load_denylist()
+        )
     except PxxError as exc:
         # A scan that cannot run is NOT a clean scan — skip the commit.
         log.warning("auto-commit: governance scan could not run (%s); not committing", exc)
@@ -272,7 +341,7 @@ async def commit_session_work(
     if findings:
         detail = "; ".join(f"{f.rule} at {f.path}:{f.line} [{f.preview}]" for f in findings)
         log.warning(
-            "auto-commit: BLOCKED by governance — %d finding(s) in the staged delta; "
+            "auto-commit: BLOCKED by governance — %d finding(s) in the session's delta; "
             "not committing, work left in the tree: %s",
             len(findings),
             detail,
@@ -288,25 +357,41 @@ async def commit_session_work(
         identity = ["-c", "user.name=pxx[bot]"]
     if await _git(cwd, "config", "user.email") is None:
         identity += ["-c", "user.email=pxx[bot]@localhost"]
-    # Path-limited when the session's delta is known: a bare `git commit`
-    # would also sweep in anything the operator had already staged -- e.g. a
-    # protected path -- into the commit that is meant to be the session's
-    # own, secrets-gated one (2.9.1 review). With a pathspec git commits
-    # exactly these paths; other staged entries stay staged, uncommitted.
-    pathspec = ["--", *staged] if only is not None else []
-    literal = ["--literal-pathspecs"] if only is not None else []
-    # No repository hooks on pxx's own commit (2.9.1 review): a pre-commit
-    # hook written during the run (.git/hooks is invisible to every scope
-    # check) could add paths or bytes after the secrets scan above. pxx's
-    # gate is the check for this commit.
-    no_hooks = ["-c", "core.hooksPath=/dev/null"]
-    committed = await _git(
-        cwd, *literal, *no_hooks, *identity, "commit", "-q", "--no-verify", "-m", message, *pathspec
+    null_sha = "0" * (len(head) if head else 40)
+    info = b"".join(
+        (f"{mode} {sha or null_sha}\t".encode() + os.fsencode(rel) + b"\0")
+        for mode, sha, rel in entries
     )
-    if committed is None:
-        log.warning("auto-commit: git commit failed; leaving work uncommitted")
+    with tempfile.TemporaryDirectory(prefix="pxx-commit-") as tmp:
+        index = str(Path(tmp) / "index")
+        base = ["read-tree", head] if head else ["read-tree", "--empty"]
+        if await _git_io(cwd, *base, index_file=index) is None:
+            return None
+        if (
+            await _git_io(cwd, "update-index", "-z", "--index-info", stdin=info, index_file=index)
+            is None
+        ):
+            log.warning("auto-commit: could not build the commit's index; leaving work uncommitted")
+            return None
+        tree = await _git_io(cwd, "write-tree", index_file=index)
+    if not tree:
         return None
-    return await _git(cwd, "rev-parse", "HEAD")
+    if head and tree == await _git(cwd, "rev-parse", "--verify", f"{head}^{{tree}}"):
+        return None  # the session's paths already match HEAD: nothing to commit
+    parents = ["-p", head] if head else []
+    commit = await _git_io(cwd, *identity, "commit-tree", tree, *parents, "-m", message)
+    if not commit:
+        log.warning("auto-commit: git commit-tree failed; leaving work uncommitted")
+        return None
+    # Move HEAD only if it is still where we read it (no race, no surprise).
+    update = ["update-ref", "-m", f"pxx: {preview}", "HEAD", commit] + ([head] if head else [])
+    if await _git_io(cwd, *update) is None:
+        log.warning("auto-commit: HEAD moved under the commit; not updating it")
+        return None
+    # Bring the real index in line for exactly the committed paths, so they
+    # read as clean; every other entry (the operator's staging) is untouched.
+    await _git_io(cwd, "update-index", "-z", "--index-info", stdin=info)
+    return commit
 
 
 __all__ = [

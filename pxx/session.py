@@ -37,7 +37,7 @@ from .errors import (
     ScopeViolation,
 )
 from .events import AuditLog, Event, EventBus
-from .gitenv import git_env
+from .gitenv import INTERNAL_GIT, git_env
 from .intent import RunIntent, resolve_run_intent
 from .manifest import RunDirWriter, build_manifest
 from .outcome import RunOutcome, TerminalCode
@@ -424,13 +424,24 @@ class Session:
                         "(not a git repo or git failed) — nothing committed"
                     )
                 else:
-                    changed, _ = await self._worktree_delta(worktree_start)
-                    sha = await commit_session_work(
-                        self.cwd,
-                        task_preview=task,
-                        net_tag=self._net.tag if self._net else None,
-                        only=set(changed),
-                    )
+                    from .worktree import worktree_delta_checked
+
+                    delta = await worktree_delta_checked(self.cwd, worktree_start)
+                    if delta is None:
+                        # Unmeasurable -- git failed, or the run changed the
+                        # repository's git configuration: commit nothing.
+                        log.warning(
+                            "auto-commit skipped: the session's changes could not be "
+                            "measured — nothing committed"
+                        )
+                    else:
+                        sha = await commit_session_work(
+                            self.cwd,
+                            task_preview=task,
+                            net_tag=self._net.tag if self._net else None,
+                            only=set(delta[0]),
+                            control_start=worktree_start.get("control"),
+                        )
                 if sha:
                     await self.bus.emit(
                         "observation",
@@ -476,39 +487,14 @@ class Session:
             # captured into the run artifact (diff.patch). On COMPLETED the net
             # is left for the user to reconcile (pop is their move).
             if self._net is not None and outcome.code is not TerminalCode.COMPLETED:
-                from .safety_net import head_moved_since, restore_safety_net
+                from .safety_net import settle_failed_run
 
-                moved = await head_moved_since(self.cwd, self._net)
-                if moved:
-                    # Never reset over history the run did not own: leave the
-                    # tree, the tag and the stash for the operator.
-                    await self.bus.emit(
-                        "gate_decision",
-                        {
-                            "gate": "safety_net",
-                            "allowed": False,
-                            "restored": False,
-                            "reason": "head_moved",
-                            "tag": self._net.tag or "",
-                        },
-                        session_id=self.session_id,
-                    )
-                    outcome = replace(
-                        outcome,
-                        summary=f"{outcome.summary} [net not restored: {moved}; the start "
-                        f"is tagged {self._net.tag or '(untagged)'}]",
-                    )
-                elif await restore_safety_net(self.cwd, self._net):
-                    await self.bus.emit(
-                        "gate_decision",
-                        {
-                            "gate": "safety_net",
-                            "allowed": True,
-                            "restored": True,
-                            "tag": self._net.tag or "",
-                        },
-                        session_id=self.session_id,
-                    )
+                async def _emit_net(data: dict) -> None:
+                    await self.bus.emit("gate_decision", data, session_id=self.session_id)
+
+                suffix = await settle_failed_run(self.cwd, self._net, _emit_net)
+                if suffix:
+                    outcome = replace(outcome, summary=outcome.summary + suffix)
             return outcome
         finally:
             await self._cleanup()
@@ -588,7 +574,7 @@ class Session:
         """
         try:
             head = subprocess.run(
-                ["git", "rev-parse", "HEAD"],
+                [*INTERNAL_GIT, "rev-parse", "HEAD"],
                 cwd=self.cwd,
                 capture_output=True,
                 text=True,
@@ -600,7 +586,7 @@ class Session:
                 return "", ""
             starting = head.stdout.strip()
             status = subprocess.run(
-                ["git", "status", "--porcelain"],
+                [*INTERNAL_GIT, "status", "--porcelain"],
                 cwd=self.cwd,
                 capture_output=True,
                 text=True,
@@ -609,7 +595,7 @@ class Session:
                 env=git_env(),
             )
             files = subprocess.run(
-                ["git", "ls-files"],
+                [*INTERNAL_GIT, "ls-files"],
                 cwd=self.cwd,
                 capture_output=True,
                 text=True,
@@ -755,8 +741,9 @@ class Session:
             return ""
         try:
             proc = await asyncio.create_subprocess_exec(
-                "git",
+                *INTERNAL_GIT,
                 "diff",
+                "--no-ext-diff",
                 "HEAD",
                 cwd=str(self.cwd),
                 stdout=asyncio.subprocess.PIPE,
@@ -777,7 +764,7 @@ class Session:
         """git in the session cwd; stdout or None on any failure (best-effort)."""
         try:
             proc = await asyncio.create_subprocess_exec(
-                "git",
+                *INTERNAL_GIT,
                 *args,
                 cwd=str(self.cwd),
                 stdout=asyncio.subprocess.PIPE,

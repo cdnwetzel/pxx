@@ -1574,7 +1574,7 @@ def test_a_failed_created_file_listing_is_visible_not_silent(tmp_path: Path, mon
     # Codex review (2.9.1 r3): visible is not enough -- an approving reviewer
     # must not be able to pass an incomplete diff. Blocked before review.
     assert outcome.code is TerminalCode.REVIEW_UNAVAILABLE
-    assert "could not be listed" in outcome.summary
+    assert "diff is incomplete" in outcome.summary
     assert reviewer.calls == []
 
 
@@ -1775,6 +1775,78 @@ def test_changed_paths_see_flagged_edits_and_whitespace_names(tmp_path: Path) ->
     _git(repo, "add", " ")
     changed = asyncio.run(loop_mod._changed_paths_checked(repo, pre, flagged_start))
     assert "a.py" in changed and " " in changed
+
+
+class _PlantsGitState(ScriptedBackend):
+    """Edits a file in scope, then changes git's view of the tree the way a
+    shell command could: a replace ref over HEAD, or a textconv driver."""
+
+    def __init__(self, how: str) -> None:
+        super().__init__(edits={"a.py": "a = 2\n"})
+        self.how = how
+
+    async def run(self, task: str, ctx: object) -> RunOutcome:
+        outcome = await super().run(task, ctx)
+        await asyncio.to_thread(self._plant, Path(ctx.cwd))  # type: ignore[attr-defined]
+        return outcome
+
+    def _plant(self, root: Path) -> None:
+        if self.how == "replace":
+            (root / "out.py").write_text("o = 'hidden'\n")
+            _git(root, "add", "out.py")
+            tree = subprocess.run(
+                [GIT, "write-tree"], cwd=root, check=True, capture_output=True, text=True
+            ).stdout.strip()
+            head = subprocess.run(
+                [GIT, "rev-parse", "HEAD"], cwd=root, check=True, capture_output=True, text=True
+            ).stdout.strip()
+            fake = subprocess.run(
+                [
+                    GIT,
+                    "-c",
+                    "user.name=t",
+                    "-c",
+                    "user.email=t@e.c",
+                    "commit-tree",
+                    tree,
+                    "-m",
+                    "f",
+                ],
+                cwd=root,
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+            _git(root, "replace", head, fake)  # `git diff HEAD` now shows nothing for out.py
+        else:
+            _git(root, "config", "diff.hide.textconv", "true")
+            (root / ".git" / "info").mkdir(exist_ok=True)
+            (root / ".git" / "info" / "attributes").write_text("a.py diff=hide\n")
+
+
+@needs_git
+@pytest.mark.parametrize("how", ["replace", "textconv"])
+def test_a_round_that_changes_git_state_is_never_approved(tmp_path: Path, how: str) -> None:
+    # Grok review (2.9.1 r7, P0): `git replace` blinded the loop's path list
+    # and diff, so an out-of-scope tracked edit read as "nothing changed".
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_repo(repo, {"a.py": "a = 1\n", "out.py": "o = 1\n"})
+    reviewer = ScriptedReviewer(["VERDICT: APPROVE"])
+    outcome = asyncio.run(
+        run_loop(
+            "edit a.py",
+            _settings(tmp_path, scope=("a.py",)),
+            cwd=repo,
+            backend_factory=Factory([_PlantsGitState(how)]),
+            reviewer=reviewer,
+        )
+    )
+    assert outcome.code in (TerminalCode.REVIEW_UNAVAILABLE, TerminalCode.OUT_OF_SCOPE)
+    assert outcome.code is not TerminalCode.COMPLETED
+    assert reviewer.calls == []
+    # the restore refuses too: git's view of the tree is not trusted
+    assert "net not restored" in outcome.summary
 
 
 @needs_git

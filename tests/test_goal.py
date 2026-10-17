@@ -998,3 +998,75 @@ def test_artifact_reviewer_explicit_empty_paths_means_none_touched() -> None:
     assert art.payload["ok"] is True  # supplied-and-empty: the diff text is not consulted
     legacy = asyncio.run(DeterministicArtifactReviewer().review_artifact(diff, "a"))
     assert legacy.payload["ok"] is False  # no paths supplied: header scan still applies
+
+
+class _TouchesRoot(ScriptedBackend):
+    """A node that reaches past its worktree into the root repository."""
+
+    def __init__(self, root: Path, how: str) -> None:
+        super().__init__(edits={"note.txt": "n\n"})
+        self.root = root
+        self.how = how
+
+    async def run(self, task: str, ctx: object) -> RunOutcome:
+        await asyncio.to_thread(self._reach, Path(ctx.cwd))  # type: ignore[attr-defined]
+        return await super().run(task, ctx)
+
+    def _reach(self, worktree: Path) -> None:
+        if self.how == "flag":
+            subprocess.run(
+                [GIT, "update-index", "--assume-unchanged", "pxx/safety.py"],
+                cwd=self.root,
+                check=True,
+            )
+            (self.root / "pxx" / "safety.py").write_text("SAFE = False\n")
+        else:  # the node's worktree shares the root's git config
+            subprocess.run([GIT, "config", "diff.hide.textconv", "true"], cwd=worktree, check=True)
+
+
+@needs_git
+@pytest.mark.parametrize("how", ["flag", "config"])
+def test_artifact_review_rejects_what_git_cannot_show(tmp_path: Path, how: str) -> None:
+    # Grok review (2.9.1 r7, P0): an assume-unchanged edit of a protected file
+    # on the root index left `git diff` empty, and the goal COMPLETED.
+    repo = tmp_path / "repo"
+    _init_repo(repo, files={"pxx/safety.py": "SAFE = True\n"})
+    outcome = asyncio.run(
+        run_goal(
+            "goal",
+            _settings(tmp_path),
+            cwd=repo,
+            planner=_planner(_dag(_task("a"))),
+            backend_factory=Factory([_TouchesRoot(repo, how)]),
+        )
+    )
+    if how == "flag":
+        assert outcome.code is TerminalCode.OUT_OF_SCOPE
+        assert "index flags" in outcome.summary
+    else:  # the node's own loop already refuses its round
+        assert outcome.code is TerminalCode.REVIEW_UNAVAILABLE
+
+
+@needs_git
+def test_a_rejected_merge_is_rolled_back(tmp_path: Path) -> None:
+    # Grok review (2.9.1 r7, P2): an artifact rejection left the merged
+    # protected edit applied in the root tree.
+    repo = tmp_path / "repo"
+    _init_repo(repo, files={"pxx/safety.py": "SAFE = True\n"})
+    bus = EventBus()
+    outcome = asyncio.run(
+        run_goal(
+            "goal",
+            _settings(tmp_path),
+            cwd=repo,
+            planner=_planner(_dag(_task("a"))),
+            backend_factory=Factory([ScriptedBackend(edits={"pxx/safety.py": "SAFE = False\n"})]),
+            bus=bus,
+        )
+    )
+    assert outcome.code is TerminalCode.OUT_OF_SCOPE
+    assert (repo / "pxx" / "safety.py").read_text() == "SAFE = True\n"
+    restored = [
+        e.data for e in bus.history if e.kind == "gate_decision" and e.data.get("restored") is True
+    ]
+    assert restored and restored[0]["gate"] == "safety_net"

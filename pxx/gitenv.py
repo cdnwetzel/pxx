@@ -25,6 +25,21 @@ import os
 
 log = logging.getLogger("pxx.gitenv")
 
+#: The argv prefix for every git command pxx runs on its OWN behalf
+#: (measurement, scan, commit, restore -- never the model's shell): replace
+#: refs ignored, so a `git replace` made during the run cannot redirect what
+#: a SHA, a diff or a reset means; and no repository-controlled code -- no
+#: fsmonitor (which can also answer "nothing changed") and no hooks of any
+#: kind (`update-ref` and `reset` fire `reference-transaction`). 2.9.1 reviews.
+INTERNAL_GIT: tuple[str, ...] = (
+    "git",
+    "--no-replace-objects",
+    "-c",
+    "core.fsmonitor=false",
+    "-c",
+    "core.hooksPath=/dev/null",
+)
+
 _DEFAULT_GIT_TIMEOUT = 60.0
 
 SCRUBBED_GIT_VARS: tuple[str, ...] = (

@@ -206,3 +206,14 @@ def test_goal_git_reports_failure_on_timeout(monkeypatch, tmp_path: Path):
     monkeypatch.setattr(goalmod, "communicate_bounded", _raise_timeout)
     code, out = asyncio.run(goalmod._git(tmp_path, "apply"))
     assert code != 0 and "timed out" in out
+
+
+def test_internal_git_runs_no_repository_controlled_code() -> None:
+    # 2.9.1 reviews: every git command pxx runs on its own behalf ignores
+    # replace refs and runs no fsmonitor and no hooks.
+    from pxx.gitenv import INTERNAL_GIT
+
+    assert INTERNAL_GIT[0] == "git"
+    assert "--no-replace-objects" in INTERNAL_GIT
+    pairs = {INTERNAL_GIT[i + 1] for i, a in enumerate(INTERNAL_GIT[:-1]) if a == "-c"}
+    assert {"core.fsmonitor=false", "core.hooksPath=/dev/null"} <= pairs

@@ -118,7 +118,15 @@ class ScopeGate:
         """Write gate: permission must allow writes AND path must be in scope."""
         if not permission.can_write:
             raise ScopeViolation(f"writes not allowed in permission mode '{permission}'")
-        return self.check(path)
+        canon = self.check(path)
+        # The git directory is never a write target, whatever the scope: its
+        # config, attributes, hooks and refs decide what every git-based gate
+        # sees (filter drivers, replace refs) -- and none of it shows in
+        # `git status` (2.9.1 review). Case-folded: `.GIT/config` is the same
+        # file on a case-insensitive filesystem.
+        if any(part.casefold() == ".git" for part in canon.parts):
+            raise ScopeViolation(f"the git directory is never writable: {path}")
+        return canon
 
     def describe(self) -> str:
         parts = [str(p) for p in self._prefixes]

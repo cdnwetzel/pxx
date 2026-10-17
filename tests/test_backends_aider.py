@@ -885,7 +885,10 @@ def test_task_cancellation_kills_aider_and_still_reports_a_moved_head(tmp_path, 
 def test_real_git_the_fence_revert_is_not_redirected_by_git_replace(tmp_path):
     """Grok review (2.9.1 r6): K2b's `reset --hard <start>` followed a
     `git replace <start> <planted>` made during the run, leaving the planted
-    tree while reporting a revert."""
+    tree while reporting a revert. Since r7 a replace ref made during the run
+    stops the fence before it measures or reverts anything."""
+    from pxx.errors import BackendError
+
     repo = tmp_path / "repo"
     repo.mkdir()
     _git_repo(repo)
@@ -899,9 +902,10 @@ def test_real_git_the_fence_revert_is_not_redirected_by_git_replace(tmp_path):
     ctx = make_ctx(
         repo, settings=Settings(permission=PermissionMode.EDIT), scope=ScopeGate(repo, ("src",))
     )
-    outcome = asyncio.run(AiderBackend(aider_path=fake_aider(tmp_path, planter)).run("t", ctx))
-    assert outcome.code is TerminalCode.OUT_OF_SCOPE
-    assert not (repo / "planted.txt").exists()  # the start tree, not the planted one
+    with pytest.raises(BackendError, match=r"git configuration changed.*refs/replace") as exc:
+        asyncio.run(AiderBackend(aider_path=fake_aider(tmp_path, planter)).run("t", ctx))
+    assert exc.value.code is TerminalCode.EDIT_FAILED
+    assert not (repo / "planted.txt").exists()  # nothing reset onto the planted tree
     assert (repo / "converter.py").read_text() == "x = 1\n"
 
 

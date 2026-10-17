@@ -17,7 +17,7 @@ import os
 from collections.abc import Callable, Mapping
 from pathlib import Path
 
-from .gitenv import git_env
+from .gitenv import INTERNAL_GIT, git_env
 
 
 def _sha256_file(path: Path) -> str | None:
@@ -37,7 +37,7 @@ async def _git(cwd: Path, *args: str) -> str | None:
     """Run a git command; return stripped stdout or None on any failure."""
     try:
         proc = await asyncio.create_subprocess_exec(
-            "git",
+            *INTERNAL_GIT,
             "-C",
             str(cwd),
             *args,
@@ -58,7 +58,7 @@ async def _git_raw(cwd: Path, *args: str) -> str | None:
     strip could clip a path's trailing whitespace."""
     try:
         proc = await asyncio.create_subprocess_exec(
-            "git",
+            *INTERNAL_GIT,
             "-C",
             str(cwd),
             *args,
@@ -88,7 +88,7 @@ async def _git_status_entries(cwd: Path) -> list[tuple[str, str]] | None:
     """
     try:
         proc = await asyncio.create_subprocess_exec(
-            "git",
+            *INTERNAL_GIT,
             "-C",
             str(cwd),
             "status",
@@ -150,6 +150,9 @@ async def worktree_snapshot(cwd: Path) -> dict | None:
     flagged = await flagged_state(cwd)
     if flagged is None:
         return None
+    control = await git_control_state(cwd)
+    if control is None:
+        return None
     for record in diff.split("\0"):
         parts = record.split("\t", 2)
         if len(parts) == 3 and parts[2]:
@@ -160,7 +163,13 @@ async def worktree_snapshot(cwd: Path) -> dict | None:
             # Content hash too: equal-VOLUME edits (1+1 -> 1+1) are still
             # caught — the trap case a pure numstat comparison misses.
             content[rel] = _sha256_file(cwd / rel)
-    return {"untracked": untracked, "numstat": numstat, "content": content, "flagged": flagged}
+    return {
+        "untracked": untracked,
+        "numstat": numstat,
+        "content": content,
+        "flagged": flagged,
+        "control": control,
+    }
 
 
 async def worktree_delta(cwd: Path, start: dict) -> tuple[list[str], int]:
@@ -181,6 +190,8 @@ async def worktree_delta_checked(cwd: Path, start: dict) -> tuple[list[str], int
     now = await worktree_snapshot(cwd)
     if now is None:
         return None
+    if "control" in start and git_control_changed(start["control"], now["control"]):
+        return None  # git's own view of the tree can no longer be trusted
     changed: list[str] = []
     diff_lines = 0
     for rel, lines in now["numstat"].items():
@@ -243,6 +254,60 @@ async def _flagged_lines(cwd: Path, rel: str) -> int | None:
         return 0  # not in HEAD either: nothing was deleted
     blob = await _git_raw(cwd, "cat-file", "blob", meta[2])
     return None if blob is None else len(blob.splitlines())
+
+
+#: Repository-local files that change what git REPORTS or RUNS -- filter,
+#: textconv and diff drivers, attributes, excludes, sparse patterns, grafts,
+#: shallow boundaries -- in the per-worktree and the common git directory.
+#: None of them shows in `git status`, so a change made during the run (a
+#: shell `git config`, a write the scope gate missed) is found only by
+#: comparing two :func:`git_control_state` fingerprints (2.9.1 review).
+_CONTROL_FILES = (
+    "config",
+    "config.worktree",
+    "info/attributes",
+    "info/exclude",
+    "info/sparse-checkout",
+    "info/grafts",
+    "shallow",
+)
+
+
+async def git_control_state(cwd: Path) -> dict[str, str] | None:
+    """Fingerprint of the repository's git control state: each of
+    :data:`_CONTROL_FILES` (content hash or ``"<absent>"``) plus the replace
+    refs. Compare two with :func:`git_control_changed`; any difference means
+    git's view of the tree -- what status, diff, a hash or a checkout reports
+    -- may have been redirected during the run, so callers that gate on that
+    view must fail closed. None when it cannot be read (fail closed too)."""
+    dirs = await _git_raw(
+        cwd, "rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir"
+    )
+    lines = [line for line in (dirs or "").split("\n") if line]
+    if len(lines) != 2:
+        return None
+    state: dict[str, str] = {}
+    for label, base in zip(("git-dir", "common-dir"), lines, strict=True):
+        for name in _CONTROL_FILES:
+            target = Path(base) / name
+            try:
+                state[f"{label}/{name}"] = hashlib.sha256(target.read_bytes()).hexdigest()[:16]
+            except FileNotFoundError:
+                state[f"{label}/{name}"] = "<absent>"
+            except OSError:
+                return None  # unreadable (a directory, permissions): unknown
+    replace = await _git_raw(
+        cwd, "for-each-ref", "--format=%(refname) %(objectname)", "refs/replace/"
+    )
+    if replace is None:
+        return None
+    state["refs/replace"] = hashlib.sha256(replace.encode()).hexdigest()[:16]
+    return state
+
+
+def git_control_changed(start: Mapping[str, str], now: Mapping[str, str]) -> list[str]:
+    """Names of the :func:`git_control_state` entries that differ."""
+    return sorted(k for k in set(start) | set(now) if start.get(k) != now.get(k))
 
 
 #: Fingerprint for a flagged entry absent from the working tree.
@@ -341,7 +406,7 @@ async def new_file_patch(cwd: Path, rel: str, *, binary: bool = False) -> str:
         )
     if target.is_dir():
         return ""
-    args = ["git", "-C", str(cwd), "diff", "--no-index", "--no-renames"]
+    args = [*INTERNAL_GIT, "-C", str(cwd), "diff", "--no-index", "--no-renames", "--no-ext-diff"]
     if binary:
         args.append("--binary")
     args += ["--", "/dev/null", rel]

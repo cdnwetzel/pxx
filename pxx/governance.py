@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .errors import PxxError
-from .gitenv import git_env
+from .gitenv import INTERNAL_GIT, git_env
 
 log = logging.getLogger("pxx.governance")
 
@@ -250,9 +250,9 @@ def _git_bytes(root: Path, *args: str) -> bytes:
     """Run git; return raw stdout. Raises PxxError on any failure (fail-closed)."""
     try:
         proc = subprocess.run(
-            # replace refs ignored and no fsmonitor hook: the scan must see
-            # the real objects, and must not run repository-controlled code
-            ["git", "--no-replace-objects", "-c", "core.fsmonitor=false", *args],
+            # INTERNAL_GIT: the scan must see the real objects, and must not
+            # run repository-controlled code
+            [*INTERNAL_GIT, *args],
             cwd=root,
             capture_output=True,
             timeout=15,

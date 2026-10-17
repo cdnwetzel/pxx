@@ -18,11 +18,12 @@ import os
 import tempfile
 import time
 from asyncio.subprocess import PIPE
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
 
 from .errors import PxxError
-from .gitenv import communicate_bounded, git_env
+from .gitenv import INTERNAL_GIT, communicate_bounded, git_env
 
 log = logging.getLogger("pxx.safety_net")
 
@@ -47,22 +48,16 @@ class SafetyNet:
     #: The start commit's TREE: a second, object-level check on what a restore
     #: would bring back. None: unknown (old callers).
     head_tree: str | None = None
+    #: The repository's git control state when the net was tied
+    #: (:func:`pxx.worktree.git_control_state`): filter/diff drivers,
+    #: attributes, excludes, replace refs. A run that changed it can make a
+    #: checkout write other bytes than the tree holds, so restore and commit
+    #: refuse (2.9.1 review). None: unknown (old callers).
+    control_state: dict[str, str] | None = None
 
 
-#: Every safety-net / commit git command: replace refs ignored (a `git
-#: replace` made during the run must not redirect what a SHA means), and no
-#: repository-controlled code -- no fsmonitor, and NO HOOKS of any kind (not
-#: only pre-commit: `update-ref` and `reset` fire `reference-transaction`,
-#: and a hook planted during the run is invisible to every scope check) --
-#: 2.9.1 reviews.
-_GIT_BASE = (
-    "git",
-    "--no-replace-objects",
-    "-c",
-    "core.fsmonitor=false",
-    "-c",
-    "core.hooksPath=/dev/null",
-)
+#: Every safety-net / commit git command (see :data:`INTERNAL_GIT`).
+_GIT_BASE = INTERNAL_GIT
 
 
 async def _git_io(
@@ -149,6 +144,8 @@ async def tie_safety_net(cwd: Path, run_id: str) -> SafetyNet | None:
         return None
     head_ref = await _git(cwd, "symbolic-ref", "-q", "HEAD")
     head_tree = await _git(cwd, "rev-parse", "--verify", "HEAD^{tree}")
+    from .worktree import git_control_state
+
     return SafetyNet(
         tag=tag,
         stash_message=stash_message,
@@ -156,6 +153,7 @@ async def tie_safety_net(cwd: Path, run_id: str) -> SafetyNet | None:
         head_ref=(head_ref or "").strip(),
         stash_sha=(stash_sha or "").strip() or None,
         head_tree=(head_tree or "").strip() or None,
+        control_state=await git_control_state(cwd),
     )
 
 
@@ -210,6 +208,43 @@ async def head_moved_since(cwd: Path, net: SafetyNet | None) -> str:
     return ""
 
 
+async def git_state_changed_since(cwd: Path, control_start: dict[str, str] | None) -> str:
+    """Why the repository's git control state no longer matches
+    ``control_start`` ("" when it does, or when the baseline is unknown).
+    An unreadable current state counts as changed: nothing is reset or
+    committed on a view of the tree that cannot be checked."""
+    if control_start is None:
+        return ""
+    from .worktree import git_control_changed, git_control_state
+
+    now = await git_control_state(cwd)
+    if now is None:
+        return "the repository's git configuration could not be read"
+    changed = git_control_changed(control_start, now)
+    if changed:
+        return (
+            "the repository's git configuration changed during the run (" + ", ".join(changed) + ")"
+        )
+    return ""
+
+
+async def restore_blocker(cwd: Path, net: SafetyNet | None) -> tuple[str, str]:
+    """(reason, detail) for why :func:`restore_safety_net` must not run, or
+    ``("", "")``. Reasons: ``head_moved`` (history, the branch, the tag or
+    the start tree moved) and ``git_state_changed`` (filter/diff drivers,
+    attributes, excludes or replace refs changed -- a checkout could then
+    write other bytes than the start tree holds)."""
+    if net is None:
+        return "", ""
+    moved = await head_moved_since(cwd, net)
+    if moved:
+        return "head_moved", moved
+    changed = await git_state_changed_since(cwd, net.control_state)
+    if changed:
+        return "git_state_changed", changed
+    return "", ""
+
+
 async def restore_safety_net(cwd: Path, net: SafetyNet | None) -> bool:
     """Restore the user's pre-run working tree — for use on an ABORT (a
     non-COMPLETED outcome), so a run that produced nothing worth keeping does
@@ -227,17 +262,22 @@ async def restore_safety_net(cwd: Path, net: SafetyNet | None) -> bool:
     never pop onto an unexpected tree); any git failure leaves tag/stash intact
     for manual recovery. Returns True when something was restored.
 
-    Never rewrites history: if HEAD moved or the branch changed during the run
-    (:func:`head_moved_since`), nothing is reset or popped -- the tag and the
-    stash stay for the operator, and the caller reports why.
+    Never rewrites history: if HEAD moved or the branch changed during the run,
+    or the repository's git configuration changed (:func:`restore_blocker`),
+    nothing is reset or popped -- the tag and the stash stay for the
+    operator, and the caller reports why.
     """
     if net is None or (net.tag is None and not net.stash_message):
         return False
-    if await head_moved_since(cwd, net):
+    reason, _ = await restore_blocker(cwd, net)
+    if reason:
         return False
     did = False
     if net.tag:
-        if await _git(cwd, "reset", "--hard", net.tag) is None:
+        # Reset to the SHA that was just checked, never the tag NAME: a
+        # re-tag between the check and the reset is not covered (2.9.1
+        # review). Old nets without a recorded SHA fall back to the tag.
+        if await _git(cwd, "reset", "--hard", net.head_sha or net.tag) is None:
             return False  # reset failed — do NOT pop onto an unexpected tree
         did = True
     if net.stash_message:
@@ -247,12 +287,64 @@ async def restore_safety_net(cwd: Path, net: SafetyNet | None) -> bool:
     return did
 
 
+async def _filtered_paths(cwd: Path, names: list[str]) -> list[str] | None:
+    """The ``names`` that carry a git ``filter`` attribute (None on failure)."""
+    if not names:
+        return []
+    out = await _git_io(
+        cwd,
+        "check-attr",
+        "-z",
+        "--stdin",
+        "filter",
+        stdin=b"\0".join(map(os.fsencode, names)) + b"\0",
+        raw=True,
+    )
+    if out is None:
+        return None
+    fields = out.split("\0")
+    return [
+        fields[i]
+        for i in range(0, len(fields) - 2, 3)
+        if fields[i + 2] not in ("unspecified", "unset")
+    ]
+
+
+async def settle_failed_run(
+    cwd: Path, net: SafetyNet | None, emit: Callable[[dict], Awaitable[None]]
+) -> str:
+    """After a non-COMPLETED outcome: restore the pre-run tree
+    (:func:`restore_safety_net`) or, when :func:`restore_blocker` refuses,
+    leave everything for the operator. Emits the ``safety_net``
+    ``gate_decision`` either way and returns the summary suffix to append
+    ("" when there is nothing to say). One implementation for the session,
+    the loop and the goal path."""
+    if net is None:
+        return ""
+    reason, detail = await restore_blocker(cwd, net)
+    if reason:
+        await emit(
+            {
+                "gate": "safety_net",
+                "allowed": False,
+                "restored": False,
+                "reason": reason,
+                "tag": net.tag or "",
+            }
+        )
+        return f" [net not restored: {detail}; the start is tagged {net.tag or '(untagged)'}]"
+    if await restore_safety_net(cwd, net):
+        await emit({"gate": "safety_net", "allowed": True, "restored": True, "tag": net.tag or ""})
+    return ""
+
+
 async def commit_session_work(
     cwd: Path,
     *,
     task_preview: str,
     net_tag: str | None,
     only: set[str] | None = None,
+    control_start: dict[str, str] | None = None,
 ) -> str | None:
     """Commit the session's work after a COMPLETED outcome; return the sha.
 
@@ -277,6 +369,12 @@ async def commit_session_work(
     """
     if only is not None and not only:
         return None  # the session changed nothing
+    # A run that changed filter drivers, attributes or replace refs can make
+    # git hash or report other bytes than the tree holds (2.9.1 review).
+    changed = await git_state_changed_since(cwd, control_start)
+    if changed:
+        log.warning("auto-commit skipped: %s; nothing committed", changed)
+        return None
     # The commit is built from blobs pxx hashed ONCE and scanned, in a
     # temporary index, with `commit-tree` (2.9.1 reviews): `git commit --
     # <paths>` re-read the working tree (and re-ran clean filters) AFTER the
@@ -295,6 +393,19 @@ async def commit_session_work(
         names = {e[3:] for e in listing.split("\0") if len(e) > 3}
     else:
         names = set(only)
+    # A `filter` attribute makes `hash-object --path` run a clean command on
+    # the bytes BEFORE the scan -- it can see a secret, rewrite what is
+    # committed, or write elsewhere (2.9.1 review). Such paths are committed
+    # by the operator, never by pxx; eol/ident conversions stay (no code).
+    filtered = await _filtered_paths(cwd, sorted(names))
+    if filtered is None or filtered:
+        log.warning(
+            "auto-commit skipped: %s; nothing committed",
+            "could not read git attributes"
+            if filtered is None
+            else f"{len(filtered)} path(s) carry a git filter attribute",
+        )
+        return None
     entries: list[tuple[str, str, str]] = []  # (mode, sha, path); mode "0" = delete
     for rel in sorted(names):
         target = cwd / rel
@@ -407,7 +518,10 @@ async def commit_session_work(
 __all__ = [
     "SafetyNet",
     "commit_session_work",
+    "git_state_changed_since",
     "head_moved_since",
+    "restore_blocker",
     "restore_safety_net",
+    "settle_failed_run",
     "tie_safety_net",
 ]

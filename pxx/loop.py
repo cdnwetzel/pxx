@@ -32,7 +32,7 @@ from .backends.base import AgentBackend, DoneCheck
 from .config import Settings
 from .errors import BudgetExceeded
 from .events import Event, EventBus
-from .gitenv import communicate_bounded, git_env
+from .gitenv import INTERNAL_GIT, communicate_bounded, git_env
 from .intent import resolve_run_intent
 from .manifest import RunDirWriter
 from .outcome import RunOutcome, TerminalCode
@@ -75,11 +75,18 @@ def _finding_keys(finds: tuple[Finding, ...]) -> frozenset[tuple]:
     return frozenset((f.file, f.line, f.message[:40]) for f in finds)
 
 
+#: Flags for every diff the loop reviews or replays: real paths (no rename
+#: pairing) and git's own patch text -- never an external diff program or a
+#: textconv filter from the repository's config, which can rewrite or hide
+#: what the reviewer and the budget see (2.9.1 review).
+_PLAIN_DIFF = ("--no-renames", "--no-ext-diff", "--no-textconv")
+
+
 async def _git(root: Path, *args: str) -> str | None:
     """Run a git command; return stdout, or None on any failure (incl. no git)."""
     try:
         proc = await asyncio.create_subprocess_exec(
-            "git",
+            *INTERNAL_GIT,
             *args,
             cwd=root,
             stdout=asyncio.subprocess.PIPE,
@@ -188,6 +195,7 @@ async def _diff_since(
     pre_sha: str | None,
     new_since: dict[str, str | None] | None = None,
     flagged_start: dict[str, str] | None = None,
+    control_start: dict[str, str] | None = None,
 ) -> str:
     """Diff of the working tree against the pre-loop state (renames expanded
     to delete+add so a rename can't shrink the accounted diff), PLUS a
@@ -197,10 +205,10 @@ async def _diff_since(
     the diff budget missed new files -- for every backend that leaves its
     work uncommitted (native always; aider since 2.9.1)."""
     if pre_sha:
-        out = await _git(root, "diff", "--no-renames", pre_sha)
+        out = await _git(root, "diff", *_PLAIN_DIFF, pre_sha)
     else:
-        out = await _git(root, "diff", "--no-renames", "HEAD") or await _git(
-            root, "diff", "--no-renames"
+        out = await _git(root, "diff", *_PLAIN_DIFF, "HEAD") or await _git(
+            root, "diff", *_PLAIN_DIFF
         )
     text = out or ""
     if pre_sha and out is None:
@@ -225,6 +233,10 @@ async def _diff_since(
                 log.warning("loop: could not read the patch for created file %s", rel)
                 patch = _INCOMPLETE_DIFF_MARK + "\n"
             text = (text + "\n" if text and not text.endswith("\n") else text) + patch
+    if await _git_state_changed(root, control_start):
+        text = (text + "\n" if text and not text.endswith("\n") else text) + (
+            _INCOMPLETE_DIFF_MARK + "\n"
+        )
     if flagged_start is not None and await _flagged_edits_unreviewable(root, flagged_start):
         text = (
             (text + "\n" if text and not text.endswith("\n") else text)
@@ -232,6 +244,18 @@ async def _diff_since(
             + "\n"
         )
     return text
+
+
+async def _git_state_changed(root: Path, control_start: dict[str, str] | None) -> bool:
+    """Whether the repository's git control state (filter/diff drivers,
+    attributes, excludes, replace refs) changed since ``control_start`` --
+    then no diff git produces can be trusted as the round's evidence (2.9.1
+    review). False when no baseline was given."""
+    if control_start is None:
+        return False
+    from .safety_net import git_state_changed_since
+
+    return bool(await git_state_changed_since(root, control_start))
 
 
 async def _flagged_edits_unreviewable(root: Path, flagged_start: dict[str, str]) -> bool:
@@ -256,6 +280,7 @@ async def _record_diff(
     pre_sha: str | None,
     new_since: dict[str, str | None] | None = None,
     flagged_start: dict[str, str] | None = None,
+    control_start: dict[str, str] | None = None,
 ) -> str:
     """The loop's work as a patch ``git apply`` can replay: tracked changes
     against the pre-loop state PLUS every untracked file as a new-file hunk.
@@ -270,11 +295,13 @@ async def _record_diff(
     # --binary so a created or changed binary file is replayable, not a
     # "Binary files differ" stub that `git apply` cannot use.
     ref = pre_sha or "HEAD"
-    tracked = await _git(root, "diff", "--no-renames", "--binary", ref)
+    tracked = await _git(root, "diff", *_PLAIN_DIFF, "--binary", ref)
     # Never a patch that LOOKS complete: a failed tracked diff, or edits behind
     # index flags, are marked (2.9.1 reviews).
     parts = [tracked if tracked is not None else _INCOMPLETE_DIFF_MARK + "\n"]
-    if flagged_start is not None and await _flagged_edits_unreviewable(root, flagged_start):
+    if (
+        flagged_start is not None and await _flagged_edits_unreviewable(root, flagged_start)
+    ) or await _git_state_changed(root, control_start):
         parts.append("\n" + _INCOMPLETE_DIFF_MARK + "\n")
     from .worktree import new_file_patch, new_files_since
 
@@ -592,6 +619,7 @@ async def run_loop(
     # every created file is not.
     untracked_start: dict[str, str | None] | None = None
     flagged_start: dict[str, str] | None = None
+    control_start: dict[str, str] | None = None
     if in_repo:
         from .worktree import untracked_fingerprints
 
@@ -601,6 +629,11 @@ async def run_loop(
         # Index-flag states, same moment and same reason (fail closed: an
         # unreadable state is an empty baseline, so any flagged file counts).
         flagged_start = await flagged_state(root) or {}
+        from .worktree import git_control_state
+
+        # The git control state, same moment; unreadable is an empty
+        # baseline, so every later comparison fails closed.
+        control_start = await git_control_state(root) or {}
 
     net_suffix = ""
     if net is not None:
@@ -635,7 +668,9 @@ async def run_loop(
     if in_repo and command and settings.done_signal:
 
         async def _run_done_check() -> bool:
-            diff_now = await _diff_since(root, pre_sha, untracked_start, flagged_start)
+            diff_now = await _diff_since(
+                root, pre_sha, untracked_start, flagged_start, control_start
+            )
             if _diff_incomplete(diff_now):
                 return False  # never "done" on evidence that may be missing files
             return await _edit_objectively_done(
@@ -658,7 +693,9 @@ async def run_loop(
         # while the tree still holds the loop's work, so a restore below
         # discards nothing that was not already on disk under runs/.
         try:
-            loop_diff = await _record_diff(root, pre_sha, untracked_start, flagged_start)
+            loop_diff = await _record_diff(
+                root, pre_sha, untracked_start, flagged_start, control_start
+            )
             if loop_diff.strip():
                 loop_writer.write_diff(loop_diff)
         except Exception:
@@ -684,7 +721,7 @@ async def run_loop(
         )
         if settings.auto_commit and outcome.code is TerminalCode.COMPLETED:
             from .safety_net import commit_session_work
-            from .worktree import worktree_delta
+            from .worktree import worktree_delta_checked
 
             sha = None
             if worktree_start is None:
@@ -695,13 +732,22 @@ async def run_loop(
                     "(git failed) — nothing committed"
                 )
             else:
-                changed, _ = await worktree_delta(root, worktree_start)
-                sha = await commit_session_work(
-                    root,
-                    task_preview=task,
-                    net_tag=net.tag if net else None,
-                    only=set(changed),  # the loop's own delta, never baseline dirt
-                )
+                delta = await worktree_delta_checked(root, worktree_start)
+                if delta is None:
+                    # Unmeasurable -- git failed, or the run changed the
+                    # repository's git configuration: commit nothing.
+                    log.warning(
+                        "auto-commit skipped: the loop's changes could not be "
+                        "measured — nothing committed"
+                    )
+                else:
+                    sha = await commit_session_work(
+                        root,
+                        task_preview=task,
+                        net_tag=net.tag if net else None,
+                        only=set(delta[0]),  # the loop's own delta, never baseline dirt
+                        control_start=worktree_start.get("control"),
+                    )
             if sha:
                 await parent_bus.emit("observation", {"source": "auto_commit", "sha": sha})
                 outcome = replace(outcome, summary=f"{outcome.summary} [committed {sha[:8]}]")
@@ -711,31 +757,14 @@ async def run_loop(
             # a tag-only net is reset too) instead of stranding it / leaving the
             # failed run's garbage. On COMPLETED the net is left for the user to
             # reconcile with pxx's work (pop is their move).
-            from .safety_net import head_moved_since, restore_safety_net
+            from .safety_net import settle_failed_run
 
-            moved = await head_moved_since(root, net)
-            if moved:
-                # Never reset over history the run did not own (2.9.1 review).
-                await parent_bus.emit(
-                    "gate_decision",
-                    {
-                        "gate": "safety_net",
-                        "allowed": False,
-                        "restored": False,
-                        "reason": "head_moved",
-                        "tag": net.tag or "",
-                    },
-                )
-                outcome = replace(
-                    outcome,
-                    summary=f"{outcome.summary} [net not restored: {moved}; the start is "
-                    f"tagged {net.tag or '(untagged)'}]",
-                )
-            elif await restore_safety_net(root, net):
-                await parent_bus.emit(
-                    "gate_decision",
-                    {"gate": "safety_net", "allowed": True, "restored": True, "tag": net.tag or ""},
-                )
+            async def _emit_net(data: dict) -> None:
+                await parent_bus.emit("gate_decision", data)
+
+            suffix = await settle_failed_run(root, net, _emit_net)
+            if suffix:
+                outcome = replace(outcome, summary=outcome.summary + suffix)
         return outcome
 
     baseline_failures: set[str] | None = None
@@ -851,7 +880,7 @@ async def run_loop(
             # heals (the budget is spent) and never rescues a failing run.
             if outcome.code is TerminalCode.BUDGET_EXCEEDED and in_repo:
                 salvage_diff = (
-                    await _diff_since(root, pre_sha, untracked_start, flagged_start)
+                    await _diff_since(root, pre_sha, untracked_start, flagged_start, control_start)
                 ).strip()
                 # No salvage on an incomplete diff (2.9.1 review): recovery
                 # must not approve what the main path would block.
@@ -945,7 +974,9 @@ async def run_loop(
         # Guard 2: diff accounting against the pre-loop git state.
         diff_text = ""
         if in_repo:
-            diff_text = await _diff_since(root, pre_sha, untracked_start, flagged_start)
+            diff_text = await _diff_since(
+                root, pre_sha, untracked_start, flagged_start, control_start
+            )
             if _diff_incomplete(diff_text):
                 # Fail closed (2.9.1 review): a diff that cannot list the
                 # files the round created can be neither budgeted nor
@@ -957,8 +988,8 @@ async def run_loop(
                 return await _complete(
                     _outcome(
                         TerminalCode.REVIEW_UNAVAILABLE,
-                        f"round {round_no}: the files this round created could not be "
-                        "listed (git failed); not approving an incomplete diff",
+                        f"round {round_no}: this round's diff is incomplete (git failed, or "
+                        "edits or git configuration it cannot show changed); not approving it",
                         round_no,
                         findings,
                     )
@@ -1123,7 +1154,9 @@ async def run_loop(
                         "current_head": head_now.strip()[:12],
                     },
                 )
-                diff_text = await _diff_since(root, pre_sha, untracked_start, flagged_start)
+                diff_text = await _diff_since(
+                    root, pre_sha, untracked_start, flagged_start, control_start
+                )
                 if _diff_incomplete(diff_text):
                     await parent_bus.emit(
                         "gate_decision",
@@ -1132,8 +1165,8 @@ async def run_loop(
                     return await _complete(
                         _outcome(
                             TerminalCode.REVIEW_UNAVAILABLE,
-                            f"round {round_no}: the files this round created could not be "
-                            "listed (git failed); not approving an incomplete diff",
+                            f"round {round_no}: this round's diff is incomplete (git failed, or "
+                            "edits or git configuration it cannot show changed); not approving it",
                             round_no,
                             findings,
                         )

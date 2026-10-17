@@ -7,6 +7,35 @@ preserved in git (tag `v1.3.3` and earlier).
 
 ### Security
 
+- **Git state the run can change no longer steers pxx's own git.** Filter,
+  textconv and diff drivers (`.git/config`), `.git/info/attributes`,
+  excludes and `git replace` refs change what git reports -- a smudge filter
+  made a "restore" check out other bytes than the start tree, a replace ref
+  hid an out-of-scope tracked edit from the scope fence and the loop, and a
+  clean filter ran on the bytes pxx was about to commit -- and none of them
+  shows in `git status`. Now:
+  - a `.git` directory (any case) is never a `write_file` / `edit_file` /
+    `delete_file` target, whatever the scope;
+  - every git command pxx runs on its own behalf (measurement, review diff,
+    scan, commit, restore -- never the model's shell) ignores replace refs and
+    runs no fsmonitor and no hooks, and every reviewed or replayed diff is
+    git's own patch text (`--no-ext-diff --no-textconv`);
+  - the repository's git control state is fingerprinted when the run starts
+    (`SafetyNet.control_state`); if it changed, the loop's round is
+    `REVIEW_UNAVAILABLE`, the aider fence ends `EDIT_FAILED` without
+    measuring or reverting, the goal's artifact review rejects, `--commit`
+    commits nothing, and the safety net is not restored (`gate_decision`
+    `safety_net`, `reason: "git_state_changed"`) -- the tag and stash stay;
+  - `--commit` skips any path with a git `filter` attribute (e.g. LFS) rather
+    than run its clean command; commit those by hand;
+  - a restore resets to the start commit's SHA, not the tag name, so a
+    re-tag between the check and the reset cannot redirect it.
+- **The goal path rejects edits git cannot show, and rolls a rejected merge
+  back.** An `assume-unchanged` edit of a protected file on the root index
+  left `git diff` empty and the goal `COMPLETED`; the artifact review now
+  compares index-flag states too. A merge the artifact review rejects is
+  rolled back to the pre-goal tree through the safety net (a merge conflict
+  or a test regression keeps its merged state, as before).
 - **The secrets gate scans what is actually committed.** `scan_staged` (used
   by `--commit` and `pxx check`) listed staged names without `-z`, so git
   C-quoted any non-ASCII or unusual name (`café.txt`, a quote, a newline, a

@@ -556,3 +556,95 @@ def test_pxx_commit_runs_no_reference_transaction_hook(tmp_path: Path) -> None:
     assert sha
     assert not marker.exists()  # the hook never ran
     assert (repo / "pxx" / "safety.py").read_text() == "SAFE = True\n"
+
+
+def _plant_filter(repo: Path, attr_path: str, clean: str, smudge: str = "cat") -> None:
+    """A filter driver + attribute, both invisible to `git status`."""
+    _git(repo, "config", "filter.evil.clean", clean)
+    _git(repo, "config", "filter.evil.smudge", smudge)
+    (repo / ".git" / "info").mkdir(exist_ok=True)
+    (repo / ".git" / "info" / "attributes").write_text(f"{attr_path} filter=evil\n")
+
+
+@needs_git
+def test_restore_refuses_after_the_run_planted_a_smudge_filter(tmp_path: Path) -> None:
+    # Grok review (2.9.1 r7, P0): `reset --hard` under a smudge filter planted
+    # during the run checked out other bytes than the tree holds, and the
+    # restore reported success with `git status` clean.
+    from pxx.safety_net import restore_blocker, restore_safety_net
+
+    repo = tmp_path / "repo"
+    _init_repo(repo, files={"guard.py": "SAFE = True\n"})
+    net = run(tie_safety_net(repo, "run-smudge"))
+    _plant_filter(repo, "guard.py", clean="cat", smudge="sed s/True/False/")
+    (repo / "guard.py").write_text("SAFE = 1\n")  # the failed run's edit
+    reason, detail = run(restore_blocker(repo, net))
+    assert reason == "git_state_changed" and "info/attributes" in detail
+    assert run(restore_safety_net(repo, net)) is False
+    assert (repo / "guard.py").read_text() == "SAFE = 1\n"  # nothing smudged in
+
+
+@needs_git
+def test_commit_never_runs_a_clean_filter(tmp_path: Path) -> None:
+    # Grok review (2.9.1 r7, P0): `hash-object --path=<rel>` ran a clean
+    # filter on the bytes before the scan; the filter rewrote a protected
+    # file and hid it behind assume-unchanged. Even a filter that predates
+    # the run (the control state is unchanged) must not run for pxx's commit.
+    from pxx.worktree import git_control_state
+
+    repo = tmp_path / "repo"
+    _init_repo(repo, files={"ok.py": "x = 1\n", "guard.py": "SAFE = True\n"})
+    marker = tmp_path / "filter-ran"
+    _plant_filter(repo, "ok.py", clean=f"sh -c 'touch {marker}; cat'")
+    control = run(git_control_state(repo))
+    (repo / "ok.py").write_text("x = 2\n")
+    head = _git(repo, "rev-parse", "HEAD")
+    sha = run(
+        commit_session_work(
+            repo, task_preview="t", net_tag=None, only={"ok.py"}, control_start=control
+        )
+    )
+    assert sha is None
+    assert _git(repo, "rev-parse", "HEAD") == head
+    assert not marker.exists()  # the clean command never ran
+
+
+@needs_git
+def test_commit_refuses_after_the_git_configuration_changed(tmp_path: Path) -> None:
+    from pxx.worktree import git_control_state
+
+    repo = tmp_path / "repo"
+    _init_repo(repo, files={"ok.py": "x = 1\n"})
+    control = run(git_control_state(repo))
+    _git(repo, "config", "core.attributesFile", str(tmp_path / "elsewhere"))
+    (repo / "ok.py").write_text("x = 2\n")
+    sha = run(
+        commit_session_work(
+            repo, task_preview="t", net_tag=None, only={"ok.py"}, control_start=control
+        )
+    )
+    assert sha is None
+
+
+@needs_git
+def test_restore_resets_to_the_checked_sha_not_the_tag_name(tmp_path: Path, monkeypatch) -> None:
+    # Grok review (2.9.1 r7, P2): the tag was checked, then the reset named
+    # the tag -- a re-tag between the two was not covered.
+    import pxx.safety_net as sn
+
+    repo = tmp_path / "repo"
+    _init_repo(repo, files={"a.py": "x = 1\n"})
+    net = run(tie_safety_net(repo, "run-sha"))
+    (repo / "a.py").write_text("x = 2\n")
+    seen: list[tuple[str, ...]] = []
+    real = sn._git
+
+    async def spy(cwd, *args):
+        seen.append(args)
+        return await real(cwd, *args)
+
+    monkeypatch.setattr(sn, "_git", spy)
+    assert run(sn.restore_safety_net(repo, net)) is True
+    resets = [a for a in seen if a[:2] == ("reset", "--hard")]
+    assert resets == [("reset", "--hard", net.head_sha)]
+    assert (repo / "a.py").read_text() == "x = 1\n"

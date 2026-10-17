@@ -26,7 +26,7 @@ from typing import ClassVar
 
 from ..config import ModelRef
 from ..errors import BackendError, BackendUnavailable
-from ..gitenv import git_env
+from ..gitenv import INTERNAL_GIT, git_env
 from ..outcome import RunOutcome, TerminalCode
 from ..safety import PermissionMode
 from .base import BackendCapabilities, SessionContext
@@ -91,16 +91,10 @@ class AiderBackend:
     async def _git(self, cwd: Path, *args: str) -> str | None:
         """Run a git command; return stdout or None when unavailable/failed."""
         try:
-            # Replace refs ignored and no fsmonitor hook (2.9.1 review): what
-            # a SHA means -- and what `reset --hard` checks out -- must not be
-            # redirectable by a `git replace` made during the run.
+            # INTERNAL_GIT: what a SHA means -- and what `reset --hard` checks
+            # out -- must not be redirectable by state made during the run.
             proc = await asyncio.create_subprocess_exec(
-                "git",
-                "--no-replace-objects",
-                "-c",
-                "core.fsmonitor=false",
-                "-c",
-                "core.hooksPath=/dev/null",  # the K2b reset moves refs: no hooks
+                *INTERNAL_GIT,
                 *args,
                 cwd=cwd,
                 stdout=PIPE,
@@ -480,6 +474,18 @@ class AiderBackend:
         the run changed it (worktree_delta). Returns (diff lines, paths)."""
         if start is None:
             return 0, []
+        from ..safety_net import git_state_changed_since
+
+        changed = await git_state_changed_since(ctx.cwd, start.get("control"))
+        if changed:
+            # Filter/diff drivers, attributes or replace refs changed: git's
+            # report of the tree -- and a revert's checkout -- can no longer
+            # be trusted, so nothing is measured or reverted (2.9.1 review).
+            raise BackendError(
+                f"{changed}; pxx cannot measure or revert what aider changed -- "
+                "inspect the working tree and the git configuration",
+                code=TerminalCode.EDIT_FAILED,
+            )
         delta = await self._delta(ctx.cwd, start)
         if delta is None:
             # Unknown is not "nothing changed": a run whose effects cannot be

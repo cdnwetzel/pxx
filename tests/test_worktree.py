@@ -229,3 +229,50 @@ def test_a_sparse_skip_worktree_file_absent_throughout_is_not_a_change(tmp_path:
     start = run(worktree_snapshot(repo))
     changed, _ = run(worktree_delta(repo, start))
     assert changed == []
+
+
+@needs_git
+@pytest.mark.parametrize(
+    "change",
+    [
+        ("config", ["config", "filter.evil.clean", "cat"]),
+        ("info/attributes", None),
+        ("refs/replace", None),
+    ],
+)
+def test_git_control_state_sees_changes_git_status_hides(tmp_path: Path, change) -> None:
+    # Grok review (2.9.1 r7): filter drivers, attributes and replace refs
+    # change what git reports, and none of them shows in `git status`.
+    from pxx.worktree import git_control_changed, git_control_state
+
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    start = asyncio.run(git_control_state(repo))
+    assert start and git_control_changed(start, asyncio.run(git_control_state(repo))) == []
+    name, args = change
+    if args:
+        subprocess.run([GIT, *args], cwd=repo, check=True)
+    elif name == "info/attributes":
+        (repo / ".git" / "info").mkdir(exist_ok=True)
+        (repo / ".git" / "info" / "attributes").write_text("* filter=evil\n")
+    else:
+        head = subprocess.run(
+            [GIT, "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True
+        ).stdout.strip()
+        tree = subprocess.run(
+            [GIT, "rev-parse", "HEAD^{tree}"], cwd=repo, check=True, capture_output=True, text=True
+        ).stdout.strip()
+        other = subprocess.run(
+            [GIT, "-c", "user.name=t", "-c", "user.email=t@e.c", "commit-tree", tree, "-m", "x"],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        subprocess.run([GIT, "replace", head, other], cwd=repo, check=True)
+    now = asyncio.run(git_control_state(repo))
+    assert any(key.endswith(name) for key in git_control_changed(start, now))
+    snapshot_start = {**asyncio.run(worktree_snapshot(repo)), "control": start}
+    from pxx.worktree import worktree_delta_checked
+
+    assert asyncio.run(worktree_delta_checked(repo, snapshot_start)) is None  # fail closed

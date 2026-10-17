@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -79,8 +80,12 @@ class BoundaryReviewer(Protocol):
 class ArtifactReviewer(Protocol):
     """Integration boundary: review the merged artifact before it ships."""
 
-    async def review_artifact(self, diff: str, artifact_id: str) -> HandoffArtifact:
-        """payload: {artifact_id, ok, issues: [str]}"""
+    async def review_artifact(
+        self, diff: str, artifact_id: str, paths: Sequence[str] = ()
+    ) -> HandoffArtifact:
+        """payload: {artifact_id, ok, issues: [str]}. ``paths``: the exact
+        repo-relative paths the artifact touches, when the caller has them
+        (more reliable than parsing diff headers)."""
         ...
 
 
@@ -108,15 +113,23 @@ class DeterministicArtifactReviewer:
     """An artifact reviewer that needs no model: rejects artifacts that
     touch protected paths, approves everything else (with an audit trail)."""
 
-    async def review_artifact(self, diff: str, artifact_id: str) -> HandoffArtifact:
+    async def review_artifact(
+        self, diff: str, artifact_id: str, paths: Sequence[str] = ()
+    ) -> HandoffArtifact:
         from .protected_paths import is_protected_path
 
-        issues: list[str] = []
+        # Exact paths first: diff headers are absent for binary and empty
+        # files and quoted for unusual names, so a header scan alone let a
+        # created protected file through (2.9.1 review). Headers are still
+        # scanned for callers that pass only a diff.
+        touched: list[str] = list(paths)
         for line in diff.splitlines():
             if line.startswith(("+++ b/", "--- a/")):
-                rel = line[6:].strip()
-                if is_protected_path(rel):
-                    issues.append(f"touches protected path: {rel}")
+                touched.append(line[6:].strip())
+        issues: list[str] = []
+        for rel in dict.fromkeys(touched):
+            if is_protected_path(rel):
+                issues.append(f"touches protected path: {rel}")
         return HandoffArtifact(
             kind="artifact_review",
             payload={

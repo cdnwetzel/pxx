@@ -676,15 +676,27 @@ def test_artifact_reviewer_rejects_protected_merge(tmp_path: Path) -> None:
     assert "artifact review" in outcome.summary
 
 
-def test_artifact_reviewer_rejects_a_newly_created_protected_file(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("rel", "content"),
+    [
+        (".github/workflows/sneaky.yml", "on: push\n"),  # plain text
+        (".github/workflows/empty.yml", ""),  # empty: no +++ header
+        (".github/workflows/blob.bin", "\x00\x01\x02binary\x00"),  # binary: no +++ header
+        (".github/workflows/with space.yml", "on: push\n"),  # quoted/escaped by git
+        (".github/workflows/wörk.yml", "on: push\n"),  # non-ASCII: quoted by git
+    ],
+)
+def test_artifact_reviewer_rejects_a_newly_created_protected_file(
+    tmp_path: Path, rel: str, content: str
+) -> None:
     """A node that CREATES a file at a protected path: `git apply` leaves it
     untracked, so `git diff HEAD` alone never showed it to the boundary
-    review (found reviewing 2.9.1). New files are part of the artifact."""
+    review, and header parsing missed binary/empty/quoted names (2.9.1
+    reviews). The reviewer now gets the exact paths."""
     repo = tmp_path / "repo"
     _init_repo(repo, files={"app.py": "x = 1\n"})
     dag = _dag(_task("a"))
-    workflow = ".github/workflows/sneaky.yml"
-    factory = Factory([ScriptedBackend(edits={workflow: "on: push\n"})])
+    factory = Factory([ScriptedBackend(edits={rel: content})])
     outcome = asyncio.run(
         run_goal(
             "goal",
@@ -696,6 +708,35 @@ def test_artifact_reviewer_rejects_a_newly_created_protected_file(tmp_path: Path
     )
     assert outcome.code is TerminalCode.OUT_OF_SCOPE
     assert "artifact review" in outcome.summary
+
+
+def test_artifact_review_fails_closed_when_paths_cannot_be_listed(tmp_path, monkeypatch):
+    """If the touched paths cannot be listed, the artifact is not approved."""
+    import pxx.worktree as wt
+
+    repo = tmp_path / "repo"
+    _init_repo(repo, files={"app.py": "x = 1\n"})
+    dag = _dag(_task("a"))
+    factory = Factory([ScriptedBackend(edits={"app.py": "x = 2\n"})])
+    real = wt.untracked_paths
+    calls = {"n": 0}
+
+    async def flaky(cwd):
+        calls["n"] += 1
+        return await real(cwd) if calls["n"] == 1 else None  # baseline ok, then git fails
+
+    monkeypatch.setattr(wt, "untracked_paths", flaky)
+    outcome = asyncio.run(
+        run_goal(
+            "goal",
+            _settings(tmp_path),
+            cwd=repo,
+            planner=_planner(dag),
+            backend_factory=factory,
+        )
+    )
+    assert outcome.code is TerminalCode.OUT_OF_SCOPE
+    assert "could not list" in outcome.summary
 
 
 @needs_git

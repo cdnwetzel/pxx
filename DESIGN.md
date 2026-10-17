@@ -484,8 +484,11 @@ class AgentBackend(Protocol):
   the run changed comes from `worktree_snapshot`/`worktree_delta` (the
   Session's and loop's helpers): tracked edits plus created files,
   pre-existing dirt excluded. If HEAD moves anyway (an aider that ignores the
-  flags) the run fails `EDIT_FAILED` with an undo hint; pxx never rewrites
-  history.
+  flags) the run says so on every exit — `EDIT_FAILED` with an undo hint,
+  or in an `INTERRUPTED` summary; pxx never rewrites history. The one reset
+  is the K2b scope fence: when every edit is out of scope, `reset --hard` to
+  the (unchanged) pre-run HEAD, never over pre-existing dirt, and a failed
+  reset is reported as failed, never as a revert.
   Limit (unchanged by 2.9.1): aider edits outside pxx's tool gates, so its
   scope enforcement is detection after the fact through git. A file git
   ignores and nobody adds is invisible to that detection; a force-added one

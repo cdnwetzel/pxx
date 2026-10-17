@@ -205,33 +205,29 @@ class AiderBackend:
             with contextlib.suppress(OSError):
                 os.unlink(tmp.name)
 
+        # aider was told not to commit. If HEAD moved anyway (an aider that
+        # ignores --no-auto-commits), say so on EVERY way out -- cancelled,
+        # failed or finished: pxx made no commit and will not rewrite history
+        # behind the operator's back.
+        moved = await self._head_moved(ctx, pre_head) if use_git else ""
         if self._cancelled or ctx.cancel_event.is_set():
             return RunOutcome(
                 code=TerminalCode.INTERRUPTED,
-                summary="cancelled",
+                summary="cancelled" + (f" — {moved}" if moved else ""),
                 session_id=ctx.session_id,
             )
         if returncode != 0:
             raise BackendError(
-                f"aider exited with code {returncode}: {stderr_text[-500:]}",
+                f"aider exited with code {returncode}: {stderr_text[-500:]}"
+                + (f" — {moved}" if moved else ""),
                 code=TerminalCode.EDIT_FAILED,
             )
+        if moved:
+            raise BackendError(moved, code=TerminalCode.EDIT_FAILED)
 
         diff_lines = 0
         changed_paths: list[str] = []
         if use_git:
-            # aider was told not to commit. If HEAD moved anyway (an aider
-            # that ignores --no-auto-commits), fail loudly: pxx made no commit
-            # and will not rewrite history behind the operator's back.
-            post_head = await self._git(ctx.cwd, "rev-parse", "HEAD")
-            if pre_head and post_head and post_head.strip() != pre_head.strip():
-                raise BackendError(
-                    "aider committed despite --no-auto-commits (HEAD moved "
-                    f"{pre_head.strip()[:7]} -> {post_head.strip()[:7]}); pxx did not "
-                    "create these commits. Inspect them; to uncommit and keep the "
-                    f"edits: git reset --soft {pre_head.strip()[:7]}",
-                    code=TerminalCode.EDIT_FAILED,
-                )
             diff_lines, changed_paths = await self._report_diff(ctx, snapshot)
         ctx.budgets.consume(rounds=1, diff_lines=diff_lines)
         ctx.budgets.check_clock()
@@ -257,8 +253,14 @@ class AiderBackend:
                         f"revert manually: git reset --hard {pre_head[:7]}"
                     )
                 else:
-                    await self._git(ctx.cwd, "reset", "--hard", pre_head)
-                    reverted_to = pre_head[:7]
+                    reset = await self._git(ctx.cwd, "reset", "--hard", pre_head)
+                    if reset is None:  # never report a revert that did not happen
+                        not_reverted = (
+                            f"revert FAILED (git reset --hard {pre_head[:7]} did not "
+                            f"succeed); revert manually: git reset --hard {pre_head[:7]}"
+                        )
+                    else:
+                        reverted_to = pre_head[:7]
             dropped: list[str] = []
             if use_git:
                 status_now = await self._git(
@@ -353,6 +355,18 @@ class AiderBackend:
                 session_id=ctx.session_id,
             )
         return lines, await err_task
+
+    async def _head_moved(self, ctx: SessionContext, pre_head: str | None) -> str:
+        """A message when HEAD is no longer where the run started, else ""."""
+        post_head = await self._git(ctx.cwd, "rev-parse", "HEAD")
+        if not pre_head or not post_head or post_head.strip() == pre_head.strip():
+            return ""
+        pre, post = pre_head.strip()[:7], post_head.strip()[:7]
+        return (
+            f"aider committed despite --no-auto-commits (HEAD moved {pre} -> {post}); "
+            "pxx did not create these commits. Inspect them; to uncommit and keep "
+            f"the edits: git reset --soft {pre}"
+        )
 
     @staticmethod
     async def _snapshot(cwd: Path) -> dict | None:

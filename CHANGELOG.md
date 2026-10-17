@@ -7,12 +7,16 @@ preserved in git (tag `v1.3.3` and earlier).
 
 ### Security
 
-- **The goal path's boundary review now sees files a node CREATES.** Node
-  patches merge with `git apply`, which leaves created files untracked, and
-  the Artifact-Reviewer read `git diff HEAD`, which never shows them — so a
-  node that *created* a file at a protected path (e.g. under `.github/`)
-  finished `COMPLETED` instead of `OUT_OF_SCOPE`. The reviewed artifact now
-  includes every file created since the goal started. Found reviewing 2.9.1.
+- **The goal path's boundary review now sees every file the artifact
+  touches.** Node patches merge with `git apply`, which leaves created files
+  untracked, and the Artifact-Reviewer read `git diff HEAD`, which never shows
+  them — so a node that *created* a file at a protected path (e.g. under
+  `.github/`) finished `COMPLETED` instead of `OUT_OF_SCOPE`. Its header-only
+  scan also missed empty, binary and oddly named files. The reviewer now gets
+  the exact paths (`git diff --name-only -z` plus files created since the goal
+  started), and fails closed: if the paths cannot be listed, the artifact is
+  rejected. `ArtifactReviewer.review_artifact` gains an optional `paths`
+  argument. Found reviewing 2.9.1.
 
 ### Fixed
 
@@ -25,17 +29,26 @@ preserved in git (tag `v1.3.3` and earlier).
   `--no-auto-commits --no-dirty-commits`; the run's changes are measured from
   the working tree (`worktree_delta`, as the session and loop do: tracked
   edits plus created files, pre-existing dirt excluded), and pxx alone
-  commits. Nothing is reset, so the operator's index and any pre-existing
-  changes are untouched. If HEAD moves anyway (an aider that ignores the
-  flags), the run fails `EDIT_FAILED` naming the commits and the undo
-  (`git reset --soft <pre-run HEAD>`) — pxx does not rewrite history. Found
+  commits. The run's work is never reset (the K2b scope fence still reverts a
+  run whose every edit is out of scope, and now reports a failed revert as
+  failed), so the operator's index and pre-existing changes are untouched.
+  If HEAD moves anyway (an aider that ignores the flags), every exit says so
+  — `EDIT_FAILED` naming the commits and the undo (`git reset --soft
+  <pre-run HEAD>`), or the `INTERRUPTED` summary — and pxx rewrites nothing. Found
   by an independent docs review of 2.9.0; the design follows the 2.9.1
   reviews (Codex as SDET, agy as tech lead).
 - **`pxx loop`'s review and diff budget include files the run created.**
   `git diff <pre-loop sha>` never shows an untracked file, so a file a round
   created was missing from the reviewer's diff and from the diff budget — for
   the native backend always, and for aider once it stopped committing. Files
-  untracked before the loop started are not counted.
+  untracked before the loop started are not counted. If git cannot list them,
+  the diff says it is incomplete rather than silently omitting them.
+- **`worktree_delta` sees paths that disappear.** A dirty file the run
+  restored to HEAD, or a pre-existing untracked file it deleted, was missing
+  from the delta (and from the session's mutation report). The delta now
+  compares the baseline and final path sets.
+- **Goals can merge binary files.** Node patches were built without
+  `--binary`, so any goal touching a binary file ended `MERGE_CONFLICT`.
 
 ### Changed
 

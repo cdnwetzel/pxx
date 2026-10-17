@@ -72,3 +72,39 @@ def test_delta_includes_hard_names(tmp_path: Path) -> None:
         target.write_text("x = 1\n")
     changed, _ = run(worktree_delta(repo, start))
     assert sorted(changed) == sorted(names)
+
+
+@needs_git
+def test_delta_sees_a_dirty_file_restored_to_head(tmp_path: Path) -> None:
+    # Codex review (2.9.1 r2): a file dirty at baseline that the run restored
+    # to HEAD dropped out of the final numstat and so out of the delta.
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    (repo / "a.py").write_text("x = 2\n")  # pre-existing dirt
+    start = run(worktree_snapshot(repo))
+    (repo / "a.py").write_text("x = 1\n")  # the run restores it to HEAD
+    changed, lines = run(worktree_delta(repo, start))
+    assert changed == ["a.py"] and lines == 2
+
+
+@needs_git
+def test_delta_sees_a_preexisting_untracked_file_deleted(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    (repo / "notes.txt").write_text("mine\n")
+    start = run(worktree_snapshot(repo))
+    (repo / "notes.txt").unlink()  # the run deletes it
+    changed, _ = run(worktree_delta(repo, start))
+    assert changed == ["notes.txt"]
+
+
+@needs_git
+def test_delta_still_excludes_untouched_preexisting_dirt(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    (repo / "a.py").write_text("x = 2\n")
+    (repo / "notes.txt").write_text("mine\n")
+    start = run(worktree_snapshot(repo))
+    (repo / "new.py").write_text("y = 1\n")  # the run's only change
+    changed, lines = run(worktree_delta(repo, start))
+    assert changed == ["new.py"] and lines == 1

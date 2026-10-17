@@ -168,10 +168,18 @@ async def _diff_since(root: Path, pre_sha: str | None, new_since: set[str] | Non
     if new_since is not None:
         from .worktree import new_file_patch, new_files_since
 
-        for rel in await new_files_since(root, new_since, _is_generated_artifact):
+        created = await new_files_since(root, new_since, _is_generated_artifact)
+        if created is None:
+            # Never let "could not list" read as "nothing was created": the
+            # reviewer and the operator see that this diff is incomplete.
+            log.warning("loop: could not list created files; the diff may be incomplete")
+            created = []
+            text += "\n# pxx: the list of created files could not be read; this diff may be incomplete\n"
+        for rel in created:
             patch = await new_file_patch(root, rel)
-            if patch:
-                text = (text + "\n" if text and not text.endswith("\n") else text) + patch
+            if not patch:
+                patch = f"# pxx: new file {rel}: content unavailable\n"
+            text = (text + "\n" if text and not text.endswith("\n") else text) + patch
     return text
 
 
@@ -432,7 +440,10 @@ async def run_loop(
         from .worktree import untracked_paths
 
         listed = await untracked_paths(root)
-        untracked_start = set(listed) if listed is not None else None
+        # A failed baseline listing must not turn new-file accounting off:
+        # an empty baseline over-counts (pre-existing untracked files look
+        # created), which is visible; None would hide every created file.
+        untracked_start = set(listed) if listed is not None else set()
 
     # K5: the loop ties ONE net at start — its per-round Sessions are
     # constructed with safety_net=False so rounds don't re-stash. Callers

@@ -151,18 +151,31 @@ async def worktree_delta(cwd: Path, start: dict) -> tuple[list[str], int]:
                 diff_lines += len((cwd / rel).read_bytes().splitlines())
             except OSError:
                 pass
-    return changed, diff_lines
+    # Paths present at baseline and gone now are changes too (2.9.1 review):
+    # a dirty file the run restored to HEAD drops out of the numstat, and a
+    # pre-existing untracked file the run deleted drops out of the listing.
+    # Iterating only the final state made both invisible.
+    for rel, lines in start["numstat"].items():
+        if rel not in now["numstat"]:
+            changed.append(rel)
+            diff_lines += lines
+    for rel in start["untracked"]:
+        if rel not in now["untracked"] and rel not in now["numstat"]:
+            changed.append(rel)
+    return list(dict.fromkeys(changed)), diff_lines
 
 
 async def new_files_since(
     cwd: Path, baseline: set[str], skip: Callable[[str], bool] | None = None
-) -> list[str]:
+) -> list[str] | None:
     """Untracked paths that were not untracked at ``baseline`` -- the files a
     run CREATED (a plain ``git diff <ref>`` never shows them). ``skip`` drops
-    paths the caller does not count (e.g. interpreter caches)."""
+    paths the caller does not count (e.g. interpreter caches). None when the
+    listing failed -- never an empty list standing in for "unknown": callers
+    that gate on this must fail closed."""
     paths = await untracked_paths(cwd)
     if paths is None:
-        return []
+        return None
     return [p for p in paths if p not in baseline and not (skip and skip(p))]
 
 

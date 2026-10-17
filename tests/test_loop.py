@@ -1543,3 +1543,32 @@ def test_a_force_added_ignored_file_outside_scope_is_caught(tmp_path: Path) -> N
     )
     assert outcome.code is TerminalCode.OUT_OF_SCOPE
     assert ".secret" in outcome.summary
+
+
+@needs_git
+def test_a_failed_created_file_listing_is_visible_not_silent(tmp_path: Path, monkeypatch) -> None:
+    # Codex review (2.9.1 r2): a listing failure read as "no files created".
+    import pxx.worktree as wt
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_repo(repo, {"a.py": "a = 1\n"})
+    real = wt.untracked_paths
+    calls = {"n": 0}
+
+    async def flaky(cwd):
+        calls["n"] += 1
+        return await real(cwd) if calls["n"] == 1 else None  # baseline ok, then git fails
+
+    monkeypatch.setattr(wt, "untracked_paths", flaky)
+    reviewer = ScriptedReviewer(["VERDICT: APPROVE"])
+    asyncio.run(
+        run_loop(
+            "add new.py",
+            _settings(tmp_path),
+            cwd=repo,
+            backend_factory=Factory([ScriptedBackend(edits={"new.py": "n = 1\n"})]),
+            reviewer=reviewer,
+        )
+    )
+    assert "the list of created files could not be read" in reviewer.calls[0][0]

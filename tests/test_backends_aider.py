@@ -534,3 +534,68 @@ def test_real_git_with_commit_pxx_commits_through_its_own_gate(tmp_path):
     outcome = asyncio.run(session(dirty, leak).run("add settings"))
     assert git("rev-parse", "HEAD") == head  # the secrets gate refused the commit
     assert "[committed " not in outcome.summary
+
+
+def _moved_head_git(calls):
+    async def fake_git(cwd, *args):
+        if args[:2] == ("rev-parse", "HEAD"):
+            calls["rev_parse"] += 1
+            return "pre0000000000" if calls["rev_parse"] == 1 else "post111111111"
+        if args and args[0] == "reset":
+            calls["reset"].append(args)
+        return ""
+
+    return fake_git
+
+
+def test_head_moved_is_reported_when_aider_fails(tmp_path, monkeypatch):
+    # Codex review (2.9.1 r2): the HEAD check ran only on success.
+    backend = AiderBackend(aider_path=fake_aider(tmp_path, "echo boom >&2; exit 3"))
+    calls = {"rev_parse": 0, "reset": []}
+    monkeypatch.setattr(backend, "_git", _moved_head_git(calls))
+    stub_delta(backend, monkeypatch, [], 0)
+    ctx = make_ctx(tmp_path, settings=Settings(permission=PermissionMode.EDIT))
+    with pytest.raises(BackendError, match=r"(?s)exited with code 3.*despite --no-auto-commits"):
+        asyncio.run(backend.run("t", ctx))
+    assert calls["reset"] == []
+
+
+def test_head_moved_is_reported_when_cancelled(tmp_path, monkeypatch):
+    backend = AiderBackend(aider_path=fake_aider(tmp_path, "sleep 30"))
+    calls = {"rev_parse": 0, "reset": []}
+    monkeypatch.setattr(backend, "_git", _moved_head_git(calls))
+    stub_delta(backend, monkeypatch, [], 0)
+    ctx = make_ctx(tmp_path, settings=Settings(permission=PermissionMode.EDIT))
+
+    async def main():
+        task = asyncio.ensure_future(backend.run("t", ctx))
+        await asyncio.sleep(0.3)
+        await backend.cancel()
+        return await task
+
+    outcome = asyncio.run(main())
+    assert outcome.code is TerminalCode.INTERRUPTED
+    assert "despite --no-auto-commits" in outcome.summary
+    assert calls["reset"] == []
+
+
+def test_a_failed_k2b_revert_is_reported_not_claimed(tmp_path, monkeypatch):
+    # Codex review (2.9.1 r2): a failed `reset --hard` was reported as a revert.
+    backend = AiderBackend(aider_path=fake_aider(tmp_path, "echo done"))
+    calls = {"status": 0, "reset": []}
+    blocking = _blocking_fake_git(calls, ["", ""])
+
+    async def failing_reset(cwd, *args):
+        if args and args[0] == "reset":
+            calls["reset"].append(args)
+            return None  # git failed
+        return await blocking(cwd, *args)
+
+    monkeypatch.setattr(backend, "_git", failing_reset)
+    stub_delta(backend, monkeypatch, ["converter.py"], 2)
+    ctx = make_ctx(tmp_path, scope=ScopeGate(tmp_path, ("other_dir",)))
+    outcome = asyncio.run(backend.run("add a comment", ctx))
+    assert outcome.code is TerminalCode.OUT_OF_SCOPE
+    assert "revert FAILED" in outcome.summary and "reverted to" not in outcome.summary
+    gates = [e for e in ctx.bus.history if e.kind == "gate_decision"]
+    assert gates[0].data["reverted_to"] == "" and "FAILED" in gates[0].data["not_reverted"]

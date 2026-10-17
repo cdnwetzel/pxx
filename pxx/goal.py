@@ -238,7 +238,10 @@ async def _merge_node(root: Path, worktree: Path, node_id: str, base_sha: str) -
     rc, out = await _git(worktree, "add", "-A")
     if rc != 0:
         return False, f"git add failed in {node_id}: {out[:200]}"
-    rc, patch = await _git(worktree, "diff", "--cached", "--no-renames", base_sha)
+    # --binary: without it a binary file becomes a "Binary files differ"
+    # stub that `git apply` rejects, so any goal touching a binary file
+    # ended MERGE_CONFLICT (2.9.1 review).
+    rc, patch = await _git(worktree, "diff", "--cached", "--no-renames", "--binary", base_sha)
     if rc != 0:
         return False, f"git diff failed in {node_id}: {patch[:200]}"
     if not patch.strip():
@@ -416,25 +419,40 @@ async def run_goal(
         _rc, merged_diff = await _git(root, "diff", "--no-renames", "HEAD")
         # `git apply` leaves files the nodes CREATED untracked, and
         # `git diff HEAD` never shows them -- a new file at a protected path
-        # slipped past this review. Created files are part of the artifact.
+        # slipped past this review. Created files are part of the artifact,
+        # and the reviewer gets the EXACT paths (NUL-separated, so binary,
+        # empty and oddly named files are covered), not only diff headers.
+        # Fail closed: if the touched paths cannot be listed, the artifact is
+        # not approved.
         from .worktree import new_file_patch, new_files_since
 
-        for rel in await new_files_since(root, untracked_start):
-            merged_diff = merged_diff.rstrip("\n") + "\n" + await new_file_patch(root, rel)
-        artifact = await DeterministicArtifactReviewer().review_artifact(
-            merged_diff, f"goal-{len(tasks)}-nodes"
-        )
+        names_rc, names = await _git(root, "diff", "--no-renames", "--name-only", "-z", "HEAD")
+        created = await new_files_since(root, untracked_start)
+        if names_rc != 0 or created is None:
+            artifact_rejection = "could not list the merged artifact's paths (git failed)"
+        else:
+            touched = [p for p in names.split("\0") if p] + created
+            for rel in created:
+                patch = await new_file_patch(root, rel)
+                merged_diff = (
+                    merged_diff.rstrip("\n")
+                    + "\n"
+                    + (patch or f"# new file {rel}: content unavailable\n")
+                )
+            artifact = await DeterministicArtifactReviewer().review_artifact(
+                merged_diff, f"goal-{len(tasks)}-nodes", paths=touched
+            )
+            if not artifact.payload["ok"]:
+                artifact_rejection = "; ".join(artifact.payload["issues"])
         await _emit(
             bus,
             "goal_node",
             {
                 "task": "artifact-review",
-                "status": "ok" if artifact.payload["ok"] else "rejected",
-                "issues": len(artifact.payload["issues"]),
+                "status": "rejected" if artifact_rejection else "ok",
+                "issues": artifact_rejection.count("; ") + 1 if artifact_rejection else 0,
             },
         )
-        if not artifact.payload["ok"]:
-            artifact_rejection = "; ".join(artifact.payload["issues"])
 
     # Integration: full test command over the combined tree, only when every
     # node completed and a command is configured.

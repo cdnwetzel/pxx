@@ -165,3 +165,26 @@ def test_delta_sees_a_symlink_retargeted(tmp_path: Path) -> None:
     (repo / "link").symlink_to("elsewhere")
     changed, _ = run(worktree_delta(repo, start))
     assert changed == ["link"]
+
+
+@needs_git
+def test_a_failed_numstat_is_an_unavailable_snapshot_not_an_empty_one(
+    tmp_path: Path, monkeypatch
+) -> None:
+    # Codex review (2.9.1 r4): a failed `git diff --numstat` read as "no
+    # tracked changes".
+    import pxx.worktree as wt
+
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    real = wt._git_raw
+
+    async def failing(cwd, *args):
+        return None if "--numstat" in args else await real(cwd, *args)
+
+    monkeypatch.setattr(wt, "_git_raw", failing)
+    assert run(worktree_snapshot(repo)) is None
+    assert (
+        run(wt.worktree_delta_checked(repo, {"untracked": {}, "numstat": {}, "content": {}}))
+        is None
+    )

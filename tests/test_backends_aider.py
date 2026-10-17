@@ -195,9 +195,10 @@ def test_claimed_but_suppressed_edit_projects_blocked(tmp_path, monkeypatch):
     async def fake_git(cwd, *args):
         if args[:2] == ("rev-parse", "HEAD"):
             return "abc123"
-        return None  # the edit never landed — nothing committed
+        return None  # the edit never landed
 
     monkeypatch.setattr(backend, "_git", fake_git)
+    stub_delta(backend, monkeypatch, [], 0)  # measured: nothing changed
     ctx = make_ctx(tmp_path, scope=ScopeGate(tmp_path, ("other_dir",)))
     outcome = asyncio.run(backend.run("Add a comment to converter.py", ctx))
     assert outcome.code is TerminalCode.OUT_OF_SCOPE
@@ -236,13 +237,10 @@ def test_error_phrase_with_real_edit_stays_completed(tmp_path, monkeypatch):
     async def fake_git(cwd, *args):
         if args[:2] == ("rev-parse", "HEAD"):
             return "abc123"
-        if args[:2] == ("diff", "--stat"):
-            return " converter.py | 2 +-\n 1 file changed, 1 insertion(+), 1 deletion(-)"
-        if args[:2] == ("diff", "--name-only"):
-            return "converter.py"
         return None
 
     monkeypatch.setattr(backend, "_git", fake_git)
+    stub_delta(backend, monkeypatch, ["converter.py"], 2)
     ctx = make_ctx(tmp_path, scope=ScopeGate(tmp_path, (".",)))
     outcome = asyncio.run(backend.run("t", ctx))
     assert outcome.code is TerminalCode.COMPLETED
@@ -278,13 +276,10 @@ def test_in_scope_edit_stays_completed(tmp_path, monkeypatch):
     async def fake_git(cwd, *args):
         if args[:2] == ("rev-parse", "HEAD"):
             return "abc123"
-        if args[:2] == ("diff", "--stat"):
-            return " converter.py | 2 +-\n 1 file changed, 1 insertion(+), 1 deletion(-)"
-        if args[:2] == ("diff", "--name-only"):
-            return "converter.py"
         return None
 
     monkeypatch.setattr(backend, "_git", fake_git)
+    stub_delta(backend, monkeypatch, ["converter.py"], 2)
     ctx = make_ctx(tmp_path, scope=ScopeGate(tmp_path, (".",)))
     outcome = asyncio.run(backend.run("t", ctx))
     assert outcome.code is TerminalCode.COMPLETED
@@ -757,3 +752,71 @@ def test_real_git_an_out_of_scope_symlink_trips_the_fence(tmp_path):
     outcome = asyncio.run(AiderBackend(aider_path=path).run("t", ctx))
     assert outcome.code is TerminalCode.OUT_OF_SCOPE
     assert "outside_link" in outcome.summary
+
+
+def test_no_baseline_means_aider_is_not_run(tmp_path, monkeypatch):
+    # Codex review (2.9.1 r4): an unavailable baseline became "zero changes".
+    marker = tmp_path / "ran"
+    backend = AiderBackend(aider_path=fake_aider(tmp_path, f"touch {marker}"))
+
+    async def fake_git(cwd, *args):
+        return "abc123" if args[:2] == ("rev-parse", "HEAD") else ""
+
+    async def no_snapshot(cwd):
+        return None
+
+    monkeypatch.setattr(backend, "_git", fake_git)
+    monkeypatch.setattr(backend, "_snapshot", no_snapshot)
+    ctx = make_ctx(tmp_path, settings=Settings(permission=PermissionMode.EDIT))
+    with pytest.raises(BackendError, match="could not snapshot"):
+        asyncio.run(backend.run("t", ctx))
+    assert not marker.exists()  # aider never started
+
+
+def test_an_unmeasurable_run_is_not_a_clean_zero_change_success(tmp_path, monkeypatch):
+    backend = AiderBackend(aider_path=fake_aider(tmp_path, "echo done"))
+
+    async def fake_git(cwd, *args):
+        return "abc123" if args[:2] == ("rev-parse", "HEAD") else ""
+
+    async def snapshot(cwd):
+        return {}
+
+    async def no_delta(cwd, start):
+        return None  # the final snapshot failed
+
+    monkeypatch.setattr(backend, "_git", fake_git)
+    monkeypatch.setattr(backend, "_snapshot", snapshot)
+    monkeypatch.setattr(backend, "_delta", no_delta)
+    ctx = make_ctx(tmp_path, settings=Settings(permission=PermissionMode.EDIT))
+    with pytest.raises(BackendError, match="could not measure what aider changed"):
+        asyncio.run(backend.run("t", ctx))
+
+
+@_NEEDS_GIT
+def test_session_commit_treats_a_wildcard_filename_literally(tmp_path):
+    """Codex review (2.9.1 r4): pathspecs are patterns even after `--`, so a
+    legal filename `*.py` staged and committed every .py file."""
+    from pxx.config import ModelRef
+    from pxx.session import Session
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    git = _git_repo(repo)
+    (repo / "staged_by_operator.py").write_text("mine = 1\n")
+    git("add", "staged_by_operator.py")
+    (repo / "unrelated.py").write_text("u = 1\n")  # untracked, matches *.py
+    settings = Settings(
+        model=ModelRef(provider="ollama", model="m"),
+        permission=PermissionMode.EDIT,
+        auto_commit=True,
+        safety_net=False,
+        memory_dir=tmp_path / "mem",
+        state_dir=tmp_path / "state",
+    )
+    backend = AiderBackend(aider_path=fake_aider(tmp_path, "echo 'w = 1' > '*.py'"))
+    outcome = asyncio.run(Session(settings, backend, cwd=repo).run("add the file"))
+    assert "[committed " in outcome.summary
+    assert git("show", "--name-only", "--format=", "HEAD").split() == ["*.py"]
+    status = git("status", "--porcelain")
+    assert "A  staged_by_operator.py" in status and "?? unrelated.py" in status

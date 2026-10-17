@@ -200,7 +200,9 @@ async def commit_session_work(
     staged: list[str] = []
     if only is not None:
         for rel in sorted(only):
-            if await _git(cwd, "add", "--", rel) is not None:
+            # --literal-pathspecs: a filename is a NAME, never a pattern -- a
+            # legal file called `*.py` must not stage every .py (2.9.1 review).
+            if await _git(cwd, "--literal-pathspecs", "add", "--", rel) is not None:
                 staged.append(rel)
             elif (
                 not (cwd / rel).exists()
@@ -256,7 +258,8 @@ async def commit_session_work(
     # own, secrets-gated one (2.9.1 review). With a pathspec git commits
     # exactly these paths; other staged entries stay staged, uncommitted.
     pathspec = ["--", *staged] if only is not None else []
-    if await _git(cwd, *identity, "commit", "-q", "-m", message, *pathspec) is None:
+    literal = ["--literal-pathspecs"] if only is not None else []
+    if await _git(cwd, *literal, *identity, "commit", "-q", "-m", message, *pathspec) is None:
         log.warning("auto-commit: git commit failed; leaving work uncommitted")
         return None
     return await _git(cwd, "rev-parse", "HEAD")

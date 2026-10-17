@@ -38,8 +38,19 @@ preserved in git (tag `v1.3.3` and earlier).
   an out-of-scope file through, and `--commit` committed it. The loop's
   re-check already used "any".
 - **pxx's commit is path-limited.** With `--commit`, `git commit` now names
-  exactly the session's delta; anything the operator had already staged
-  stays staged and is no longer swept into pxx's (secrets-gated) commit.
+  exactly the session's delta (a staged rename's source included); anything
+  the operator had already staged stays staged and is no longer swept into
+  pxx's (secrets-gated) commit. Paths are matched literally
+  (`--literal-pathspecs`): a file named `*.py` is that file, not every
+  `.py`.
+- **Unmeasurable runs fail closed.** If the files a loop round created cannot
+  be listed, the round ends `REVIEW_UNAVAILABLE` (`gate_decision` gate
+  `diff_complete`) before review — on the main path, in budget-overrun
+  salvage and in the stale-review refresh — and the done-signal never fires
+  on such a diff. An aider run whose baseline cannot be snapshotted is not
+  started, and one whose result cannot be measured ends `EDIT_FAILED` instead
+  of a clean zero-change success; a failed `git diff --numstat` makes the
+  snapshot unavailable rather than empty.
 
 ### Fixed
 

@@ -145,7 +145,9 @@ async def worktree_snapshot(cwd: Path) -> dict | None:
     # two REAL paths, not one synthetic "a => b" string that no scope check,
     # fingerprint or `git add` can use (2.9.1 reviews).
     diff = await _git_raw(cwd, "diff", "HEAD", "--numstat", "--no-renames", "-z")
-    for record in (diff or "").split("\0"):
+    if diff is None:
+        return None  # unknown is not "no tracked changes" (2.9.1 review)
+    for record in diff.split("\0"):
         parts = record.split("\t", 2)
         if len(parts) == 3 and parts[2]:
             adds, dels, rel = parts
@@ -159,6 +161,13 @@ async def worktree_snapshot(cwd: Path) -> dict | None:
 
 
 async def worktree_delta(cwd: Path, start: dict) -> tuple[list[str], int]:
+    """See :func:`worktree_delta_checked`; ``([], 0)`` when the final state
+    cannot be read (callers that gate on the delta must use the checked
+    form)."""
+    return await worktree_delta_checked(cwd, start) or ([], 0)
+
+
+async def worktree_delta_checked(cwd: Path, start: dict) -> tuple[list[str], int] | None:
     """(paths changed since ``start``, diff lines) — uncommitted included.
 
     A file dirty at baseline is excluded UNLESS its content hash changed
@@ -168,7 +177,7 @@ async def worktree_delta(cwd: Path, start: dict) -> tuple[list[str], int]:
     """
     now = await worktree_snapshot(cwd)
     if now is None:
-        return [], 0
+        return None
     changed: list[str] = []
     diff_lines = 0
     for rel, lines in now["numstat"].items():
@@ -283,5 +292,6 @@ __all__ = [
     "untracked_fingerprints",
     "untracked_paths",
     "worktree_delta",
+    "worktree_delta_checked",
     "worktree_snapshot",
 ]

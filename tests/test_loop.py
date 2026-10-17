@@ -1597,3 +1597,40 @@ def test_a_recreated_preexisting_untracked_file_reaches_review(tmp_path: Path) -
         )
     )
     assert "+fresh = 1" in reviewer.calls[0][0]
+
+
+@needs_git
+def test_an_incomplete_diff_is_never_salvaged_after_a_budget_overrun(
+    tmp_path: Path, monkeypatch
+) -> None:
+    # Codex review (2.9.1 r4): budget-overrun salvage bypassed the
+    # completeness block -- tests green + an approving reviewer => COMPLETED.
+    import pxx.worktree as wt
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_repo(repo, {"a.py": "a = 1\n"})
+    real = wt.untracked_paths
+    calls = {"n": 0}
+
+    async def flaky(cwd):
+        calls["n"] += 1
+        return await real(cwd) if calls["n"] == 1 else None
+
+    monkeypatch.setattr(wt, "untracked_paths", flaky)
+    overrun = ScriptedBackend(
+        edits={"new.py": "n = 1\n"},
+        outcome=RunOutcome(code=TerminalCode.BUDGET_EXCEEDED, summary="over", tokens=5),
+    )
+    reviewer = ScriptedReviewer(["VERDICT: APPROVE"])
+    outcome = asyncio.run(
+        run_loop(
+            "add new.py",
+            _settings(tmp_path, test_command="true"),
+            cwd=repo,
+            backend_factory=Factory([overrun]),
+            reviewer=reviewer,
+        )
+    )
+    assert outcome.code is not TerminalCode.COMPLETED
+    assert reviewer.calls == []

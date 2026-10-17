@@ -192,6 +192,14 @@ class AiderBackend:
             status = await self._git(ctx.cwd, "status", "--porcelain=v1", "--untracked-files=all")
             untracked_start, tracked_dirty_start = self._parse_porcelain(status or "")
             snapshot = await self._snapshot(ctx.cwd)
+            if snapshot is None:
+                # Fail closed (2.9.1 review): without a baseline nothing aider
+                # changes could be measured or scope-checked afterwards.
+                raise BackendError(
+                    "could not snapshot the working tree before running aider "
+                    "(git failed); not running it",
+                    code=TerminalCode.EDIT_FAILED,
+                )
         tmp = tempfile.NamedTemporaryFile(
             mode="w", suffix=".md", prefix="pxx-aider-context-", delete=False, encoding="utf-8"
         )
@@ -395,10 +403,10 @@ class AiderBackend:
         return await worktree_snapshot(cwd)
 
     @staticmethod
-    async def _delta(cwd: Path, start: dict) -> tuple[list[str], int]:
-        from ..worktree import worktree_delta
+    async def _delta(cwd: Path, start: dict) -> tuple[list[str], int] | None:
+        from ..worktree import worktree_delta_checked
 
-        return await worktree_delta(cwd, start)
+        return await worktree_delta_checked(cwd, start)
 
     async def _report_diff(self, ctx: SessionContext, start: dict | None) -> tuple[int, list[str]]:
         """Emit file_changed events for what the run changed in the working
@@ -406,7 +414,16 @@ class AiderBackend:
         the run changed it (worktree_delta). Returns (diff lines, paths)."""
         if start is None:
             return 0, []
-        paths, diff_lines = await self._delta(ctx.cwd, start)
+        delta = await self._delta(ctx.cwd, start)
+        if delta is None:
+            # Unknown is not "nothing changed": a run whose effects cannot be
+            # measured cannot be scope-checked or reported (2.9.1 review).
+            raise BackendError(
+                "could not measure what aider changed (git failed after the run); "
+                "inspect the working tree before trusting it",
+                code=TerminalCode.EDIT_FAILED,
+            )
+        paths, diff_lines = delta
         for path in paths:
             await ctx.bus.emit(
                 "file_changed",

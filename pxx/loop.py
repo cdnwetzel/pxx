@@ -558,6 +558,8 @@ async def run_loop(
 
         async def _run_done_check() -> bool:
             diff_now = await _diff_since(root, pre_sha, untracked_start)
+            if _diff_incomplete(diff_now):
+                return False  # never "done" on evidence that may be missing files
             return await _edit_objectively_done(
                 root=root,
                 pre_sha=pre_sha,
@@ -770,18 +772,24 @@ async def run_loop(
             # heals (the budget is spent) and never rescues a failing run.
             if outcome.code is TerminalCode.BUDGET_EXCEEDED and in_repo:
                 salvage_diff = (await _diff_since(root, pre_sha, untracked_start)).strip()
-                if salvage_diff and await _overwork_salvageable(
-                    root=root,
-                    pre_sha=pre_sha,
-                    diff=salvage_diff,
-                    scope=scope,
-                    max_diff_lines=settings.budgets.max_diff_lines,
-                    command=command,
-                    lint_command=lint_command,
-                    task=task,
-                    reviewer=reviewer,
-                    review_mode=review_mode,
-                    sandbox=settings.sandbox_shell,
+                # No salvage on an incomplete diff (2.9.1 review): recovery
+                # must not approve what the main path would block.
+                if (
+                    salvage_diff
+                    and not _diff_incomplete(salvage_diff)
+                    and await _overwork_salvageable(
+                        root=root,
+                        pre_sha=pre_sha,
+                        diff=salvage_diff,
+                        scope=scope,
+                        max_diff_lines=settings.budgets.max_diff_lines,
+                        command=command,
+                        lint_command=lint_command,
+                        task=task,
+                        reviewer=reviewer,
+                        review_mode=review_mode,
+                        sandbox=settings.sandbox_shell,
+                    )
                 ):
                     # Record the salvaged run's diff telemetry (the normal
                     # scope/diff guards, which populate these, were bypassed).
@@ -1017,6 +1025,20 @@ async def run_loop(
                     },
                 )
                 diff_text = await _diff_since(root, pre_sha, untracked_start)
+                if _diff_incomplete(diff_text):
+                    await parent_bus.emit(
+                        "gate_decision",
+                        {"gate": "diff_complete", "round": round_no, "allowed": False},
+                    )
+                    return await _complete(
+                        _outcome(
+                            TerminalCode.REVIEW_UNAVAILABLE,
+                            f"round {round_no}: the files this round created could not be "
+                            "listed (git failed); not approving an incomplete diff",
+                            round_no,
+                            findings,
+                        )
+                    )
                 head2 = await _git(root, "rev-parse", "HEAD")
                 review_start = time.monotonic()
                 result = await review_changes(diff_text, task, reviewer, review_mode)

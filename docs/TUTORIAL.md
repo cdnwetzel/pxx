@@ -168,14 +168,14 @@ Now let pxx write code. Fix the first bug:
 pxx edit --commit -m "Fix celsius_to_fahrenheit — it's missing the + 32"
 pytest -q        # test_c2f_freezing and test_c2f_boiling now PASS  →  2 / 6 🎉
 ```
-Real output from this exact command (qwen3:4b-instruct-8k on an 8GB MacBook):
+Real output from this exact command (pxx 2.9.0, qwen3:4b-instruct-8k on an 8GB MacBook):
 ```
-[COMPLETED] I've successfully fixed the celsius_to_fahrenheit function by adding the +32 as
-required. The change was made directly in the converter.py file.
+[COMPLETED] I've fixed the celsius_to_fahrenheit function by adding the +32 operation as required.
+The function now correctly converts Celsius to Fahrenheit with the proper formula.
 …
-The function now properly converts Celsius to Fahrenheit using the correct formula:
-F = (C × 9/5) + 32.
-[net: pxx-pre/20260725T145823Z+stash] [committed 475a6745] (rounds=5 tokens=10267 diff_lines=2)
+The fix ensures that when converting from Celsius to Fahrenheit, the formula is correctly
+implemented as (C × 9/5) + 32.
+[net: pxx-pre/20261017T164648Z] [committed 2915e64c] (rounds=5 tokens=10193 diff_lines=2 session=23d0f45c3f17)
 ```
 > 🟢 **New to this** The agent *reads* `converter.py` with a tool call first, then makes a surgical
 > edit — that read-then-edit rhythm is normal and is the agent working exactly as designed. Decode
@@ -290,24 +290,27 @@ pxx edit --commit --scope . -m "Implement main(argv) so 'python3 converter.py 10
 pytest -q                        # 6 passed  →  6 / 6 ✅
 python3 converter.py 100 C F     # 212.0     ← you built a working CLI
 ```
-Real output from this exact command (same model and machine as Level 3):
+Real output from this exact command (same version, model and machine as Level 3):
 ```
-[COMPLETED] I've implemented the main() function in converter.py. The function now:
-1. Checks if there are exactly 4 arguments (value, unit_from, unit_to)
-2. Parses the arguments - the value as a float and the units as strings
+[COMPLETED] I've implemented the main function in converter.py. Here's what I did:
 …
-When running 'python converter.py 100 C F', it will:
-- Call convert(100, 'C', 'F')  →  180 + 32 = 212.0  →  Print "212.0"
-[net: pxx-pre/20260725T150847Z] [committed 802301cf] (rounds=4 tokens=8949 diff_lines=15)
+The implementation should now work such that when someone runs 'python3 converter.py 100 C F', it will:
+1. Parse the arguments: value=100, unit_from='C', unit_to='F'
+2. Call convert(100, 'C', 'F')
+3. Since this is Celsius to Fahrenheit, it will use celsius_to_fahrenheit(100) = 100 * 9/5 + 32 = 212.0
+4. Print 212.0
+…
+[net: pxx-pre/20261017T164926Z] [committed fce0f772] (rounds=4 tokens=8815 diff_lines=11 session=c89bf32772a8)
 ```
 > 🟣 **Go deeper** `PXX_TEST_COMMAND="pytest -q" pxx loop -m "make the failing tests pass" --scope .`
 > runs bounded autonomous rounds (edit → test → review) — in 2.x it works in **any** repo, and it
 > verifies each round with your test command (`PXX_TEST_COMMAND`, or `test_command` in config).
 > Without one, pxx stops before the first round and asks which command should verify the work. It's the
 > hands-off version of what you just did by hand; budget-capped so it can't run away. Real output
-> from handing this exact sandbox's last red test to `pxx loop` (same model and machine as Level 3):
+> from handing this exact sandbox's last red test to `pxx loop` (same version, model and machine as
+> Level 3):
 > ```
-> [COMPLETED] completed in 1 round(s); tests passed [net: pxx-pre/20260725T201331Z]
+> [COMPLETED] completed in 1 round(s); tests passed [net: pxx-pre/20261017T165104Z]
 > ```
 > One round, self-verified against pytest. For everyday work, `edit` + `review` is still the bread
 > and butter.

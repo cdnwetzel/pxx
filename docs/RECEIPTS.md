@@ -17,9 +17,11 @@ Two provenance grades are used, and marked on every entry:
 
 ## R-001 — Tutorial completes 6/6 on 8 GB consumer hardware (local Ollama)
 
-**Claim.** `docs/TUTORIAL.md` — from the scaffolded sandbox at 0/6
+**Claim.** ~~`docs/TUTORIAL.md` — from the scaffolded sandbox at 0/6
 failing tests, the documented `pxx` commands reach 6/6 passing plus a
-working CLI, on an 8 GB machine with the tutorial's recommended model.
+working CLI, on an 8 GB machine with the tutorial's recommended model.~~
+**[Superseded by R-048** — the tutorial was reworked for 2.9.0 and re-run
+verbatim from PyPI on three setups; this entry records 2.1.0.]
 
 **Grade.** Attested (2026-07-26) + Reproducible (the procedure *is* the
 tutorial).
@@ -2373,6 +2375,84 @@ shared capability — spot a defect in a diff — and is unfair to their differe
 (f) `format_compliance` and `availability` are properties of this harness, not of the tools.
 (g) Nothing here licenses promoting any reviewer to a blocking gate. A lenient-only pass at
 unequal coverage on 13 cases is not that evidence.
+
+---
+
+## R-048 — Tutorial completes 6/6 verbatim from PyPI on 2.9.0, on three setups from 8 GB to a GPU gateway
+
+**Claim.** `docs/TUTORIAL.md` as published at 2.9.0 — every command the
+levels (0–7) instruct, in order (the optional 🟣 callouts are reported
+separately below), `pxx-orchestrator` installed from PyPI with the
+tutorial's own `uv tool install -U` line and the sandbox fetched with its
+own `curl` line — goes from 0/6 to 6/6 passing and `python3 converter.py
+100 C F` → `212.0`, ending with a clean tree and no leftover stash, on
+each of three setups: an 8 GB Mac with the tutorial's local model, a LAN
+GPU box, and an OpenAI-compatible gateway. Small and capable models alike.
+
+**Grade.** Attested (2026-10-17) + Reproducible (the procedure *is* the
+tutorial; for a fleet setup, point Level 2's `~/.config/pxx/config.toml`
+at your endpoint).
+
+**Environment.** pxx **2.9.0** from PyPI (`uv tool install -U --python
+3.12`), each setup in a fresh `HOME` (no prior pxx config, state or memory;
+no `PXX_*` variables), non-TTY. Sandbox from the published `v2` scaffold.
+
+| Setup | Coder | Reviewer (`pxx review`) | Endpoint |
+|---|---|---|---|
+| 8 GB | `qwen3:4b-instruct-8k` (Level 0's 8 GB block) | same model (the default) | local Ollama 0.40.5 |
+| LAN GPU box | `qwen3.8-27b` FP8 | `gpt-oss:20b` via `[roles.review]` | vLLM 0.27.1 + LAN Ollama |
+| gateway | `Qwen3-Coder` | `devstral:24b` via `[roles.review]` | OpenAI-compatible gateway |
+
+`[roles.review]` is not instructed by the tutorial (Level 5 names it as
+the way to get an independent reviewer) and is declared as configured
+environment for the two fleet setups.
+
+**Record.** Session summary lines as printed (`rounds / tokens / diff_lines`):
+
+| Level | 8 GB | LAN GPU box | gateway |
+|---|---|---|---|
+| 1 `ask` | 3 / 5723 / 0 | 5 / 12191 / 0 | 2 / 4652 / 0 |
+| 3 `edit --commit` → 2/6 | 5 / 10193 / 2 | 5 / 12649 / 2 | 5 / 13366 / 2 |
+| 3 redo after undo → 2/6 | 5 / 10452 / 2 | 5 / 12937 / 2 | 4 / 9568 / 2 |
+| 4 `edit --commit --scope .` → 3/6 | 4 / 8249 / 2 | 5 / 13024 / 2 | 5 / 12713 / 2 |
+| 4 fence (`--scope some_other_dir`) | declined up front, untouched | `[OUT_OF_SCOPE]`, untouched | `[OUT_OF_SCOPE]`, untouched |
+| 5 `edit` + `review` → 5/6 | 5 / 10447 / 8; APPROVE | 5 / 14780 / 11; APPROVE | 6 / 19420 / 27; APPROVE (implemented `main()` too → 6/6 early) |
+| 6 `edit --commit --scope .` → 6/6 | 4 / 8815 / 11 | 4 / 11220 / 8 | nothing left to do (the case Level 5's callout covers) |
+| 7 `memory search "round"` | hit | hit | hit |
+
+Retries or Troubleshooting remedies used: **none** on any setup. Capable
+models reached for `run_shell` to run their own tests; with no shell
+safeguard configured each call was refused back to the model
+(`shell_unguarded`, new in 2.9.0) and the session completed — before 2.9.0
+these runs ended `HOOKS_MISSING` at Level 3. Level 6's `pxx loop` line
+(`PXX_TEST_COMMAND="pytest -q" pxx loop -m "make the failing tests pass"
+--scope .`), handed the 5/6 sandbox, completed in 1 round with tests
+passing on the 8 GB setup (2.9.0) and the gateway (a pre-release build of
+2.9.0, before publication).
+
+Local run records: per-setup transcripts and `~/.local/state/pxx/runs/`
+under each run's `HOME`; procedure, pre-registered rules and every run —
+including the ones voided below — kept with the maintainer.
+
+**Boundary — explicitly not claimed.**
+(a) **Not single-attempt-deterministic at 4B.** Of two 8 GB runs on pre-release
+builds of 2.9.0, one stopped at 4/6: at Level 4 the model repeated an
+`old_string` with indentation the file does not have five times, then
+reported `[COMPLETED]` with `diff_lines=0` — Troubleshooting item 3's
+symptom; that run did not apply the item's re-run. The receipt run above
+needed no remedy. The same failure mode is R-001's.
+(b) **Two runs were voided for verified infrastructure faults**, not
+counted either way: a LAN route dropped for about a minute while the
+operator's VPN changed (the inference server stayed up), and one setup that
+installed **2.8.0** minutes after 2.9.0 published — PyPI's index is
+CDN-cached for up to 10 minutes and edges disagreed. That run, on 2.8.0,
+reproduced the pre-2.9.0 `HOOKS_MISSING` failures. A reader installing in
+the minutes after a release can get the previous version; `pxx --version`
+tells you.
+(c) `COMPLETED` from `pxx edit` is the model's report, not verification —
+the tests the tutorial runs after each level are the check (see R-033).
+(d) Models below the tutorial's recommendations, aider as the engine, and
+Windows are outside the claim.
 
 ---
 

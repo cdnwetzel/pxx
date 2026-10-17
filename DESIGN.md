@@ -526,7 +526,11 @@ records it identically in `task.json` and the `session_start` event;
   (default 3): native/aider backend edit round -> run `test_command` ->
   review gate -> heal with reviewer findings. Same guards as 1.x: round cap,
   diff budget, monotonic failing-set progress (NO_PROGRESS), scope re-check
-  after each round (aider commits can bypass hooks), lint gate.
+  after each round (aider edits bypass pxx's tool gates), lint gate. The
+  review and the diff budget see files the round created (baseline taken
+  after the safety-net stash); if they cannot be listed, the round ends
+  `REVIEW_UNAVAILABLE` with `gate_decision` `diff_complete` before any review,
+  salvage or done-signal can approve it.
 - `review.py`: `Finding(id, severity, file, line, message)`,
   `Verdict(StrEnum): APPROVE|REVISE|NO_REVIEW`; fail-closed: unknown output
   -> REVISE, no evidence -> NO_REVIEW; `mode` blocking|advisory (advisory

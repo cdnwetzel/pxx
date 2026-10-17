@@ -75,7 +75,7 @@ preserved in git (tag `v1.3.3` and earlier).
   created was missing from the reviewer's diff and from the diff budget — for
   the native backend always, and for aider once it stopped committing. Files
   untracked before the loop started are not counted. If git cannot list them,
-  the diff says it is incomplete rather than silently omitting them.
+  the round is blocked — see "Unmeasurable runs fail closed" below.
 - **`worktree_delta` sees paths that disappear.** A dirty file the run
   restored to HEAD, or a pre-existing untracked file it deleted, was missing
   from the delta (and from the session's mutation report). The delta now

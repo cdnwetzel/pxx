@@ -81,7 +81,7 @@ class ArtifactReviewer(Protocol):
     """Integration boundary: review the merged artifact before it ships."""
 
     async def review_artifact(
-        self, diff: str, artifact_id: str, paths: Sequence[str] = ()
+        self, diff: str, artifact_id: str, paths: Sequence[str] | None = None
     ) -> HandoffArtifact:
         """payload: {artifact_id, ok, issues: [str]}. ``paths``: the exact
         repo-relative paths the artifact touches, when the caller has them
@@ -114,7 +114,7 @@ class DeterministicArtifactReviewer:
     touch protected paths, approves everything else (with an audit trail)."""
 
     async def review_artifact(
-        self, diff: str, artifact_id: str, paths: Sequence[str] = ()
+        self, diff: str, artifact_id: str, paths: Sequence[str] | None = None
     ) -> HandoffArtifact:
         from .protected_paths import is_protected_path
 
@@ -124,7 +124,7 @@ class DeterministicArtifactReviewer:
         # also matched `+++ b/...` lines inside hunk BODIES, copying file
         # content into the issue text that reaches events (2.9.1 reviews).
         # The header scan remains only for callers that pass a diff alone.
-        if paths:
+        if paths is not None:  # supplied -- even empty -- means "these, only"
             touched: list[str] = list(paths)
         else:
             touched = [

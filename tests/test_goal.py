@@ -955,3 +955,14 @@ def test_committed_worktree_still_merges_back(tmp_path: Path) -> None:
     )
     assert outcome.code is TerminalCode.COMPLETED
     assert (repo / "alpha.py").read_text() == "A = 1\n"
+
+
+def test_artifact_reviewer_explicit_empty_paths_means_none_touched() -> None:
+    # agy review (2.9.1 r4): paths=[] fell back to parsing diff headers.
+    from pxx.roles import DeterministicArtifactReviewer
+
+    diff = "+++ b/.github/workflows/x.yml\n"
+    art = asyncio.run(DeterministicArtifactReviewer().review_artifact(diff, "a", paths=[]))
+    assert art.payload["ok"] is True  # supplied-and-empty: the diff text is not consulted
+    legacy = asyncio.run(DeterministicArtifactReviewer().review_artifact(diff, "a"))
+    assert legacy.payload["ok"] is False  # no paths supplied: header scan still applies

@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 
 from .gitenv import git_env
@@ -44,6 +44,32 @@ async def _git(cwd: Path, *args: str) -> str | None:
     if proc.returncode != 0:
         return None
     return out.decode(errors="replace").strip()
+
+
+async def _git_raw(cwd: Path, *args: str) -> str | None:
+    """Like :func:`_git` but UNSTRIPPED -- for NUL-separated output, where a
+    strip could clip a path's trailing whitespace."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "git",
+            "-C",
+            str(cwd),
+            *args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+            env=git_env(),
+        )
+    except OSError:
+        return None
+    try:
+        out, _ = await asyncio.wait_for(proc.communicate(), 15.0)
+    except TimeoutError:
+        proc.kill()
+        await proc.wait()  # reap it: never leak a child on the way past
+        return None
+    if proc.returncode != 0:
+        return None
+    return out.decode(errors="replace")
 
 
 async def _git_status_entries(cwd: Path) -> list[tuple[str, str]] | None:
@@ -108,10 +134,13 @@ async def worktree_snapshot(cwd: Path) -> dict | None:
         untracked[rel] = _sha256_file(cwd / rel)
     numstat: dict[str, int] = {}
     content: dict[str, str | None] = {}
-    diff = await _git(cwd, "diff", "HEAD", "--numstat")
-    for line in (diff or "").splitlines():
-        parts = line.split("\t")
-        if len(parts) == 3:
+    # -z: paths byte-exact (no quoting); --no-renames: a staged rename is its
+    # two REAL paths, not one synthetic "a => b" string that no scope check,
+    # fingerprint or `git add` can use (2.9.1 reviews).
+    diff = await _git_raw(cwd, "diff", "HEAD", "--numstat", "--no-renames", "-z")
+    for record in (diff or "").split("\0"):
+        parts = record.split("\t", 2)
+        if len(parts) == 3 and parts[2]:
             adds, dels, rel = parts
             numstat[rel] = (int(adds) if adds.isdigit() else 0) + (
                 int(dels) if dels.isdigit() else 0
@@ -165,18 +194,35 @@ async def worktree_delta(cwd: Path, start: dict) -> tuple[list[str], int]:
     return list(dict.fromkeys(changed)), diff_lines
 
 
-async def new_files_since(
-    cwd: Path, baseline: set[str], skip: Callable[[str], bool] | None = None
-) -> list[str] | None:
-    """Untracked paths that were not untracked at ``baseline`` -- the files a
-    run CREATED (a plain ``git diff <ref>`` never shows them). ``skip`` drops
-    paths the caller does not count (e.g. interpreter caches). None when the
-    listing failed -- never an empty list standing in for "unknown": callers
-    that gate on this must fail closed."""
+async def untracked_fingerprints(cwd: Path) -> dict[str, str | None] | None:
+    """{untracked path: content fingerprint} -- a baseline for
+    :func:`new_files_since`. None when the listing failed. Take it AFTER any
+    safety-net stash: the stash removes pre-existing untracked files, and a
+    baseline that still lists them would hide a run that re-creates them."""
     paths = await untracked_paths(cwd)
     if paths is None:
         return None
-    return [p for p in paths if p not in baseline and not (skip and skip(p))]
+    return {rel: _sha256_file(cwd / rel) for rel in paths}
+
+
+async def new_files_since(
+    cwd: Path,
+    baseline: Mapping[str, str | None],
+    skip: Callable[[str], bool] | None = None,
+) -> list[str] | None:
+    """Untracked paths the run CREATED or CHANGED since ``baseline`` (from
+    :func:`untracked_fingerprints`) -- a plain ``git diff <ref>`` shows
+    neither. ``skip`` drops paths the caller does not count (e.g. interpreter
+    caches). None when the listing failed -- never an empty list standing in
+    for "unknown": callers that gate on this must fail closed."""
+    paths = await untracked_paths(cwd)
+    if paths is None:
+        return None
+    return [
+        p
+        for p in paths
+        if not (skip and skip(p)) and (p not in baseline or baseline[p] != _sha256_file(cwd / p))
+    ]
 
 
 async def new_file_patch(cwd: Path, rel: str, *, binary: bool = False) -> str:
@@ -184,6 +230,19 @@ async def new_file_patch(cwd: Path, rel: str, *, binary: bool = False) -> str:
     /dev/null rel``). Read-only by construction: nothing is staged, no
     intent-to-add. "" on any failure. Output is NOT stripped -- a patch must
     keep its trailing newline to stay appliable."""
+    # Only paths inside the repo, and never a directory: `rel` comes from git
+    # status today, but this helper must not read outside the tree if a
+    # caller ever hands it `../x` or an absolute path (2.9.1 review). A file
+    # symlink is fine -- git diffs the link text, not its target.
+    from .safety import canonicalize
+
+    target = cwd / rel
+    root = canonicalize(cwd)
+    real = canonicalize(target)
+    if real != root and root not in real.parents:
+        return ""
+    if target.is_dir() and not target.is_symlink():
+        return ""
     args = ["git", "-C", str(cwd), "diff", "--no-index", "--no-renames"]
     if binary:
         args.append("--binary")
@@ -212,6 +271,7 @@ async def new_file_patch(cwd: Path, rel: str, *, binary: bool = False) -> str:
 __all__ = [
     "new_file_patch",
     "new_files_since",
+    "untracked_fingerprints",
     "untracked_paths",
     "worktree_delta",
     "worktree_snapshot",

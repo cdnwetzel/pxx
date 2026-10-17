@@ -3,9 +3,12 @@
 Delegates the edit to the ``aider`` CLI as an async subprocess. pxx still owns
 policy: permission mode maps to aider's chat mode, scope/memory context is
 passed via a temp ``--read`` file, stdout lines are streamed as
-``model_response`` events, and file changes are captured via a pre/post
-``git rev-parse HEAD`` diff (``git diff --stat pre..HEAD``) feeding
-``file_changed`` events and the diff-lines budget.
+``model_response`` events, and in a repo aider runs with
+``--no-auto-commits --no-dirty-commits``: what the run changed is measured
+from the working tree (``pxx.worktree``, as the session and loop do) and
+feeds ``file_changed`` events, the diff-lines budget and the scope fence.
+pxx alone commits (``--commit``); a HEAD or branch that moves anyway is
+reported on every exit, never reset.
 """
 
 from __future__ import annotations
@@ -179,6 +182,9 @@ class AiderBackend:
     async def run(self, task: str, ctx: SessionContext) -> RunOutcome:
         pre_head = await self._git(ctx.cwd, "rev-parse", "HEAD")
         use_git = pre_head is not None
+        # The branch too: a switch to another branch at the SAME commit moves
+        # no SHA but would still put any later reset on the wrong branch.
+        pre_ref = (await self._git(ctx.cwd, "symbolic-ref", "-q", "HEAD") or "") if use_git else ""
         untracked_start: set[str] = set()
         tracked_dirty_start = False
         snapshot: dict | None = None
@@ -209,7 +215,7 @@ class AiderBackend:
         # ignores --no-auto-commits), say so on EVERY way out -- cancelled,
         # failed or finished: pxx made no commit and will not rewrite history
         # behind the operator's back.
-        moved = await self._head_moved(ctx, pre_head) if use_git else ""
+        moved = await self._head_moved(ctx, pre_head, pre_ref) if use_git else ""
         if self._cancelled or ctx.cancel_event.is_set():
             return RunOutcome(
                 code=TerminalCode.INTERRUPTED,
@@ -232,12 +238,15 @@ class AiderBackend:
         ctx.budgets.consume(rounds=1, diff_lines=diff_lines)
         ctx.budgets.check_clock()
 
-        # F4 + K2b: when every edit aider reports is outside the active
-        # scope, the run is scope-blocked — reverted (below), never
-        # projected as success.
+        # F4 + K2b: when ANY edit aider reports is outside the active scope,
+        # the run is scope-blocked — reverted (below), never projected as
+        # success. "Every edit" (the pre-2.9.1 rule) let a run that also made
+        # one in-scope edit through, out-of-scope file and all, and --commit
+        # then committed it; the loop's re-check already uses "any".
         claimed = [m.group(1) for line in lines if (m := _APPLIED_EDIT_RE.search(line))]
         reported = list(dict.fromkeys([*changed_paths, *claimed]))
-        if reported and all(not ctx.scope.in_scope(p) for p in reported):
+        offenders = [p for p in reported if not ctx.scope.in_scope(p)]
+        if offenders:
             # K2b: the fence actually fences — undo the blocked run's edits
             # (reset --hard to the pre-run HEAD; aider made no commits) and its
             # session-created droppings. Pre-existing state is
@@ -275,8 +284,8 @@ class AiderBackend:
                             continue
                         dropped.append(rel)
             summary = (
-                "aider reported edits only outside the active scope: "
-                f"{', '.join(reported[:5])} (scope: {ctx.scope.describe()})"
+                "aider edited outside the active scope: "
+                f"{', '.join(offenders[:5])} (scope: {ctx.scope.describe()})"
             )
             if reverted_to:
                 summary += f" — out-of-scope edits reverted to {reverted_to}"
@@ -290,7 +299,7 @@ class AiderBackend:
                     "gate": "scope",
                     "backend": "aider",
                     "allowed": False,
-                    "paths": reported[:10],
+                    "paths": offenders[:10],
                     "scope": ctx.scope.describe(),
                     "reverted_to": reverted_to,
                     "not_reverted": not_reverted,
@@ -356,8 +365,17 @@ class AiderBackend:
             )
         return lines, await err_task
 
-    async def _head_moved(self, ctx: SessionContext, pre_head: str | None) -> str:
+    async def _head_moved(
+        self, ctx: SessionContext, pre_head: str | None, pre_ref: str = ""
+    ) -> str:
         """A message when HEAD is no longer where the run started, else ""."""
+        post_ref = await self._git(ctx.cwd, "symbolic-ref", "-q", "HEAD") or ""
+        if post_ref.strip() != pre_ref.strip():
+            return (
+                "the checked-out branch changed during the aider run "
+                f"({pre_ref.strip() or 'detached'} -> {post_ref.strip() or 'detached'}); "
+                "pxx switched nothing. Check out the original branch to continue."
+            )
         post_head = await self._git(ctx.cwd, "rev-parse", "HEAD")
         if not pre_head or not post_head or post_head.strip() == pre_head.strip():
             return ""

@@ -599,3 +599,108 @@ def test_a_failed_k2b_revert_is_reported_not_claimed(tmp_path, monkeypatch):
     assert "revert FAILED" in outcome.summary and "reverted to" not in outcome.summary
     gates = [e for e in ctx.bus.history if e.kind == "gate_decision"]
     assert gates[0].data["reverted_to"] == "" and "FAILED" in gates[0].data["not_reverted"]
+
+
+def _session_for(tmp_path, repo, body):
+    from pxx.config import ModelRef
+    from pxx.session import Session
+
+    settings = Settings(
+        model=ModelRef(provider="ollama", model="m"),
+        permission=PermissionMode.EDIT,
+        memory_dir=tmp_path / "mem",
+        state_dir=tmp_path / "state",
+    )
+    return Session(settings, AiderBackend(aider_path=fake_aider(tmp_path, body)), cwd=repo)
+
+
+@_NEEDS_GIT
+def test_session_never_resets_over_a_rogue_aider_commit(tmp_path):
+    """agy review (2.9.1 r2, P0): on EDIT_FAILED the session's safety net ran
+    `reset --hard <net tag>`, orphaning the very commit the error tells the
+    operator to inspect. The net now refuses when HEAD moved."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    git = _git_repo(repo)
+    rogue = "echo 'x = 99' > converter.py\ngit -c user.name=a -c user.email=a@e.c commit -qam rogue"
+    outcome = asyncio.run(_session_for(tmp_path, repo, rogue).run("set x"))
+    assert outcome.code is TerminalCode.EDIT_FAILED
+    assert git("log", "-1", "--format=%s").strip() == "rogue"  # the commit survives
+    assert (repo / "converter.py").read_text() == "x = 99\n"  # and its edit
+    assert "net not restored" in outcome.summary
+
+
+@_NEEDS_GIT
+def test_session_never_resets_a_branch_aider_switched_to(tmp_path):
+    """agy review (2.9.1 r2, P0): a model that ran `git checkout other` got
+    `other` reset to main's tip by the net. Now nothing moves."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    git = _git_repo(repo)
+    start_branch = git("symbolic-ref", "--short", "HEAD").strip()
+    main = git("rev-parse", "HEAD").strip()
+    git("checkout", "-q", "-b", "other")
+    (repo / "o.txt").write_text("only on other\n")
+    git("add", "-A")
+    git("commit", "-q", "-m", "other work")
+    other_tip = git("rev-parse", "HEAD").strip()
+    git("checkout", "-q", "-")
+    outcome = asyncio.run(_session_for(tmp_path, repo, "git checkout -q other").run("look"))
+    assert outcome.code is TerminalCode.EDIT_FAILED
+    assert "branch changed" in outcome.summary
+    assert git("rev-parse", "other").strip() == other_tip  # other is untouched
+    assert git("rev-parse", start_branch).strip() == main  # and so is the start branch
+
+
+@_NEEDS_GIT
+def test_session_branch_switch_at_the_same_commit_is_caught(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    git = _git_repo(repo)
+    git("branch", "twin")  # same commit, different branch
+    outcome = asyncio.run(_session_for(tmp_path, repo, "git checkout -q twin").run("look"))
+    assert outcome.code is TerminalCode.EDIT_FAILED
+    assert "branch changed" in outcome.summary
+
+
+def test_one_out_of_scope_edit_among_in_scope_ones_blocks_the_run(tmp_path, monkeypatch):
+    # agy review (2.9.1 r2): the fence required EVERY edit to be out of
+    # scope, so an extra in-scope edit carried an out-of-scope one through.
+    backend = AiderBackend(aider_path=fake_aider(tmp_path, "echo done"))
+    calls = {"status": 0, "reset": []}
+    monkeypatch.setattr(backend, "_git", _blocking_fake_git(calls, ["", ""]))
+    stub_delta(backend, monkeypatch, ["src/ok.py", ".secret"], 3)
+    ctx = make_ctx(tmp_path, scope=ScopeGate(tmp_path, ("src",)))
+    outcome = asyncio.run(backend.run("edit", ctx))
+    assert outcome.code is TerminalCode.OUT_OF_SCOPE
+    assert ".secret" in outcome.summary and "src/ok.py" not in outcome.summary
+    gates = [e for e in ctx.bus.history if e.kind == "gate_decision"]
+    assert gates[0].data["paths"] == [".secret"]
+
+
+@_NEEDS_GIT
+def test_session_commit_never_sweeps_in_pre_staged_work(tmp_path):
+    """Grok review (2.9.1 r2): a bare `git commit` committed whatever was
+    already staged alongside the session's delta."""
+    from pxx.config import ModelRef
+    from pxx.session import Session
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    git = _git_repo(repo)
+    (repo / "staged_by_operator.py").write_text("mine = 1\n")
+    git("add", "staged_by_operator.py")
+    settings = Settings(
+        model=ModelRef(provider="ollama", model="m"),
+        permission=PermissionMode.EDIT,
+        auto_commit=True,
+        safety_net=False,  # keep the operator's index in place for this case
+        memory_dir=tmp_path / "mem",
+        state_dir=tmp_path / "state",
+    )
+    backend = AiderBackend(aider_path=fake_aider(tmp_path, "echo 'x = 2' > converter.py"))
+    outcome = asyncio.run(Session(settings, backend, cwd=repo).run("set x to 2"))
+    assert "[committed " in outcome.summary
+    committed = git("show", "--name-only", "--format=", "HEAD").split()
+    assert committed == ["converter.py"]  # only the session's own delta
+    assert git("status", "--porcelain") == "A  staged_by_operator.py\n"  # still staged

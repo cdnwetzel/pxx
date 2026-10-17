@@ -32,6 +32,12 @@ class SafetyNet:
 
     tag: str | None  # pxx-pre/<ts>(-N), None when tagging failed
     stash_message: str | None  # None when the tree was clean (tag only)
+    #: Where HEAD stood when the net was tied: the commit, and the branch ref
+    #: ("" when detached). A restore only resets when both are unchanged --
+    #: otherwise the reset would move a branch the run switched to, or orphan
+    #: commits made during the run (2.9.1 review). None: unknown (old callers).
+    head_sha: str | None = None
+    head_ref: str | None = None
 
 
 async def _git(cwd: Path, *args: str) -> str | None:
@@ -84,7 +90,13 @@ async def tie_safety_net(cwd: Path, run_id: str) -> SafetyNet | None:
 
     if tag is None and stash_message is None:
         return None
-    return SafetyNet(tag=tag, stash_message=stash_message)
+    head_ref = await _git(cwd, "symbolic-ref", "-q", "HEAD")
+    return SafetyNet(
+        tag=tag,
+        stash_message=stash_message,
+        head_sha=head.strip(),
+        head_ref=(head_ref or "").strip(),
+    )
 
 
 async def _stash_ref(cwd: Path, message: str) -> str | None:
@@ -104,6 +116,20 @@ async def _stash_ref(cwd: Path, message: str) -> str | None:
     return None
 
 
+async def head_moved_since(cwd: Path, net: SafetyNet | None) -> str:
+    """Why HEAD no longer matches where the net was tied ("" when it does,
+    or when the net predates this check)."""
+    if net is None or net.head_sha is None:
+        return ""
+    now = (await _git(cwd, "rev-parse", "--verify", "HEAD") or "").strip()
+    ref = (await _git(cwd, "symbolic-ref", "-q", "HEAD") or "").strip()
+    if ref != (net.head_ref or ""):
+        return f"the checked-out branch changed during the run ({net.head_ref or 'detached'} -> {ref or 'detached'})"
+    if now != net.head_sha:
+        return f"HEAD moved during the run ({net.head_sha[:7]} -> {now[:7] or '?'})"
+    return ""
+
+
 async def restore_safety_net(cwd: Path, net: SafetyNet | None) -> bool:
     """Restore the user's pre-run working tree — for use on an ABORT (a
     non-COMPLETED outcome), so a run that produced nothing worth keeping does
@@ -120,8 +146,14 @@ async def restore_safety_net(cwd: Path, net: SafetyNet | None) -> bool:
     Fail-soft (hard rule 1): if the reset fails the stash is left untouched (we
     never pop onto an unexpected tree); any git failure leaves tag/stash intact
     for manual recovery. Returns True when something was restored.
+
+    Never rewrites history: if HEAD moved or the branch changed during the run
+    (:func:`head_moved_since`), nothing is reset or popped -- the tag and the
+    stash stay for the operator, and the caller reports why.
     """
     if net is None or (net.tag is None and not net.stash_message):
+        return False
+    if await head_moved_since(cwd, net):
         return False
     did = False
     if net.tag:
@@ -165,12 +197,12 @@ async def commit_session_work(
     """
     if only is not None and not only:
         return None  # the session changed nothing
+    staged: list[str] = []
     if only is not None:
-        staged_any = False
         for rel in sorted(only):
             if await _git(cwd, "add", "--", rel) is not None:
-                staged_any = True
-        if not staged_any:
+                staged.append(rel)
+        if not staged:
             log.warning("auto-commit: nothing stageable in the session's delta")
             return None
     else:
@@ -209,10 +241,22 @@ async def commit_session_work(
         identity = ["-c", "user.name=pxx[bot]"]
     if await _git(cwd, "config", "user.email") is None:
         identity += ["-c", "user.email=pxx[bot]@localhost"]
-    if await _git(cwd, *identity, "commit", "-q", "-m", message) is None:
+    # Path-limited when the session's delta is known: a bare `git commit`
+    # would also sweep in anything the operator had already staged -- e.g. a
+    # protected path -- into the commit that is meant to be the session's
+    # own, secrets-gated one (2.9.1 review). With a pathspec git commits
+    # exactly these paths; other staged entries stay staged, uncommitted.
+    pathspec = ["--", *staged] if only is not None else []
+    if await _git(cwd, *identity, "commit", "-q", "-m", message, *pathspec) is None:
         log.warning("auto-commit: git commit failed; leaving work uncommitted")
         return None
     return await _git(cwd, "rev-parse", "HEAD")
 
 
-__all__ = ["SafetyNet", "commit_session_work", "restore_safety_net", "tie_safety_net"]
+__all__ = [
+    "SafetyNet",
+    "commit_session_work",
+    "head_moved_since",
+    "restore_safety_net",
+    "tie_safety_net",
+]

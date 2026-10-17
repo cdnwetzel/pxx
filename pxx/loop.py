@@ -183,7 +183,9 @@ async def _diff_since(root: Path, pre_sha: str | None, new_since: set[str] | Non
     return text
 
 
-async def _record_diff(root: Path, pre_sha: str | None) -> str:
+async def _record_diff(
+    root: Path, pre_sha: str | None, new_since: dict[str, str | None] | None = None
+) -> str:
     """The loop's work as a patch ``git apply`` can replay: tracked changes
     against the pre-loop state PLUS every untracked file as a new-file hunk.
 
@@ -204,7 +206,7 @@ async def _record_diff(root: Path, pre_sha: str | None) -> str:
     # Generated artifacts (__pycache__, .pytest_cache, ...) are not the run's
     # work and can eat the 1 MiB budget -- the same filter the loop's own
     # accounting applies.
-    for rel in await new_files_since(root, set(), _is_generated_artifact):
+    for rel in await new_files_since(root, new_since or {}, _is_generated_artifact) or []:
         parts.append(await new_file_patch(root, rel, binary=True))
     text = "".join(p for p in parts if p)
     return text if len(text) <= 1_000_000 else ""
@@ -433,17 +435,9 @@ async def run_loop(
     command = test_command or settings.test_command
     in_repo = await _in_git_repo(root)
     pre_sha = None
-    untracked_start: set[str] | None = None
     if in_repo:
         head = await _git(root, "rev-parse", "HEAD")
         pre_sha = head.strip() if head else None
-        from .worktree import untracked_paths
-
-        listed = await untracked_paths(root)
-        # A failed baseline listing must not turn new-file accounting off:
-        # an empty baseline over-counts (pre-existing untracked files look
-        # created), which is visible; None would hide every created file.
-        untracked_start = set(listed) if listed is not None else set()
 
     # K5: the loop ties ONE net at start — its per-round Sessions are
     # constructed with safety_net=False so rounds don't re-stash. Callers
@@ -505,6 +499,17 @@ async def run_loop(
         }
     )
 
+    # Baseline for "files the run created", taken AFTER the net's stash (which
+    # removes pre-existing untracked files): a baseline taken before it would
+    # hide a run that re-creates a stashed path (2.9.1 review). A failed
+    # listing becomes an empty baseline -- over-counting is visible, hiding
+    # every created file is not.
+    untracked_start: dict[str, str | None] | None = None
+    if in_repo:
+        from .worktree import untracked_fingerprints
+
+        untracked_start = await untracked_fingerprints(root) or {}
+
     net_suffix = ""
     if net is not None:
         net_suffix = f" [net: {net.tag or 'no-tag'}{'+stash' if net.stash_message else ''}]"
@@ -558,7 +563,7 @@ async def run_loop(
         # while the tree still holds the loop's work, so a restore below
         # discards nothing that was not already on disk under runs/.
         try:
-            loop_diff = await _record_diff(root, pre_sha)
+            loop_diff = await _record_diff(root, pre_sha, untracked_start)
             if loop_diff.strip():
                 loop_writer.write_diff(loop_diff)
         except Exception:
@@ -611,9 +616,27 @@ async def run_loop(
             # a tag-only net is reset too) instead of stranding it / leaving the
             # failed run's garbage. On COMPLETED the net is left for the user to
             # reconcile with pxx's work (pop is their move).
-            from .safety_net import restore_safety_net
+            from .safety_net import head_moved_since, restore_safety_net
 
-            if await restore_safety_net(root, net):
+            moved = await head_moved_since(root, net)
+            if moved:
+                # Never reset over history the run did not own (2.9.1 review).
+                await parent_bus.emit(
+                    "gate_decision",
+                    {
+                        "gate": "safety_net",
+                        "allowed": False,
+                        "restored": False,
+                        "reason": "head_moved",
+                        "tag": net.tag or "",
+                    },
+                )
+                outcome = replace(
+                    outcome,
+                    summary=f"{outcome.summary} [net not restored: {moved}; the start is "
+                    f"tagged {net.tag or '(untagged)'}]",
+                )
+            elif await restore_safety_net(root, net):
                 await parent_bus.emit(
                     "gate_decision",
                     {"gate": "safety_net", "allowed": True, "restored": True, "tag": net.tag or ""},

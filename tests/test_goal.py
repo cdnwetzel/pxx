@@ -710,6 +710,71 @@ def test_artifact_reviewer_rejects_a_newly_created_protected_file(
     assert "artifact review" in outcome.summary
 
 
+def test_a_recreated_stashed_protected_file_is_still_reviewed(tmp_path: Path) -> None:
+    """agy review (2.9.1 r2): the baseline was taken BEFORE the net stashed a
+    pre-existing untracked file, so a node re-creating that path was skipped
+    by the boundary review. Different bytes, so the case holds whether or not
+    the stash succeeds on this machine."""
+    repo = tmp_path / "repo"
+    _init_repo(repo, files={"app.py": "x = 1\n"})
+    workflow = repo / ".github" / "workflows" / "sneaky.yml"
+    workflow.parent.mkdir(parents=True)
+    workflow.write_text("# the operator's draft\n")
+    dag = _dag(_task("a"))
+    factory = Factory([ScriptedBackend(edits={".github/workflows/sneaky.yml": "on: push\n"})])
+    outcome = asyncio.run(
+        run_goal(
+            "goal",
+            _settings(tmp_path),
+            cwd=repo,
+            planner=_planner(dag),
+            backend_factory=factory,
+        )
+    )
+    assert outcome.code is TerminalCode.OUT_OF_SCOPE
+    assert "artifact review" in outcome.summary
+
+
+def test_a_node_created_github_directory_symlink_is_rejected(tmp_path: Path) -> None:
+    """Grok review (2.9.1 r2): a node that creates `.github` as a DIRECTORY
+    SYMLINK (pointing at an in-repo decoy) produced an empty patch, so the
+    header scan never saw it. git lists the link as the path `.github`."""
+    repo = tmp_path / "repo"
+    _init_repo(repo, files={"app.py": "x = 1\n"})
+
+    class Linker(ScriptedBackend):
+        async def run(self, task, ctx):
+            root = Path(ctx.cwd)
+            (root / "decoy" / "workflows").mkdir(parents=True)
+            (root / "decoy" / "workflows" / "pwn.yml").write_text("on: push\n")
+            (root / ".github").symlink_to("decoy", target_is_directory=True)
+            return RunOutcome(code=TerminalCode.COMPLETED, summary="ok", tokens=1)
+
+    outcome = asyncio.run(
+        run_goal(
+            "goal",
+            _settings(tmp_path),
+            cwd=repo,
+            planner=_planner(_dag(_task("a"))),
+            backend_factory=Factory([Linker()]),
+        )
+    )
+    assert outcome.code is TerminalCode.OUT_OF_SCOPE
+    assert "touches protected path: .github" in outcome.summary
+
+
+def test_artifact_review_issues_never_carry_file_content() -> None:
+    """Grok review (2.9.1 r2): with exact paths supplied, hunk bodies are not
+    parsed -- a created file whose body looks like a diff header must not
+    copy its content into the issue text (events are metadata-only)."""
+    from pxx.roles import DeterministicArtifactReviewer
+
+    diff = "diff --git a/x.txt b/x.txt\n+++ b/x.txt\n+++ b/../TOKEN=supersecretvalue\n"
+    art = asyncio.run(DeterministicArtifactReviewer().review_artifact(diff, "a", paths=["x.txt"]))
+    assert art.payload["ok"] is True
+    assert "supersecret" not in repr(art.payload)
+
+
 def test_artifact_review_fails_closed_when_paths_cannot_be_listed(tmp_path, monkeypatch):
     """If the touched paths cannot be listed, the artifact is not approved."""
     import pxx.worktree as wt

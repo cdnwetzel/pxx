@@ -44,7 +44,9 @@ pxx/
   audit_sampling.py    # deterministic human audit sampling (14.5)
   router.py            # Endpoint probing, ModelRegistry, fallback chains
   session.py           # Session: wires config+backend+memory+safety+events
+  safety_net.py        # stash+tag at start; restore on a failed run only if HEAD/branch unchanged
   loop.py              # bounded autonomous loop (edit -> test -> review)
+  worktree.py          # shared "what did this run change": snapshot/delta, created files
   review.py            # review gate: Finding, Verdict, backends, policy
   memory/
     __init__.py        # re-exports MemoryStore, capture, inject
@@ -476,8 +478,7 @@ class AgentBackend(Protocol):
 - `aider.py`: runs `aider --message <task> --yes-always --no-stream
   [--no-git]` as an async subprocess; maps permission ASK->`--chat-mode ask`,
   EDIT->`--chat-mode diff`-ish defaults; passes scope context via a temp
-  `--read` file; captures file changes via pre/post `git rev-parse HEAD`
-  diff; streams stdout lines as `model_response` events. In a repo aider runs
+  `--read` file; streams stdout lines as `model_response` events. In a repo aider runs
   with `--no-auto-commits --no-dirty-commits`: pxx owns committing on every
   backend, so `--commit` goes through the session's commit path (secrets scan,
   `[net:]` trailer, telemetry) and without it the edits stay uncommitted. What
@@ -486,14 +487,15 @@ class AgentBackend(Protocol):
   pre-existing dirt excluded. If HEAD moves anyway (an aider that ignores the
   flags) the run says so on every exit — `EDIT_FAILED` with an undo hint,
   or in an `INTERRUPTED` summary; pxx never rewrites history. The one reset
-  is the K2b scope fence: when every edit is out of scope, `reset --hard` to
+  is the K2b scope fence: when ANY edit is out of scope, `reset --hard` to
   the (unchanged) pre-run HEAD, never over pre-existing dirt, and a failed
   reset is reported as failed, never as a revert.
   Limit (unchanged by 2.9.1): aider edits outside pxx's tool gates, so its
   scope enforcement is detection after the fact through git. A file git
   ignores and nobody adds is invisible to that detection; a force-added one
   (`git add -f`) is staged and caught. Run aider only with a scope you would
-  also enforce in review, or use the native backend, whose tools are gated. Import/launch
+  also enforce in review, or use the native backend, whose tools are gated.
+  Import/launch
   guarded: `shutil.which("aider")` or importable `aider`; else
   `BackendUnavailable` with install hint. aider is an **optional** extra.
 - `mock.py`: `MockBackend(script: list[Step])` — scripted tool calls /

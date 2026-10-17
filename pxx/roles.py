@@ -118,14 +118,20 @@ class DeterministicArtifactReviewer:
     ) -> HandoffArtifact:
         from .protected_paths import is_protected_path
 
-        # Exact paths first: diff headers are absent for binary and empty
-        # files and quoted for unusual names, so a header scan alone let a
-        # created protected file through (2.9.1 review). Headers are still
-        # scanned for callers that pass only a diff.
-        touched: list[str] = list(paths)
-        for line in diff.splitlines():
-            if line.startswith(("+++ b/", "--- a/")):
-                touched.append(line[6:].strip())
+        # Exact paths when the caller has them, and ONLY those: diff headers
+        # are absent for binary and empty files and quoted for unusual names
+        # (a header scan let created protected files through), and a scan
+        # also matched `+++ b/...` lines inside hunk BODIES, copying file
+        # content into the issue text that reaches events (2.9.1 reviews).
+        # The header scan remains only for callers that pass a diff alone.
+        if paths:
+            touched: list[str] = list(paths)
+        else:
+            touched = [
+                line[6:].strip()
+                for line in diff.splitlines()
+                if line.startswith(("+++ b/", "--- a/"))
+            ]
         issues: list[str] = []
         for rel in dict.fromkeys(touched):
             if is_protected_path(rel):

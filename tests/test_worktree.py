@@ -108,3 +108,31 @@ def test_delta_still_excludes_untouched_preexisting_dirt(tmp_path: Path) -> None
     (repo / "new.py").write_text("y = 1\n")  # the run's only change
     changed, lines = run(worktree_delta(repo, start))
     assert changed == ["new.py"] and lines == 1
+
+
+@needs_git
+def test_new_file_patch_never_reads_outside_the_repo(tmp_path: Path) -> None:
+    # Grok review (2.9.1 r2): the path was not confined to the repo.
+    from pxx.worktree import new_file_patch
+
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    (tmp_path / "secret.txt").write_text("TOP SECRET\n")
+    assert run(new_file_patch(repo, "../secret.txt")) == ""
+    assert run(new_file_patch(repo, str(tmp_path / "secret.txt"))) == ""
+    (repo / "d").mkdir()
+    assert run(new_file_patch(repo, "d")) == ""  # never diff a directory
+    (repo / "ok.txt").write_text("fine\n")
+    assert "+fine" in run(new_file_patch(repo, "ok.txt"))
+
+
+@needs_git
+def test_snapshot_sees_a_staged_rename_as_two_real_paths(tmp_path: Path) -> None:
+    # agy + Grok reviews (2.9.1 r2): a staged rename was one synthetic
+    # "a => b" path in the numstat, which no scope check could use.
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    start = run(worktree_snapshot(repo))
+    _git(repo, "mv", "a.py", "moved.py")
+    changed, _ = run(worktree_delta(repo, start))
+    assert sorted(changed) == ["a.py", "moved.py"]

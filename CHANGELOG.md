@@ -16,7 +16,28 @@ preserved in git (tag `v1.3.3` and earlier).
   the exact paths (`git diff --name-only -z` plus files created since the goal
   started), and fails closed: if the paths cannot be listed, the artifact is
   rejected. `ArtifactReviewer.review_artifact` gains an optional `paths`
-  argument. Found reviewing 2.9.1.
+  argument. Found reviewing 2.9.1. With exact paths the reviewer no longer
+  parses the diff text at all, so a file body that *looks* like a diff
+  header can no longer copy its content into the issue text (and so into
+  events); a node that creates `.github` as a directory symlink is rejected;
+  and the created-file baseline is taken after the safety net's stash, so a
+  node re-creating a stashed path is still reviewed.
+- **The safety net never resets over history the run did not own.** On a
+  failed run it ran `git reset --hard <pxx-pre tag>` unconditionally — so if
+  the run had committed, or switched branches (a model can run `git
+  checkout`), the reset orphaned those commits or moved the other branch. It
+  now restores only when HEAD and the checked-out branch are where they were
+  when the net was tied; otherwise it leaves the tree, tag and stash, emits
+  `gate_decision` (`restored: false, reason: "head_moved"`) and says so in
+  the summary. The aider backend also treats a branch switch at the same
+  commit as a moved HEAD.
+- **aider's scope fence blocks a run with ANY out-of-scope edit,** not only
+  one whose edits are all out of scope — an extra in-scope edit used to carry
+  an out-of-scope file through, and `--commit` committed it. The loop's
+  re-check already used "any".
+- **pxx's commit is path-limited.** With `--commit`, `git commit` now names
+  exactly the session's delta; anything the operator had already staged
+  stays staged and is no longer swept into pxx's (secrets-gated) commit.
 
 ### Fixed
 
@@ -47,6 +68,11 @@ preserved in git (tag `v1.3.3` and earlier).
   restored to HEAD, or a pre-existing untracked file it deleted, was missing
   from the delta (and from the session's mutation report). The delta now
   compares the baseline and final path sets.
+- **`worktree_snapshot` lists paths exactly.** Its `git diff HEAD --numstat`
+  ran without `-z --no-renames`, so a staged rename came back as one
+  synthetic `a => b` path and unusual names quoted — unusable for the scope
+  check, fingerprints and staging. `new_file_patch` also refuses paths that
+  resolve outside the repository, and directories.
 - **Goals can merge binary files.** Node patches were built without
   `--binary`, so any goal touching a binary file ended `MERGE_CONFLICT`.
 
@@ -59,7 +85,9 @@ preserved in git (tag `v1.3.3` and earlier).
   whitespace differs (e.g. "your old_string indents line 8 with 4 spaces, the
   file with no indentation"). Matching is unchanged — still exact, never
   applied on a near-match; ambiguous or genuinely different snippets get no
-  hint; the diagnosis is bounded on huge inputs. Line numbers and whitespace
+  hint; the diagnosis is bounded on huge inputs; a line-ending difference that
+  is not the only one falls through to the indentation check; whitespace-only
+  edge lines count as edge lines. Line numbers and whitespace
   facts only, never file content. Observed 2026-10-17: a 4B model sent the
   same over-indented `old_string` five times against the generic message.
 

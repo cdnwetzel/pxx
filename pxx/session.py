@@ -476,9 +476,28 @@ class Session:
             # captured into the run artifact (diff.patch). On COMPLETED the net
             # is left for the user to reconcile (pop is their move).
             if self._net is not None and outcome.code is not TerminalCode.COMPLETED:
-                from .safety_net import restore_safety_net
+                from .safety_net import head_moved_since, restore_safety_net
 
-                if await restore_safety_net(self.cwd, self._net):
+                moved = await head_moved_since(self.cwd, self._net)
+                if moved:
+                    # Never reset over history the run did not own: leave the
+                    # tree, the tag and the stash for the operator.
+                    await self.bus.emit(
+                        "gate_decision",
+                        {
+                            "gate": "safety_net",
+                            "allowed": False,
+                            "restored": False,
+                            "reason": "head_moved",
+                        },
+                        session_id=self.session_id,
+                    )
+                    outcome = replace(
+                        outcome,
+                        summary=f"{outcome.summary} [net not restored: {moved}; the start "
+                        f"is tagged {self._net.tag or '(untagged)'}]",
+                    )
+                elif await restore_safety_net(self.cwd, self._net):
                     await self.bus.emit(
                         "gate_decision",
                         {"gate": "safety_net", "allowed": True, "restored": True},

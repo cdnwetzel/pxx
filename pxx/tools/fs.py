@@ -228,6 +228,9 @@ def _describe_indent(indent: str) -> str:
     parts = [
         f"{n} {name}{'s' if n != 1 else ''}" for n, name in ((spaces, "space"), (tabs, "tab")) if n
     ]
+    other = len(indent) - tabs - spaces  # e.g. a non-breaking space
+    if other:
+        parts.append(f"{other} other whitespace char{'s' if other != 1 else ''}")
     return " + ".join(parts)
 
 
@@ -264,21 +267,31 @@ def mismatch_hint(text: str, old: str) -> str:
     if len(text) > _HINT_MAX_FILE_CHARS or old.count("\n") > _HINT_MAX_SNIPPET_LINES:
         return ""
     # 1) line endings: the snippet matches once its CRLF/LF are normalized
+    # (edit_file reads with universal newlines, so "the text being matched"
+    # is LF even for a CRLF file on disk.)
     file_crlf, old_crlf = "\r\n" in text, "\r\n" in old
     if file_crlf != old_crlf:
-        if text.replace("\r\n", "\n").count(old.replace("\r\n", "\n")) == 1:
-            ends = ("CRLF", "LF") if file_crlf else ("LF", "CRLF")
+        ends = ("CRLF", "LF") if file_crlf else ("LF", "CRLF")
+        target = "\r\n" if file_crlf else "\n"
+        normalized = old.replace("\r\n", "\n").replace("\n", target)
+        if text.count(normalized) == 1:
             return (
-                f" Hint: the file uses {ends[0]} line endings and your old_string "
-                f"uses {ends[1]}; send it with the file's line endings."
+                f" Hint: the text being matched uses {ends[0]} line endings and your "
+                f"old_string uses {ends[1]}; send it with {ends[0]} line endings."
             )
-        return ""
-    # 2) blank lines at the snippet's edges are the only difference
-    core = old.strip("\r\n")
-    if core != old and core and text.count(core) == 1:
+        old = normalized  # line endings were not the only difference: keep looking
+    # 2) blank (or whitespace-only) lines at the snippet's edges are the
+    # only difference
+    edge_lines = old.split("\n")
+    while edge_lines and not edge_lines[0].strip():
+        edge_lines.pop(0)
+    while edge_lines and not edge_lines[-1].strip():
+        edge_lines.pop()
+    core = "\n".join(edge_lines)
+    if core and core != old and text.count(core) == 1:
         return (
             " Hint: without the blank lines at its start/end your old_string matches "
-            "exactly once — those edge newlines are not in the file there; drop them."
+            "exactly once — those edge lines are not in the file there; drop them."
         )
     # 3) the same lines, but indentation or trailing whitespace differs
     want = old.splitlines()

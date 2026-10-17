@@ -1572,3 +1572,24 @@ def test_a_failed_created_file_listing_is_visible_not_silent(tmp_path: Path, mon
         )
     )
     assert "the list of created files could not be read" in reviewer.calls[0][0]
+
+
+@needs_git
+def test_a_recreated_preexisting_untracked_file_reaches_review(tmp_path: Path) -> None:
+    # agy review (2.9.1 r2): a path untracked before the loop (then stashed by
+    # the net) and re-created by a round was invisible to review and budget.
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_repo(repo, {"a.py": "a = 1\n"})
+    (repo / "new.py").write_text("old = 0\n")
+    reviewer = ScriptedReviewer(["VERDICT: APPROVE"])
+    asyncio.run(
+        run_loop(
+            "write new.py",
+            _settings(tmp_path),
+            cwd=repo,
+            backend_factory=Factory([ScriptedBackend(edits={"new.py": "fresh = 1\n"})]),
+            reviewer=reviewer,
+        )
+    )
+    assert "+fresh = 1" in reviewer.calls[0][0]

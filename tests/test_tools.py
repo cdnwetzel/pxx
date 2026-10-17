@@ -239,15 +239,24 @@ def test_mismatch_hint_names_line_endings_edges_and_trailing_space() -> None:
 
     # CRLF vs LF (Codex review): diagnosed as line endings, not indentation
     crlf = mismatch_hint("a = 1\nb = 2\n", "a = 1\r\nb = 2")
-    assert "file uses LF line endings and your old_string uses CRLF" in crlf
+    assert "text being matched uses LF line endings and your old_string uses CRLF" in crlf
     lf = mismatch_hint("a = 1\r\nb = 2\r\n", "a = 1\nb = 2")
-    assert "file uses CRLF line endings and your old_string uses LF" in lf
+    assert "text being matched uses CRLF line endings and your old_string uses LF" in lf
     # an edge newline the file does not have there (Codex: "x\n" vs "\nx")
     edge = mismatch_hint("x\ny\n", "\nx")
     assert "blank lines at its start/end" in edge and "indent" not in edge
     # same indentation, trailing whitespace differs on line 2
     trail = mismatch_hint("a = 1\nb = 2\n", "a = 1\nb = 2   ")
     assert "trailing whitespace differs on line 2" in trail
+    # agy review (2.9.1 r2): CRLF *and* an indentation difference fell silent
+    both = mismatch_hint("def f():\n    return 1\n", "def f():\r\nreturn 1")
+    assert "indents line 2 with no indentation, the file with 4 spaces" in both
+    # whitespace-only edge lines count as edge lines
+    ws_edge = mismatch_hint("x = 1\ny = 2\n", "  \nx = 1\n")
+    assert "blank lines at its start/end" in ws_edge
+    # exotic indentation is described, never an empty phrase
+    nbsp = mismatch_hint("def f():\n    return 1\n", "\u00a0return 1")
+    assert "1 other whitespace char" in nbsp
 
 
 def test_mismatch_hint_bounds_its_work() -> None:

@@ -296,13 +296,9 @@ async def run_goal(
     isolated = (root / ".git").exists()
     worktrees: dict[str, Path] = {}
     base_sha = ""
-    untracked_start: set[str] = set()
     if isolated:
         rc, out = await _git(root, "rev-parse", "HEAD")
         base_sha = out.strip() if rc == 0 else ""
-        from .worktree import untracked_paths
-
-        untracked_start = set(await untracked_paths(root) or [])
     if isolated:
         from .improve.scheduler import candidate_worktree
 
@@ -324,6 +320,17 @@ async def run_goal(
                     "stash": net.stash_message or "",
                 },
             )
+    # Baseline for "files the nodes created", taken AFTER the net's stash
+    # (which removes pre-existing untracked files): taken before it, a stashed
+    # path a node re-creates -- e.g. a protected workflow file -- was skipped
+    # by the boundary review (2.9.1 review). A failed listing becomes an
+    # empty baseline: over-counting is visible, hiding is not.
+    untracked_start: dict[str, str | None] = {}
+    if isolated:
+        from .worktree import untracked_fingerprints
+
+        untracked_start = await untracked_fingerprints(root) or {}
+
     net_suffix = ""
     if net is not None:
         net_suffix = f" [net: {net.tag or 'no-tag'}{'+stash' if net.stash_message else ''}]"

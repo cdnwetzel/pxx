@@ -30,9 +30,13 @@ preserved in git (tag `v1.3.3` and earlier).
   when the net was tied; otherwise it leaves the tree, tag and stash, emits
   `gate_decision` (`gate: "safety_net", allowed: false, restored: false,
   reason: "head_moved", tag`) and says so in the summary — so `pxx verify`
-  lists `gate_denied:safety_net` among the run's risks. `SafetyNet` gains
-  optional `head_sha` / `head_ref` fields (`head_moved_since()` is public). The aider backend also treats a branch switch at the same
-  commit as a moved HEAD.
+  lists `gate_denied:safety_net` among the run's risks. It also refuses when
+  the `pxx-pre` tag no longer points at the run's start (a run that can run
+  git can move it), and it pops the net's own stash by commit SHA, never a
+  newer stash that reuses the message. `SafetyNet` gains optional
+  `head_sha` / `head_ref` / `stash_sha` fields (`head_moved_since()` is
+  public). The aider backend also treats a branch switch at the same commit
+  as a moved HEAD.
 - **aider's scope fence blocks a run with ANY out-of-scope edit,** not only
   one whose edits are all out of scope — an extra in-scope edit used to carry
   an out-of-scope file through, and `--commit` committed it. The loop's
@@ -50,7 +54,11 @@ preserved in git (tag `v1.3.3` and earlier).
   on such a diff. An aider run whose baseline cannot be snapshotted is not
   started, and one whose result cannot be measured ends `EDIT_FAILED` instead
   of a clean zero-change success; a failed `git diff --numstat` makes the
-  snapshot unavailable rather than empty.
+  snapshot unavailable rather than empty; a HEAD that cannot be read after the
+  run is "could not verify HEAD", not "unmoved". The loop's scope re-check
+  ends `REVIEW_UNAVAILABLE` when the round's changed paths cannot be listed,
+  and the recorded `diff.patch` carries the incomplete marker instead of
+  looking complete.
 
 ### Fixed
 

@@ -385,7 +385,13 @@ class AiderBackend:
                 "pxx switched nothing. Check out the original branch to continue."
             )
         post_head = await self._git(ctx.cwd, "rev-parse", "HEAD")
-        if not pre_head or not post_head or post_head.strip() == pre_head.strip():
+        if pre_head and not post_head:
+            # A failed read is not "HEAD did not move" (2.9.1 review).
+            return (
+                "could not verify HEAD after the aider run (git failed); "
+                f"the run started at {pre_head.strip()[:7]} — inspect before trusting it"
+            )
+        if not pre_head or post_head.strip() == pre_head.strip():
             return ""
         pre, post = pre_head.strip()[:7], post_head.strip()[:7]
         return (

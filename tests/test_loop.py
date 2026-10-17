@@ -1634,3 +1634,59 @@ def test_an_incomplete_diff_is_never_salvaged_after_a_budget_overrun(
     )
     assert outcome.code is not TerminalCode.COMPLETED
     assert reviewer.calls == []
+
+
+@needs_git
+def test_a_scope_recheck_that_cannot_list_changes_blocks(tmp_path: Path, monkeypatch) -> None:
+    # Grok review (2.9.1 r4): a failed `git status` read as "no changes", so
+    # the scope re-check saw nothing out of scope.
+    import pxx.loop as loop_mod
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_repo(repo, {"a.py": "a = 1\n"})
+    state = {"ran": False}
+
+    class Editing(ScriptedBackend):
+        async def run(self, task, ctx):
+            outcome = await super().run(task, ctx)
+            state["ran"] = True
+            return outcome
+
+    real_git = loop_mod._git
+
+    async def git_after_round(root, *args, **kw):
+        if state["ran"] and args and args[0] == "status":
+            return None  # git fails once the round has run
+        return await real_git(root, *args, **kw)
+
+    monkeypatch.setattr(loop_mod, "_git", git_after_round)
+    outcome = asyncio.run(
+        run_loop(
+            "edit",
+            _settings(tmp_path),
+            cwd=repo,
+            backend_factory=Factory([Editing(edits={"a.py": "a = 2\n"})]),
+        )
+    )
+    assert outcome.code is TerminalCode.REVIEW_UNAVAILABLE
+    assert "scope cannot be verified" in outcome.summary
+
+
+@needs_git
+def test_the_recorded_patch_says_when_it_is_incomplete(tmp_path: Path, monkeypatch) -> None:
+    # Grok review (2.9.1 r4, P2): a listing failure wrote a patch that looked
+    # complete.
+    import pxx.loop as loop_mod
+    import pxx.worktree as wt
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_repo(repo, {"a.py": "a = 1\n"})
+
+    async def failing(cwd):
+        return None
+
+    monkeypatch.setattr(wt, "untracked_paths", failing)
+    patch = asyncio.run(loop_mod._record_diff(repo, None, {}))
+    assert loop_mod._INCOMPLETE_DIFF_MARK in patch.splitlines()

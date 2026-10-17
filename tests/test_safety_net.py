@@ -378,3 +378,47 @@ def test_commit_falls_back_to_pxx_identity_when_unconfigured(tmp_path: Path, mon
     assert sha
     assert _git(repo, "log", "-1", "--format=%an") == "pxx[bot]"
     assert _git(repo, "log", "-1", "--format=%ae") == "pxx[bot]@localhost"
+
+
+def _ident(repo: Path, *args: str) -> str:
+    return _git(repo, "-c", "user.name=t", "-c", "user.email=t@e.c", *args)
+
+
+@needs_git
+def test_restore_refuses_when_the_net_tag_was_retargeted(tmp_path: Path) -> None:
+    """Grok review (2.9.1 r4, P0): the guard checked HEAD and the branch but
+    not the reset TARGET -- a run that `git tag -f`s pxx-pre onto a planted
+    commit and then fails had the branch reset onto it."""
+    from pxx.safety_net import head_moved_since, restore_safety_net, tie_safety_net
+
+    repo = tmp_path / "repo"
+    _init_repo(repo, files={"a.py": "x = 1\n"})
+    tip = _git(repo, "rev-parse", "HEAD")
+    net = run(tie_safety_net(repo, "run-tag"))
+    assert net is not None and net.tag
+    tree = _git(repo, "rev-parse", "HEAD^{tree}")
+    planted = _ident(repo, "commit-tree", tree, "-m", "planted")
+    _git(repo, "tag", "-f", net.tag, planted)
+    assert "no longer points" in run(head_moved_since(repo, net))
+    assert run(restore_safety_net(repo, net)) is False
+    assert _git(repo, "rev-parse", "HEAD") == tip  # the branch never moved
+
+
+@needs_git
+def test_restore_pops_the_nets_own_stash_not_a_newer_same_named_one(tmp_path: Path) -> None:
+    """Grok review (2.9.1 r4): the stash was chosen by message, so a newer
+    stash reusing the net's message was popped instead of the user's WIP."""
+    from pxx.safety_net import restore_safety_net, tie_safety_net
+
+    repo = tmp_path / "repo"
+    _init_repo(repo, files={"a.py": "x = 1\n"})
+    (repo / "wip.txt").write_text("user wip\n")
+    net = run(tie_safety_net(repo, "run-stash"))
+    assert net is not None and net.stash_message and net.stash_sha
+    (repo / "planted.txt").write_text("planted\n")
+    _ident(repo, "stash", "push", "-u", "-q", "-m", net.stash_message)
+    assert run(restore_safety_net(repo, net)) is True
+    assert (repo / "wip.txt").read_text() == "user wip\n"  # the user's WIP is back
+    assert not (repo / "planted.txt").exists()
+    remaining = _git(repo, "stash", "list")
+    assert remaining.count("\n") == 0 and net.stash_message in remaining  # the planted one stays

@@ -38,6 +38,10 @@ class SafetyNet:
     #: commits made during the run (2.9.1 review). None: unknown (old callers).
     head_sha: str | None = None
     head_ref: str | None = None
+    #: The stash's own commit SHA: restore pops THIS object, never "the newest
+    #: stash with the net's message" -- a later stash can reuse the message
+    #: (2.9.1 review). None: no stash, or unknown (old callers).
+    stash_sha: str | None = None
 
 
 async def _git(cwd: Path, *args: str) -> str | None:
@@ -75,6 +79,7 @@ async def tie_safety_net(cwd: Path, run_id: str) -> SafetyNet | None:
         return None  # not a git repo (or nothing to tag)
 
     stash_message = None
+    stash_sha: str | None = None
     status = await _git(cwd, "status", "--porcelain=v1", "--untracked-files=all")
     if status:
         stash_message = f"pxx safety net {run_id}"
@@ -82,6 +87,8 @@ async def tie_safety_net(cwd: Path, run_id: str) -> SafetyNet | None:
         if out is None:
             log.warning("safety-net stash failed; continuing without it")
             stash_message = None
+        else:
+            stash_sha = await _git(cwd, "rev-parse", "--verify", "stash@{0}")
 
     tag = await _unique_tag(cwd)
     if await _git(cwd, "tag", tag, "HEAD") is None:
@@ -96,13 +103,23 @@ async def tie_safety_net(cwd: Path, run_id: str) -> SafetyNet | None:
         stash_message=stash_message,
         head_sha=head.strip(),
         head_ref=(head_ref or "").strip(),
+        stash_sha=(stash_sha or "").strip() or None,
     )
 
 
-async def _stash_ref(cwd: Path, message: str) -> str | None:
-    """The ``stash@{N}`` whose message equals ``message`` EXACTLY — matched on
-    the trailing message so ``run-1`` never selects ``run-10`` and the user's
-    other stashes are never touched. None if absent."""
+async def _stash_ref(cwd: Path, message: str, sha: str | None = None) -> str | None:
+    """The ``stash@{N}`` holding the net's stash. With ``sha`` (recorded at tie
+    time) ONLY the entry whose commit is that object qualifies -- a later
+    stash reusing the message is never popped, and if the object is gone no
+    stash is touched. Without it (an old net), the message must equal
+    ``message`` EXACTLY, so ``run-1`` never selects ``run-10``. None if
+    absent."""
+    if sha:
+        hashes = await _git(cwd, "stash", "list", "--format=%H")
+        for i, line in enumerate((hashes or "").splitlines()):
+            if line.strip() == sha:
+                return f"stash@{{{i}}}"
+        return None
     listing = await _git(cwd, "stash", "list")
     if not listing:
         return None
@@ -127,6 +144,13 @@ async def head_moved_since(cwd: Path, net: SafetyNet | None) -> str:
         return f"the checked-out branch changed during the run ({net.head_ref or 'detached'} -> {ref or 'detached'})"
     if now != net.head_sha:
         return f"HEAD moved during the run ({net.head_sha[:7]} -> {now[:7] or '?'})"
+    # The reset target itself: a run that can run git can move the tag (2.9.1
+    # review) -- `git tag -f` onto a planted commit, then fail, and the
+    # "restore" would reset the branch onto it.
+    if net.tag:
+        target = (await _git(cwd, "rev-parse", "--verify", f"{net.tag}^{{commit}}") or "").strip()
+        if target != net.head_sha:
+            return f"the safety-net tag {net.tag} no longer points at the run's start"
     return ""
 
 
@@ -161,7 +185,7 @@ async def restore_safety_net(cwd: Path, net: SafetyNet | None) -> bool:
             return False  # reset failed — do NOT pop onto an unexpected tree
         did = True
     if net.stash_message:
-        ref = await _stash_ref(cwd, net.stash_message)
+        ref = await _stash_ref(cwd, net.stash_message, net.stash_sha)
         if ref is not None and await _git(cwd, "stash", "pop", ref) is not None:
             did = True
     return did

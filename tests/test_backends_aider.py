@@ -820,3 +820,21 @@ def test_session_commit_treats_a_wildcard_filename_literally(tmp_path):
     assert git("show", "--name-only", "--format=", "HEAD").split() == ["*.py"]
     status = git("status", "--porcelain")
     assert "A  staged_by_operator.py" in status and "?? unrelated.py" in status
+
+
+def test_an_unverifiable_head_after_the_run_is_not_success(tmp_path, monkeypatch):
+    # Grok review (2.9.1 r4): a failed `rev-parse` read as "HEAD did not move".
+    backend = AiderBackend(aider_path=fake_aider(tmp_path, "echo done"))
+    calls = {"rev_parse": 0}
+
+    async def fake_git(cwd, *args):
+        if args[:2] == ("rev-parse", "HEAD"):
+            calls["rev_parse"] += 1
+            return "pre0000000000" if calls["rev_parse"] == 1 else None
+        return ""
+
+    monkeypatch.setattr(backend, "_git", fake_git)
+    stub_delta(backend, monkeypatch, [], 0)
+    ctx = make_ctx(tmp_path, settings=Settings(permission=PermissionMode.EDIT))
+    with pytest.raises(BackendError, match="could not verify HEAD"):
+        asyncio.run(backend.run("t", ctx))

@@ -117,7 +117,7 @@ def _is_generated_artifact(rel_path: str) -> bool:
     return rel_path.endswith(_GENERATED_ARTIFACT_SUFFIXES)
 
 
-async def _changed_paths(root: Path, pre_sha: str | None = None) -> list[str]:
+async def _changed_paths_checked(root: Path, pre_sha: str | None = None) -> list[str] | None:
     """Repo-relative paths changed vs the pre-loop state.
 
     Covers committed work (``pre_sha``..working tree), staged/unstaged
@@ -133,9 +133,13 @@ async def _changed_paths(root: Path, pre_sha: str | None = None) -> list[str]:
     if pre_sha:
         # -z: NUL-separated, path quoting fully disabled (spaces/non-ASCII exact)
         out = await _git(root, "diff", "--name-only", "--no-renames", "-z", pre_sha)
+        if out is None:
+            return None  # unknown is not "nothing changed" (2.9.1 review)
         if out:
             paths.update(n for n in out.split("\0") if n.strip())
     out = await _git(root, "status", "--porcelain", "--no-renames", "--untracked-files=all", "-z")
+    if out is None:
+        return None
     if not out:
         return sorted(p for p in paths if not _is_generated_artifact(p))
     for entry in out.split("\0"):
@@ -148,6 +152,12 @@ async def _changed_paths(root: Path, pre_sha: str | None = None) -> list[str]:
                 continue
             paths.add(path)
     return sorted(p for p in paths if not _is_generated_artifact(p))
+
+
+async def _changed_paths(root: Path, pre_sha: str | None = None) -> list[str]:
+    """:func:`_changed_paths_checked`, with a git failure as []: for
+    telemetry only -- every gate uses the checked form and fails closed."""
+    return await _changed_paths_checked(root, pre_sha) or []
 
 
 #: The marker _diff_since appends when it could not list created files. A
@@ -220,7 +230,12 @@ async def _record_diff(
     # Generated artifacts (__pycache__, .pytest_cache, ...) are not the run's
     # work and can eat the 1 MiB budget -- the same filter the loop's own
     # accounting applies.
-    for rel in await new_files_since(root, new_since or {}, _is_generated_artifact) or []:
+    created = await new_files_since(root, new_since or {}, _is_generated_artifact)
+    if created is None:
+        # Never write a patch that LOOKS complete (2.9.1 review).
+        parts.append("\n" + _INCOMPLETE_DIFF_MARK + "\n")
+        created = []
+    for rel in created:
         parts.append(await new_file_patch(root, rel, binary=True))
     text = "".join(p for p in parts if p)
     return text if len(text) <= 1_000_000 else ""
@@ -337,7 +352,9 @@ async def _edit_objectively_done(
         return False  # no objective signal that the edit is complete
     if not diff.strip():
         return False  # nothing produced yet
-    changed = await _changed_paths(root, pre_sha)
+    changed = await _changed_paths_checked(root, pre_sha)
+    if changed is None:
+        return False  # the changed paths cannot be verified (git failed)
     if any(not scope.in_scope(root / p) for p in changed):
         return False  # would be OUT_OF_SCOPE
     if _diff_line_count(diff) > max_diff_lines:
@@ -819,7 +836,24 @@ async def run_loop(
 
         # Guard 1: scope re-check (backend commits can bypass hooks).
         if in_repo:
-            changed = await _changed_paths(root, pre_sha)
+            changed_or_none = await _changed_paths_checked(root, pre_sha)
+            if changed_or_none is None:
+                # Fail closed (2.9.1 review): a scope re-check that cannot list
+                # the round's changes must not read as "all in scope".
+                await parent_bus.emit(
+                    "gate_decision",
+                    {"gate": "scope_recheck", "round": round_no, "allowed": False},
+                )
+                return await _complete(
+                    _outcome(
+                        TerminalCode.REVIEW_UNAVAILABLE,
+                        f"round {round_no}: the round's changed paths could not be "
+                        "listed (git failed); scope cannot be verified",
+                        round_no,
+                        findings,
+                    )
+                )
+            changed = changed_or_none
             legs["files_changed"] = len(changed)
             offenders = [p for p in changed if not scope.in_scope(root / p)]
             await parent_bus.emit(

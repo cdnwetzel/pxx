@@ -112,6 +112,7 @@ class Settings:
     sandbox_shell: bool = False
     hook_denial: str = "abort"                        # | "refuse_tool": a hook denial is returned to the model
     scope_violation: str = "abort"                    # | "refuse_tool": a scope violation is returned to the model
+    shell_unguarded: str = "refuse_tool"              # | "abort": run_shell with no shell safeguard ends the run
     delete_staging: str = ""                          # trusted config only; "" disables delete_file
     mcp_servers: tuple[McpServerSpec, ...] = ()
     run_intent: str | None = None                   # declared run intent; None -> "unknown" recorded
@@ -338,6 +339,14 @@ class ToolRegistry:  # register(tool), specs() -> [openai tool schema],
   continues. Both are honoured from the user config only, never from a
   repo-local file. The two settings are independent; the
   call is never executed either way, and the path is never touched.
+- Run-time shell denial: `run_shell` in a write-capable mode with no shell
+  safeguard raises `ShellUnguarded` (a `HooksMissing`) before any subprocess.
+  `shell_unguarded = "refuse_tool"` (the default since 2.9.0) returns it to
+  the model through the same `tool_denied` path; `"abort"` ends the run
+  HOOKS_MISSING. User config only. Two separate axes, deliberately: *what
+  counts as a safeguard* lives in `shell.py`; *what a missing one does* is
+  this setting. A broken safeguard (`sandbox_shell` with no sandboxer) is a
+  setup error and always aborts.
 - `broker.py`: the single authorization authority. `ToolRegistry.call`
   classifies every call into a `ToolAction` (action class READ/WRITE/DELETE/
   SHELL/NETWORK/MEMORY, risk tier, canonicalized targets) and routes it
@@ -437,8 +446,10 @@ class ToolRegistry:  # register(tool), specs() -> [openai tool schema],
   parsed JSON themselves.
 - `audit_sampling.py`: deterministic human-audit flags (100% promotions /
   high-risk, ~20% ordinary, sha256 of run_id — no RNG).
-- `shell.py`: run_shell — allowed in AUTO; in EDIT only if a PreToolUse hook
-  allows it (fail-closed); never in ASK/PLAN. `sandbox_shell=True` wraps in
+- `shell.py`: run_shell — in EDIT and AUTO only with a shell safeguard (a
+  covering PreToolUse hook, an available `sandbox_shell`, or
+  `allow_ungated_shell`); without one, `shell_unguarded` decides refuse vs
+  abort; never in ASK/PLAN. `sandbox_shell=True` wraps in
   `sandbox-exec -f <generated profile>` on macOS / `bubblewrap` on Linux when
   available. Timeout 60s default, output capped at 32 KiB.
 - Tool surface is deliberately ~8 tools (small local models degrade past ~10).

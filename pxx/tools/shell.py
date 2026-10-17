@@ -22,7 +22,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from ..errors import HooksMissing, ScopeViolation
+from ..errors import HooksMissing, ScopeViolation, ShellUnguarded
 from ..gitenv import git_env
 from ..safety import PermissionMode
 from . import ToolContext, ToolSpec, tool_schema
@@ -159,7 +159,7 @@ class RunShell:
             or ctx.allow_ungated_shell
         )
         if mode in (PermissionMode.EDIT, PermissionMode.AUTO) and not gated:
-            raise HooksMissing(
+            raise ShellUnguarded(
                 f"run_shell in permission mode '{mode}' requires a shell safeguard "
                 "(fail-closed); none is configured. Choose one: add a PreToolUse hook "
                 '([[hooks]] event="PreToolUse", matcher="run_shell", command=...) that '

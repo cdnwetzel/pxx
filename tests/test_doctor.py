@@ -200,7 +200,10 @@ def test_hook_coverage_warns_in_edit_mode_without_matching_hook():
 
     check = _hook_coverage_check(Settings(permission=PermissionMode.EDIT))
     assert not check.ok and not check.hard  # a warning line, never a failure
-    assert "HOOKS_MISSING" in check.detail and "docs/CONFIG.md" in check.detail
+    # default shell_unguarded = "refuse_tool": the warning says what happens
+    assert "refused back to the model" in check.detail and "docs/CONFIG.md" in check.detail
+    abort = _hook_coverage_check(Settings(permission=PermissionMode.EDIT, shell_unguarded="abort"))
+    assert not abort.ok and "HOOKS_MISSING" in abort.detail
 
     # a hook whose matcher misses run_shell does not cover it
     settings = Settings(
@@ -220,9 +223,13 @@ def test_hook_coverage_ok_with_matching_hook_and_other_modes():
         hooks=(Hook(event="PreToolUse", command="true", matcher="run_shell"),),
     )
     assert _hook_coverage_check(settings).ok
-    # HOOKS_MISSING only applies to edit mode
+    # read-only modes never run shell, so there is nothing to warn about
     assert _hook_coverage_check(Settings(permission=PermissionMode.ASK)).ok
-    assert _hook_coverage_check(Settings(permission=PermissionMode.AUTO)).ok
+    # auto is write-capable too (2.3.5): it needs a safeguard like edit
+    assert not _hook_coverage_check(Settings(permission=PermissionMode.AUTO)).ok
+    # the other two safeguards count, not only a hook
+    for extra in ({"sandbox_shell": True}, {"allow_ungated_shell": True}):
+        assert _hook_coverage_check(Settings(permission=PermissionMode.AUTO, **extra)).ok
 
 
 # --- model presence on reachable endpoints ----------------------------------

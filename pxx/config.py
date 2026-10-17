@@ -142,6 +142,22 @@ class Settings:
     #: with a leading slash it invented; the gate was right to refuse it, and
     #: wrong to end a run whose only other calls were correct.
     scope_violation: str = "abort"
+    #: What ``run_shell`` does in a write-capable mode when NO shell safeguard
+    #: is configured (no covering PreToolUse hook, no available sandbox, no
+    #: ``allow_ungated_shell``). "refuse_tool" (the default since 2.9.0): the
+    #: command is not run, the model is told why, a ``tool_denied`` event is
+    #: emitted, and the run continues. "abort": the session ends
+    #: HOOKS_MISSING, the only behaviour before 2.9.0. Nothing is widened
+    #: either way -- an unguarded command never runs; this setting decides
+    #: only whether one attempt ends the run. Which configurations COUNT as a
+    #: safeguard is a separate question, answered in tools/shell.py. Observed
+    #: 2026-10-17: capable models (27B, Qwen3-Coder) edit, then reach for
+    #: ``pytest`` to verify; the abort discarded the correct edit before
+    #: ``--commit``, so only models that never verify could finish the
+    #: tutorial. A *broken* safeguard (``sandbox_shell`` with no sandboxer)
+    #: still aborts: that is setup the operator must fix. Honoured from the
+    #: user config only, like hook_denial / scope_violation.
+    shell_unguarded: str = "refuse_tool"
     #: Where ``delete_file`` STAGES a removed file instead of unlinking it
     #: (2.6.1). Empty (the default) disables the tool: it answers with an
     #: error telling the model to leave the file and say so. Set from TRUSTED
@@ -315,6 +331,9 @@ _USER_ENV = Path("~/.config/pxx/env").expanduser()
 _PROJECT_CONFIGS = ("pxx.toml", os.path.join(".pxx", "config.toml"))
 
 # TOML key -> Settings field (flat keys) handled explicitly below.
+#: Values accepted by the per-gate denial-treatment settings.
+_DENIAL_TREATMENTS = ("abort", "refuse_tool")
+
 _KNOWN_KEYS = {
     "model",
     "provider",
@@ -334,6 +353,7 @@ _KNOWN_KEYS = {
     "allow_ungated_shell",
     "hook_denial",
     "scope_violation",
+    "shell_unguarded",
     "delete_staging",
     "safety_net",
     "auto_commit",
@@ -479,6 +499,8 @@ def _settings_from_dict(
         "hook_denial",
         # 2.6.1: the same reasoning for the scope gate's own setting.
         "scope_violation",
+        # 2.9.0: and for the shell gate's.
+        "shell_unguarded",
         # 2.6.1: where delete_file stages a removed file is the operator's
         # choice; a repo must not choose where its own files are moved to.
         "delete_staging",
@@ -618,20 +640,17 @@ def _settings_from_dict(
         if not isinstance(value, bool):
             raise ConfigError(f"{source}: loop_review must be a boolean")
         kwargs["loop_review"] = value
-    if "hook_denial" in data:
-        value = data["hook_denial"]
-        if value not in ("abort", "refuse_tool"):
-            raise ConfigError(
-                f'{source}: hook_denial must be "abort" or "refuse_tool", got {value!r}'
-            )
-        kwargs["hook_denial"] = value
-    if "scope_violation" in data:
-        value = data["scope_violation"]
-        if value not in ("abort", "refuse_tool"):
-            raise ConfigError(
-                f'{source}: scope_violation must be "abort" or "refuse_tool", got {value!r}'
-            )
-        kwargs["scope_violation"] = value
+    # What a gate's refusal does to the run: the same strict two-value choice
+    # for each gate (hook_denial 2.6.0, scope_violation 2.6.1, shell_unguarded
+    # 2.9.0). A new treatment is a new value here, not a new key.
+    for key in ("hook_denial", "scope_violation", "shell_unguarded"):
+        if key in data:
+            value = data[key]
+            if value not in _DENIAL_TREATMENTS:
+                raise ConfigError(
+                    f'{source}: {key} must be "abort" or "refuse_tool", got {value!r}'
+                )
+            kwargs[key] = value
     if "delete_staging" in data:
         value = data["delete_staging"]
         if not isinstance(value, str):

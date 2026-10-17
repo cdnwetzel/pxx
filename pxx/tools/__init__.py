@@ -15,7 +15,9 @@ strings — they are data for the model, not crashes. Gate errors
 the run, except that an authorize-time ``HookDenied`` (``hook_denial =
 "refuse_tool"``, 2.6.0) or ``ScopeViolation`` (``scope_violation =
 "refuse_tool"``, 2.6.1) is returned to the model as the tool's result
-instead; the refused call is never executed either way.
+instead, as is a ``run_shell`` with no shell safeguard (``ShellUnguarded``,
+``shell_unguarded = "refuse_tool"``, the default since 2.9.0); the refused call
+is never executed either way.
 """
 
 from __future__ import annotations
@@ -25,7 +27,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
-from ..errors import GateError, HookDenied, ScopeViolation
+from ..errors import GateError, HookDenied, ScopeViolation, ShellUnguarded
 from ..events import EventBus
 from ..safety import HookRunner, PermissionMode, ScopeGate
 
@@ -77,6 +79,11 @@ class ToolContext:
     #: violation is returned to the model as the tool's result instead of
     #: ending the run (2.6.1).
     refuse_scope_violations: bool = False
+    #: Settings.shell_unguarded == "refuse_tool": run_shell with no shell
+    #: safeguard is returned to the model as the tool's result instead of
+    #: ending the run (2.9.0). Off at this level so a bare ToolContext keeps
+    #: the strict behaviour; sessions get the Settings default (on).
+    refuse_unguarded_shell: bool = False
     #: Settings.delete_staging: where ``delete_file`` moves a file instead of
     #: unlinking it. None = the tool is disabled (2.6.1).
     delete_staging: Path | None = None
@@ -165,40 +172,8 @@ class ToolRegistry:
             )
             if not refuse:
                 raise
-            # The refusal is data for the model. The call was NOT executed;
-            # the model is told what was refused and why, so it can do the
-            # work another way (or not), and the run goes on. Before this,
-            # one refused `ls` after a hundred lines of correct edits ended
-            # the session and the safety net reset the tree.
-            error = f"error: refused by policy: {exc}"
-            # Metadata only: which tool, which argument names and sizes, and a
-            # denial category. Never the argument values (a denied write_file
-            # carries the file body) and never the hook's text -- the model
-            # sees that in the tool result; the audit log records that it
-            # happened.
-            await ctx.bus.emit(
-                "tool_denied",
-                {
-                    "tool": name,
-                    "arg_names": sorted(args),
-                    "arg_sizes": {k: len(str(v)) for k, v in args.items()},
-                    "reason": (
-                        "scope_violation" if isinstance(exc, ScopeViolation) else "hook_denied"
-                    ),
-                },
-                session_id=ctx.session_id,
-            )
-            await ctx.bus.emit(
-                "tool_result",
-                {
-                    "tool": name,
-                    "result_preview": error[:EVENT_PREVIEW_CHARS],
-                    "error": True,
-                    "denied": True,
-                },
-                session_id=ctx.session_id,
-            )
-            return error
+            reason = "scope_violation" if isinstance(exc, ScopeViolation) else "hook_denied"
+            return await _refuse(name, args, ctx, exc, reason)
 
         await ctx.bus.emit(
             "tool_call",
@@ -209,6 +184,13 @@ class ToolRegistry:
         error: str | None = None
         try:
             result = await tool.run(args, ctx)
+        except ShellUnguarded as exc:
+            # Run-time, not authorize-time: whether a shell safeguard exists is
+            # the shell tool's own check. Nothing was executed (the check comes
+            # before any subprocess), so it gets the same refusal treatment.
+            if not ctx.refuse_unguarded_shell:
+                raise
+            return await _refuse(name, args, ctx, exc, "shell_unguarded")
         except GateError:
             raise  # gate denials are never swallowed into model data
         except Exception as exc:  # tool failure is data for the model
@@ -269,3 +251,42 @@ __all__ = [
     "default_registry",
     "tool_schema",
 ]
+
+
+async def _refuse(
+    name: str, args: dict[str, Any], ctx: ToolContext, exc: GateError, reason: str
+) -> str:
+    """Return a gate refusal to the model as the tool's result.
+
+    The call was NOT executed; the model is told what was refused and why, so
+    it can do the work another way (or not), and the run goes on. Before
+    refusals, one refused `ls` after a hundred lines of correct edits ended
+    the session and the safety net reset the tree.
+    """
+    error = f"error: refused by policy: {exc}"
+    # Metadata only: which tool, which argument names and sizes, and a
+    # denial category. Never the argument values (a denied write_file
+    # carries the file body) and never the hook's text -- the model
+    # sees that in the tool result; the audit log records that it
+    # happened.
+    await ctx.bus.emit(
+        "tool_denied",
+        {
+            "tool": name,
+            "arg_names": sorted(args),
+            "arg_sizes": {k: len(str(v)) for k, v in args.items()},
+            "reason": reason,
+        },
+        session_id=ctx.session_id,
+    )
+    await ctx.bus.emit(
+        "tool_result",
+        {
+            "tool": name,
+            "result_preview": error[:EVENT_PREVIEW_CHARS],
+            "error": True,
+            "denied": True,
+        },
+        session_id=ctx.session_id,
+    )
+    return error

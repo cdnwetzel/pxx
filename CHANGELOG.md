@@ -5,7 +5,24 @@ preserved in git (tag `v1.3.3` and earlier).
 
 ## [Unreleased]
 
-_Nothing yet._
+### Changed
+
+- **`run_shell` with no shell safeguard is refused back to the model, not the
+  end of the run.** New `shell_unguarded = "abort" | "refuse_tool"`, default
+  `"refuse_tool"`. In `edit`/`auto` with no covering `PreToolUse` hook, no
+  available `sandbox_shell` and no `allow_ungated_shell`, the command still
+  never runs; the model now gets `error: refused by policy: …` (with a
+  `tool_denied` event, `reason: "shell_unguarded"`) and the session continues,
+  where before it ended `HOOKS_MISSING`. Set `"abort"` for the old behaviour.
+  User config only, like `hook_denial` / `scope_violation`. A *broken*
+  safeguard (`sandbox_shell` with no sandboxer) still aborts. Observed
+  2026-10-17 walking the tutorial: capable models (a 27B, Qwen3-Coder) made
+  the correct edit, then ran `pytest` to check it, and the abort discarded the
+  edit before `--commit` — only models that never verify could finish.
+- **`pxx doctor`'s `hooks:run_shell` check matches the gate.** It now covers
+  `auto` (write-capable since 2.3.5), counts `sandbox_shell` and
+  `allow_ungated_shell` as safeguards, and says whether an unguarded command
+  will be refused or end the run.
 
 ## [2.8.0] — 2026-10-12
 

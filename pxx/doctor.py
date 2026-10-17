@@ -244,11 +244,14 @@ async def _endpoint_checks(settings: Settings) -> list[Check]:
 
 
 def _hook_coverage_check(settings: Settings) -> Check:
-    """run_shell in edit mode fails closed without a matching PreToolUse hook
-    (K9). Only edit mode is subject to HOOKS_MISSING; other modes are fine."""
+    """Say what ``run_shell`` will do under this config (K9). Write-capable
+    modes (edit, and auto since 2.3.5) need a shell safeguard: a covering
+    PreToolUse hook, ``sandbox_shell``, or ``allow_ungated_shell``. Without
+    one, ``shell_unguarded`` decides: refuse the command back to the model
+    (default since 2.9.0) or end the run HOOKS_MISSING."""
     from .safety import PermissionMode
 
-    if settings.permission is not PermissionMode.EDIT:
+    if settings.permission not in (PermissionMode.EDIT, PermissionMode.AUTO):
         return Check("hooks:run_shell", True, f"permission '{settings.permission}'", hard=False)
     covered = any(
         h.event == "PreToolUse" and (not h.matcher or h.matcher in "run_shell")
@@ -256,11 +259,21 @@ def _hook_coverage_check(settings: Settings) -> Check:
     )
     if covered:
         return Check("hooks:run_shell", True, "PreToolUse hook covers run_shell", hard=False)
+    if settings.sandbox_shell:
+        return Check("hooks:run_shell", True, "sandbox_shell contains run_shell", hard=False)
+    if settings.allow_ungated_shell:
+        return Check(
+            "hooks:run_shell", True, "allow_ungated_shell: run_shell runs ungated", hard=False
+        )
+    if settings.shell_unguarded == "refuse_tool":
+        effect = "run_shell calls are refused back to the model (shell_unguarded)"
+    else:
+        effect = "run_shell will fail closed (HOOKS_MISSING)"
     return Check(
         "hooks:run_shell",
         False,
-        "permission 'edit' but no PreToolUse hook matches run_shell — run_shell "
-        "will fail closed (HOOKS_MISSING); see docs/CONFIG.md §hooks",
+        f"permission '{settings.permission}' but no shell safeguard — {effect}; "
+        "see docs/CONFIG.md §hooks",
         hard=False,
     )
 

@@ -32,6 +32,18 @@ class HooksMissing(GateError):
     """A hook is required for this action but none is configured."""
 
 
+class ShellUnguarded(HooksMissing):
+    """run_shell in a write-capable mode with NO shell safeguard configured
+    (no covering PreToolUse hook, no available sandbox, no opt-in).
+
+    A subclass so existing ``except HooksMissing`` handling (the
+    HOOKS_MISSING terminal) is unchanged under ``shell_unguarded = "abort"``.
+    Distinct from a *broken* safeguard (``sandbox_shell`` with no sandboxer),
+    which stays a plain ``HooksMissing``: that is a setup error the operator
+    must see, never something to refuse back to the model.
+    """
+
+
 class BudgetExceeded(GateError):
     """A configured budget (rounds/tokens/cost/diff/wall-clock) tripped."""
 

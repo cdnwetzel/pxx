@@ -234,3 +234,16 @@ def test_budget_snapshot():
     snap = guard.snapshot()
     assert snap["rounds"] == 1 and snap["tokens"] == 5
     assert snap["remaining_seconds"] > 0
+
+
+def test_consume_records_all_usage_before_raising():
+    # Codex review: rounds were checked before the same step's tokens were
+    # added, so a round-budget abort under-reported tokens by one response.
+    from pxx.errors import BudgetExceeded
+    from pxx.safety import BudgetGuard, Budgets
+
+    guard = BudgetGuard(Budgets(max_rounds=1))
+    guard.consume(rounds=1, tokens=12)
+    with pytest.raises(BudgetExceeded, match="max_rounds"):
+        guard.consume(rounds=1, tokens=12)
+    assert guard.rounds == 2 and guard.tokens == 24

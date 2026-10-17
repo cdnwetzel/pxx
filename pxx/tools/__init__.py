@@ -175,6 +175,18 @@ class ToolRegistry:
             reason = "scope_violation" if isinstance(exc, ScopeViolation) else "hook_denied"
             return await _refuse(name, args, ctx, exc, reason)
 
+        # Tool-owned preconditions (today: run_shell's safeguard check) run
+        # BEFORE the tool_call event, so a refused call is never recorded as a
+        # call -- the denial events carry only argument names and sizes.
+        preflight = getattr(tool, "preflight", None)
+        if preflight is not None:
+            try:
+                preflight(args, ctx)
+            except ShellUnguarded as exc:
+                if not ctx.refuse_unguarded_shell:
+                    raise
+                return await _refuse(name, args, ctx, exc, "shell_unguarded")
+
         await ctx.bus.emit(
             "tool_call",
             {"tool": name, "args": _preview_args(args)},
@@ -184,13 +196,6 @@ class ToolRegistry:
         error: str | None = None
         try:
             result = await tool.run(args, ctx)
-        except ShellUnguarded as exc:
-            # Run-time, not authorize-time: whether a shell safeguard exists is
-            # the shell tool's own check. Nothing was executed (the check comes
-            # before any subprocess), so it gets the same refusal treatment.
-            if not ctx.refuse_unguarded_shell:
-                raise
-            return await _refuse(name, args, ctx, exc, "shell_unguarded")
         except GateError:
             raise  # gate denials are never swallowed into model data
         except Exception as exc:  # tool failure is data for the model

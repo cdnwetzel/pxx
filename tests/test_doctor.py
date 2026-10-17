@@ -379,3 +379,23 @@ def test_review_independence_is_wired_into_run_doctor(monkeypatch, tmp_path):
     checks = asyncio.run(run_doctor(settings, cwd=tmp_path))
     named = [c for c in checks if c.name == "review:independence"]
     assert len(named) == 1 and not named[0].ok
+
+
+def test_hook_coverage_flags_a_requested_but_missing_sandbox(monkeypatch):
+    # Codex review: doctor reported sandbox_shell as a safeguard without
+    # checking a sandboxer exists, and a covering hook masked the missing
+    # sandbox -- the runtime denies run_shell in both cases.
+    from pxx.config import Settings
+    from pxx.doctor import _hook_coverage_check
+    from pxx.safety import Hook, PermissionMode
+
+    monkeypatch.setattr("pxx.tools.shell._sandbox_available", lambda: False)
+    alone = Settings(permission=PermissionMode.EDIT, sandbox_shell=True)
+    hooked = Settings(
+        permission=PermissionMode.EDIT,
+        sandbox_shell=True,
+        hooks=(Hook(event="PreToolUse", command="true", matcher="run_shell"),),
+    )
+    for settings in (alone, hooked):
+        check = _hook_coverage_check(settings)
+        assert not check.ok and "no sandboxer" in check.detail

@@ -1449,3 +1449,41 @@ def test_changed_paths_filters_generated_artifacts(tmp_path: Path) -> None:
 
     changed = asyncio.run(_changed_paths(repo))
     assert changed == ["src/foo.py"]
+
+
+def test_a_forwarded_session_abort_reports_loop_rounds_and_tokens(tmp_path):
+    # Codex review, 68f5882: a session abort is forwarded as the loop's
+    # outcome; it must count OUTER rounds and the loop's accumulated tokens,
+    # not the session's inner model rounds (which can exceed max_rounds).
+    aborting = ScriptedBackend(
+        outcome=RunOutcome(code=TerminalCode.HOOKS_MISSING, summary="x", rounds=5, tokens=50)
+    )
+    outcome = asyncio.run(
+        run_loop(
+            "task",
+            _settings(tmp_path, budgets=Budgets(max_rounds=3)),
+            cwd=tmp_path,
+            backend_factory=Factory([aborting]),
+            bus=EventBus(),
+        )
+    )
+    assert outcome.code is TerminalCode.HOOKS_MISSING
+    assert (outcome.rounds, outcome.tokens) == (1, 50)
+
+
+def test_a_later_round_abort_reports_the_accumulated_tokens(tmp_path):
+    first = ScriptedBackend(edits={"a.txt": "a\n"})  # COMPLETED, tokens=10
+    aborting = ScriptedBackend(
+        outcome=RunOutcome(code=TerminalCode.HOOKS_MISSING, summary="x", rounds=4, tokens=7)
+    )
+    outcome = asyncio.run(
+        run_loop(
+            "task",
+            _settings(tmp_path, test_command="false", budgets=Budgets(max_rounds=3)),
+            cwd=tmp_path,
+            backend_factory=Factory([first, aborting]),
+            bus=EventBus(),
+        )
+    )
+    assert outcome.code is TerminalCode.HOOKS_MISSING
+    assert (outcome.rounds, outcome.tokens) == (2, 17)

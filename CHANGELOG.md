@@ -19,6 +19,16 @@ preserved in git (tag `v1.3.3` and earlier).
   2026-10-17 walking the tutorial: capable models (a 27B, Qwen3-Coder) made
   the correct edit, then ran `pytest` to check it, and the abort discarded the
   edit before `--commit` — only models that never verify could finish.
+  **Migration for callers that read exit codes or events:** a run that used to
+  end `HOOKS_MISSING` (exit 3) can now finish `COMPLETED` (exit 0) — and, with
+  `--commit`, commit — although the command the model wanted (often its own
+  test run) never ran. `COMPLETED` never meant "tests were run"; use `pxx loop`
+  with `test_command` for verified completion. Detect a refusal with the
+  `tool_denied` event (`reason: "shell_unguarded"`); restore the old ending
+  with `shell_unguarded = "abort"` in the user config. A refused command is
+  checked before the `tool_call` event, so it is never recorded as a call and
+  its text never reaches events or audit — the denial carries argument names
+  and sizes only.
 - **`pxx doctor`'s `hooks:run_shell` check matches the gate.** It now covers
   `auto` (write-capable since 2.3.5), counts `sandbox_shell` and
   `allow_ungated_shell` as safeguards, and says whether an unguarded command
@@ -32,7 +42,15 @@ preserved in git (tag `v1.3.3` and earlier).
   tokens=0` even after the model had run several rounds — easy to read as
   "no model call", and it was (a 2026-07-25 tutorial report recorded a scope
   refusal that way). The budget guard's counts now fill any outcome that
-  reports none.
+  reports none. A session abort that `pxx loop` forwards now reports the
+  loop's own counts — outer rounds and accumulated tokens — instead of that
+  one session's inner model rounds.
+- **A budget abort no longer drops the last response's usage.**
+  `BudgetGuard.consume()` checked the round limit before adding the same
+  step's tokens, cost and diff lines; it now records all of them first.
+- **`pxx doctor` no longer reports a missing sandbox as a safeguard.**
+  `sandbox_shell = true` with no sandboxer installed denies `run_shell` at
+  runtime, even with a covering hook; doctor now says so instead of passing.
 
 ## [2.8.0] — 2026-10-12
 

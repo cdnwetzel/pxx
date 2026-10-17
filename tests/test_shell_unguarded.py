@@ -148,3 +148,21 @@ def test_the_setting_parses_strictly_and_only_from_trusted_config(tmp_path, monk
     user_cfg.unlink()
     (project / "pxx.toml").write_text('shell_unguarded = "abort"\n')
     assert load_settings(project).shell_unguarded == "refuse_tool"
+
+
+def test_a_refused_command_never_appears_in_the_event_stream(tmp_path):
+    # Codex review, 2cd11af: the tool_call event (args preview) used to be
+    # emitted before the safeguard check, so a refused command's text -- and
+    # any secret in it -- reached events/audit. The preflight now runs first.
+    events = []
+    bus = EventBus()
+
+    async def _record(e):
+        events.append(e)
+
+    bus.subscribe(_record)
+    ctx = _ctx(tmp_path, refuse=True, bus=bus)
+    sentinel = "REVIEW_SENTINEL_7f3a"
+    run(default_registry().call("run_shell", {"command": f"TOKEN={sentinel} pytest"}, ctx))
+    assert "tool_call" not in [e.kind for e in events]
+    assert sentinel not in repr([(e.kind, e.data) for e in events])

@@ -250,9 +250,21 @@ def _hook_coverage_check(settings: Settings) -> Check:
     one, ``shell_unguarded`` decides: refuse the command back to the model
     (default since 2.9.0) or end the run HOOKS_MISSING."""
     from .safety import PermissionMode
+    from .tools.shell import _sandbox_available
 
     if settings.permission not in (PermissionMode.EDIT, PermissionMode.AUTO):
         return Check("hooks:run_shell", True, f"permission '{settings.permission}'", hard=False)
+    # Same precedence as the runtime: a requested sandbox that is missing
+    # denies run_shell outright, whatever else is configured.
+    if settings.sandbox_shell and not _sandbox_available():
+        return Check(
+            "hooks:run_shell",
+            False,
+            "sandbox_shell=true but no sandboxer is installed (macOS: sandbox-exec; "
+            "Linux: bwrap) — run_shell will fail closed (HOOKS_MISSING); see "
+            "docs/CONFIG.md §hooks",
+            hard=False,
+        )
     covered = any(
         h.event == "PreToolUse" and (not h.matcher or h.matcher in "run_shell")
         for h in settings.hooks

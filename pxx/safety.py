@@ -233,16 +233,19 @@ class BudgetGuard:
     def consume(
         self, *, rounds: int = 0, tokens: int = 0, cost: float = 0.0, diff_lines: int = 0
     ) -> None:
+        # Record everything this step already spent BEFORE checking any limit:
+        # the usage happened either way, and checking rounds first used to drop
+        # the same response's tokens from the guard (and so from the outcome).
         self.rounds += rounds
+        self.tokens += tokens
+        self.cost_usd += cost
+        self.diff_lines += diff_lines
         if self.rounds > self.budgets.max_rounds:
             raise BudgetExceeded("max_rounds", str(self.budgets.max_rounds))
-        self.tokens += tokens
         if self.tokens > self.budgets.max_tokens:
             raise BudgetExceeded("max_tokens", str(self.budgets.max_tokens))
-        self.cost_usd += cost
         if self.cost_usd > self.budgets.max_cost_usd:
             raise BudgetExceeded("max_cost_usd", str(self.budgets.max_cost_usd))
-        self.diff_lines += diff_lines
         if self.diff_lines > self.budgets.max_diff_lines:
             raise BudgetExceeded("max_diff_lines", str(self.budgets.max_diff_lines))
 

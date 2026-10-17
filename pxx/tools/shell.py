@@ -132,7 +132,11 @@ class RunShell:
         mutating=True,
     )
 
-    async def run(self, args: dict[str, Any], ctx: ToolContext) -> str:
+    def preflight(self, args: dict[str, Any], ctx: ToolContext) -> None:
+        """Raise unless this call may run under ``ctx`` -- before anything is
+        dispatched or recorded. ``ToolRegistry.call`` runs it ahead of the
+        ``tool_call`` event, so a refused command is never logged as a call;
+        ``run`` repeats it so a direct caller cannot skip it."""
         mode = ctx.permission
         if mode in (PermissionMode.ASK, PermissionMode.PLAN):
             raise ScopeViolation(f"run_shell is never allowed in permission mode '{mode}'")
@@ -169,6 +173,8 @@ class RunShell:
                 "See docs/CONFIG.md §hooks"
             )
 
+    async def run(self, args: dict[str, Any], ctx: ToolContext) -> str:
+        self.preflight(args, ctx)
         command = str(args.get("command", ""))
         timeout = float(args.get("timeout") or DEFAULT_TIMEOUT)
 

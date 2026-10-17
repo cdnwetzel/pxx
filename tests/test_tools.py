@@ -202,6 +202,44 @@ def test_edit_file_zero_and_multiple_matches(reg: ToolRegistry, tmp_path: Path) 
     assert (tmp_path / "m.txt").read_text() == "dup\ndup\n"  # unchanged
 
 
+def test_edit_file_names_an_indentation_mismatch(reg: ToolRegistry, tmp_path: Path) -> None:
+    # 2026-10-17: a 4B model sent this old_string (four extra leading spaces)
+    # five times against a generic "not found". The edit must still fail --
+    # exact match only -- but say what to fix.
+    src = "def c2f(c):\n    return c\n\n\ndef f2c(f):\n    raise NotImplementedError\n"
+    (tmp_path / "converter.py").write_text(src)
+    ctx = make_ctx(tmp_path)
+    old = "    def f2c(f):\n        raise NotImplementedError"
+    out = call(
+        reg, "edit_file", {"path": "converter.py", "old_string": old, "new_string": "x"}, ctx
+    )
+    assert "not found" in out
+    assert "matches line 5 if indentation is ignored" in out
+    assert "4 spaces, the file with no indentation" in out
+    assert (tmp_path / "converter.py").read_text() == src  # nothing applied
+
+
+def test_mismatch_hint_only_when_certain() -> None:
+    from pxx.tools.fs import mismatch_hint
+
+    text = "a:\n    x = 1\nb:\n    x = 1\n"
+    assert mismatch_hint(text, "x = 1") == ""  # two places: ambiguous, no hint
+    assert mismatch_hint(text, "y = 2") == ""  # genuinely different text
+    assert mismatch_hint(text, "\n\n") == ""  # whitespace-only snippet
+    tab = mismatch_hint("def f():\n    return 1\n", "\treturn 1")
+    assert "indents that line with 1 tab, the file with 4 spaces" in tab
+    # first line agrees, a later line's indentation differs
+    later = mismatch_hint("def f():\n    return 1\n", "def f():\nreturn 1")
+    assert "matches line 1" in later and "later line" in later
+
+
+def test_mismatch_hint_carries_no_file_content() -> None:
+    from pxx.tools.fs import mismatch_hint
+
+    hint = mismatch_hint("SECRET_TOKEN = 'abc'\n", "  SECRET_TOKEN = 'abc'")
+    assert hint and "SECRET" not in hint and "abc" not in hint
+
+
 # --------------------------------------------------------------- list_files
 
 

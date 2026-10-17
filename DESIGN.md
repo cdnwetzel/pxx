@@ -326,7 +326,9 @@ class ToolRegistry:  # register(tool), specs() -> [openai tool schema],
                      # async call(name, args_json) -> str
 ```
 - `fs.py`: read_file (offset/limit), write_file (permission>=EDIT, in-scope),
-  edit_file (exact old/new string replace, unique match), delete_file (a
+  edit_file (exact old/new string replace, unique match; a miss that would
+  match exactly one place with indentation ignored says so — line and
+  whitespace counts only, never applied), delete_file (a
   STAGED move of one in-scope regular file to
   `<delete_staging>/<project dir>/<relative path>`, never an unlink; action
   class DELETE, HIGH tier, allowed in EDIT; disabled with an error for the
@@ -473,7 +475,11 @@ class AgentBackend(Protocol):
   [--no-git]` as an async subprocess; maps permission ASK->`--chat-mode ask`,
   EDIT->`--chat-mode diff`-ish defaults; passes scope context via a temp
   `--read` file; captures file changes via pre/post `git rev-parse HEAD`
-  diff; streams stdout lines as `model_response` events. Import/launch
+  diff; streams stdout lines as `model_response` events. aider commits its
+  own edits; when `auto_commit` is off (no `--commit`), a successful run
+  unwinds them with `git reset --mixed <pre-run HEAD>`, so the edits stay
+  uncommitted exactly as the native backend leaves them — `--commit` is
+  opt-in on every backend. Import/launch
   guarded: `shutil.which("aider")` or importable `aider`; else
   `BackendUnavailable` with install hint. aider is an **optional** extra.
 - `mock.py`: `MockBackend(script: list[Step])` — scripted tool calls /

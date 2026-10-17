@@ -5,7 +5,31 @@ preserved in git (tag `v1.3.3` and earlier).
 
 ## [Unreleased]
 
-_Nothing yet._
+### Fixed
+
+- **`--commit` is opt-in under the aider backend too.** aider commits its own
+  edits, so with a healthy aider installed every successful `pxx edit` was
+  committed whether or not `--commit` was passed — contradicting the README
+  and the tutorial. A successful aider run without `--commit` now unwinds
+  aider's commits with `git reset --mixed` to the pre-run HEAD: the edits
+  stay in the working tree, uncommitted, as with the native backend. The
+  diff, scope-fence and truthfulness checks still read aider's commits
+  first, so they are unchanged; with `--commit`, the commits are kept and the
+  session commits as before. The unwind is recorded as an `observation`
+  (`source: "aider_commits_unwound"`). Found by an independent docs review of
+  2.9.0.
+
+### Changed
+
+- **`edit_file` says what to fix when an `old_string` misses on
+  indentation.** When the snippet would match exactly one place with
+  indentation ignored line by line, the "not found" error now names the line
+  and the difference (e.g. "your old_string indents that line with 4 spaces,
+  the file with no indentation"). Matching is unchanged — still exact; the
+  edit is never applied on a near-match. The hint carries line numbers and
+  whitespace counts only, never file content. Observed 2026-10-17: a 4B model
+  sent the same over-indented `old_string` five times against the generic
+  message, then gave up.
 
 ## [2.9.0] — 2026-10-17
 

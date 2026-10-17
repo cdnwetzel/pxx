@@ -217,6 +217,59 @@ class DeleteFile:
         )
 
 
+def _indent(line: str) -> str:
+    return line[: len(line) - len(line.lstrip())]
+
+
+def _describe_indent(indent: str) -> str:
+    if not indent:
+        return "no indentation"
+    tabs, spaces = indent.count("\t"), indent.count(" ")
+    parts = [
+        f"{n} {name}{'s' if n != 1 else ''}" for n, name in ((spaces, "space"), (tabs, "tab")) if n
+    ]
+    return " + ".join(parts)
+
+
+def mismatch_hint(text: str, old: str) -> str:
+    """A concrete reason an ``edit_file`` old_string missed, when one is
+    certain: the snippet matches exactly ONE place once indentation is ignored
+    line by line. Returns "" otherwise. Never changes what matches -- the edit
+    still needs the exact text; this only names what to fix. Reports line
+    numbers and whitespace counts only, never file content (audit is
+    metadata-only). Observed 2026-10-17: a 4B model repeated an old_string with
+    four extra leading spaces five times against a generic "not found"."""
+    want = [ln.strip() for ln in old.splitlines()]
+    while want and not want[0]:
+        want.pop(0)
+    while want and not want[-1]:
+        want.pop()
+    if not want:
+        return ""
+    have = text.splitlines()
+    hits = [
+        i
+        for i in range(len(have) - len(want) + 1)
+        if [ln.strip() for ln in have[i : i + len(want)]] == want
+    ]
+    if len(hits) != 1:
+        return ""
+    first_old = next(ln for ln in old.splitlines() if ln.strip())
+    first_file = have[hits[0]]
+    if _indent(first_old) != _indent(first_file):
+        return (
+            f" Hint: it matches line {hits[0] + 1} if indentation is ignored — your "
+            f"old_string indents that line with {_describe_indent(_indent(first_old))}, "
+            f"the file with {_describe_indent(_indent(first_file))}. Copy the "
+            "file's indentation exactly."
+        )
+    return (
+        f" Hint: it matches line {hits[0] + 1} if indentation is ignored — the "
+        "indentation of a later line, or trailing whitespace, differs. Copy those "
+        "lines exactly as read_file shows them."
+    )
+
+
 class EditFile:
     spec = ToolSpec(
         name="edit_file",
@@ -249,7 +302,7 @@ class EditFile:
             return _err(
                 f"old_string not found in {path} — the file's current content "
                 "differs from what you expected. Call read_file on it and retry "
-                "with an exact substring (match whitespace exactly)."
+                "with an exact substring (match whitespace exactly)." + mismatch_hint(text, old)
             )
         if count > 1:
             return _err(

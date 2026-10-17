@@ -300,6 +300,15 @@ class AiderBackend:
                     session_id=ctx.session_id,
                 )
 
+        # `--commit` is opt-in (auto_commit). aider commits its own edits, and
+        # the diff, scope and truthfulness checks above read pre_head..HEAD, so
+        # they need those commits. When no commit was asked for, unwind them
+        # with a MIXED reset: HEAD returns to where the run started and the
+        # edits stay in the working tree, uncommitted -- what the native backend
+        # leaves. With --commit, the session commits the work itself.
+        if use_git and pre_head and not ctx.settings.auto_commit:
+            await self._unwind_commits(ctx, pre_head)
+
         tail = [line for line in lines if line.strip()][-5:]
         summary = "\n".join(tail)[:500] or "aider completed"
         return RunOutcome(
@@ -332,6 +341,24 @@ class AiderBackend:
                 session_id=ctx.session_id,
             )
         return lines, await err_task
+
+    async def _unwind_commits(self, ctx: SessionContext, pre_head: str) -> None:
+        """Move HEAD back to ``pre_head`` if aider committed, keeping its edits
+        as uncommitted changes (``git reset --mixed``). Never touches the
+        working tree, so no edit -- aider's or the user's -- is lost."""
+        post_head = await self._git(ctx.cwd, "rev-parse", "HEAD")
+        if not post_head or post_head.strip() == pre_head.strip():
+            return
+        await self._git(ctx.cwd, "reset", "--mixed", "--quiet", pre_head.strip())
+        await ctx.bus.emit(
+            "observation",
+            {
+                "source": "aider_commits_unwound",
+                "from": post_head.strip()[:12],
+                "to": pre_head.strip()[:12],
+            },
+            session_id=ctx.session_id,
+        )
 
     async def _report_diff(self, ctx: SessionContext, pre_head: str) -> tuple[int, list[str]]:
         """Emit file_changed events for the aider run's committed diff.

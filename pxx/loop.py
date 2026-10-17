@@ -189,6 +189,10 @@ async def _diff_since(
             root, "diff", "--no-renames"
         )
     text = out or ""
+    if pre_sha and out is None:
+        # The tracked diff itself failed: never an empty diff standing in for
+        # "nothing changed" (2.9.1 review).
+        text = _INCOMPLETE_DIFF_MARK + "\n"
     if new_since is not None:
         from .worktree import new_file_patch, new_files_since
 
@@ -202,7 +206,10 @@ async def _diff_since(
         for rel in created:
             patch = await new_file_patch(root, rel)
             if not patch:
-                patch = f"# pxx: new file {rel}: content unavailable\n"
+                # A created file whose patch cannot be read is missing
+                # evidence, exactly like a failed listing (2.9.1 review).
+                log.warning("loop: could not read the patch for created file %s", rel)
+                patch = _INCOMPLETE_DIFF_MARK + "\n"
             text = (text + "\n" if text and not text.endswith("\n") else text) + patch
     return text
 
@@ -236,7 +243,8 @@ async def _record_diff(
         parts.append("\n" + _INCOMPLETE_DIFF_MARK + "\n")
         created = []
     for rel in created:
-        parts.append(await new_file_patch(root, rel, binary=True))
+        patch = await new_file_patch(root, rel, binary=True)
+        parts.append(patch or "\n" + _INCOMPLETE_DIFF_MARK + "\n")
     text = "".join(p for p in parts if p)
     return text if len(text) <= 1_000_000 else ""
 

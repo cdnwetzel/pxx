@@ -1690,3 +1690,65 @@ def test_the_recorded_patch_says_when_it_is_incomplete(tmp_path: Path, monkeypat
     monkeypatch.setattr(wt, "untracked_paths", failing)
     patch = asyncio.run(loop_mod._record_diff(repo, None, {}))
     assert loop_mod._INCOMPLETE_DIFF_MARK in patch.splitlines()
+
+
+@needs_git
+@pytest.mark.parametrize("overrun", [False, True], ids=["main-path", "budget-salvage"])
+def test_a_created_file_whose_patch_cannot_be_read_blocks_like_a_failed_listing(
+    tmp_path: Path, monkeypatch, overrun: bool
+) -> None:
+    # Codex review (2.9.1 r5): a failed new_file_patch became a comment the
+    # completeness gate did not recognise -> COMPLETED with zero diff lines.
+    import pxx.worktree as wt
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_repo(repo, {"a.py": "a = 1\n"})
+
+    async def unreadable(cwd, rel, *, binary=False):
+        return ""
+
+    monkeypatch.setattr(wt, "new_file_patch", unreadable)
+    backend = ScriptedBackend(
+        edits={"new.py": "n = 1\n"},
+        outcome=RunOutcome(code=TerminalCode.BUDGET_EXCEEDED, summary="over", tokens=5)
+        if overrun
+        else None,
+    )
+    reviewer = ScriptedReviewer(["VERDICT: APPROVE"])
+    outcome = asyncio.run(
+        run_loop(
+            "add new.py",
+            _settings(tmp_path, test_command="true"),
+            cwd=repo,
+            backend_factory=Factory([backend]),
+            reviewer=reviewer,
+        )
+    )
+    assert outcome.code is not TerminalCode.COMPLETED
+    assert reviewer.calls == []
+
+
+@needs_git
+def test_a_recreated_untracked_file_with_identical_bytes_reaches_review(tmp_path: Path) -> None:
+    # Codex review (2.9.1 r5): identical bytes isolate the baseline ORDER.
+    import subprocess
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_repo(repo, {"a.py": "a = 1\n"})
+    for key, val in (("user.name", "t"), ("user.email", "t@e.c")):  # so the stash runs
+        subprocess.run(["git", "config", key, val], cwd=repo, check=True)
+    (repo / "new.py").write_text("same = 1\n")
+    reviewer = ScriptedReviewer(["VERDICT: APPROVE"])
+    outcome = asyncio.run(
+        run_loop(
+            "write new.py",
+            _settings(tmp_path),
+            cwd=repo,
+            backend_factory=Factory([ScriptedBackend(edits={"new.py": "same = 1\n"})]),
+            reviewer=reviewer,
+        )
+    )
+    assert "+stash" in outcome.summary  # the net really stashed the file
+    assert "+same = 1" in reviewer.calls[0][0]

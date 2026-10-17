@@ -780,6 +780,37 @@ def test_artifact_review_issues_never_carry_file_content() -> None:
 
 
 @needs_git
+def test_a_recreated_stashed_protected_file_with_identical_bytes_is_reviewed(
+    tmp_path: Path,
+) -> None:
+    """Codex review (2.9.1 r5): with DIFFERENT bytes the fingerprint alone
+    caught the re-created file, hiding a wrong baseline order. Identical bytes
+    isolate the order: only a baseline taken after the stash sees it."""
+    import subprocess
+
+    repo = tmp_path / "repo"
+    _init_repo(repo, files={"app.py": "x = 1\n"})
+    for key, val in (("user.name", "t"), ("user.email", "t@e.c")):  # so the stash runs
+        subprocess.run(["git", "config", key, val], cwd=repo, check=True)
+    workflow = repo / ".github" / "workflows" / "sneaky.yml"
+    workflow.parent.mkdir(parents=True)
+    workflow.write_text("on: push\n")
+    factory = Factory([ScriptedBackend(edits={".github/workflows/sneaky.yml": "on: push\n"})])
+    outcome = asyncio.run(
+        run_goal(
+            "goal",
+            _settings(tmp_path),
+            cwd=repo,
+            planner=_planner(_dag(_task("a"))),
+            backend_factory=factory,
+        )
+    )
+    assert "+stash" in outcome.summary  # the net really stashed the file
+    assert outcome.code is TerminalCode.OUT_OF_SCOPE
+    assert "artifact review" in outcome.summary
+
+
+@needs_git
 def test_artifact_review_fails_closed_when_paths_cannot_be_listed(tmp_path, monkeypatch):
     """If the touched paths cannot be listed, the artifact is not approved."""
     import pxx.worktree as wt

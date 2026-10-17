@@ -58,7 +58,13 @@ preserved in git (tag `v1.3.3` and earlier).
   run is "could not verify HEAD", not "unmoved". The loop's scope re-check
   ends `REVIEW_UNAVAILABLE` when the round's changed paths cannot be listed,
   and the recorded `diff.patch` carries the incomplete marker instead of
-  looking complete.
+  looking complete. A created file whose patch cannot be read, or a tracked
+  `git diff` that fails, counts as incomplete too. A cancelled aider task (the
+  session's wall-clock timeout) kills and reaps the aider process instead of
+  orphaning it, and records a moved HEAD/branch as an `observation`
+  (`source: "aider_head_moved"`). New-file patches for symlinks are the link
+  text (mode 120000) — also for links to directories, which `git diff
+  --no-index` cannot produce.
 
 ### Fixed
 

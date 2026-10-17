@@ -256,10 +256,25 @@ async def new_file_patch(cwd: Path, rel: str, *, binary: bool = False) -> str:
 
     target = cwd / rel
     root = canonicalize(cwd)
-    real = canonicalize(target)
-    if real != root and root not in real.parents:
+    # Confine where the ENTRY lives, not where a symlink points: git diffs a
+    # link's text, never its target, so an in-repo link to /elsewhere is a
+    # valid new file; a `../x` or absolute `rel` is not.
+    real = canonicalize(target.parent) / target.name
+    if root not in real.parents:
         return ""
-    if target.is_dir() and not target.is_symlink():
+    if target.is_symlink():
+        # A symlink's content is its link text (mode 120000) -- exactly what
+        # git records. `git diff --no-index` cannot produce it for a link to
+        # a DIRECTORY (it walks the target), so build it directly.
+        try:
+            link = os.readlink(target)
+        except OSError:
+            return ""
+        return (
+            f"diff --git a/{rel} b/{rel}\nnew file mode 120000\n--- /dev/null\n"
+            f"+++ b/{rel}\n@@ -0,0 +1 @@\n+{link}\n\\ No newline at end of file\n"
+        )
+    if target.is_dir():
         return ""
     args = ["git", "-C", str(cwd), "diff", "--no-index", "--no-renames"]
     if binary:

@@ -212,8 +212,16 @@ class AiderBackend:
             self._proc = await asyncio.create_subprocess_exec(
                 *argv, cwd=ctx.cwd, env=env, stdout=PIPE, stderr=PIPE
             )
-            lines, stderr_text = await self._pump(ctx)
-            returncode = await self._proc.wait()
+            try:
+                lines, stderr_text = await self._pump(ctx)
+                returncode = await self._proc.wait()
+            except asyncio.CancelledError:
+                # The task itself was cancelled (e.g. the session's wall-clock
+                # wait_for), not backend.cancel(): never leave aider running,
+                # and still record whether it moved HEAD (2.9.1 review). The
+                # cleanup is shielded so the cancellation cannot cut it short.
+                await asyncio.shield(self._abandon(ctx, pre_head, pre_ref, use_git))
+                raise
         finally:
             self._proc = None
             with contextlib.suppress(OSError):
@@ -372,6 +380,28 @@ class AiderBackend:
                 session_id=ctx.session_id,
             )
         return lines, await err_task
+
+    async def _abandon(
+        self, ctx: SessionContext, pre_head: str | None, pre_ref: str, use_git: bool
+    ) -> None:
+        """Kill and reap aider after the task was cancelled, then report a
+        moved HEAD/branch as an observation (the outcome is the caller's)."""
+        proc = self._proc
+        if proc is not None and proc.returncode is None:
+            with contextlib.suppress(ProcessLookupError):
+                proc.kill()
+            with contextlib.suppress(Exception):
+                await asyncio.wait_for(proc.wait(), timeout=10)
+        if not use_git:
+            return
+        moved = await self._head_moved(ctx, pre_head, pre_ref)
+        if moved:
+            log.warning("aider run cancelled: %s", moved)
+            await ctx.bus.emit(
+                "observation",
+                {"source": "aider_head_moved", "detail": moved[:300]},
+                session_id=ctx.session_id,
+            )
 
     async def _head_moved(
         self, ctx: SessionContext, pre_head: str | None, pre_ref: str = ""

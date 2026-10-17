@@ -838,3 +838,41 @@ def test_an_unverifiable_head_after_the_run_is_not_success(tmp_path, monkeypatch
     ctx = make_ctx(tmp_path, settings=Settings(permission=PermissionMode.EDIT))
     with pytest.raises(BackendError, match="could not verify HEAD"):
         asyncio.run(backend.run("t", ctx))
+
+
+def test_task_cancellation_kills_aider_and_still_reports_a_moved_head(tmp_path, monkeypatch):
+    # Codex review (2.9.1 r5): cancelling the TASK (the session's wait_for)
+    # skipped the HEAD check and left the aider process running.
+    import os as _os
+
+    pidfile = tmp_path / "aider.pid"
+    backend = AiderBackend(
+        aider_path=fake_aider(tmp_path, f"echo $$ > {pidfile}\necho ready\nexec sleep 30")
+    )
+    calls = {"rev_parse": 0, "reset": []}
+    monkeypatch.setattr(backend, "_git", _moved_head_git(calls))
+    stub_delta(backend, monkeypatch, [], 0)
+    ctx = make_ctx(tmp_path, settings=Settings(permission=PermissionMode.EDIT))
+
+    async def main():
+        task = asyncio.ensure_future(backend.run("t", ctx))
+        for _ in range(500):
+            if any(e.kind == "model_response" for e in ctx.bus.history):
+                break
+            await asyncio.sleep(0.01)
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await asyncio.wait_for(task, timeout=15)
+
+    import contextlib
+
+    asyncio.run(main())
+    pid = int(pidfile.read_text())
+    with pytest.raises(ProcessLookupError):
+        _os.kill(pid, 0)  # aider is gone, not orphaned
+    obs = [e.data for e in ctx.bus.history if e.kind == "observation"]
+    assert any(
+        o.get("source") == "aider_head_moved" and "despite --no-auto-commits" in o.get("detail", "")
+        for o in obs
+    )
+    assert calls["reset"] == []

@@ -6,6 +6,8 @@ import json
 from dataclasses import replace
 from pathlib import Path
 
+import pytest
+
 from pxx.config import ModelRef, Settings
 from pxx.manifest import (
     AgentManifest,
@@ -45,6 +47,25 @@ def test_budget_change_changes_agent_version_id(tmp_path: Path) -> None:
         prompts_dir=tmp_path / "none",
     )
     assert base.agent_version_id != tighter.agent_version_id
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("shell_unguarded", "abort"),
+        ("hook_denial", "refuse_tool"),
+        ("scope_violation", "refuse_tool"),
+        ("allow_ungated_shell", True),
+    ],
+)
+def test_gate_treatment_changes_agent_version_id(tmp_path: Path, key: str, value: object) -> None:
+    # They change what a run does (end vs continue, shell runs vs not), so
+    # runs grouped by agent identity must not conflate them.
+    base = build_manifest(_settings(tmp_path), "mock", prompts_dir=tmp_path / "none")
+    other = build_manifest(
+        _settings(tmp_path, **{key: value}), "mock", prompts_dir=tmp_path / "none"
+    )
+    assert base.agent_version_id != other.agent_version_id
 
 
 def test_model_change_changes_agent_version_id(tmp_path: Path) -> None:

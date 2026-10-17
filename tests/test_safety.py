@@ -32,9 +32,11 @@ def test_permission_write_and_shell_matrix():
     assert not PermissionMode.PLAN.can_write
     assert PermissionMode.EDIT.can_write
     assert PermissionMode.AUTO.can_write
+    # both write-capable modes may shell (given a safeguard, tools/shell.py)
     assert PermissionMode.AUTO.can_shell
-    assert not PermissionMode.EDIT.can_shell
+    assert PermissionMode.EDIT.can_shell
     assert not PermissionMode.ASK.can_shell
+    assert not PermissionMode.PLAN.can_shell
 
 
 # --- ScopeGate --------------------------------------------------------------
@@ -234,3 +236,16 @@ def test_budget_snapshot():
     snap = guard.snapshot()
     assert snap["rounds"] == 1 and snap["tokens"] == 5
     assert snap["remaining_seconds"] > 0
+
+
+def test_consume_records_all_usage_before_raising():
+    # Codex review: rounds were checked before the same step's tokens were
+    # added, so a round-budget abort under-reported tokens by one response.
+    from pxx.errors import BudgetExceeded
+    from pxx.safety import BudgetGuard, Budgets
+
+    guard = BudgetGuard(Budgets(max_rounds=1))
+    guard.consume(rounds=1, tokens=12)
+    with pytest.raises(BudgetExceeded, match="max_rounds"):
+        guard.consume(rounds=1, tokens=12)
+    assert guard.rounds == 2 and guard.tokens == 24

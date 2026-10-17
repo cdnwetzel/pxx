@@ -23,6 +23,8 @@ Precedence (highest wins): CLI flags → `PXX_*` env vars → `./pxx.toml` or
 | `sandbox_shell` | bool | `false` | wrap `run_shell` — and, in `pxx loop`, the `test_command` run — in sandbox-exec/bubblewrap; fail-closed when set and no sandboxer is installed |
 | `allow_ungated_shell` | bool | `false` | explicitly permit `run_shell` with no hook/sandbox (see `[[hooks]]`) |
 | `hook_denial` | `"abort"` \| `"refuse_tool"` | `"abort"` | what a `PreToolUse` denial does: end the run (default) or return `error: refused by policy: …` to the model and continue (see `[[hooks]]`) |
+| `scope_violation` | `"abort"` \| `"refuse_tool"` | `"abort"` | what an out-of-scope path does: end the run `OUT_OF_SCOPE` (default) or refuse the call back to the model and continue; user config only |
+| `shell_unguarded` | `"abort"` \| `"refuse_tool"` | `"refuse_tool"` | what `run_shell` does in `edit`/`auto` with **no** shell safeguard (hook, `sandbox_shell`, `allow_ungated_shell`): refuse the command back to the model and continue (default), or end the run `HOOKS_MISSING`; the command never runs either way; user config only (see `[[hooks]]`) |
 | `safety_net` | bool | `true` | stash + `pxx-pre/<ts>` tag on edit-capable session starts (git repos) |
 | `bare` | bool | `false` | payload-only mode for `ask`/`plan`: single user message, no system prompt, no `tools` key, no tool schemas constructed — for contract-gated callers; everything else unchanged (see [bare-mode/](bare-mode/README.md)) |
 | `temperature` | float | unset | sampling temperature sent in the request payload, strict range [0.0, 2.0]; unset = key not sent, server default applies; deterministic generation surface for strict textual contracts |
@@ -269,6 +271,16 @@ behind the hook and a denial is information the model can act on — a
 model that reaches for one refused `ls` before its final edit should lose
 the `ls`, not the edit.
 
+**No safeguard at all.** In `edit`/`auto`, `run_shell` needs one of: a
+`PreToolUse` hook that covers it, `sandbox_shell = true` (with a sandboxer
+installed), or `allow_ungated_shell = true`. With none, the command is not
+run. By default (`shell_unguarded = "refuse_tool"`, 2.9.0+) the model is told
+`error: refused by policy: … requires a shell safeguard …` and keeps working —
+a model that edits and then reaches for `pytest` keeps its edit. Set
+`shell_unguarded = "abort"` to end such runs `HOOKS_MISSING` instead (the
+pre-2.9.0 behaviour). To let a model actually run its tests, configure one of
+the three safeguards; `pxx loop` runs your `test_command` itself either way.
+
 **Path contract — read this before writing a scope/boundary hook.** The
 filesystem tools (`read_file` / `write_file` / `edit_file` / `list_files` /
 `search_files`) put their target in `args["path"]` **relative to the project
@@ -297,8 +309,10 @@ root**, not as an absolute path. A hook that enforces a path boundary MUST:
 **file** tools (it checks path targets); a shell command has no path target, so
 `scope` does **not** restrict what `run_shell` can touch. Because of that,
 `run_shell` in `edit` or `auto` mode (including unattended `pxx run`) requires an
-explicit shell safeguard, or it is denied with `HOOKS_MISSING`. Provide at least
-one (they're additive — any one satisfies the gate):
+explicit shell safeguard, or the command is never run — refused back to the model
+by default, or the session ends `HOOKS_MISSING` with `shell_unguarded = "abort"`
+(see **No safeguard at all** above). Provide at least one (they're additive — any
+one satisfies the gate):
 
 - a `PreToolUse` hook that **actually fires for `run_shell`** — `matcher =
   "run_shell"` or an empty matcher (deterministic allow/deny per command). A hook

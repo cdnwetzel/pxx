@@ -1,10 +1,14 @@
 """run_shell — the most dangerous tool, gated hardest.
 
-Policy (fail-closed, per DESIGN.md):
-- ``AUTO``: allowed (registry already ran PreToolUse hooks).
-- ``EDIT``: allowed only when at least one PreToolUse hook is configured —
-  the hook ran before this tool executed, so reaching ``run()`` means it
-  allowed the call. No hook configured -> denied.
+Policy (fail-closed, per DESIGN.md), checked in ``RunShell.preflight`` before
+anything is dispatched or recorded:
+- ``EDIT`` / ``AUTO``: allowed only with a shell safeguard -- a PreToolUse hook
+  that covers run_shell (the broker already ran it, so reaching here means it
+  allowed the call), an available sandbox (``sandbox_shell``), or the explicit
+  ``allow_ungated_shell`` opt-in. With none, ``ShellUnguarded`` is raised and
+  ``shell_unguarded`` decides: refuse it back to the model (default) or end
+  the run HOOKS_MISSING. A requested sandbox with no sandboxer is a setup
+  error: plain ``HooksMissing``, always terminal.
 - ``ASK`` / ``PLAN``: always denied.
 
 Execution: ``/bin/sh -c`` via asyncio subprocess, combined stdout+stderr
@@ -22,7 +26,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from ..errors import HooksMissing, ScopeViolation
+from ..errors import HooksMissing, ScopeViolation, ShellUnguarded
 from ..gitenv import git_env
 from ..safety import PermissionMode
 from . import ToolContext, ToolSpec, tool_schema
@@ -132,7 +136,11 @@ class RunShell:
         mutating=True,
     )
 
-    async def run(self, args: dict[str, Any], ctx: ToolContext) -> str:
+    def preflight(self, args: dict[str, Any], ctx: ToolContext) -> None:
+        """Raise unless this call may run under ``ctx`` -- before anything is
+        dispatched or recorded. ``ToolRegistry.call`` runs it ahead of the
+        ``tool_call`` event, so a refused command is never logged as a call;
+        ``run`` repeats it so a direct caller cannot skip it."""
         mode = ctx.permission
         if mode in (PermissionMode.ASK, PermissionMode.PLAN):
             raise ScopeViolation(f"run_shell is never allowed in permission mode '{mode}'")
@@ -159,7 +167,7 @@ class RunShell:
             or ctx.allow_ungated_shell
         )
         if mode in (PermissionMode.EDIT, PermissionMode.AUTO) and not gated:
-            raise HooksMissing(
+            raise ShellUnguarded(
                 f"run_shell in permission mode '{mode}' requires a shell safeguard "
                 "(fail-closed); none is configured. Choose one: add a PreToolUse hook "
                 '([[hooks]] event="PreToolUse", matcher="run_shell", command=...) that '
@@ -169,6 +177,8 @@ class RunShell:
                 "See docs/CONFIG.md §hooks"
             )
 
+    async def run(self, args: dict[str, Any], ctx: ToolContext) -> str:
+        self.preflight(args, ctx)
         command = str(args.get("command", ""))
         timeout = float(args.get("timeout") or DEFAULT_TIMEOUT)
 

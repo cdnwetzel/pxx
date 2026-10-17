@@ -200,7 +200,10 @@ def test_hook_coverage_warns_in_edit_mode_without_matching_hook():
 
     check = _hook_coverage_check(Settings(permission=PermissionMode.EDIT))
     assert not check.ok and not check.hard  # a warning line, never a failure
-    assert "HOOKS_MISSING" in check.detail and "docs/CONFIG.md" in check.detail
+    # default shell_unguarded = "refuse_tool": the warning says what happens
+    assert "refused back to the model" in check.detail and "docs/CONFIG.md" in check.detail
+    abort = _hook_coverage_check(Settings(permission=PermissionMode.EDIT, shell_unguarded="abort"))
+    assert not abort.ok and "HOOKS_MISSING" in abort.detail
 
     # a hook whose matcher misses run_shell does not cover it
     settings = Settings(
@@ -210,7 +213,7 @@ def test_hook_coverage_warns_in_edit_mode_without_matching_hook():
     assert not _hook_coverage_check(settings).ok
 
 
-def test_hook_coverage_ok_with_matching_hook_and_other_modes():
+def test_hook_coverage_ok_with_matching_hook_and_other_modes(monkeypatch):
     from pxx.config import Settings
     from pxx.doctor import _hook_coverage_check
     from pxx.safety import Hook, PermissionMode
@@ -220,9 +223,15 @@ def test_hook_coverage_ok_with_matching_hook_and_other_modes():
         hooks=(Hook(event="PreToolUse", command="true", matcher="run_shell"),),
     )
     assert _hook_coverage_check(settings).ok
-    # HOOKS_MISSING only applies to edit mode
+    # read-only modes never run shell, so there is nothing to warn about
     assert _hook_coverage_check(Settings(permission=PermissionMode.ASK)).ok
-    assert _hook_coverage_check(Settings(permission=PermissionMode.AUTO)).ok
+    # auto is write-capable too (2.3.5): it needs a safeguard like edit
+    assert not _hook_coverage_check(Settings(permission=PermissionMode.AUTO)).ok
+    # the other two safeguards count, not only a hook (sandbox only when a
+    # sandboxer exists -- pinned, so the test does not depend on the host)
+    monkeypatch.setattr("pxx.tools.shell._sandbox_available", lambda: True)
+    for extra in ({"sandbox_shell": True}, {"allow_ungated_shell": True}):
+        assert _hook_coverage_check(Settings(permission=PermissionMode.AUTO, **extra)).ok
 
 
 # --- model presence on reachable endpoints ----------------------------------
@@ -372,3 +381,23 @@ def test_review_independence_is_wired_into_run_doctor(monkeypatch, tmp_path):
     checks = asyncio.run(run_doctor(settings, cwd=tmp_path))
     named = [c for c in checks if c.name == "review:independence"]
     assert len(named) == 1 and not named[0].ok
+
+
+def test_hook_coverage_flags_a_requested_but_missing_sandbox(monkeypatch):
+    # Codex review: doctor reported sandbox_shell as a safeguard without
+    # checking a sandboxer exists, and a covering hook masked the missing
+    # sandbox -- the runtime denies run_shell in both cases.
+    from pxx.config import Settings
+    from pxx.doctor import _hook_coverage_check
+    from pxx.safety import Hook, PermissionMode
+
+    monkeypatch.setattr("pxx.tools.shell._sandbox_available", lambda: False)
+    alone = Settings(permission=PermissionMode.EDIT, sandbox_shell=True)
+    hooked = Settings(
+        permission=PermissionMode.EDIT,
+        sandbox_shell=True,
+        hooks=(Hook(event="PreToolUse", command="true", matcher="run_shell"),),
+    )
+    for settings in (alone, hooked):
+        check = _hook_coverage_check(settings)
+        assert not check.ok and "no sandboxer" in check.detail

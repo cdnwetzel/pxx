@@ -149,6 +149,23 @@ def test_session_maps_scope_violation(tmp_path):
     assert outcome.code is TerminalCode.OUT_OF_SCOPE
 
 
+def test_an_abort_after_real_rounds_reports_them_not_zero(tmp_path):
+    # Two rounds ran before the gate ended the session. The abort outcome is
+    # built from the exception alone; the guard's count must fill it, or the
+    # summary prints "rounds=0" and reads as "the model never ran".
+    backend = MockBackend(
+        [
+            {"tool": "write_file", "args": {"path": "a.txt", "content": "a"}},
+            {"tool": "write_file", "args": {"path": "b.txt", "content": "b"}},
+            {"tool": "write_file", "args": {"path": "/etc/pxx-evil", "content": "x"}},
+        ]
+    )
+    session = Session(_settings(tmp_path), backend, cwd=tmp_path)
+    outcome = run(session.run("write two, then escape"))
+    assert outcome.code is TerminalCode.OUT_OF_SCOPE
+    assert outcome.rounds == 2
+
+
 def test_session_denies_write_in_ask_mode(tmp_path):
     backend = MockBackend([{"tool": "write_file", "args": {"path": "x.txt", "content": "x"}}])
     session = Session(_settings(tmp_path, PermissionMode.ASK), backend, cwd=tmp_path)

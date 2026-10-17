@@ -761,6 +761,10 @@ async def run_loop(
                             findings,
                         )
                     )
+            # A loop outcome counts OUTER rounds and the loop's accumulated
+            # tokens (as _outcome does); the forwarded session outcome counts
+            # its own inner model rounds and only its own tokens.
+            outcome = replace(outcome, rounds=round_no, tokens=tokens)
             if net_suffix:
                 outcome = replace(outcome, summary=outcome.summary + net_suffix)
             return await _complete(outcome)  # backend-level terminal code short-circuits the loop

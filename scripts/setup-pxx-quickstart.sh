@@ -4,7 +4,7 @@
 #
 # CHANGES vs the original:
 #   1. converter.py now ships the `if __name__ == "__main__": main(sys.argv)` entry
-#      point (P0 fix) — Level 6's `python converter.py 100 C F` could never print
+#      point (P0 fix) — Level 6's `python3 converter.py 100 C F` could never print
 #      without it. It's boilerplate the learner shouldn't have to write.
 #   2. Added test_cli_c_to_f() so the CLI climax is actually test-covered — the
 #      scoreboard is now /6 and "all green" genuinely guarantees the CLI works.
@@ -35,7 +35,7 @@ def convert(value, unit_from, unit_to):
 
 
 def main(argv):
-    # Level 6: make `python converter.py 100 C F` print 212.0
+    # Level 6: make `python3 converter.py 100 C F` print 212.0
     raise NotImplementedError
 
 
@@ -58,7 +58,7 @@ def test_convert_f_to_c(): assert convert(32, "F", "C") == 0         # Level 5 a
 
 
 def test_cli_c_to_f():                                               # Level 6 adds (the CLI itself)
-    """`python converter.py 100 C F` must print 212.0 — covers main() + the entry point."""
+    """`python3 converter.py 100 C F` must print 212.0 — covers main() + the entry point."""
     out = subprocess.run(
         [sys.executable, "converter.py", "100", "C", "F"],
         capture_output=True, text=True,
@@ -80,7 +80,7 @@ cat > README.md <<'MD'
 A throwaway converter with a bug and two unfinished functions. You'll finish it with pxx.
 
     pytest -q        # 6 failing tests — your starting line
-    # Goal: all 6 green, and `python converter.py 100 C F` prints 212.0
+    # Goal: all 6 green, and `python3 converter.py 100 C F` prints 212.0
 
 Nothing here matters — break it, undo it, re-break it. That's the point.
 MD

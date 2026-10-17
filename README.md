@@ -148,7 +148,7 @@ pxx ask -m "Explain main.py"        # read-only (default): no writes, no shell
 pxx edit -m "Add error handling to main.py"   # writes allowed, in scope
 pxx edit --commit -m "…"            # + commit the change on COMPLETED (opt-in)
 pxx run  -m "Add tests for utils.py"          # unattended, budget-capped
-pxx loop -m "Fix the failing tests" --scope src  # bounded edit→test→review loop
+PXX_TEST_COMMAND="pytest -q" pxx loop -m "Fix the failing tests" --scope src  # bounded edit→test→review loop
 pxx chat                            # interactive session
 ```
 
@@ -158,7 +158,8 @@ run commit its work. The `pxx-pre/<ts>` safety tag always points at the
 pre-session HEAD, so undo is `git reset --hard <tag>` either way.
 
 Permission modes: **ask** (read-only) → **plan** (plan only) → **edit** (writes in
-scope, shell via hooks) → **auto** (unattended, budgets enforced). Every run is
+scope) → **auto** (unattended, budgets enforced); in both, `run_shell` needs a shell safeguard
+(a hook, `sandbox_shell`, or `allow_ungated_shell`) or the command is refused. Every run is
 bounded: max rounds/tokens/cost/wall-clock/diff-lines, all configurable.
 
 > **New to pxx?** The [**hands-on tutorial**](https://github.com/cdnwetzel/pxx/blob/v2/docs/TUTORIAL.md) takes you from install to building

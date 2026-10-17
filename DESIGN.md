@@ -243,8 +243,8 @@ HOOK_DENIED are repo additions.
 class PermissionMode(StrEnum):
     ASK = "ask"        # read-only: no writes, no mutating shell
     PLAN = "plan"      # like ask, model asked to produce a plan only
-    EDIT = "edit"      # writes allowed within scope; shell gated by hooks
-    AUTO = "auto"      # unattended: writes+shell allowed within scope/budgets
+    EDIT = "edit"      # writes allowed within scope; run_shell needs a shell safeguard
+    AUTO = "auto"      # unattended: as EDIT, budgets enforced; same shell safeguard rule
 
 class ScopeGate:
     def __init__(self, root: Path, scope: tuple[str, ...], trusted: tuple[str, ...])

@@ -161,7 +161,8 @@ class Settings:
     #: Where ``delete_file`` STAGES a removed file instead of unlinking it
     #: (2.6.1). Empty (the default) disables the tool: it answers with an
     #: error telling the model to leave the file and say so. Set from TRUSTED
-    #: config only (user config, env, CLI) -- like ``hooks``: a repo must not
+    #: config only (the user config; there is no env var or CLI flag for it)
+    #: -- like ``hooks``: a repo must not
     #: choose where its own files are moved to. The staged copy keeps the
     #: project-relative path under ``<delete_staging>/<project dir name>/``,
     #: so nothing is ever unrecoverable; a human purges the staging area.
@@ -508,8 +509,9 @@ def _settings_from_dict(
         if key in data and not allow_exec_surfaces:
             log.warning(
                 "ignoring %s in repo-local config %s (exec surfaces are honored "
-                "only from user config, env, or CLI — a repo must not define "
-                "the gate that guards it)",
+                "only from trusted sources — the user config, and env/CLI where "
+                "one exists for the key; see docs/CONFIG.md — a repo must not "
+                "define the gate that guards it)",
                 key,
                 source,
             )

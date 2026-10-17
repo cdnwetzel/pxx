@@ -22,8 +22,8 @@ from .errors import BudgetExceeded, HookDenied, ScopeViolation
 class PermissionMode(StrEnum):
     ASK = "ask"  # read-only: no writes, no shell
     PLAN = "plan"  # read-only, model produces a plan
-    EDIT = "edit"  # writes allowed in scope; shell only via hook
-    AUTO = "auto"  # unattended: writes + shell in scope, budgets enforced
+    EDIT = "edit"  # writes allowed in scope; run_shell needs a shell safeguard
+    AUTO = "auto"  # unattended: as EDIT, budgets enforced; same shell rule
 
     @property
     def can_write(self) -> bool:
@@ -31,7 +31,10 @@ class PermissionMode(StrEnum):
 
     @property
     def can_shell(self) -> bool:
-        return self is PermissionMode.AUTO
+        """The mode permits run_shell at all. A call still needs a shell
+        safeguard (a covering hook, an available sandbox, or the explicit
+        opt-in) -- that check lives in tools/shell.py."""
+        return self in (PermissionMode.EDIT, PermissionMode.AUTO)
 
 
 def canonicalize(path: str | Path, *, cwd: Path | None = None) -> Path:

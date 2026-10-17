@@ -32,9 +32,11 @@ def test_permission_write_and_shell_matrix():
     assert not PermissionMode.PLAN.can_write
     assert PermissionMode.EDIT.can_write
     assert PermissionMode.AUTO.can_write
+    # both write-capable modes may shell (given a safeguard, tools/shell.py)
     assert PermissionMode.AUTO.can_shell
-    assert not PermissionMode.EDIT.can_shell
+    assert PermissionMode.EDIT.can_shell
     assert not PermissionMode.ASK.can_shell
+    assert not PermissionMode.PLAN.can_shell
 
 
 # --- ScopeGate --------------------------------------------------------------

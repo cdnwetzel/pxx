@@ -39,9 +39,9 @@ your control.
 > ⚠️ **Safety** (read these).
 
 > ### ⏩ Fast track (comfortable with agents + the terminal?)
-> `bash setup-pxx-quickstart.sh` → `uv tool install -U --python 3.12 pxx-orchestrator` →
-> `uv tool install pytest` → `pxx edit --commit -m "fix celsius_to_fahrenheit"` →
-> `pxx edit --commit --scope . -m "implement fahrenheit_to_celsius"` → `pxx review` →
+> `uv tool install -U --python 3.12 pxx-orchestrator` → `uv tool install pytest` →
+> `bash setup-pxx-quickstart.sh && cd pxx-quickstart` → `pxx edit --commit -m "fix celsius_to_fahrenheit"` →
+> `pxx edit --scope . -m "implement fahrenheit_to_celsius"` → `pxx review` → `git commit -am "f2c"` →
 > `pxx edit --commit --scope . -m "implement convert() and a CLI in main()"`.
 > The only two things pxx changes for you are **Level 2 (how it picks your model)** and **Level 3
 > (the safety net)** — read those two, skim the rest.
@@ -300,9 +300,10 @@ When running 'python converter.py 100 C F', it will:
 - Call convert(100, 'C', 'F')  →  180 + 32 = 212.0  →  Print "212.0"
 [net: pxx-pre/20260725T150847Z] [committed 802301cf] (rounds=4 tokens=8949 diff_lines=15)
 ```
-> 🟣 **Go deeper** `pxx loop -m "make the failing tests pass" --scope .` runs bounded autonomous
-> rounds (edit → test → review) — in 2.x it works in **any** repo, and it verifies each round with
-> your test command (set `PXX_TEST_COMMAND="pytest -q"` or `test_command` in config). It's the
+> 🟣 **Go deeper** `PXX_TEST_COMMAND="pytest -q" pxx loop -m "make the failing tests pass" --scope .`
+> runs bounded autonomous rounds (edit → test → review) — in 2.x it works in **any** repo, and it
+> verifies each round with your test command (`PXX_TEST_COMMAND`, or `test_command` in config).
+> Without one, pxx stops before the first round and asks which command should verify the work. It's the
 > hands-off version of what you just did by hand; budget-capped so it can't run away. Real output
 > from handing this exact sandbox's last red test to `pxx loop` (same model and machine as Level 3):
 > ```

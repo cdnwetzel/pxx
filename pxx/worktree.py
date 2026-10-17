@@ -212,9 +212,37 @@ async def worktree_delta_checked(cwd: Path, start: dict) -> tuple[list[str], int
     for rel in start["untracked"]:
         if rel not in now["untracked"] and rel not in now["numstat"]:
             changed.append(rel)
-    # Edits and deletions behind assume-unchanged / skip-worktree flags.
-    changed.extend(flagged_changed(start.get("flagged", {}), now.get("flagged", {})))
+    # Edits and deletions behind assume-unchanged / skip-worktree flags. git
+    # cannot diff them, so their size is counted conservatively -- the whole
+    # file (or, for a deletion, the whole HEAD blob) -- never as zero
+    # (2.9.1 review); an unmeasurable size makes the delta unavailable.
+    for rel in flagged_changed(start.get("flagged", {}), now.get("flagged", {})):
+        changed.append(rel)
+        size = await _flagged_lines(cwd, rel)
+        if size is None:
+            return None
+        diff_lines += size
     return list(dict.fromkeys(changed)), diff_lines
+
+
+async def _flagged_lines(cwd: Path, rel: str) -> int | None:
+    """Upper-bound line count for a changed flagged path, or None."""
+    target = cwd / rel
+    if target.is_symlink():
+        return 1
+    if target.is_file():
+        try:
+            return len(target.read_bytes().splitlines())
+        except OSError:
+            return None
+    entry = await _git_raw(cwd, "ls-tree", "-z", "--full-tree", "HEAD", "--", rel)
+    if entry is None:
+        return None
+    meta = entry.split("\t", 1)[0].split()
+    if len(meta) != 3:
+        return 0  # not in HEAD either: nothing was deleted
+    blob = await _git_raw(cwd, "cat-file", "blob", meta[2])
+    return None if blob is None else len(blob.splitlines())
 
 
 #: Fingerprint for a flagged entry absent from the working tree.

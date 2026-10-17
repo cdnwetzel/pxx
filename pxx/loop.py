@@ -392,6 +392,7 @@ async def _edit_objectively_done(
     command: str | None,
     lint_command: str | None,
     sandbox: bool = False,
+    flagged_start: dict[str, str] | None = None,
 ) -> bool:
     """Whether the current on-disk edit passes every OBJECTIVE mandatory gate a
     completing round enforces — scope, diff budget, lint, tests — i.e. everything
@@ -404,7 +405,7 @@ async def _edit_objectively_done(
         return False  # no objective signal that the edit is complete
     if not diff.strip():
         return False  # nothing produced yet
-    changed = await _changed_paths_checked(root, pre_sha)
+    changed = await _changed_paths_checked(root, pre_sha, flagged_start)
     if changed is None:
         return False  # the changed paths cannot be verified (git failed)
     if any(not scope.in_scope(root / p) for p in changed):
@@ -432,6 +433,7 @@ async def _overwork_salvageable(
     reviewer: Reviewer | None,
     review_mode: ReviewMode,
     sandbox: bool = False,
+    flagged_start: dict[str, str] | None = None,
 ) -> bool:
     """Whether an over-worked run's diff is complete AND passes every mandatory
     guard, so a session that ran out of its per-turn budget (BUDGET_EXCEEDED) can
@@ -449,6 +451,7 @@ async def _overwork_salvageable(
         command=command,
         lint_command=lint_command,
         sandbox=sandbox,
+        flagged_start=flagged_start,
     ):
         return False
     if reviewer is not None:
@@ -644,6 +647,7 @@ async def run_loop(
                 command=command,
                 lint_command=lint_command,
                 sandbox=settings.sandbox_shell,
+                flagged_start=flagged_start,
             )
 
         done_check = _run_done_check
@@ -866,6 +870,7 @@ async def run_loop(
                         reviewer=reviewer,
                         review_mode=review_mode,
                         sandbox=settings.sandbox_shell,
+                        flagged_start=flagged_start,
                     )
                 ):
                     # Record the salvaged run's diff telemetry (the normal

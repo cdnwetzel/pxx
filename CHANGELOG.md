@@ -40,13 +40,16 @@ preserved in git (tag `v1.3.3` and earlier).
 - **The safety net and aider's scope fence are not fooled by `git replace`,
   and edits hidden behind index flags are seen.** The fence's revert runs only
   when HEAD's tree is still the start tree and is reported only once the tree
-  is verified afterwards. Every safety-net git command runs with
-  `--no-replace-objects`, and a restore also requires the start commit's tree
+  is verified afterwards. Every safety-net and aider-backend git command runs
+  with `--no-replace-objects` and no repository hooks (a `reference-transaction`
+  hook fires even on `update-ref`), and a restore also requires the start commit's tree
   to be unchanged. Tracked files flagged `assume-unchanged` or
   `skip-worktree` — which git reports as clean — are fingerprinted at the
   run's start and compared at the end, so an edit or a deletion behind the
-  flag reaches the scope fence, the loop's re-check and the session's delta
-  (a sparse-checkout file absent throughout is not a change); because `git
+  flag reaches the scope fence, the loop's re-check, the done-signal and
+  over-work salvage checks, and the session's delta — where it counts against
+  the diff budget at the file's full line count, since git cannot show what
+  changed (a sparse-checkout file absent throughout is not a change); because `git
   diff` cannot show such an edit, the loop treats it as incomplete evidence
   and blocks the round (`REVIEW_UNAVAILABLE`) rather than reviewing around
   it. Names are never stripped, so a file named

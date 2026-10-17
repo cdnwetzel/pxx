@@ -1778,6 +1778,45 @@ def test_changed_paths_see_flagged_edits_and_whitespace_names(tmp_path: Path) ->
 
 
 @needs_git
+@pytest.mark.parametrize("helper", ["done", "salvage"])
+def test_done_and_salvage_see_an_out_of_scope_flagged_edit(tmp_path: Path, helper: str) -> None:
+    # agy review (2.9.1 r7, P2): the done-check and the over-work salvage
+    # re-listed changed paths without the flagged baseline, so an
+    # out-of-scope edit behind an index flag passed their scope check.
+    import pxx.loop as loop_mod
+    from pxx.safety import ScopeGate
+    from pxx.worktree import flagged_state
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_repo(repo, {"a.py": "a = 1\n", "out.py": "o = 1\n"})
+    pre = subprocess.run(
+        [GIT, "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True
+    ).stdout.strip()
+    _git(repo, "update-index", "--skip-worktree", "out.py")
+    flagged_start = asyncio.run(flagged_state(repo))
+    (repo / "a.py").write_text("a = 2\n")
+    (repo / "out.py").write_text("o = 'hidden'\n")
+    kwargs = dict(
+        root=repo,
+        pre_sha=pre,
+        diff="-a = 1\n+a = 2\n",
+        scope=ScopeGate(repo, ("a.py",)),
+        max_diff_lines=100,
+        command=f"{sys.executable} -c pass",  # green: only the scope check can refuse
+        lint_command=None,
+        flagged_start=flagged_start,
+    )
+    assert asyncio.run(loop_mod._edit_objectively_done(**{**kwargs, "flagged_start": None}))
+    if helper == "done":
+        call = loop_mod._edit_objectively_done
+    else:
+        call = loop_mod._overwork_salvageable
+        kwargs.update(task="t", reviewer=None, review_mode=ReviewMode.BLOCKING)
+    assert asyncio.run(call(**kwargs)) is False
+
+
+@needs_git
 def test_an_edit_behind_an_index_flag_blocks_before_review(tmp_path: Path) -> None:
     # Codex review (2.9.1 r6): a flagged edit reached the path check but not
     # the reviewer or the budget (git diff omits it) -- COMPLETED, 0 lines.

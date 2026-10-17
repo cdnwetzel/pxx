@@ -99,6 +99,8 @@ class AiderBackend:
                 "--no-replace-objects",
                 "-c",
                 "core.fsmonitor=false",
+                "-c",
+                "core.hooksPath=/dev/null",  # the K2b reset moves refs: no hooks
                 *args,
                 cwd=cwd,
                 stdout=PIPE,

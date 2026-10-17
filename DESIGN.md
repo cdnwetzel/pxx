@@ -44,7 +44,11 @@ pxx/
   audit_sampling.py    # deterministic human audit sampling (14.5)
   router.py            # Endpoint probing, ModelRegistry, fallback chains
   session.py           # Session: wires config+backend+memory+safety+events
-  safety_net.py        # stash+tag at start; restore on a failed run only if HEAD/branch unchanged
+  safety_net.py        # stash+tag at start; restore on a failed run only if HEAD/branch/tag/tree
+                       # unchanged (SafetyNet: tag, stash_message, head_sha, head_ref,
+                       # stash_sha, head_tree; refusal -> gate_decision safety_net
+                       # restored:false reason:head_moved); commit_session_work commits
+                       # exactly the scanned blobs (temp index + commit-tree, no hooks)
   loop.py              # bounded autonomous loop (edit -> test -> review)
   worktree.py          # shared "what did this run change": snapshot/delta, created files
   review.py            # review gate: Finding, Verdict, backends, policy
@@ -532,7 +536,9 @@ records it identically in `task.json` and the `session_start` event;
   review and the diff budget see files the round created (baseline taken
   after the safety-net stash); if they cannot be listed, the round ends
   `REVIEW_UNAVAILABLE` with `gate_decision` `diff_complete` before any review,
-  salvage or done-signal can approve it.
+  salvage or done-signal can approve it. The scope re-check likewise ends
+  `REVIEW_UNAVAILABLE` (`gate_decision` `scope_recheck`, `allowed: false`)
+  when the round's changed paths cannot be listed.
 - `review.py`: `Finding(id, severity, file, line, message)`,
   `Verdict(StrEnum): APPROVE|REVISE|NO_REVIEW`; fail-closed: unknown output
   -> REVISE, no evidence -> NO_REVIEW; `mode` blocking|advisory (advisory

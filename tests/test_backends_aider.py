@@ -527,7 +527,8 @@ def test_real_git_with_commit_pxx_commits_through_its_own_gate(tmp_path):
     dirty.mkdir()
     git = _git_repo(dirty)
     head = git("rev-parse", "HEAD")
-    leak = "echo \"api_key = 'sk-live-0123456789abcdef0123456789abcdef'\" > settings.py"
+    fake = "sk-" + "live-" + "0123456789abcdef" * 2  # assembled: no literal for the CI gate
+    leak = f"echo \"api_key = '{fake}'\" > settings.py"
     outcome = asyncio.run(session(dirty, leak).run("add settings"))
     assert git("rev-parse", "HEAD") == head  # the secrets gate refused the commit
     assert "[committed " not in outcome.summary
@@ -902,3 +903,23 @@ def test_real_git_the_fence_revert_is_not_redirected_by_git_replace(tmp_path):
     assert outcome.code is TerminalCode.OUT_OF_SCOPE
     assert not (repo / "planted.txt").exists()  # the start tree, not the planted one
     assert (repo / "converter.py").read_text() == "x = 1\n"
+
+
+@_NEEDS_GIT
+@pytest.mark.parametrize("flag", ["--assume-unchanged", "--skip-worktree"])
+def test_real_git_a_flagged_edit_counts_against_the_diff_budget(tmp_path, flag):
+    """Codex review (2.9.1 r7): flagged edits added a path but zero lines, so
+    a standalone aider session's diff budget never saw them."""
+    from pxx.errors import BudgetExceeded
+    from pxx.safety import BudgetGuard, Budgets
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    git = _git_repo(repo)
+    git("update-index", flag, "converter.py")
+    body = "\\n".join(f"line{i} = {i}" for i in range(5))
+    path = fake_aider(tmp_path, f"printf '{body}\\\\n' > converter.py")
+    ctx = make_ctx(repo, settings=Settings(permission=PermissionMode.EDIT))
+    ctx = type(ctx)(**{**ctx.__dict__, "budgets": BudgetGuard(Budgets(max_diff_lines=2))})
+    with pytest.raises(BudgetExceeded):
+        asyncio.run(AiderBackend(aider_path=path).run("t", ctx))

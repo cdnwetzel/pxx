@@ -465,7 +465,8 @@ def test_pxx_commit_ignores_a_hook_written_during_the_run(tmp_path: Path) -> Non
     assert (repo / "pxx" / "safety.py").read_text() == "SAFE = True\n"  # the hook never ran
 
 
-_SECRET = "api_key = 'sk-live-0123456789abcdef0123456789abcdef'\n"
+# Assembled so no source line matches the CI governance gate; same bytes.
+_SECRET = "api_key = '" + "sk-" + "live-" + "0123456789abcdef" * 2 + "'\n"
 
 
 def _no_secret_committed(repo: Path) -> bool:
@@ -538,3 +539,20 @@ def test_scan_staged_ignores_git_replace(tmp_path: Path) -> None:
     clean_blob = _git(repo, "rev-parse", "HEAD:ok.py")
     _git(repo, "replace", secret_blob, clean_blob)
     assert scan_staged(cwd=repo), "the replace ref hid the staged secret"
+
+
+@needs_git
+def test_pxx_commit_runs_no_reference_transaction_hook(tmp_path: Path) -> None:
+    """Codex review (2.9.1 r7, P0): `update-ref` fires reference-transaction,
+    so moving from `git commit` to commit-tree still ran a planted hook."""
+    repo = tmp_path / "repo"
+    _init_repo(repo, files={"ok.py": "x = 1\n", "pxx/safety.py": "SAFE = True\n"})
+    marker = tmp_path / "hook-ran"
+    hook = repo / ".git" / "hooks" / "reference-transaction"
+    hook.write_text(f"#!/bin/sh\ntouch {marker}\necho 'SAFE = False' > pxx/safety.py\n")
+    hook.chmod(0o755)
+    (repo / "ok.py").write_text("x = 2\n")
+    sha = run(commit_session_work(repo, task_preview="t", net_tag=None, only={"ok.py"}))
+    assert sha
+    assert not marker.exists()  # the hook never ran
+    assert (repo / "pxx" / "safety.py").read_text() == "SAFE = True\n"

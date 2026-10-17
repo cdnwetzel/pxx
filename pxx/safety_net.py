@@ -50,9 +50,19 @@ class SafetyNet:
 
 
 #: Every safety-net / commit git command: replace refs ignored (a `git
-#: replace` made during the run must not redirect what a SHA means) and no
-#: fsmonitor hook (repository-controlled code) -- 2.9.1 reviews.
-_GIT_BASE = ("git", "--no-replace-objects", "-c", "core.fsmonitor=false")
+#: replace` made during the run must not redirect what a SHA means), and no
+#: repository-controlled code -- no fsmonitor, and NO HOOKS of any kind (not
+#: only pre-commit: `update-ref` and `reset` fire `reference-transaction`,
+#: and a hook planted during the run is invisible to every scope check) --
+#: 2.9.1 reviews.
+_GIT_BASE = (
+    "git",
+    "--no-replace-objects",
+    "-c",
+    "core.fsmonitor=false",
+    "-c",
+    "core.hooksPath=/dev/null",
+)
 
 
 async def _git_io(

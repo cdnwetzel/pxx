@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+from collections.abc import Callable
 from pathlib import Path
 
 from .gitenv import git_env
@@ -153,4 +154,52 @@ async def worktree_delta(cwd: Path, start: dict) -> tuple[list[str], int]:
     return changed, diff_lines
 
 
-__all__ = ["untracked_paths", "worktree_delta", "worktree_snapshot"]
+async def new_files_since(
+    cwd: Path, baseline: set[str], skip: Callable[[str], bool] | None = None
+) -> list[str]:
+    """Untracked paths that were not untracked at ``baseline`` -- the files a
+    run CREATED (a plain ``git diff <ref>`` never shows them). ``skip`` drops
+    paths the caller does not count (e.g. interpreter caches)."""
+    paths = await untracked_paths(cwd)
+    if paths is None:
+        return []
+    return [p for p in paths if p not in baseline and not (skip and skip(p))]
+
+
+async def new_file_patch(cwd: Path, rel: str, *, binary: bool = False) -> str:
+    """A new-file hunk for an untracked ``rel`` (``git diff --no-index
+    /dev/null rel``). Read-only by construction: nothing is staged, no
+    intent-to-add. "" on any failure. Output is NOT stripped -- a patch must
+    keep its trailing newline to stay appliable."""
+    args = ["git", "-C", str(cwd), "diff", "--no-index", "--no-renames"]
+    if binary:
+        args.append("--binary")
+    args += ["--", "/dev/null", rel]
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+            env=git_env(),
+        )
+    except OSError:
+        return ""
+    try:
+        out, _ = await asyncio.wait_for(proc.communicate(), 15.0)
+    except TimeoutError:
+        proc.kill()
+        await proc.wait()  # reap it: never leak a child on the way past
+        return ""
+    # --no-index exits 1 when the two sides differ, which a new file always does
+    if proc.returncode not in (0, 1):
+        return ""
+    return out.decode(errors="replace")
+
+
+__all__ = [
+    "new_file_patch",
+    "new_files_since",
+    "untracked_paths",
+    "worktree_delta",
+    "worktree_snapshot",
+]

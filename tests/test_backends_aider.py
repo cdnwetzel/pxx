@@ -47,6 +47,19 @@ def fake_aider(tmp_path, body: str) -> str:
     return str(script)
 
 
+def stub_delta(backend, monkeypatch, paths, lines):
+    """Stub the worktree seams: the run changed ``paths`` (``lines`` total)."""
+
+    async def snapshot(cwd):
+        return {}
+
+    async def delta(cwd, start):
+        return list(paths), lines
+
+    monkeypatch.setattr(backend, "_snapshot", snapshot)
+    monkeypatch.setattr(backend, "_delta", delta)
+
+
 def test_missing_binary_raises_backend_unavailable(monkeypatch, tmp_path):
     monkeypatch.setattr(shutil, "which", lambda cmd: None)
     with pytest.raises(BackendUnavailable, match=r"pip install pxx-orchestrator\[aider\]"):
@@ -133,13 +146,10 @@ def test_git_diff_reporting(tmp_path, monkeypatch):
     async def fake_git(cwd, *args):
         if args[:2] == ("rev-parse", "HEAD"):
             return "abc123"
-        if args[:2] == ("diff", "--stat"):
-            return " pxx/foo.py | 5 +++--\n 1 file changed, 3 insertions(+), 2 deletions(-)"
-        if args[:2] == ("diff", "--name-only"):
-            return "pxx/foo.py"
         return None
 
     monkeypatch.setattr(backend, "_git", fake_git)
+    stub_delta(backend, monkeypatch, ["pxx/foo.py"], 5)
     ctx = make_ctx(tmp_path)
     outcome = asyncio.run(backend.run("t", ctx))
     assert outcome.code is TerminalCode.COMPLETED
@@ -157,13 +167,10 @@ def test_out_of_scope_capture_projects_blocked(tmp_path, monkeypatch):
     async def fake_git(cwd, *args):
         if args[:2] == ("rev-parse", "HEAD"):
             return "abc123"
-        if args[:2] == ("diff", "--stat"):
-            return " converter.py | 2 +-\n 1 file changed, 1 insertion(+), 1 deletion(-)"
-        if args[:2] == ("diff", "--name-only"):
-            return "converter.py"
         return None
 
     monkeypatch.setattr(backend, "_git", fake_git)
+    stub_delta(backend, monkeypatch, ["converter.py"], 2)
     ctx = make_ctx(tmp_path, scope=ScopeGate(tmp_path, ("other_dir",)))
     outcome = asyncio.run(backend.run("add a comment", ctx))
     assert outcome.code is TerminalCode.OUT_OF_SCOPE
@@ -284,22 +291,19 @@ def test_in_scope_edit_stays_completed(tmp_path, monkeypatch):
     assert not [e for e in ctx.bus.history if e.kind == "gate_decision"]
 
 
-def test_deep_paths_come_from_name_only_not_stat(tmp_path, monkeypatch):
-    """K2-R1: --stat truncates deep paths; the scope check must see the full
-    --name-only path, else a legit deep in-scope edit false-fires the block."""
+def test_deep_paths_reach_the_scope_check_intact(tmp_path, monkeypatch):
+    """K2-R1: a truncated path (as `git diff --stat` prints deep ones) false-fires
+    the block. Paths now come from the worktree delta, full and exact."""
     path = fake_aider(tmp_path, "echo done")
     backend = AiderBackend(aider_path=path)
 
     async def fake_git(cwd, *args):
         if args[:2] == ("rev-parse", "HEAD"):
             return "abc123"
-        if args[:2] == ("diff", "--stat"):
-            return " .../deep/module.py | 3 ++-\n 1 file changed, 2 insertions(+), 1 deletion(-)"
-        if args[:2] == ("diff", "--name-only"):
-            return "src/deep/module.py"
         return None
 
     monkeypatch.setattr(backend, "_git", fake_git)
+    stub_delta(backend, monkeypatch, ["src/deep/module.py"], 3)
     ctx = make_ctx(tmp_path, scope=ScopeGate(tmp_path, ("src",)))
     outcome = asyncio.run(backend.run("t", ctx))
     assert outcome.code is TerminalCode.COMPLETED  # the truncated form is out of scope
@@ -308,14 +312,8 @@ def test_deep_paths_come_from_name_only_not_stat(tmp_path, monkeypatch):
     assert [e.data["path"] for e in changed] == ["src/deep/module.py"]
 
 
-def _blocking_fake_git(
-    calls,
-    statuses,
-    *,
-    diff=(" converter.py | 2 +-\n 1 file changed, 1 insertion(+), 1 deletion(-)", "converter.py"),
-):
+def _blocking_fake_git(calls, statuses):
     """fake_git for K2b: stateful `status` answers, records `reset` calls."""
-    stat, names = diff
 
     async def fake_git(cwd, *args):
         if args[:2] == ("rev-parse", "HEAD"):
@@ -326,10 +324,6 @@ def _blocking_fake_git(
         if args and args[0] == "reset":
             calls["reset"].append(args)
             return ""
-        if args[:2] == ("diff", "--stat"):
-            return stat
-        if args[:2] == ("diff", "--name-only"):
-            return names
         return None
 
     return fake_git
@@ -341,11 +335,12 @@ def test_block_reverts_out_of_scope_commits(tmp_path, monkeypatch):
     backend = AiderBackend(aider_path=path)
     calls = {"status": 0, "reset": []}
     monkeypatch.setattr(backend, "_git", _blocking_fake_git(calls, ["", ""]))
+    stub_delta(backend, monkeypatch, ["converter.py"], 2)
     ctx = make_ctx(tmp_path, scope=ScopeGate(tmp_path, ("other_dir",)))
     outcome = asyncio.run(backend.run("add a comment", ctx))
     assert outcome.code is TerminalCode.OUT_OF_SCOPE
     assert calls["reset"] == [("reset", "--hard", "abc123def456")]
-    assert "out-of-scope commits reverted to abc123d" in outcome.summary
+    assert "out-of-scope edits reverted to abc123d" in outcome.summary
     gates = [e for e in ctx.bus.history if e.kind == "gate_decision"]
     assert gates[0].data["reverted_to"] == "abc123d"
 
@@ -363,9 +358,9 @@ def test_block_removes_only_session_created_droppings(tmp_path, monkeypatch):
         _blocking_fake_git(
             calls,
             ["?? pre_existing.txt", "?? pre_existing.txt\n?? converter_notes.txt"],
-            diff=(None, None),
         ),
     )
+    stub_delta(backend, monkeypatch, [], 0)
     ctx = make_ctx(tmp_path, scope=ScopeGate(tmp_path, ("other_dir",)))
     outcome = asyncio.run(backend.run("add a comment", ctx))
     assert outcome.code is TerminalCode.OUT_OF_SCOPE
@@ -385,22 +380,46 @@ def test_block_skips_revert_with_preexisting_dirt(tmp_path, monkeypatch):
     monkeypatch.setattr(
         backend, "_git", _blocking_fake_git(calls, [" M dirty.txt", " M dirty.txt"])
     )
+    stub_delta(backend, monkeypatch, ["converter.py"], 2)
     ctx = make_ctx(tmp_path, scope=ScopeGate(tmp_path, ("other_dir",)))
     outcome = asyncio.run(backend.run("add a comment", ctx))
     assert outcome.code is TerminalCode.OUT_OF_SCOPE
     assert calls["reset"] == []  # pre-existing dirt is untouchable
-    assert "commits not reverted (pre-existing local changes)" in outcome.summary
+    assert "edits not reverted (pre-existing local changes)" in outcome.summary
     assert "git reset --hard abc123d" in outcome.summary
     gates = [e for e in ctx.bus.history if e.kind == "gate_decision"]
     assert gates[0].data["reverted_to"] == ""
     assert "not reverted" in gates[0].data["not_reverted"]
 
 
-# --- --commit is opt-in under aider too (aider commits its own edits) ----------
+# --- pxx owns committing: aider never commits (2.9.1) -------------------------
 
 
-def _moving_head_fake_git(calls):
-    """HEAD is pre at the start of the run and moves after aider commits."""
+def test_aider_is_told_not_to_commit_in_a_repo(tmp_path, monkeypatch):
+    path = fake_aider(tmp_path, 'echo "ARGS: $@"')
+    backend = AiderBackend(aider_path=path)
+
+    async def fake_git(cwd, *args):
+        return "abc123" if args[:2] == ("rev-parse", "HEAD") else None
+
+    monkeypatch.setattr(backend, "_git", fake_git)
+    stub_delta(backend, monkeypatch, [], 0)
+    ctx = make_ctx(tmp_path, settings=Settings(permission=PermissionMode.EDIT))
+    args = asyncio.run(backend.run("t", ctx)).summary
+    assert "--no-auto-commits" in args and "--no-dirty-commits" in args
+    assert "--no-git" not in args
+
+
+def test_no_commit_flags_outside_a_repo(tmp_path):
+    path = fake_aider(tmp_path, 'echo "ARGS: $@"')
+    args = asyncio.run(AiderBackend(aider_path=path).run("t", make_ctx(tmp_path))).summary
+    assert "--no-git" in args and "--no-auto-commits" not in args
+
+
+def test_an_aider_that_commits_anyway_fails_loudly_and_rewrites_nothing(tmp_path, monkeypatch):
+    path = fake_aider(tmp_path, "echo done")
+    backend = AiderBackend(aider_path=path)
+    calls = {"rev_parse": 0, "reset": []}
 
     async def fake_git(cwd, *args):
         if args[:2] == ("rev-parse", "HEAD"):
@@ -408,73 +427,21 @@ def _moving_head_fake_git(calls):
             return "pre0000000000" if calls["rev_parse"] == 1 else "post111111111"
         if args and args[0] == "reset":
             calls["reset"].append(args)
-            return ""
-        if args[:2] == ("status", "--porcelain=v1"):
-            return ""
-        if args[:2] == ("diff", "--stat"):
-            return " converter.py | 2 +-\n 1 file changed, 1 insertion(+), 1 deletion(-)"
-        if args[:2] == ("diff", "--name-only"):
-            return "converter.py"
-        return None
-
-    return fake_git
-
-
-def test_without_commit_aiders_commits_are_unwound_keeping_the_edit(tmp_path, monkeypatch):
-    path = fake_aider(tmp_path, "echo done")
-    backend = AiderBackend(aider_path=path)
-    calls = {"rev_parse": 0, "reset": []}
-    monkeypatch.setattr(backend, "_git", _moving_head_fake_git(calls))
-    ctx = make_ctx(tmp_path, settings=Settings(permission=PermissionMode.EDIT))
-    outcome = asyncio.run(backend.run("fix it", ctx))
-    assert outcome.code is TerminalCode.COMPLETED
-    assert outcome.diff_lines == 2  # measured from aider's commit, before the unwind
-    # mixed, never hard: the edit stays in the working tree
-    assert calls["reset"] == [("reset", "--mixed", "--quiet", "pre0000000000")]
-    obs = [e.data for e in ctx.bus.history if e.kind == "observation"]
-    assert obs == [
-        {"source": "aider_commits_unwound", "from": "post11111111", "to": "pre000000000"}
-    ]
-
-
-def test_with_commit_aiders_commits_are_kept(tmp_path, monkeypatch):
-    path = fake_aider(tmp_path, "echo done")
-    backend = AiderBackend(aider_path=path)
-    calls = {"rev_parse": 0, "reset": []}
-    monkeypatch.setattr(backend, "_git", _moving_head_fake_git(calls))
-    settings = Settings(permission=PermissionMode.EDIT, auto_commit=True)
-    outcome = asyncio.run(backend.run("fix it", make_ctx(tmp_path, settings=settings)))
-    assert outcome.code is TerminalCode.COMPLETED
-    assert calls["reset"] == []
-
-
-def test_no_commit_by_aider_means_nothing_to_unwind(tmp_path, monkeypatch):
-    path = fake_aider(tmp_path, "echo done")
-    backend = AiderBackend(aider_path=path)
-    calls = {"reset": []}
-
-    async def fake_git(cwd, *args):
-        if args[:2] == ("rev-parse", "HEAD"):
-            return "same000000000"
-        if args and args[0] == "reset":
-            calls["reset"].append(args)
         return ""
 
     monkeypatch.setattr(backend, "_git", fake_git)
+    stub_delta(backend, monkeypatch, [], 0)
     ctx = make_ctx(tmp_path, settings=Settings(permission=PermissionMode.EDIT))
-    asyncio.run(backend.run("look", ctx))
-    assert calls["reset"] == []
+    with pytest.raises(BackendError, match=r"despite --no-auto-commits.*git reset --soft pre0000"):
+        asyncio.run(backend.run("t", ctx))
+    assert calls["reset"] == []  # pxx does not rewrite history behind the operator
 
 
-@pytest.mark.skipif(shutil.which("git") is None, reason="git not available")
-def test_real_git_an_aider_style_commit_becomes_an_uncommitted_edit(tmp_path):
-    """End to end with real git: a fake aider that edits AND commits (as aider
-    does by default). Without --commit, HEAD must end where it started and the
-    edit must survive in the working tree."""
+_NEEDS_GIT = pytest.mark.skipif(shutil.which("git") is None, reason="git not available")
+
+
+def _git_repo(repo):
     import subprocess
-
-    repo = tmp_path / "repo"  # the fake aider script lives outside the repo
-    repo.mkdir()
 
     def git(*args):
         return subprocess.run(
@@ -483,23 +450,87 @@ def test_real_git_an_aider_style_commit_becomes_an_uncommitted_edit(tmp_path):
             check=True,
             capture_output=True,
             text=True,
-        ).stdout.strip()
+        ).stdout
 
     git("init", "-q")
     (repo / "converter.py").write_text("x = 1\n")
     git("add", "-A")
     git("commit", "-q", "-m", "start")
-    start = git("rev-parse", "HEAD")
-    path = fake_aider(
-        tmp_path,
-        "echo 'x = 2' > converter.py\n"
-        "git -c user.name=aider -c user.email=a@example.com commit -qam 'aider: edit'\n"
-        "echo 'Applied edit to converter.py'",
-    )
+    return git
+
+
+@_NEEDS_GIT
+def test_real_git_edits_and_new_files_stay_uncommitted_and_are_reported(tmp_path):
+    """End to end with real git and the real worktree helpers: a fake aider that
+    edits a file and creates one (and, like a well-behaved aider given
+    --no-auto-commits, commits nothing). HEAD stays put, both paths are
+    reported, and the edits are left exactly as the native backend leaves them."""
+    repo = tmp_path / "repo"  # the fake aider script lives outside the repo
+    repo.mkdir()
+    git = _git_repo(repo)
+    start = git("rev-parse", "HEAD").strip()
+    path = fake_aider(tmp_path, "echo 'x = 2' > converter.py\necho 'y = 1' > new.py")
     ctx = make_ctx(repo, settings=Settings(permission=PermissionMode.EDIT))
-    outcome = asyncio.run(AiderBackend(aider_path=path).run("set x to 2", ctx))
+    outcome = asyncio.run(AiderBackend(aider_path=path).run("edit", ctx))
     assert outcome.code is TerminalCode.COMPLETED
-    assert outcome.diff_lines == 2
-    assert git("rev-parse", "HEAD") == start  # no commit was asked for
-    assert (repo / "converter.py").read_text() == "x = 2\n"  # the edit survives
-    assert git("status", "--porcelain") == "M converter.py"  # strip() eats the leading space
+    assert git("rev-parse", "HEAD").strip() == start
+    changed = sorted(e.data["path"] for e in ctx.bus.history if e.kind == "file_changed")
+    assert changed == ["converter.py", "new.py"]
+    assert outcome.diff_lines == 3  # 1 insertion + 1 deletion + 1 new line
+    assert git("status", "--porcelain") == " M converter.py\n?? new.py\n"
+
+
+@_NEEDS_GIT
+def test_real_git_preexisting_staged_work_is_untouched(tmp_path):
+    """Nothing is reset, so the index the operator had before the run survives
+    exactly -- staged and unstaged stay distinct (raw porcelain, no strip)."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    git = _git_repo(repo)
+    (repo / "staged.py").write_text("s = 1\n")
+    git("add", "staged.py")
+    path = fake_aider(tmp_path, "echo 'x = 2' > converter.py")
+    ctx = make_ctx(repo, settings=Settings(permission=PermissionMode.EDIT))
+    outcome = asyncio.run(AiderBackend(aider_path=path).run("edit", ctx))
+    assert outcome.code is TerminalCode.COMPLETED
+    assert git("status", "--porcelain") == " M converter.py\nA  staged.py\n"
+    changed = [e.data["path"] for e in ctx.bus.history if e.kind == "file_changed"]
+    assert changed == ["converter.py"]  # pre-existing staged work is not the run's
+
+
+@_NEEDS_GIT
+def test_real_git_with_commit_pxx_commits_through_its_own_gate(tmp_path):
+    """agy review (P0): under --commit, aider's own commits used to land
+    unscanned. Now aider commits nothing and the session's commit path runs:
+    clean work is committed BY PXX (net trailer), a secret is never committed."""
+    from pxx.config import ModelRef
+    from pxx.session import Session
+
+    def session(repo, body):
+        settings = Settings(
+            model=ModelRef(provider="ollama", model="m"),
+            permission=PermissionMode.EDIT,
+            auto_commit=True,
+            memory_dir=tmp_path / "mem",
+            state_dir=tmp_path / "state",
+        )
+        backend = AiderBackend(aider_path=fake_aider(tmp_path, body))
+        return Session(settings, backend, cwd=repo)
+
+    clean = tmp_path / "clean"
+    clean.mkdir()
+    git = _git_repo(clean)
+    outcome = asyncio.run(session(clean, "echo 'x = 2' > converter.py").run("set x to 2"))
+    assert outcome.code is TerminalCode.COMPLETED
+    assert "[committed " in outcome.summary
+    assert "[net: pxx-pre/" in git("log", "-1", "--format=%B")  # pxx's commit, not aider's
+    assert git("status", "--porcelain") == ""
+
+    dirty = tmp_path / "dirty"
+    dirty.mkdir()
+    git = _git_repo(dirty)
+    head = git("rev-parse", "HEAD")
+    leak = "echo \"api_key = 'sk-live-0123456789abcdef0123456789abcdef'\" > settings.py"
+    outcome = asyncio.run(session(dirty, leak).run("add settings"))
+    assert git("rev-parse", "HEAD") == head  # the secrets gate refused the commit
+    assert "[committed " not in outcome.summary

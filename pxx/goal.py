@@ -293,9 +293,13 @@ async def run_goal(
     isolated = (root / ".git").exists()
     worktrees: dict[str, Path] = {}
     base_sha = ""
+    untracked_start: set[str] = set()
     if isolated:
         rc, out = await _git(root, "rev-parse", "HEAD")
         base_sha = out.strip() if rc == 0 else ""
+        from .worktree import untracked_paths
+
+        untracked_start = set(await untracked_paths(root) or [])
     if isolated:
         from .improve.scheduler import candidate_worktree
 
@@ -410,6 +414,13 @@ async def run_goal(
         from .roles import DeterministicArtifactReviewer
 
         _rc, merged_diff = await _git(root, "diff", "--no-renames", "HEAD")
+        # `git apply` leaves files the nodes CREATED untracked, and
+        # `git diff HEAD` never shows them -- a new file at a protected path
+        # slipped past this review. Created files are part of the artifact.
+        from .worktree import new_file_patch, new_files_since
+
+        for rel in await new_files_since(root, untracked_start):
+            merged_diff = merged_diff.rstrip("\n") + "\n" + await new_file_patch(root, rel)
         artifact = await DeterministicArtifactReviewer().review_artifact(
             merged_diff, f"goal-{len(tasks)}-nodes"
         )

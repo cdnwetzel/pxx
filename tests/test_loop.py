@@ -1487,3 +1487,59 @@ def test_a_later_round_abort_reports_the_accumulated_tokens(tmp_path):
     )
     assert outcome.code is TerminalCode.HOOKS_MISSING
     assert (outcome.rounds, outcome.tokens) == (2, 17)
+
+
+@needs_git
+def test_a_file_the_round_created_reaches_review_and_the_diff_budget(tmp_path: Path) -> None:
+    # Codex review (2.9.1): `git diff <pre_sha>` never shows a created file, so
+    # the review and the diff budget missed new files for every backend that
+    # leaves work uncommitted. A pre-existing untracked file is not the run's.
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_repo(repo, {"a.py": "a = 1\n"})
+    (repo / "notes.txt").write_text("the operator's, untracked before the loop\n")
+    reviewer = ScriptedReviewer(["VERDICT: APPROVE"])
+    created = "".join(f"line{i} = {i}\n" for i in range(6))
+    outcome = asyncio.run(
+        run_loop(
+            "add new.py",
+            _settings(tmp_path),
+            cwd=repo,
+            backend_factory=Factory([ScriptedBackend(edits={"new.py": created})]),
+            reviewer=reviewer,
+        )
+    )
+    assert outcome.code is TerminalCode.COMPLETED
+    reviewed = reviewer.calls[0][0]
+    assert "new.py" in reviewed and "+line5 = 5" in reviewed
+    assert "notes.txt" not in reviewed  # untracked at loop start: not the run's work
+    assert outcome.diff_lines == 6  # the created file's lines count toward the budget
+
+
+@needs_git
+def test_a_force_added_ignored_file_outside_scope_is_caught(tmp_path: Path) -> None:
+    # Grok review (2.9.1): a run that `git add -f`s a gitignored file outside
+    # the scope, beside an in-scope edit, must not slip past the loop's scope
+    # re-check. aider no longer commits, so the file stays staged -- and
+    # staged paths are part of `git diff <pre_sha>`.
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_repo(repo, {"src/ok.py": "a = 1\n", ".gitignore": ".secret\n"})
+
+    class ForceAdding(ScriptedBackend):
+        async def run(self, task, ctx):
+            (Path(ctx.cwd) / "src" / "ok.py").write_text("a = 2\n")
+            (Path(ctx.cwd) / ".secret").write_text("SECRET_TOKEN=abc\n")
+            _git(Path(ctx.cwd), "add", "-f", ".secret")
+            return RunOutcome(code=TerminalCode.COMPLETED, summary="ok", tokens=1)
+
+    outcome = asyncio.run(
+        run_loop(
+            "edit",
+            _settings(tmp_path, scope=("src",)),
+            cwd=repo,
+            backend_factory=Factory([ForceAdding()]),
+        )
+    )
+    assert outcome.code is TerminalCode.OUT_OF_SCOPE
+    assert ".secret" in outcome.summary

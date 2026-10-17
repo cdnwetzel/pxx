@@ -676,6 +676,28 @@ def test_artifact_reviewer_rejects_protected_merge(tmp_path: Path) -> None:
     assert "artifact review" in outcome.summary
 
 
+def test_artifact_reviewer_rejects_a_newly_created_protected_file(tmp_path: Path) -> None:
+    """A node that CREATES a file at a protected path: `git apply` leaves it
+    untracked, so `git diff HEAD` alone never showed it to the boundary
+    review (found reviewing 2.9.1). New files are part of the artifact."""
+    repo = tmp_path / "repo"
+    _init_repo(repo, files={"app.py": "x = 1\n"})
+    dag = _dag(_task("a"))
+    workflow = ".github/workflows/sneaky.yml"
+    factory = Factory([ScriptedBackend(edits={workflow: "on: push\n"})])
+    outcome = asyncio.run(
+        run_goal(
+            "goal",
+            _settings(tmp_path),
+            cwd=repo,
+            planner=_planner(dag),
+            backend_factory=factory,
+        )
+    )
+    assert outcome.code is TerminalCode.OUT_OF_SCOPE
+    assert "artifact review" in outcome.summary
+
+
 @needs_git
 def test_goal_ties_one_net_at_start(tmp_path: Path) -> None:
     """K12: one net per goal run (merge-back mutates the root repo) — never

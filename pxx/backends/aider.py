@@ -153,6 +153,12 @@ class AiderBackend:
         # EDIT/AUTO -> default code mode
         if not use_git:
             argv.append("--no-git")
+        else:
+            # pxx owns committing: aider must leave its edits (and any
+            # pre-existing changes) uncommitted. --commit is then honoured by
+            # the session's own commit path -- secrets scan, [net:] trailer,
+            # telemetry -- on every backend alike.
+            argv += ["--no-auto-commits", "--no-dirty-commits"]
         argv += ["--read", read_file]
         return argv
 
@@ -175,9 +181,11 @@ class AiderBackend:
         use_git = pre_head is not None
         untracked_start: set[str] = set()
         tracked_dirty_start = False
+        snapshot: dict | None = None
         if use_git:
             status = await self._git(ctx.cwd, "status", "--porcelain=v1", "--untracked-files=all")
             untracked_start, tracked_dirty_start = self._parse_porcelain(status or "")
+            snapshot = await self._snapshot(ctx.cwd)
         tmp = tempfile.NamedTemporaryFile(
             mode="w", suffix=".md", prefix="pxx-aider-context-", delete=False, encoding="utf-8"
         )
@@ -212,7 +220,19 @@ class AiderBackend:
         diff_lines = 0
         changed_paths: list[str] = []
         if use_git:
-            diff_lines, changed_paths = await self._report_diff(ctx, pre_head or "")
+            # aider was told not to commit. If HEAD moved anyway (an aider
+            # that ignores --no-auto-commits), fail loudly: pxx made no commit
+            # and will not rewrite history behind the operator's back.
+            post_head = await self._git(ctx.cwd, "rev-parse", "HEAD")
+            if pre_head and post_head and post_head.strip() != pre_head.strip():
+                raise BackendError(
+                    "aider committed despite --no-auto-commits (HEAD moved "
+                    f"{pre_head.strip()[:7]} -> {post_head.strip()[:7]}); pxx did not "
+                    "create these commits. Inspect them; to uncommit and keep the "
+                    f"edits: git reset --soft {pre_head.strip()[:7]}",
+                    code=TerminalCode.EDIT_FAILED,
+                )
+            diff_lines, changed_paths = await self._report_diff(ctx, snapshot)
         ctx.budgets.consume(rounds=1, diff_lines=diff_lines)
         ctx.budgets.check_clock()
 
@@ -222,8 +242,9 @@ class AiderBackend:
         claimed = [m.group(1) for line in lines if (m := _APPLIED_EDIT_RE.search(line))]
         reported = list(dict.fromkeys([*changed_paths, *claimed]))
         if reported and all(not ctx.scope.in_scope(p) for p in reported):
-            # K2b: the fence actually fences — undo the blocked run's commits
-            # and its session-created droppings. Pre-existing state is
+            # K2b: the fence actually fences — undo the blocked run's edits
+            # (reset --hard to the pre-run HEAD; aider made no commits) and its
+            # session-created droppings. Pre-existing state is
             # untouchable: never reset over user dirt (the K5 stash, when
             # present, is in refs/stash and unaffected by reset --hard),
             # never delete files that were already untracked at run start.
@@ -232,7 +253,7 @@ class AiderBackend:
             if use_git and pre_head:
                 if tracked_dirty_start:
                     not_reverted = (
-                        "commits not reverted (pre-existing local changes); "
+                        "edits not reverted (pre-existing local changes); "
                         f"revert manually: git reset --hard {pre_head[:7]}"
                     )
                 else:
@@ -256,7 +277,7 @@ class AiderBackend:
                 f"{', '.join(reported[:5])} (scope: {ctx.scope.describe()})"
             )
             if reverted_to:
-                summary += f" — out-of-scope commits reverted to {reverted_to}"
+                summary += f" — out-of-scope edits reverted to {reverted_to}"
             if not_reverted:
                 summary += f" — {not_reverted}"
             if dropped:
@@ -300,15 +321,6 @@ class AiderBackend:
                     session_id=ctx.session_id,
                 )
 
-        # `--commit` is opt-in (auto_commit). aider commits its own edits, and
-        # the diff, scope and truthfulness checks above read pre_head..HEAD, so
-        # they need those commits. When no commit was asked for, unwind them
-        # with a MIXED reset: HEAD returns to where the run started and the
-        # edits stay in the working tree, uncommitted -- what the native backend
-        # leaves. With --commit, the session commits the work itself.
-        if use_git and pre_head and not ctx.settings.auto_commit:
-            await self._unwind_commits(ctx, pre_head)
-
         tail = [line for line in lines if line.strip()][-5:]
         summary = "\n".join(tail)[:500] or "aider completed"
         return RunOutcome(
@@ -342,41 +354,31 @@ class AiderBackend:
             )
         return lines, await err_task
 
-    async def _unwind_commits(self, ctx: SessionContext, pre_head: str) -> None:
-        """Move HEAD back to ``pre_head`` if aider committed, keeping its edits
-        as uncommitted changes (``git reset --mixed``). Never touches the
-        working tree, so no edit -- aider's or the user's -- is lost."""
-        post_head = await self._git(ctx.cwd, "rev-parse", "HEAD")
-        if not post_head or post_head.strip() == pre_head.strip():
-            return
-        await self._git(ctx.cwd, "reset", "--mixed", "--quiet", pre_head.strip())
-        await ctx.bus.emit(
-            "observation",
-            {
-                "source": "aider_commits_unwound",
-                "from": post_head.strip()[:12],
-                "to": pre_head.strip()[:12],
-            },
-            session_id=ctx.session_id,
-        )
+    @staticmethod
+    async def _snapshot(cwd: Path) -> dict | None:
+        """Worktree state at run start (seam for tests; the session and loop
+        use the same helper)."""
+        from ..worktree import worktree_snapshot
 
-    async def _report_diff(self, ctx: SessionContext, pre_head: str) -> tuple[int, list[str]]:
-        """Emit file_changed events for the aider run's committed diff.
+        return await worktree_snapshot(cwd)
 
-        Returns (diff lines, changed paths). Paths come from
-        ``git diff --name-only``: ``--stat`` truncates deep paths, and a
-        truncated path can false-fire the F4 scope-block projection
-        (K2-R1). ``--stat`` is used for diff-line counts only."""
-        stat = await self._git(ctx.cwd, "diff", "--stat", f"{pre_head}..HEAD")
-        names = await self._git(ctx.cwd, "diff", "--name-only", f"{pre_head}..HEAD")
-        paths = [p.strip() for p in (names or "").splitlines() if p.strip()]
+    @staticmethod
+    async def _delta(cwd: Path, start: dict) -> tuple[list[str], int]:
+        from ..worktree import worktree_delta
+
+        return await worktree_delta(cwd, start)
+
+    async def _report_diff(self, ctx: SessionContext, start: dict | None) -> tuple[int, list[str]]:
+        """Emit file_changed events for what the run changed in the working
+        tree -- tracked edits and new files, pre-existing dirt excluded unless
+        the run changed it (worktree_delta). Returns (diff lines, paths)."""
+        if start is None:
+            return 0, []
+        paths, diff_lines = await self._delta(ctx.cwd, start)
         for path in paths:
             await ctx.bus.emit(
                 "file_changed",
                 {"backend": "aider", "path": path},
                 session_id=ctx.session_id,
             )
-        ins = re.search(r"(\d+) insertion", stat or "")
-        dele = re.search(r"(\d+) deletion", stat or "")
-        diff_lines = (int(ins.group(1)) if ins else 0) + (int(dele.group(1)) if dele else 0)
         return diff_lines, paths

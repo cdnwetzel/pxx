@@ -150,16 +150,29 @@ async def _changed_paths(root: Path, pre_sha: str | None = None) -> list[str]:
     return sorted(p for p in paths if not _is_generated_artifact(p))
 
 
-async def _diff_since(root: Path, pre_sha: str | None) -> str:
+async def _diff_since(root: Path, pre_sha: str | None, new_since: set[str] | None = None) -> str:
     """Diff of the working tree against the pre-loop state (renames expanded
-    to delete+add so a rename can't shrink the accounted diff)."""
+    to delete+add so a rename can't shrink the accounted diff), PLUS a
+    new-file hunk for every file created since the loop started when
+    ``new_since`` (the untracked set at loop start) is given. ``git diff
+    <sha>`` alone never shows a created file, so without it the review and
+    the diff budget missed new files -- for every backend that leaves its
+    work uncommitted (native always; aider since 2.9.1)."""
     if pre_sha:
         out = await _git(root, "diff", "--no-renames", pre_sha)
     else:
         out = await _git(root, "diff", "--no-renames", "HEAD") or await _git(
             root, "diff", "--no-renames"
         )
-    return out or ""
+    text = out or ""
+    if new_since is not None:
+        from .worktree import new_file_patch, new_files_since
+
+        for rel in await new_files_since(root, new_since, _is_generated_artifact):
+            patch = await new_file_patch(root, rel)
+            if patch:
+                text = (text + "\n" if text and not text.endswith("\n") else text) + patch
+    return text
 
 
 async def _record_diff(root: Path, pre_sha: str | None) -> str:
@@ -178,39 +191,13 @@ async def _record_diff(root: Path, pre_sha: str | None) -> str:
     ref = pre_sha or "HEAD"
     tracked = await _git(root, "diff", "--no-renames", "--binary", ref)
     parts = [tracked or ""]
-    listed = await _git(root, "ls-files", "--others", "--exclude-standard", "-z")
-    for rel in (listed or "").split("\0"):
-        # Generated artifacts (__pycache__, .pytest_cache, ...) are not the
-        # run's work and can eat the 1 MiB budget -- the same filter the
-        # loop's own accounting applies.
-        if not rel or _is_generated_artifact(rel):
-            continue
-        # --no-index exits 1 when the files differ; _git returns None on a
-        # non-zero exit, so run it directly and keep whatever it printed.
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                "git",
-                "diff",
-                "--no-index",
-                "--no-renames",
-                "--binary",
-                "--",
-                "/dev/null",
-                rel,
-                cwd=str(root),
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.DEVNULL,
-                env=git_env(),
-            )
-        except OSError:
-            continue
-        try:
-            out, _ = await asyncio.wait_for(proc.communicate(), timeout=15.0)
-        except TimeoutError:
-            proc.kill()
-            await proc.wait()  # reap it: never leak a child on the way past
-            continue
-        parts.append(out.decode(errors="replace"))
+    from .worktree import new_file_patch, new_files_since
+
+    # Generated artifacts (__pycache__, .pytest_cache, ...) are not the run's
+    # work and can eat the 1 MiB budget -- the same filter the loop's own
+    # accounting applies.
+    for rel in await new_files_since(root, set(), _is_generated_artifact):
+        parts.append(await new_file_patch(root, rel, binary=True))
     text = "".join(p for p in parts if p)
     return text if len(text) <= 1_000_000 else ""
 
@@ -438,9 +425,14 @@ async def run_loop(
     command = test_command or settings.test_command
     in_repo = await _in_git_repo(root)
     pre_sha = None
+    untracked_start: set[str] | None = None
     if in_repo:
         head = await _git(root, "rev-parse", "HEAD")
         pre_sha = head.strip() if head else None
+        from .worktree import untracked_paths
+
+        listed = await untracked_paths(root)
+        untracked_start = set(listed) if listed is not None else None
 
     # K5: the loop ties ONE net at start — its per-round Sessions are
     # constructed with safety_net=False so rounds don't re-stash. Callers
@@ -535,7 +527,7 @@ async def run_loop(
     if in_repo and command and settings.done_signal:
 
         async def _run_done_check() -> bool:
-            diff_now = await _diff_since(root, pre_sha)
+            diff_now = await _diff_since(root, pre_sha, untracked_start)
             return await _edit_objectively_done(
                 root=root,
                 pre_sha=pre_sha,
@@ -729,7 +721,7 @@ async def run_loop(
             # block), the task IS done → COMPLETED. Fail-closed otherwise; never
             # heals (the budget is spent) and never rescues a failing run.
             if outcome.code is TerminalCode.BUDGET_EXCEEDED and in_repo:
-                salvage_diff = (await _diff_since(root, pre_sha)).strip()
+                salvage_diff = (await _diff_since(root, pre_sha, untracked_start)).strip()
                 if salvage_diff and await _overwork_salvageable(
                     root=root,
                     pre_sha=pre_sha,
@@ -798,7 +790,7 @@ async def run_loop(
         # Guard 2: diff accounting against the pre-loop git state.
         diff_text = ""
         if in_repo:
-            diff_text = await _diff_since(root, pre_sha)
+            diff_text = await _diff_since(root, pre_sha, untracked_start)
             total = _diff_line_count(diff_text)
             try:
                 budgets.consume(diff_lines=total - accounted_diff)
@@ -959,7 +951,7 @@ async def run_loop(
                         "current_head": head_now.strip()[:12],
                     },
                 )
-                diff_text = await _diff_since(root, pre_sha)
+                diff_text = await _diff_since(root, pre_sha, untracked_start)
                 head2 = await _git(root, "rev-parse", "HEAD")
                 review_start = time.monotonic()
                 result = await review_changes(diff_text, task, reviewer, review_mode)

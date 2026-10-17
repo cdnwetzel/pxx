@@ -227,10 +227,36 @@ def test_mismatch_hint_only_when_certain() -> None:
     assert mismatch_hint(text, "y = 2") == ""  # genuinely different text
     assert mismatch_hint(text, "\n\n") == ""  # whitespace-only snippet
     tab = mismatch_hint("def f():\n    return 1\n", "\treturn 1")
-    assert "indents that line with 1 tab, the file with 4 spaces" in tab
-    # first line agrees, a later line's indentation differs
+    assert "indents line 2 with 1 tab, the file with 4 spaces" in tab
+    # first line agrees; the hint names the line that actually differs
     later = mismatch_hint("def f():\n    return 1\n", "def f():\nreturn 1")
-    assert "matches line 1" in later and "later line" in later
+    assert "matches line 1" in later
+    assert "indents line 2 with no indentation, the file with 4 spaces" in later
+
+
+def test_mismatch_hint_names_line_endings_edges_and_trailing_space() -> None:
+    from pxx.tools.fs import mismatch_hint
+
+    # CRLF vs LF (Codex review): diagnosed as line endings, not indentation
+    crlf = mismatch_hint("a = 1\nb = 2\n", "a = 1\r\nb = 2")
+    assert "file uses LF line endings and your old_string uses CRLF" in crlf
+    lf = mismatch_hint("a = 1\r\nb = 2\r\n", "a = 1\nb = 2")
+    assert "file uses CRLF line endings and your old_string uses LF" in lf
+    # an edge newline the file does not have there (Codex: "x\n" vs "\nx")
+    edge = mismatch_hint("x\ny\n", "\nx")
+    assert "blank lines at its start/end" in edge and "indent" not in edge
+    # same indentation, trailing whitespace differs on line 2
+    trail = mismatch_hint("a = 1\nb = 2\n", "a = 1\nb = 2   ")
+    assert "trailing whitespace differs on line 2" in trail
+
+
+def test_mismatch_hint_bounds_its_work() -> None:
+    from pxx.tools import fs
+
+    big = "x = 1\n" * (fs._HINT_MAX_FILE_CHARS // 6 + 10)
+    assert fs.mismatch_hint(big, "  x = 1") == ""  # past the size bound: no diagnosis
+    long_snippet = "\n".join(["  y = 1"] * (fs._HINT_MAX_SNIPPET_LINES + 5))
+    assert fs.mismatch_hint("y = 1\n" * 3, long_snippet) == ""
 
 
 def test_mismatch_hint_carries_no_file_content() -> None:

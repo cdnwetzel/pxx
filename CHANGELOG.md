@@ -5,31 +5,50 @@ preserved in git (tag `v1.3.3` and earlier).
 
 ## [Unreleased]
 
+### Security
+
+- **The goal path's boundary review now sees files a node CREATES.** Node
+  patches merge with `git apply`, which leaves created files untracked, and
+  the Artifact-Reviewer read `git diff HEAD`, which never shows them — so a
+  node that *created* a file at a protected path (e.g. under `.github/`)
+  finished `COMPLETED` instead of `OUT_OF_SCOPE`. The reviewed artifact now
+  includes every file created since the goal started. Found reviewing 2.9.1.
+
 ### Fixed
 
-- **`--commit` is opt-in under the aider backend too.** aider commits its own
-  edits, so with a healthy aider installed every successful `pxx edit` was
-  committed whether or not `--commit` was passed — contradicting the README
-  and the tutorial. A successful aider run without `--commit` now unwinds
-  aider's commits with `git reset --mixed` to the pre-run HEAD: the edits
-  stay in the working tree, uncommitted, as with the native backend. The
-  diff, scope-fence and truthfulness checks still read aider's commits
-  first, so they are unchanged; with `--commit`, the commits are kept and the
-  session commits as before. The unwind is recorded as an `observation`
-  (`source: "aider_commits_unwound"`). Found by an independent docs review of
-  2.9.0.
+- **`--commit` is opt-in under the aider backend too, and goes through pxx's
+  commit gate.** aider committed its own edits, so with a healthy aider
+  installed every successful `pxx edit` was committed whether or not
+  `--commit` was passed — and with `--commit`, aider's commits bypassed the
+  session's commit path: its fail-closed secrets scan, the `[net:]` trailer
+  and the commit telemetry. In a repo aider now runs with
+  `--no-auto-commits --no-dirty-commits`; the run's changes are measured from
+  the working tree (`worktree_delta`, as the session and loop do: tracked
+  edits plus created files, pre-existing dirt excluded), and pxx alone
+  commits. Nothing is reset, so the operator's index and any pre-existing
+  changes are untouched. If HEAD moves anyway (an aider that ignores the
+  flags), the run fails `EDIT_FAILED` naming the commits and the undo
+  (`git reset --soft <pre-run HEAD>`) — pxx does not rewrite history. Found
+  by an independent docs review of 2.9.0; the design follows the 2.9.1
+  reviews (Codex as SDET, agy as tech lead).
+- **`pxx loop`'s review and diff budget include files the run created.**
+  `git diff <pre-loop sha>` never shows an untracked file, so a file a round
+  created was missing from the reviewer's diff and from the diff budget — for
+  the native backend always, and for aider once it stopped committing. Files
+  untracked before the loop started are not counted.
 
 ### Changed
 
-- **`edit_file` says what to fix when an `old_string` misses on
-  indentation.** When the snippet would match exactly one place with
-  indentation ignored line by line, the "not found" error now names the line
-  and the difference (e.g. "your old_string indents that line with 4 spaces,
-  the file with no indentation"). Matching is unchanged — still exact; the
-  edit is never applied on a near-match. The hint carries line numbers and
-  whitespace counts only, never file content. Observed 2026-10-17: a 4B model
-  sent the same over-indented `old_string` five times against the generic
-  message, then gave up.
+- **`edit_file` says what to fix when an `old_string` misses, if it can be
+  certain.** CRLF vs LF line endings; blank lines at the snippet's edges that
+  the file does not have there; or, when the snippet matches exactly one
+  place with whitespace ignored, the first line whose indentation or trailing
+  whitespace differs (e.g. "your old_string indents line 8 with 4 spaces, the
+  file with no indentation"). Matching is unchanged — still exact, never
+  applied on a near-match; ambiguous or genuinely different snippets get no
+  hint; the diagnosis is bounded on huge inputs. Line numbers and whitespace
+  facts only, never file content. Observed 2026-10-17: a 4B model sent the
+  same over-indented `old_string` five times against the generic message.
 
 ## [2.9.0] — 2026-10-17
 

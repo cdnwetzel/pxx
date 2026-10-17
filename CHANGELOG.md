@@ -24,6 +24,16 @@ preserved in git (tag `v1.3.3` and earlier).
   `allow_ungated_shell` as safeguards, and says whether an unguarded command
   will be refused or end the run.
 
+### Fixed
+
+- **An aborted session reports the rounds and tokens it actually spent.**
+  Gate aborts (`OUT_OF_SCOPE`, `HOOKS_MISSING`, `HOOK_DENIED`, …) built their
+  outcome from the exception alone, so the summary printed `rounds=0
+  tokens=0` even after the model had run several rounds — easy to read as
+  "no model call", and it was (a 2026-07-25 tutorial report recorded a scope
+  refusal that way). The budget guard's counts now fill any outcome that
+  reports none.
+
 ## [2.8.0] — 2026-10-12
 
 ### Added

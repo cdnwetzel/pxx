@@ -376,8 +376,15 @@ class Session:
                 )
 
             edit_seconds = time.monotonic() - edit_start
+            # The abort branches above build their outcome from the exception
+            # alone, so rounds/tokens defaulted to a false zero even when the
+            # model had run (a HOOKS_MISSING after four rounds printed
+            # "rounds=0 tokens=0", read as "no model call"). The guard is the
+            # source of truth; fill from it wherever the outcome reports none.
             outcome = replace(
                 outcome,
+                rounds=outcome.rounds or budgets.rounds,
+                tokens=outcome.tokens or budgets.tokens,
                 edit_seconds=outcome.edit_seconds or edit_seconds,
                 injected_observation_ids=tuple(injected_ids),
             )

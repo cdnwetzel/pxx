@@ -17,7 +17,7 @@ import os
 from collections.abc import Callable, Mapping
 from pathlib import Path
 
-from .gitenv import INTERNAL_GIT, git_env
+from .gitenv import INTERNAL_GIT, git_config_home, git_env
 
 
 def _sha256_file(path: Path) -> str | None:
@@ -144,7 +144,9 @@ async def worktree_snapshot(cwd: Path) -> dict | None:
     # -z: paths byte-exact (no quoting); --no-renames: a staged rename is its
     # two REAL paths, not one synthetic "a => b" string that no scope check,
     # fingerprint or `git add` can use (2.9.1 reviews).
-    diff = await _git_raw(cwd, "diff", "HEAD", "--numstat", "--no-renames", "-z")
+    diff = await _git_raw(
+        cwd, "diff", "HEAD", "--numstat", "--no-renames", "--no-ext-diff", "--no-textconv", "-z"
+    )
     if diff is None:
         return None  # unknown is not "no tracked changes" (2.9.1 review)
     flagged = await flagged_state(cwd)
@@ -256,12 +258,14 @@ async def _flagged_lines(cwd: Path, rel: str) -> int | None:
     return None if blob is None else len(blob.splitlines())
 
 
-#: Repository-local files that change what git REPORTS or RUNS -- filter,
-#: textconv and diff drivers, attributes, excludes, sparse patterns, grafts,
-#: shallow boundaries -- in the per-worktree and the common git directory.
-#: None of them shows in `git status`, so a change made during the run (a
-#: shell `git config`, a write the scope gate missed) is found only by
-#: comparing two :func:`git_control_state` fingerprints (2.9.1 review).
+#: Files that change what git REPORTS or RUNS -- filter, textconv and diff
+#: drivers, attributes, excludes, sparse patterns, grafts, shallow
+#: boundaries -- in the per-worktree and the common git directory. None of
+#: them shows in `git status`, so a change made during the run (a shell
+#: `git config`, a write the scope gate missed) is found only by comparing
+#: two :func:`git_control_state` fingerprints (2.9.1 review). Configuration
+#: is ALSO fingerprinted as git resolves it -- every scope and every
+#: `include.path` target -- and so are the global attributes/excludes files.
 _CONTROL_FILES = (
     "config",
     "config.worktree",
@@ -296,6 +300,47 @@ async def git_control_state(cwd: Path) -> dict[str, str] | None:
                 state[f"{label}/{name}"] = "<absent>"
             except OSError:
                 return None  # unreadable (a directory, permissions): unknown
+    # The configuration git actually applies: system, global, local,
+    # worktree and command-line scopes, with every included file resolved --
+    # an include target is not one of the files above. Hashed, never logged
+    # (values can hold credentials).
+    config = await _git_raw(cwd, "config", "--list", "--show-origin", "--show-scope", "-z")
+    if config is None:
+        return None
+    state["config/effective"] = hashlib.sha256(config.encode()).hexdigest()[:16]
+    for key, label in (("core.attributesFile", "attributes"), ("core.excludesFile", "excludes")):
+        target = await _global_git_file(
+            cwd, key, "attributes" if label == "attributes" else "ignore"
+        )
+        try:
+            state[f"global/{label}"] = (
+                hashlib.sha256(target.read_bytes()).hexdigest()[:16] if target else "<absent>"
+            )
+        except FileNotFoundError:
+            state[f"global/{label}"] = "<absent>"
+        except OSError:
+            return None
+    # In-tree .gitattributes files are control state too: `* -diff` turns
+    # every review diff into a "Binary files differ" stub that costs nothing
+    # against the diff budget, and a model can write one with write_file
+    # (2.9.1 review). Tracked and untracked, every directory, content-hashed.
+    attrs = await _git_raw(
+        cwd,
+        "ls-files",
+        "-z",
+        "--cached",
+        "--others",
+        "--exclude-standard",
+        "--",
+        ":(glob)**/.gitattributes",
+    )
+    if attrs is None:
+        return None
+    digest = hashlib.sha256()
+    for rel in sorted({*filter(None, attrs.split("\0")), ".gitattributes"}):
+        digest.update(rel.encode(errors="surrogateescape") + b"\0")
+        digest.update((_sha256_file(cwd / rel) or "<absent>").encode() + b"\0")
+    state["attributes/in-tree"] = digest.hexdigest()[:16]
     replace = await _git_raw(
         cwd, "for-each-ref", "--format=%(refname) %(objectname)", "refs/replace/"
     )
@@ -303,6 +348,18 @@ async def git_control_state(cwd: Path) -> dict[str, str] | None:
         return None
     state["refs/replace"] = hashlib.sha256(replace.encode()).hexdigest()[:16]
     return state
+
+
+async def _global_git_file(cwd: Path, key: str, default_name: str) -> Path | None:
+    """Where git reads the global attributes/excludes file: ``key`` when set
+    (``--type=path`` expands ``~``), else ``$XDG_CONFIG_HOME/git/<name>``
+    (``~/.config`` when unset). None when it cannot be located."""
+    configured = await _git_raw(cwd, "config", "--type=path", "--get", key)
+    if configured and configured.strip("\n"):
+        target = Path(configured.rstrip("\n"))
+        return target if target.is_absolute() else cwd / target
+    base = git_config_home()
+    return base / "git" / default_name if base else None
 
 
 def git_control_changed(start: Mapping[str, str], now: Mapping[str, str]) -> list[str]:
@@ -373,6 +430,31 @@ async def new_files_since(
     ]
 
 
+#: git's C-style escapes for a quoted path in a patch header.
+_PATCH_ESCAPES = {7: "\\a", 8: "\\b", 9: "\\t", 10: "\\n", 11: "\\v", 12: "\\f", 13: "\\r"}
+
+
+def _patch_path(name: str) -> str:
+    """``name`` as git writes it in a patch header: verbatim, or -- when it
+    holds a quote, a backslash, a control or a non-ASCII byte -- C-quoted the
+    way ``git apply`` parses it (2.9.1 review: a newline in a synthesized
+    header made the recorded patch unappliable)."""
+    raw = os.fsencode(name)
+    if not any(b < 0x20 or b in (0x22, 0x5C, 0x7F) or b >= 0x80 for b in raw):
+        return name
+    out = []
+    for b in raw:
+        if b in _PATCH_ESCAPES:
+            out.append(_PATCH_ESCAPES[b])
+        elif b in (0x22, 0x5C):
+            out.append("\\" + chr(b))
+        elif 0x20 <= b < 0x7F:
+            out.append(chr(b))
+        else:
+            out.append(f"\\{b:03o}")
+    return '"' + "".join(out) + '"'
+
+
 async def new_file_patch(cwd: Path, rel: str, *, binary: bool = False) -> str:
     """A new-file hunk for an untracked ``rel`` (``git diff --no-index
     /dev/null rel``). Read-only by construction: nothing is staged, no
@@ -400,13 +482,17 @@ async def new_file_patch(cwd: Path, rel: str, *, binary: bool = False) -> str:
             link = os.readlink(target)
         except OSError:
             return ""
+        a, b = _patch_path("a/" + rel), _patch_path("b/" + rel)
+        lines = link.split("\n")  # a link text is bytes: it may hold newlines
+        body = "".join(f"+{line}\n" for line in lines)
         return (
-            f"diff --git a/{rel} b/{rel}\nnew file mode 120000\n--- /dev/null\n"
-            f"+++ b/{rel}\n@@ -0,0 +1 @@\n+{link}\n\\ No newline at end of file\n"
+            f"diff --git {a} {b}\nnew file mode 120000\n--- /dev/null\n"
+            f"+++ {b}\n@@ -0,0 +1,{len(lines)} @@\n{body}\\ No newline at end of file\n"
         )
     if target.is_dir():
         return ""
-    args = [*INTERNAL_GIT, "-C", str(cwd), "diff", "--no-index", "--no-renames", "--no-ext-diff"]
+    args = [*INTERNAL_GIT, "-C", str(cwd), "diff", "--no-index", "--no-renames"]
+    args += ["--no-ext-diff", "--no-textconv"]
     if binary:
         args.append("--binary")
     args += ["--", "/dev/null", rel]

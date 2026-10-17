@@ -56,8 +56,9 @@ pxx/
                        # index + commit-tree, no hooks, no filter-attributed paths)
   loop.py              # bounded autonomous loop (edit -> test -> review)
   worktree.py          # shared "what did this run change": snapshot/delta, created files,
-                       # index-flag states, git control state (config, attributes,
-                       # excludes, sparse/grafts/shallow, replace refs)
+                       # index-flag states, git control state (effective config incl.
+                       # includes, attributes/excludes incl. global files,
+                       # sparse/grafts/shallow, replace refs)
   review.py            # review gate: Finding, Verdict, backends, policy
   memory/
     __init__.py        # re-exports MemoryStore, capture, inject
@@ -250,6 +251,23 @@ The 18 canonical codes map to 12.2 as: COMPLETED≡APPROVED,
 DIFF_CAP≡DIFF_BUDGET_EXCEEDED, ROUND_CAP≡ROUND_CAP_EXCEEDED,
 BUDGET_EXCEEDED≡TIME_BUDGET_EXCEEDED; INTERRUPTED/CLARIFICATION_REQUIRED/
 HOOK_DENIED are repo additions.
+
+### Threat model (what the git-based gates defend)
+The adversary is the model acting through what pxx lets it touch: the gated
+tools (`write_file`, `edit_file`, `delete_file`, and `run_shell` only behind
+a covering hook, a sandbox, `allow_ungated_shell`, or the default
+`refuse_tool`) and aider's edits, which are detected after the fact through
+git. Against that adversary the gates fail closed: `.git` is never writable,
+the git control state (effective config, attributes incl. in-tree
+`.gitattributes`, excludes, replace refs) is fingerprinted and any change
+blocks review, commit and restore, and pxx's own git runs without replace
+refs, fsmonitor, hooks, external diff or textconv. Out of scope, documented
+rather than defended: a model with UNGATED shell (it can do far worse than
+poison git); the operator's own environment and configuration
+(`GIT_CONFIG_*`, `GIT_EXTERNAL_DIFF`, pre-existing drivers or includes);
+operator-chosen repository layouts (a separate git dir or a `.git` symlink
+inside the work tree); and operator commands (`pxx review`, `improve`,
+`eval`) on a repository the operator already trusts.
 
 ### safety.py
 ```python

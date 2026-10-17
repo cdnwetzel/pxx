@@ -710,6 +710,12 @@ def test_artifact_reviewer_rejects_a_newly_created_protected_file(
     )
     assert outcome.code is TerminalCode.OUT_OF_SCOPE
     assert "artifact review" in outcome.summary
+    # Codex review (2.9.1 r8, P1): the rollback's `reset --hard` left the
+    # rejected merge's CREATED file behind; it is removed, with its now-empty
+    # directories, and the user's own file is untouched.
+    assert not (repo / rel).exists()
+    assert not (repo / ".github").exists()
+    assert (repo / "app.py").read_text() == "x = 1\n"
 
 
 @needs_git
@@ -809,6 +815,14 @@ def test_a_recreated_stashed_protected_file_with_identical_bytes_is_reviewed(
     assert "+stash" in outcome.summary  # the net really stashed the file
     assert outcome.code is TerminalCode.OUT_OF_SCOPE
     assert "artifact review" in outcome.summary
+    # The rollback brought the user's stashed original back (the node's
+    # re-created copy, which would block the pop, was removed first) and
+    # consumed the net's stash.
+    assert workflow.read_text() == "on: push\n"
+    listed = subprocess.run(
+        ["git", "stash", "list"], cwd=repo, check=True, capture_output=True, text=True
+    )
+    assert listed.stdout == ""
 
 
 @needs_git
@@ -1070,3 +1084,36 @@ def test_a_rejected_merge_is_rolled_back(tmp_path: Path) -> None:
         e.data for e in bus.history if e.kind == "gate_decision" and e.data.get("restored") is True
     ]
     assert restored and restored[0]["gate"] == "safety_net"
+
+
+@needs_git
+def test_the_boundary_rejects_a_git_state_change_after_the_merge(tmp_path, monkeypatch) -> None:
+    # Codex review (2.9.1 r8, P2): the config case above is stopped by the
+    # node's own loop, so it never reached the goal's guard. Here the change
+    # lands after a clean node, during the merge -- only the boundary sees it.
+    import pxx.goal as goal_mod
+
+    repo = tmp_path / "repo"
+    _init_repo(repo, files={"app.py": "x = 1\n"})
+    real_merge = goal_mod._merge_node
+
+    async def merge_then_plant(root, *args, **kwargs):
+        result = await real_merge(root, *args, **kwargs)
+        await asyncio.to_thread(
+            subprocess.run, [GIT, "config", "diff.hide.textconv", "true"], cwd=root, check=True
+        )
+        return result
+
+    monkeypatch.setattr(goal_mod, "_merge_node", merge_then_plant)
+    outcome = asyncio.run(
+        run_goal(
+            "goal",
+            _settings(tmp_path),
+            cwd=repo,
+            planner=_planner(_dag(_task("a"))),
+            backend_factory=Factory([ScriptedBackend(edits={"app.py": "x = 2\n"})]),
+        )
+    )
+    assert outcome.code is TerminalCode.OUT_OF_SCOPE
+    assert "git configuration changed" in outcome.summary
+    assert "net not restored" in outcome.summary  # nor is the tree reset under it

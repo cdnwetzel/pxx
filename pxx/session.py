@@ -744,6 +744,7 @@ class Session:
                 *INTERNAL_GIT,
                 "diff",
                 "--no-ext-diff",
+                "--no-textconv",
                 "HEAD",
                 cwd=str(self.cwd),
                 stdout=asyncio.subprocess.PIPE,

@@ -437,6 +437,7 @@ async def run_goal(
     # integration boundary (typed handoff artifact; protected-path content
     # rejects as OUT_OF_SCOPE).
     artifact_rejection = ""
+    created_by_merge: list[str] = []  # files absent from the post-stash baseline
     if isolated and not failed_codes and not merge_conflict:
         from .roles import DeterministicArtifactReviewer
 
@@ -455,6 +456,7 @@ async def run_goal(
 
         names_rc, names = await _git(root, "diff", "--no-renames", "--name-only", "-z", "HEAD")
         created = await new_files_since(root, untracked_start)
+        created_by_merge = [p for p in created or [] if p not in untracked_start]
         flagged_now = await flagged_state(root)
         git_changed = await git_state_changed_since(root, control_start)
         if names_rc != 0 or created is None or flagged_now is None:
@@ -532,7 +534,7 @@ async def run_goal(
             if bus is not None:  # a gate decision, like the net's tie above
                 await bus.emit("gate_decision", data)
 
-        restore_suffix = await settle_failed_run(root, net, _emit_net)
+        restore_suffix = await settle_failed_run(root, net, _emit_net, created=created_by_merge)
 
     parts = [f"{len(completed)}/{len(tasks)} tasks completed"]
     if failed:

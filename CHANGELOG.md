@@ -20,8 +20,11 @@ preserved in git (tag `v1.3.3` and earlier).
     scan, commit, restore -- never the model's shell) ignores replace refs and
     runs no fsmonitor and no hooks, and every reviewed or replayed diff is
     git's own patch text (`--no-ext-diff --no-textconv`);
-  - the repository's git control state is fingerprinted when the run starts
-    (`SafetyNet.control_state`); if it changed, the loop's round is
+  - the repository's git control state -- the configuration as git resolves
+    it (every scope and `include.path` target), the attributes, excludes,
+    sparse-checkout, grafts and shallow files (including the global
+    attributes/excludes files) and the replace refs -- is fingerprinted when
+    the run starts (`SafetyNet.control_state`); if it changed, the loop's round is
     `REVIEW_UNAVAILABLE`, the aider fence ends `EDIT_FAILED` without
     measuring or reverting, the goal's artifact review rejects, `--commit`
     commits nothing, and the safety net is not restored (`gate_decision`
@@ -30,12 +33,22 @@ preserved in git (tag `v1.3.3` and earlier).
     than run its clean command; commit those by hand;
   - a restore resets to the start commit's SHA, not the tag name, so a
     re-tag between the check and the reset cannot redirect it.
+  - in-tree `.gitattributes` files are part of that control state: a run
+    that writes `* -diff` (review diff becomes a binary stub, zero diff
+    budget) is blocked like any other change.
+
+  The boundary is written down in DESIGN.md ("Threat model"): the model
+  acting through pxx's gated tools and aider's detected edits. A model with
+  ungated shell, the operator's own environment and git configuration, and
+  operator-chosen repository layouts are documented as out of scope.
 - **The goal path rejects edits git cannot show, and rolls a rejected merge
   back.** An `assume-unchanged` edit of a protected file on the root index
   left `git diff` empty and the goal `COMPLETED`; the artifact review now
   compares index-flag states too. A merge the artifact review rejects is
-  rolled back to the pre-goal tree through the safety net (a merge conflict
-  or a test regression keeps its merged state, as before).
+  rolled back to the pre-goal tree through the safety net -- including the
+  files the merge created, which `reset --hard` alone leaves behind (and
+  which would block the stash from popping) -- while a merge conflict or a
+  test regression keeps its merged state, as before.
 - **The secrets gate scans what is actually committed.** `scan_staged` (used
   by `--commit` and `pxx check`) listed staged names without `-z`, so git
   C-quoted any non-ASCII or unusual name (`café.txt`, a quote, a newline, a
@@ -140,7 +153,8 @@ preserved in git (tag `v1.3.3` and earlier).
   orphaning it, and records a moved HEAD/branch as an `observation`
   (`source: "aider_head_moved"`). New-file patches for symlinks are the link
   text (mode 120000) — also for links to directories, which `git diff
-  --no-index` cannot produce.
+  --no-index` cannot produce — with names C-quoted as git writes them and
+  multi-line link texts kept whole, so the recorded patch applies.
 
 ### Fixed
 

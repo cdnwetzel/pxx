@@ -1818,6 +1818,8 @@ class _PlantsGitState(ScriptedBackend):
                 text=True,
             ).stdout.strip()
             _git(root, "replace", head, fake)  # `git diff HEAD` now shows nothing for out.py
+        elif self.how == "binary":  # a plain file write -- what write_file can do
+            (root / ".gitattributes").write_text("* -diff\n")
         else:
             _git(root, "config", "diff.hide.textconv", "true")
             (root / ".git" / "info").mkdir(exist_ok=True)
@@ -1825,7 +1827,7 @@ class _PlantsGitState(ScriptedBackend):
 
 
 @needs_git
-@pytest.mark.parametrize("how", ["replace", "textconv"])
+@pytest.mark.parametrize("how", ["replace", "textconv", "binary"])
 def test_a_round_that_changes_git_state_is_never_approved(tmp_path: Path, how: str) -> None:
     # Grok review (2.9.1 r7, P0): `git replace` blinded the loop's path list
     # and diff, so an out-of-scope tracked edit read as "nothing changed".

@@ -217,3 +217,15 @@ def test_internal_git_runs_no_repository_controlled_code() -> None:
     assert "--no-replace-objects" in INTERNAL_GIT
     pairs = {INTERNAL_GIT[i + 1] for i, a in enumerate(INTERNAL_GIT[:-1]) if a == "-c"}
     assert {"core.fsmonitor=false", "core.hooksPath=/dev/null"} <= pairs
+
+
+def test_git_config_home_follows_xdg_then_home(monkeypatch, tmp_path) -> None:
+    from pxx.gitenv import git_config_home
+
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    assert git_config_home() == tmp_path / "xdg"
+    monkeypatch.delenv("XDG_CONFIG_HOME")
+    monkeypatch.setenv("HOME", str(tmp_path))
+    assert git_config_home() == tmp_path / ".config"
+    monkeypatch.delenv("HOME")
+    assert git_config_home() is None

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -238,6 +239,8 @@ def test_a_sparse_skip_worktree_file_absent_throughout_is_not_a_change(tmp_path:
         ("config", ["config", "filter.evil.clean", "cat"]),
         ("info/attributes", None),
         ("refs/replace", None),
+        ("attributes/in-tree", "root"),
+        ("attributes/in-tree", "nested"),
     ],
 )
 def test_git_control_state_sees_changes_git_status_hides(tmp_path: Path, change) -> None:
@@ -250,8 +253,14 @@ def test_git_control_state_sees_changes_git_status_hides(tmp_path: Path, change)
     start = asyncio.run(git_control_state(repo))
     assert start and git_control_changed(start, asyncio.run(git_control_state(repo))) == []
     name, args = change
-    if args:
+    if isinstance(args, list):
         subprocess.run([GIT, *args], cwd=repo, check=True)
+    elif name == "attributes/in-tree":
+        # Grok review (2.9.1 r8, P1): `* -diff` makes the review diff a
+        # binary stub and zeroes the diff budget -- reachable via write_file.
+        target = repo / (".gitattributes" if args == "root" else "sub/.gitattributes")
+        target.parent.mkdir(exist_ok=True)
+        target.write_text("* -diff\n")
     elif name == "info/attributes":
         (repo / ".git" / "info").mkdir(exist_ok=True)
         (repo / ".git" / "info" / "attributes").write_text("* filter=evil\n")
@@ -276,3 +285,90 @@ def test_git_control_state_sees_changes_git_status_hides(tmp_path: Path, change)
     from pxx.worktree import worktree_delta_checked
 
     assert asyncio.run(worktree_delta_checked(repo, snapshot_start)) is None  # fail closed
+
+
+@needs_git
+@pytest.mark.parametrize("via", ["include", "attributesFile"])
+def test_git_control_state_follows_files_the_config_points_at(tmp_path: Path, via: str) -> None:
+    # An include.path target (or a core.attributesFile target) is not one of
+    # the git directory's own files: editing it changes git's behaviour with
+    # every fingerprinted file unchanged.
+    from pxx.worktree import git_control_changed, git_control_state
+
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    target = tmp_path / "pointed-at"
+    target.write_text("[core]\n\tquotePath = true\n" if via == "include" else "")
+    key = "include.path" if via == "include" else "core.attributesFile"
+    _git(repo, "config", key, str(target))
+    start = run(git_control_state(repo))
+    target.write_text('[filter "x"]\n\tclean = cat\n' if via == "include" else "* filter=x\n")
+    changed = git_control_changed(start, run(git_control_state(repo)))
+    assert changed == (["config/effective"] if via == "include" else ["global/attributes"])
+
+
+@needs_git
+@pytest.mark.parametrize(
+    ("name", "link"),
+    [
+        ("plain", "target"),
+        ("nl\nname", "target"),
+        ('quo"te', "target"),
+        ("back\\slash", "target"),
+        ("tab\tname", "target"),
+        ("wörk", "target"),
+        ("multi", "line\none"),
+        ("trailing", "dir/\n"),
+    ],
+)
+def test_a_synthesized_symlink_patch_applies_and_round_trips(
+    tmp_path: Path, name: str, link: str
+) -> None:
+    # Codex review (2.9.1 r8, P2): the synthesized header did not quote
+    # names, so a newline in a name made the recorded patch unappliable.
+    from pxx.worktree import new_file_patch
+
+    src = tmp_path / "src"
+    _init_repo(src)
+    (src / name).symlink_to(link)
+    patch = run(new_file_patch(src, name))
+    assert patch
+    dst = tmp_path / "dst"
+    _init_repo(dst)
+    proc = subprocess.run(
+        [GIT, "apply", "-"], cwd=dst, input=patch.encode(), capture_output=True, check=False
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert (dst / name).is_symlink() and os.readlink(dst / name) == link
+
+
+@needs_git
+def test_no_internal_diff_runs_a_textconv_or_external_diff_driver(tmp_path: Path) -> None:
+    # Codex review (2.9.1 r8, P1): the session's evidence diff still ran a
+    # textconv driver, which can execute and rewrite what is saved. Every diff
+    # pxx produces for itself must be git's own patch text.
+    import types
+
+    import pxx.loop as loop_mod
+    from pxx.session import Session
+    from pxx.worktree import new_file_patch
+
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    pre = _git(repo, "rev-parse", "HEAD")
+    marker = tmp_path / "driver-ran"
+    _git(repo, "config", "diff.spy.textconv", f"touch {marker} && cat")
+    _git(repo, "config", "diff.external", f"sh -c 'touch {marker}'")
+    (repo / ".git" / "info").mkdir(exist_ok=True)
+    (repo / ".git" / "info" / "attributes").write_text("* diff=spy\n")
+    (repo / "a.py").write_text("x = 2\n")
+    (repo / "new.py").write_text("y = 1\n")
+
+    run(worktree_snapshot(repo))
+    run(loop_mod._diff_since(repo, pre, {}))
+    run(loop_mod._record_diff(repo, pre, {}))
+    run(new_file_patch(repo, "new.py"))
+    run(Session._collect_diff(types.SimpleNamespace(cwd=repo)))
+    assert not marker.exists()
+    subprocess.run([GIT, "diff"], cwd=repo, capture_output=True, check=False)
+    assert marker.exists()  # the planted driver is live: the check above is real

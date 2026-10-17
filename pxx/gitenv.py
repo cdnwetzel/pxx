@@ -22,6 +22,7 @@ import contextlib
 import logging
 import math
 import os
+from pathlib import Path
 
 log = logging.getLogger("pxx.gitenv")
 
@@ -65,6 +66,16 @@ SCRUBBED_GIT_VARS: tuple[str, ...] = (
 def git_env() -> dict[str, str]:
     """A copy of the current environment safe to hand a git subprocess."""
     return {k: v for k, v in os.environ.items() if k not in SCRUBBED_GIT_VARS}
+
+
+def git_config_home() -> Path | None:
+    """Where git looks for its XDG files (``git/attributes``, ``git/ignore``):
+    ``$XDG_CONFIG_HOME``, else ``$HOME/.config``; None when neither is set."""
+    base = os.environ.get("XDG_CONFIG_HOME")
+    if base:
+        return Path(base)
+    home = os.environ.get("HOME")
+    return Path(home) / ".config" if home else None
 
 
 def git_timeout() -> float:

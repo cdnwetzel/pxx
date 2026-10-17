@@ -18,7 +18,7 @@ import os
 import tempfile
 import time
 from asyncio.subprocess import PIPE
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -310,15 +310,53 @@ async def _filtered_paths(cwd: Path, names: list[str]) -> list[str] | None:
     ]
 
 
+def _remove_created(cwd: Path, created: Sequence[str]) -> None:
+    """Delete files a failed run created (and directories that leaves
+    empty), confined to ``cwd``. Best-effort: what cannot be removed stays."""
+    from .safety import canonicalize
+
+    root = canonicalize(cwd)
+    for rel in created:
+        target = cwd / rel
+        # Confine the ENTRY, not a symlink's target: unlink removes the link.
+        parent = canonicalize(target.parent)
+        if root != parent and root not in parent.parents:
+            continue
+        if target.is_dir() and not target.is_symlink():
+            continue
+        try:
+            target.unlink()
+        except FileNotFoundError:
+            continue
+        except OSError:
+            log.warning("safety net: could not remove created file %s", rel)
+            continue
+        while parent != root:
+            try:
+                parent.rmdir()  # only succeeds when empty
+            except OSError:
+                break
+            parent = parent.parent
+
+
 async def settle_failed_run(
-    cwd: Path, net: SafetyNet | None, emit: Callable[[dict], Awaitable[None]]
+    cwd: Path,
+    net: SafetyNet | None,
+    emit: Callable[[dict], Awaitable[None]],
+    *,
+    created: Sequence[str] = (),
 ) -> str:
     """After a non-COMPLETED outcome: restore the pre-run tree
     (:func:`restore_safety_net`) or, when :func:`restore_blocker` refuses,
     leave everything for the operator. Emits the ``safety_net``
     ``gate_decision`` either way and returns the summary suffix to append
     ("" when there is nothing to say). One implementation for the session,
-    the loop and the goal path."""
+    the loop and the goal path.
+
+    ``created``: repo-relative files the caller KNOWS the run created (absent
+    from its post-stash baseline). ``reset --hard`` never removes untracked
+    files, so they are deleted first -- only when the restore is allowed,
+    only inside the repo, never a directory (2.9.1 review)."""
     if net is None:
         return ""
     reason, detail = await restore_blocker(cwd, net)
@@ -333,6 +371,7 @@ async def settle_failed_run(
             }
         )
         return f" [net not restored: {detail}; the start is tagged {net.tag or '(untagged)'}]"
+    _remove_created(cwd, created)
     if await restore_safety_net(cwd, net):
         await emit({"gate": "safety_net", "allowed": True, "restored": True, "tag": net.tag or ""})
     return ""

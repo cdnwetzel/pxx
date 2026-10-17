@@ -2380,8 +2380,9 @@ unequal coverage on 13 cases is not that evidence.
 
 ## R-048 — Tutorial completes 6/6 verbatim from PyPI on 2.9.0, on three setups from 8 GB to a GPU gateway
 
-**Claim.** `docs/TUTORIAL.md` as published at 2.9.0 — every documented
-command in order, `pxx-orchestrator` installed from PyPI with the
+**Claim.** `docs/TUTORIAL.md` as published at 2.9.0 — every command the
+levels (0–7) instruct, in order (the optional 🟣 callouts are reported
+separately below), `pxx-orchestrator` installed from PyPI with the
 tutorial's own `uv tool install -U` line and the sandbox fetched with its
 own `curl` line — goes from 0/6 to 6/6 passing and `python3 converter.py
 100 C F` → `212.0`, ending with a clean tree and no leftover stash, on

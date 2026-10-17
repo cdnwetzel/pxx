@@ -10,7 +10,7 @@ folder you choose, and drops a one-command undo net before it touches anything.
 
 ```
 $ pytest -q                     # all 6 tests green
-$ python converter.py 100 C F   # 212.0
+$ python3 converter.py 100 C F  # 212.0
 ```
 
 You start at **0 / 6 tests passing**. Each level teaches one pxx skill *and* moves the scoreboard.
@@ -180,10 +180,16 @@ F = (C × 9/5) + 32.
 > 🟢 **New to this** The agent *reads* `converter.py` with a tool call first, then makes a surgical
 > edit — that read-then-edit rhythm is normal and is the agent working exactly as designed. Decode
 > the last line: the net tag you can rewind to, the commit `--commit` made for you, and
-> `diff_lines=2` — the whole session changed two lines. (That `+stash`? There was an untracked file
-> in the tree — the net stashed it. You'll learn exactly what that means below.) One more habit to
+> `diff_lines=2` — the whole session changed two lines. (If your line also shows `+stash`, there was
+> uncommitted or untracked work in the tree and the net stashed it — you'll learn exactly what that
+> means below. On a clean tree you'll see just the tag.) One more habit to
 > notice: the model may leave the old `# BUG` comment sitting on the line it just fixed — agents fix
 > what you ask for, not what you didn't. Deleting stale comments is still your job.
+> 🟢 **New to this** Stronger models often try to *run your tests* after editing. Out of the box pxx
+> refuses that (`refused by policy: … requires a shell safeguard`) — the command doesn't run, the
+> agent is told why, and it carries on; your edit and `--commit` are unaffected. To let the agent run
+> commands, give the shell a safeguard: `sandbox_shell = true` in `~/.config/pxx/config.toml`, a
+> `PreToolUse` hook, or `allow_ungated_shell = true` ([CONFIG.md § hooks](CONFIG.md)).
 
 You just moved the scoreboard with an AI agent. Now the part that earns your trust — **break it and
 get it back.**
@@ -208,6 +214,7 @@ git stash push --include-untracked -m "pxx safety net <run-id>"
 git status --short                        # (empty) ← clean; your work is safe in the stash
 git stash list                            # stash@{0}: On main: pxx safety net <run-id>
 git stash pop                             #  M converter.py  ← your work is back
+git checkout -- converter.py              # (you were only pretending — drop the note)
 ```
 > ⚠️ **Remember two commands:** `git stash pop` restores your *uncommitted* work; `git reset --hard
 > <tag>` rewinds the *session's* changes. And this is why the tutorial always passes `--commit`:
@@ -230,14 +237,22 @@ Implement the next function, and keep the agent boxed in:
 pxx edit --commit --scope . -m "Implement fahrenheit_to_celsius: (f - 32) * 5 / 9"
 pytest -q        # test_f2c now PASSES  →  3 / 6
 ```
-`--scope` fences edits to a path prefix; try `--scope some_other_dir` and pxx will *refuse* to touch
-`converter.py`. The default writable area is the repo root — `--scope` narrows it.
+`--scope` fences **writes** to a path prefix — the agent can still *read* the whole repo for context,
+but it cannot change anything outside the fence. The default writable area is the repo root —
+`--scope` narrows it. See the fence hold:
+```sh
+pxx edit --scope some_other_dir -m "Add a comment '# fenced' at the top of converter.py"
+git status --short   # (empty) ← converter.py untouched
+```
+If the agent attempts the write, pxx ends the session with `[OUT_OF_SCOPE] path outside scope:
+converter.py`; some models instead see the fence in their instructions and decline up front. Either
+way the write never happens — that's the guarantee.
 
 > 🟣 **Go deeper** The writable world is: the project root you run in, narrowed by `--scope`, plus
 > any extra absolute paths you allow via `trusted_paths` in `~/.config/pxx/config.toml`. Everything
 > else raises a scope violation — the agent cannot wander. 🟢 **New to this** "scope" = the
 > folder(s) the agent may modify; everything else is look-but-don't-touch.
-> ✅ **Checkpoint** 3 / 6, and you saw the scope gate refuse an out-of-bounds edit.
+> ✅ **Checkpoint** 3 / 6, and an edit outside the fence left `converter.py` untouched.
 
 ---
 
@@ -256,7 +271,9 @@ review critiques (`verdict: APPROVE` or `REVISE`, exit code 2 on REVISE — scri
 decide what enters history.
 
 > 🟣 **Go deeper** `pxx review --staged` reviews staged changes; `pxx review --since <sha>` reviews
-> committed history. The reviewer uses the same model you configured — no second model needed.
+> committed history. By default the reviewer is the model you configured — it works, but it's the author judging its own
+diff (`pxx doctor` flags this as self-review). For an independent opinion, give the reviewer its own
+model: `[roles.review]` in `~/.config/pxx/config.toml` ([CONFIG.md](CONFIG.md)).
 > 🟢 **New to this** Small models are eager: without the "Change only convert()" fence the agent may
 > implement `main()` too and jump you straight to 6 / 6. If that happens, enjoy it — review, commit,
 > skip Level 6's edit, and just run its verification lines.
@@ -269,9 +286,9 @@ decide what enters history.
 One function left — the CLI entry point. Hand it over:
 
 ```sh
-pxx edit --commit --scope . -m "Implement main(argv) so 'python converter.py 100 C F' prints 212.0, using convert()"
+pxx edit --commit --scope . -m "Implement main(argv) so 'python3 converter.py 100 C F' prints 212.0, using convert()"
 pytest -q                        # 6 passed  →  6 / 6 ✅
-python converter.py 100 C F      # 212.0     ← you built a working CLI
+python3 converter.py 100 C F     # 212.0     ← you built a working CLI
 ```
 Real output from this exact command (same model and machine as Level 3):
 ```
@@ -293,7 +310,7 @@ When running 'python converter.py 100 C F', it will:
 > ```
 > One round, self-verified against pytest. For everyday work, `edit` + `review` is still the bread
 > and butter.
-> ✅ **Checkpoint** All tests green and `python converter.py 100 C F` → `212.0`. **You built it.**
+> ✅ **Checkpoint** All tests green and `python3 converter.py 100 C F` → `212.0`. **You built it.**
 
 ---
 
@@ -304,7 +321,7 @@ As a project grows, let pxx remember decisions across sessions (memory is on by 
 
 ```sh
 pxx memory add "temperatures are floats; round only at display" --tags conventions
-pxx memory search "rounding"
+pxx memory search "round"           # matches whole words in the note (not stems like "rounding")
 pxx memory list
 ```
 Safe to skip on day one.
@@ -376,7 +393,7 @@ default, fenced by scope, undoable via the tag. Now cement it with **less hand-h
 > **Capstone — add Kelvin.** Make `convert` handle `"K"` too (0°C = 273.15 K), add two tests first,
 > then let pxx make them pass. Use what you learned: start with `ask` to plan, `edit --commit
 > --scope .` to build, `review` to check, and the safety tag if a round goes sideways. Target:
-> `python converter.py 0 C K` → `273.15`.
+> `python3 converter.py 0 C K` → `273.15`.
 
 ---
 

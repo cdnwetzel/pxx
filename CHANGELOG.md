@@ -5,6 +5,10 @@ preserved in git (tag `v1.3.3` and earlier).
 
 ## [Unreleased]
 
+_Nothing yet._
+
+## [2.9.0] — 2026-10-17
+
 ### Changed
 
 - **`run_shell` with no shell safeguard is refused back to the model, not the

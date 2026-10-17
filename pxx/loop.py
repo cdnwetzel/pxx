@@ -136,10 +136,16 @@ async def _changed_paths_checked(root: Path, pre_sha: str | None = None) -> list
         if out is None:
             return None  # unknown is not "nothing changed" (2.9.1 review)
         if out:
-            paths.update(n for n in out.split("\0") if n.strip())
+            paths.update(n for n in out.split("\0") if n)  # never strip a name
     out = await _git(root, "status", "--porcelain", "--no-renames", "--untracked-files=all", "-z")
     if out is None:
         return None
+    from .worktree import flagged_modified_paths
+
+    hidden = await flagged_modified_paths(root)  # edits git reports as clean
+    if hidden is None:
+        return None
+    paths.update(hidden)
     if not out:
         return sorted(p for p in paths if not _is_generated_artifact(p))
     for entry in out.split("\0"):

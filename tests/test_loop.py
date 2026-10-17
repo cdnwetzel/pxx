@@ -1752,3 +1752,23 @@ def test_a_recreated_untracked_file_with_identical_bytes_reaches_review(tmp_path
     )
     assert "+stash" in outcome.summary  # the net really stashed the file
     assert "+same = 1" in reviewer.calls[0][0]
+
+
+@needs_git
+def test_changed_paths_see_flagged_edits_and_whitespace_names(tmp_path: Path) -> None:
+    # Grok review (2.9.1 r5): index flags hid tracked edits from the scope
+    # re-check, and a name that strip() empties was dropped.
+    import pxx.loop as loop_mod
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_repo(repo, {"a.py": "a = 1\n", "b.py": "b = 1\n"})
+    pre = subprocess.run(
+        [GIT, "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True
+    ).stdout.strip()
+    _git(repo, "update-index", "--assume-unchanged", "a.py")
+    (repo / "a.py").write_text("a = 'hidden'\n")
+    (repo / " ").write_text("space\n")
+    _git(repo, "add", " ")
+    changed = asyncio.run(loop_mod._changed_paths_checked(repo, pre))
+    assert "a.py" in changed and " " in changed

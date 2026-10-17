@@ -147,6 +147,9 @@ async def worktree_snapshot(cwd: Path) -> dict | None:
     diff = await _git_raw(cwd, "diff", "HEAD", "--numstat", "--no-renames", "-z")
     if diff is None:
         return None  # unknown is not "no tracked changes" (2.9.1 review)
+    hidden = await flagged_modified_paths(cwd)
+    if hidden is None:
+        return None
     for record in diff.split("\0"):
         parts = record.split("\t", 2)
         if len(parts) == 3 and parts[2]:
@@ -157,6 +160,9 @@ async def worktree_snapshot(cwd: Path) -> dict | None:
             # Content hash too: equal-VOLUME edits (1+1 -> 1+1) are still
             # caught — the trap case a pure numstat comparison misses.
             content[rel] = _sha256_file(cwd / rel)
+    for rel in hidden:  # edited behind an assume-unchanged/skip-worktree flag
+        numstat.setdefault(rel, 0)
+        content[rel] = _sha256_file(cwd / rel)
     return {"untracked": untracked, "numstat": numstat, "content": content}
 
 
@@ -210,6 +216,36 @@ async def worktree_delta_checked(cwd: Path, start: dict) -> tuple[list[str], int
         if rel not in now["untracked"] and rel not in now["numstat"]:
             changed.append(rel)
     return list(dict.fromkeys(changed)), diff_lines
+
+
+async def flagged_modified_paths(cwd: Path) -> list[str] | None:
+    """Tracked paths whose index entry is flagged assume-unchanged or
+    skip-worktree AND whose working-tree bytes differ from the index blob.
+
+    git reports such files as clean, so `git diff` / `git status` never show
+    an edit to them (2.9.1 review). A flagged file absent from the working
+    tree (normal for skip-worktree in a sparse checkout) is not a change.
+    None when git fails -- callers that gate must fail closed."""
+    listing = await _git_raw(cwd, "ls-files", "-v", "-z")
+    if listing is None:
+        return None
+    out: list[str] = []
+    for entry in listing.split("\0"):
+        if len(entry) < 3 or entry[1] != " ":
+            continue
+        tag, rel = entry[0], entry[2:]
+        if not (tag.islower() or tag == "S"):
+            continue
+        target = cwd / rel
+        if not target.exists() and not target.is_symlink():
+            continue
+        index_oid = await _git(cwd, "rev-parse", f":{rel}")
+        work_oid = await _git(cwd, "hash-object", "--", rel)
+        if index_oid is None or work_oid is None:
+            return None
+        if index_oid != work_oid:
+            out.append(rel)
+    return out
 
 
 async def untracked_fingerprints(cwd: Path) -> dict[str, str | None] | None:
@@ -302,6 +338,7 @@ async def new_file_patch(cwd: Path, rel: str, *, binary: bool = False) -> str:
 
 
 __all__ = [
+    "flagged_modified_paths",
     "new_file_patch",
     "new_files_since",
     "untracked_fingerprints",

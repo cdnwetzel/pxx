@@ -188,3 +188,18 @@ def test_a_failed_numstat_is_an_unavailable_snapshot_not_an_empty_one(
         run(wt.worktree_delta_checked(repo, {"untracked": {}, "numstat": {}, "content": {}}))
         is None
     )
+
+
+@needs_git
+@pytest.mark.parametrize("flag", ["--assume-unchanged", "--skip-worktree"])
+def test_delta_sees_edits_hidden_behind_index_flags(tmp_path: Path, flag: str) -> None:
+    # Grok review (2.9.1 r5): git reports a flagged file as clean, so an edit
+    # to it was invisible to every measurement.
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    start = run(worktree_snapshot(repo))
+    _git(repo, "update-index", flag, "a.py")
+    (repo / "a.py").write_text("x = 'hidden edit'\n")
+    assert _git(repo, "status", "--porcelain") == ""  # git itself sees nothing
+    changed, _ = run(worktree_delta(repo, start))
+    assert changed == ["a.py"]

@@ -42,6 +42,9 @@ class SafetyNet:
     #: stash with the net's message" -- a later stash can reuse the message
     #: (2.9.1 review). None: no stash, or unknown (old callers).
     stash_sha: str | None = None
+    #: The start commit's TREE: a second, object-level check on what a restore
+    #: would bring back. None: unknown (old callers).
+    head_tree: str | None = None
 
 
 async def _git(cwd: Path, *args: str) -> str | None:
@@ -49,8 +52,11 @@ async def _git(cwd: Path, *args: str) -> str | None:
     by git_timeout(): a wedged git or a blocking hook can't hang the safety-net
     tie (this runs at startup, before the run's own budget exists)."""
     try:
+        # --no-replace-objects: a `git replace` made during the run must not
+        # redirect what a SHA means to the guard or to `reset --hard` (2.9.1
+        # review) -- every safety-net command sees the real objects.
         proc = await asyncio.create_subprocess_exec(
-            "git", *args, cwd=cwd, stdout=PIPE, stderr=PIPE, env=git_env()
+            "git", "--no-replace-objects", *args, cwd=cwd, stdout=PIPE, stderr=PIPE, env=git_env()
         )
         out, _ = await communicate_bounded(proc, label=args[0] if args else "")
     except (OSError, TimeoutError):
@@ -98,12 +104,14 @@ async def tie_safety_net(cwd: Path, run_id: str) -> SafetyNet | None:
     if tag is None and stash_message is None:
         return None
     head_ref = await _git(cwd, "symbolic-ref", "-q", "HEAD")
+    head_tree = await _git(cwd, "rev-parse", "--verify", "HEAD^{tree}")
     return SafetyNet(
         tag=tag,
         stash_message=stash_message,
         head_sha=head.strip(),
         head_ref=(head_ref or "").strip(),
         stash_sha=(stash_sha or "").strip() or None,
+        head_tree=(head_tree or "").strip() or None,
     )
 
 
@@ -151,6 +159,10 @@ async def head_moved_since(cwd: Path, net: SafetyNet | None) -> str:
         target = (await _git(cwd, "rev-parse", "--verify", f"{net.tag}^{{commit}}") or "").strip()
         if target != net.head_sha:
             return f"the safety-net tag {net.tag} no longer points at the run's start"
+    if net.head_tree:
+        tree = (await _git(cwd, "rev-parse", "--verify", "HEAD^{tree}") or "").strip()
+        if tree != net.head_tree:
+            return "the start commit no longer has the tree it had when the run began"
     return ""
 
 
@@ -283,7 +295,15 @@ async def commit_session_work(
     # exactly these paths; other staged entries stay staged, uncommitted.
     pathspec = ["--", *staged] if only is not None else []
     literal = ["--literal-pathspecs"] if only is not None else []
-    if await _git(cwd, *literal, *identity, "commit", "-q", "-m", message, *pathspec) is None:
+    # No repository hooks on pxx's own commit (2.9.1 review): a pre-commit
+    # hook written during the run (.git/hooks is invisible to every scope
+    # check) could add paths or bytes after the secrets scan above. pxx's
+    # gate is the check for this commit.
+    no_hooks = ["-c", "core.hooksPath=/dev/null"]
+    committed = await _git(
+        cwd, *literal, *no_hooks, *identity, "commit", "-q", "--no-verify", "-m", message, *pathspec
+    )
+    if committed is None:
         log.warning("auto-commit: git commit failed; leaving work uncommitted")
         return None
     return await _git(cwd, "rev-parse", "HEAD")

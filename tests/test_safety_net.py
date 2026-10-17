@@ -422,3 +422,43 @@ def test_restore_pops_the_nets_own_stash_not_a_newer_same_named_one(tmp_path: Pa
     assert not (repo / "planted.txt").exists()
     remaining = _git(repo, "stash", "list")
     assert remaining.count("\n") == 0 and net.stash_message in remaining  # the planted one stays
+
+
+@needs_git
+def test_restore_is_not_fooled_by_git_replace(tmp_path: Path) -> None:
+    """Grok review (2.9.1 r5, P0): `git replace <start> <planted>` left every
+    SHA the guard compared unchanged, and `reset --hard` followed the replace
+    ref -- the "restore" checked out the attacker's tree."""
+    from pxx.safety_net import restore_safety_net, tie_safety_net
+
+    repo = tmp_path / "repo"
+    _init_repo(repo, files={"ok.py": "safe = True\n"})
+    start = _git(repo, "rev-parse", "HEAD")
+    net = run(tie_safety_net(repo, "run-replace"))
+    assert net is not None and net.head_tree
+    (repo / "ok.py").write_text("safe = False\n")
+    (repo / "evil.txt").write_text("planted\n")
+    _git(repo, "add", "-A")
+    _ident(repo, "commit", "-q", "-m", "planted")
+    planted = _git(repo, "rev-parse", "HEAD")
+    _git(repo, "reset", "-q", "--hard", start)
+    _git(repo, "replace", start, planted)
+    run(restore_safety_net(repo, net))  # whatever it decides, it must not plant
+    assert (repo / "ok.py").read_text() == "safe = True\n"
+    assert not (repo / "evil.txt").exists()
+
+
+@needs_git
+def test_pxx_commit_ignores_a_hook_written_during_the_run(tmp_path: Path) -> None:
+    """Grok review (2.9.1 r5): a pre-commit hook (invisible to every scope
+    check) staged a protected file into pxx's path-limited commit."""
+    repo = tmp_path / "repo"
+    _init_repo(repo, files={"ok.py": "x = 1\n", "pxx/safety.py": "SAFE = True\n"})
+    hook = repo / ".git" / "hooks" / "pre-commit"
+    hook.write_text("#!/bin/sh\necho 'SAFE = False' > pxx/safety.py\ngit add pxx/safety.py\n")
+    hook.chmod(0o755)
+    (repo / "ok.py").write_text("x = 2\n")
+    sha = run(commit_session_work(repo, task_preview="t", net_tag=None, only={"ok.py"}))
+    assert sha
+    assert _git(repo, "show", "--name-only", "--format=", "HEAD").split() == ["ok.py"]
+    assert (repo / "pxx" / "safety.py").read_text() == "SAFE = True\n"  # the hook never ran

@@ -174,30 +174,55 @@ def load_denylist(path: Path | None = None) -> tuple[str, ...]:
 
 
 def scan_staged(*, cwd: Path | None = None, denylist: tuple[str, ...] = ()) -> list[Finding]:
-    """Scan files staged in git (``git diff --cached --name-only``).
+    """Scan what is STAGED in git -- the index blobs, i.e. the exact bytes a
+    commit will record.
 
     FAIL-CLOSED: raises :class:`PxxError` when the staged fileset cannot be
-    determined (not a git repository, git missing, index/lock error) — a
-    scan that cannot run is NOT a clean scan, and must never read as one.
-    Rename detection is disabled so a staged rename can't hide its source.
-    Staged files that no longer exist on disk are skipped by
-    :func:`scan_content`'s unreadable-file handling."""
+    determined (not a git repository, git missing, index/lock error) or a
+    staged blob cannot be read -- a scan that cannot run is NOT a clean scan,
+    and must never read as one. Rename detection is disabled so a staged
+    rename can't hide its source; deletions have no blob and are not read.
+
+    Names come NUL-separated (``-z``) and are never stripped, and content is
+    read from the index rather than the working tree (2.9.1 review): git
+    quotes unusual names in plain output, so a quoted name was "unreadable"
+    and skipped -- a secret in ``café.txt`` was committed -- and a clean
+    filter could commit bytes the working-tree read never saw."""
     root = cwd or Path.cwd()
+    listing = _git_bytes(
+        root, "diff", "--cached", "--name-only", "--no-renames", "-z", "--diff-filter=d"
+    )
+    names = [n for n in listing.decode("utf-8", "surrogateescape").split("\0") if n]
+    findings: list[Finding] = []
+    for name in names:
+        if Path(name).name in LOCKFILE_NAMES:
+            continue
+        data = _git_bytes(root, "cat-file", "blob", f":{name}")
+        if _is_binaryish(data):
+            continue
+        try:
+            text = data.decode("utf-8")
+        except UnicodeDecodeError:
+            log.debug("governance: skipping non-utf-8 staged file %s", name)
+            continue
+        findings.extend(scan_text(text, str(root / name), denylist=denylist))
+    return findings
+
+
+def _git_bytes(root: Path, *args: str) -> bytes:
+    """Run git; return raw stdout. Raises PxxError on any failure (fail-closed)."""
     try:
         proc = subprocess.run(
-            ["git", "diff", "--cached", "--name-only", "--no-renames"],
+            ["git", *args],
             cwd=root,
             capture_output=True,
-            text=True,
             timeout=15,
             env=git_env(),
         )
     except (OSError, subprocess.SubprocessError) as exc:
         raise PxxError(f"governance: cannot scan staged files: {exc}") from exc
     if proc.returncode != 0:
-        detail = (proc.stderr or "").strip().splitlines()
+        detail = proc.stderr.decode(errors="replace").strip().splitlines()
         reason = detail[0] if detail else f"git exited {proc.returncode}"
         raise PxxError(f"governance: cannot scan staged files: {reason}")
-    names = [n for n in proc.stdout.splitlines() if n.strip()]
-    paths = [root / name for name in names]
-    return scan_content(paths, denylist=denylist)
+    return proc.stdout

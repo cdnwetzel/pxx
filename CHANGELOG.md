@@ -7,6 +7,28 @@ preserved in git (tag `v1.3.3` and earlier).
 
 ### Security
 
+- **The secrets gate scans what is actually committed.** `scan_staged` (used
+  by `--commit` and `pxx check`) listed staged names without `-z`, so git
+  C-quoted any non-ASCII or unusual name (`café.txt`, a quote, a newline, a
+  lone space), the quoted name could not be opened, the file was skipped —
+  and its secret was committed. It also read the working tree, so a clean
+  filter could commit bytes the scan never saw. It now lists names with
+  `-z` (never stripped) and scans each staged **index blob**; a blob it
+  cannot read fails the scan closed (no commit).
+- **pxx's own commit runs no repository hooks.** A hook written during the
+  run (`.git/hooks` is invisible to every scope check) could add paths or
+  bytes after the secrets scan; `--commit` now commits with `--no-verify` and
+  `core.hooksPath=/dev/null` — pxx's gate is the check for that commit.
+  Behaviour change: repository pre-commit/commit-msg hooks no longer run on
+  pxx's auto-commits.
+- **The safety net is not fooled by `git replace`, and edits hidden behind
+  index flags are seen.** Every safety-net git command runs with
+  `--no-replace-objects`, and a restore also requires the start commit's tree
+  to be unchanged. Tracked files flagged `assume-unchanged` or
+  `skip-worktree` — which git reports as clean — are compared against their
+  index blob, so an edit behind the flag reaches the scope fence, the loop's
+  re-check and the session's delta. Names are never stripped, so a file named
+  with only whitespace is not dropped.
 - **The goal path's boundary review now sees every file the artifact
   touches.** Node patches merge with `git apply`, which leaves created files
   untracked, and the Artifact-Reviewer read `git diff HEAD`, which never shows
@@ -36,7 +58,7 @@ preserved in git (tag `v1.3.3` and earlier).
   newer stash that reuses the message. `SafetyNet` gains optional
   `head_sha` / `head_ref` / `stash_sha` fields (`head_moved_since()` is
   public). The aider backend also treats a branch switch at the same commit
-  as a moved HEAD.
+  as a moved HEAD. (`SafetyNet` also records `head_tree`.)
 - **aider's scope fence blocks a run with ANY out-of-scope edit,** not only
   one whose edits are all out of scope — an extra in-scope edit used to carry
   an out-of-scope file through, and `--commit` committed it. The loop's

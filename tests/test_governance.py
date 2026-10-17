@@ -221,3 +221,70 @@ def test_scan_staged_scans_staged_files(tmp_path):
     subprocess.run(["git", "add", "secret.txt"], cwd=tmp_path, check=True)
     findings = scan_staged(cwd=tmp_path)
     assert [f.path for f in findings] == [str(secret)]
+
+
+def _staged_repo(tmp_path):
+    import shutil as _shutil
+    import subprocess as _sp
+
+    if _shutil.which("git") is None:
+        pytest.skip("git not available")
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    def git(*args, **kw):
+        return _sp.run(["git", *args], cwd=repo, check=True, capture_output=True, **kw)
+
+    git("init", "-q")
+    git("config", "user.name", "t")
+    git("config", "user.email", "t@e.c")
+    return repo, git
+
+
+_SECRET = "api_key = 'sk-live-0123456789abcdef0123456789abcdef'\n"
+
+
+@pytest.mark.parametrize("name", ["café.txt", 'notes"x.txt', " ", "a\nb.txt", "plain.txt"])
+def test_scan_staged_reads_names_git_would_quote(tmp_path, name):
+    # Grok review (2.9.1 r5, P0): names git C-quotes in plain output were
+    # "unreadable" and skipped, so the secret was committed.
+    from pxx.governance import scan_staged
+
+    repo, git = _staged_repo(tmp_path)
+    (repo / name).write_text(_SECRET)
+    git("add", "--", name)
+    findings = scan_staged(cwd=repo)
+    assert findings and findings[0].rule == "secret-assignment"
+
+
+def test_scan_staged_reads_the_staged_blob_not_the_worktree(tmp_path):
+    # Grok review (2.9.1 r5): a clean filter put a secret into the commit that
+    # the working-tree read never saw.
+    from pxx.governance import scan_staged
+
+    repo, git = _staged_repo(tmp_path)
+    git("config", "filter.evil.clean", f'printf "{_SECRET.strip()}\\n"')
+    (repo / ".gitattributes").write_text("*.py filter=evil\n")
+    (repo / "ok.py").write_text("x = 'innocent'\n")
+    git("add", ".gitattributes", "ok.py")
+    assert (repo / "ok.py").read_text() == "x = 'innocent'\n"
+    findings = scan_staged(cwd=repo)
+    assert any(f.rule == "secret-assignment" and f.path.endswith("ok.py") for f in findings)
+
+
+def test_scan_staged_fails_closed_on_an_unreadable_blob(tmp_path, monkeypatch):
+    import pxx.governance as gov
+
+    repo, git = _staged_repo(tmp_path)
+    (repo / "a.txt").write_text("fine\n")
+    git("add", "a.txt")
+    real = gov._git_bytes
+
+    def broken(root, *args):
+        if args[:1] == ("cat-file",):
+            raise gov.PxxError("governance: cannot scan staged files: boom")
+        return real(root, *args)
+
+    monkeypatch.setattr(gov, "_git_bytes", broken)
+    with pytest.raises(gov.PxxError):
+        gov.scan_staged(cwd=repo)

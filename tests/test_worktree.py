@@ -241,6 +241,7 @@ def test_a_sparse_skip_worktree_file_absent_throughout_is_not_a_change(tmp_path:
         ("refs/replace", None),
         ("attributes/in-tree", "root"),
         ("attributes/in-tree", "nested"),
+        ("attributes/in-tree", "ignored"),
     ],
 )
 def test_git_control_state_sees_changes_git_status_hides(tmp_path: Path, change) -> None:
@@ -260,6 +261,8 @@ def test_git_control_state_sees_changes_git_status_hides(tmp_path: Path, change)
         # binary stub and zeroes the diff budget -- reachable via write_file.
         target = repo / (".gitattributes" if args == "root" else "sub/.gitattributes")
         target.parent.mkdir(exist_ok=True)
+        if args == "ignored":  # the run hides its own attributes file (Grok r9)
+            (repo / "sub" / ".gitignore").write_text(".gitattributes\n")
         target.write_text("* -diff\n")
     elif name == "info/attributes":
         (repo / ".git" / "info").mkdir(exist_ok=True)

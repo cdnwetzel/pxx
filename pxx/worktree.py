@@ -334,10 +334,30 @@ async def git_control_state(cwd: Path) -> dict[str, str] | None:
         "--",
         ":(glob)**/.gitattributes",
     )
-    if attrs is None:
+    # ...and IGNORED ones: a run can write `sub/.gitignore` hiding its own
+    # `sub/.gitattributes` (2.9.1 review). `--directory` keeps a wholly
+    # ignored directory one entry (no walk); the attributes inside it only
+    # reach files that are ignored too.
+    ignored = await _git_raw(
+        cwd,
+        "ls-files",
+        "-z",
+        "--others",
+        "--ignored",
+        "--exclude-standard",
+        "--directory",
+        "--",
+        ":(glob)**/.gitattributes",
+    )
+    if attrs is None or ignored is None:
         return None
+    found = {
+        rel
+        for rel in (*attrs.split("\0"), *ignored.split("\0"))
+        if rel == ".gitattributes" or rel.endswith("/.gitattributes")
+    }
     digest = hashlib.sha256()
-    for rel in sorted({*filter(None, attrs.split("\0")), ".gitattributes"}):
+    for rel in sorted(found | {".gitattributes"}):
         digest.update(rel.encode(errors="surrogateescape") + b"\0")
         digest.update((_sha256_file(cwd / rel) or "<absent>").encode() + b"\0")
     state["attributes/in-tree"] = digest.hexdigest()[:16]

@@ -1835,17 +1835,24 @@ def test_a_round_that_changes_git_state_is_never_approved(tmp_path: Path, how: s
     repo.mkdir()
     _init_repo(repo, {"a.py": "a = 1\n", "out.py": "o = 1\n"})
     reviewer = ScriptedReviewer(["VERDICT: APPROVE"])
+    bus = EventBus()
+    # The attributes file is IN scope (Codex r9): only the incomplete-diff
+    # guard can stop that round, not the scope re-check.
+    scope = ("a.py", ".gitattributes") if how == "binary" else ("a.py",)
     outcome = asyncio.run(
         run_loop(
             "edit a.py",
-            _settings(tmp_path, scope=("a.py",)),
+            _settings(tmp_path, scope=scope),
             cwd=repo,
             backend_factory=Factory([_PlantsGitState(how)]),
             reviewer=reviewer,
+            bus=bus,
         )
     )
+    if how == "binary":
+        assert outcome.code is TerminalCode.REVIEW_UNAVAILABLE
+        assert _gate_events(bus, "diff_complete")[0]["allowed"] is False
     assert outcome.code in (TerminalCode.REVIEW_UNAVAILABLE, TerminalCode.OUT_OF_SCOPE)
-    assert outcome.code is not TerminalCode.COMPLETED
     assert reviewer.calls == []
     # the restore refuses too: git's view of the tree is not trusted
     assert "net not restored" in outcome.summary

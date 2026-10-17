@@ -29,11 +29,13 @@ preserved in git (tag `v1.3.3` and earlier).
     measuring or reverting, the goal's artifact review rejects, `--commit`
     commits nothing, and the safety net is not restored (`gate_decision`
     `safety_net`, `reason: "git_state_changed"`) -- the tag and stash stay;
-  - `--commit` skips any path with a git `filter` attribute (e.g. LFS) rather
-    than run its clean command; commit those by hand;
+  - `--commit` commits nothing when any path in the session's delta has a
+    git `filter` attribute (e.g. LFS), rather than run its clean command --
+    the work stays in the tree; commit it by hand;
   - a restore resets to the start commit's SHA, not the tag name, so a
     re-tag between the check and the reset cannot redirect it.
-  - in-tree `.gitattributes` files are part of that control state: a run
+  - in-tree `.gitattributes` files (tracked, untracked or gitignored) are
+    part of that control state: a run
     that writes `* -diff` (review diff becomes a binary stub, zero diff
     budget) is blocked like any other change.
 
@@ -63,8 +65,9 @@ preserved in git (tag `v1.3.3` and earlier).
   did nothing (the scan saw the old blob, the commit took the secret), a
   clean filter could run differently the second time, and a `git replace`
   could show the scan different bytes. Now each session path is read once and
-  hashed once (`git hash-object -w --stdin --path=…`, so clean filters such as
-  LFS still apply), those blob SHAs are scanned (by SHA, replace refs ignored)
+  hashed once (`git hash-object -w --stdin --path=…`: eol/ident conversions
+  apply; a delta with any `filter`-attributed path, e.g. LFS, is not
+  auto-committed at all — see below), those blob SHAs are scanned (by SHA, replace refs ignored)
   and the commit is built from them in a temporary index with `commit-tree`,
   then `update-ref` (old HEAD checked). The operator's index is updated only
   for the committed paths. `scan_staged` (`pxx check`) likewise reads staged

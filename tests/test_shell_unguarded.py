@@ -212,3 +212,16 @@ def test_a_session_with_abort_ends_hooks_missing(tmp_path):
     outcome = run(session.run("edit, then try to run the tests"))
     assert outcome.code is TerminalCode.HOOKS_MISSING
     assert not (tmp_path / "proj" / "ran.txt").exists()
+
+
+def test_a_repo_cannot_soften_a_user_abort(tmp_path, monkeypatch):
+    # AppSec review (Grok): the guarded repo must not turn the operator's
+    # "abort" into "refuse_tool" -- the direction that lets a run continue.
+    user_cfg = tmp_path / "home" / "config.toml"
+    user_cfg.parent.mkdir()
+    monkeypatch.setattr("pxx.config._USER_CONFIG", user_cfg)
+    project = tmp_path / "proj"
+    project.mkdir()
+    user_cfg.write_text('shell_unguarded = "abort"\n')
+    (project / "pxx.toml").write_text('shell_unguarded = "refuse_tool"\n')
+    assert load_settings(project).shell_unguarded == "abort"

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import os
 from collections.abc import Callable, Mapping
 from pathlib import Path
 
@@ -20,7 +21,13 @@ from .gitenv import git_env
 
 
 def _sha256_file(path: Path) -> str | None:
+    """Content fingerprint; a symlink is fingerprinted by its LINK TEXT (what
+    git tracks) -- following it fails for a dangling or directory link, and
+    two None fingerprints compared equal, hiding a newly created link (2.9.1
+    review)."""
     try:
+        if path.is_symlink():
+            return "link:" + hashlib.sha256(os.readlink(path).encode()).hexdigest()[:16]
         return hashlib.sha256(path.read_bytes()).hexdigest()[:16]
     except OSError:
         return None
@@ -174,7 +181,9 @@ async def worktree_delta(cwd: Path, start: dict) -> tuple[list[str], int]:
             else:
                 diff_lines += max(0, lines - base)
     for rel, fingerprint in now["untracked"].items():
-        if start["untracked"].get(rel) != fingerprint:
+        # absent at baseline is a change on its own -- never inferred from two
+        # fingerprints that may both be None (unreadable)
+        if rel not in start["untracked"] or start["untracked"][rel] != fingerprint:
             changed.append(rel)
             try:
                 diff_lines += len((cwd / rel).read_bytes().splitlines())

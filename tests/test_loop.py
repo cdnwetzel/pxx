@@ -1562,7 +1562,7 @@ def test_a_failed_created_file_listing_is_visible_not_silent(tmp_path: Path, mon
 
     monkeypatch.setattr(wt, "untracked_paths", flaky)
     reviewer = ScriptedReviewer(["VERDICT: APPROVE"])
-    asyncio.run(
+    outcome = asyncio.run(
         run_loop(
             "add new.py",
             _settings(tmp_path),
@@ -1571,7 +1571,11 @@ def test_a_failed_created_file_listing_is_visible_not_silent(tmp_path: Path, mon
             reviewer=reviewer,
         )
     )
-    assert "the list of created files could not be read" in reviewer.calls[0][0]
+    # Codex review (2.9.1 r3): visible is not enough -- an approving reviewer
+    # must not be able to pass an incomplete diff. Blocked before review.
+    assert outcome.code is TerminalCode.REVIEW_UNAVAILABLE
+    assert "could not be listed" in outcome.summary
+    assert reviewer.calls == []
 
 
 @needs_git

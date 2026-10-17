@@ -28,8 +28,10 @@ preserved in git (tag `v1.3.3` and earlier).
   checkout`), the reset orphaned those commits or moved the other branch. It
   now restores only when HEAD and the checked-out branch are where they were
   when the net was tied; otherwise it leaves the tree, tag and stash, emits
-  `gate_decision` (`restored: false, reason: "head_moved"`) and says so in
-  the summary. The aider backend also treats a branch switch at the same
+  `gate_decision` (`gate: "safety_net", allowed: false, restored: false,
+  reason: "head_moved", tag`) and says so in the summary — so `pxx verify`
+  lists `gate_denied:safety_net` among the run's risks. `SafetyNet` gains
+  optional `head_sha` / `head_ref` fields (`head_moved_since()` is public). The aider backend also treats a branch switch at the same
   commit as a moved HEAD.
 - **aider's scope fence blocks a run with ANY out-of-scope edit,** not only
   one whose edits are all out of scope — an extra in-scope edit used to carry
@@ -51,8 +53,7 @@ preserved in git (tag `v1.3.3` and earlier).
   the working tree (`worktree_delta`, as the session and loop do: tracked
   edits plus created files, pre-existing dirt excluded), and pxx alone
   commits. The run's work is never reset (the K2b scope fence still reverts a
-  run whose every edit is out of scope, and now reports a failed revert as
-  failed), so the operator's index and pre-existing changes are untouched.
+  run with any out-of-scope edit, and now reports a failed revert as failed), so the operator's index and pre-existing changes are untouched.
   If HEAD moves anyway (an aider that ignores the flags), every exit says so
   — `EDIT_FAILED` naming the commits and the undo (`git reset --soft
   <pre-run HEAD>`), or the `INTERRUPTED` summary — and pxx rewrites nothing. Found

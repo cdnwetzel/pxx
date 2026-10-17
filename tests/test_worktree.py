@@ -136,3 +136,32 @@ def test_snapshot_sees_a_staged_rename_as_two_real_paths(tmp_path: Path) -> None
     _git(repo, "mv", "a.py", "moved.py")
     changed, _ = run(worktree_delta(repo, start))
     assert sorted(changed) == ["a.py", "moved.py"]
+
+
+@needs_git
+def test_delta_sees_new_dangling_and_directory_symlinks(tmp_path: Path) -> None:
+    # Codex review (2.9.1 r3): a dangling or directory symlink fingerprinted
+    # as None on both sides and vanished from the delta.
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    (repo / "realdir").mkdir()
+    (repo / "realdir" / "f.txt").write_text("x\n")
+    _git(repo, "add", "-A")
+    _git(repo, "-c", "user.name=t", "-c", "user.email=t@e.c", "commit", "-q", "-m", "d")
+    start = run(worktree_snapshot(repo))
+    (repo / "dangling").symlink_to("does-not-exist")
+    (repo / "dirlink").symlink_to("realdir", target_is_directory=True)
+    changed, _ = run(worktree_delta(repo, start))
+    assert sorted(changed) == ["dangling", "dirlink"]
+
+
+@needs_git
+def test_delta_sees_a_symlink_retargeted(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    (repo / "link").symlink_to("a.py")
+    start = run(worktree_snapshot(repo))
+    (repo / "link").unlink()
+    (repo / "link").symlink_to("elsewhere")
+    changed, _ = run(worktree_delta(repo, start))
+    assert changed == ["link"]

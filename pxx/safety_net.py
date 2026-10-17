@@ -202,6 +202,15 @@ async def commit_session_work(
         for rel in sorted(only):
             if await _git(cwd, "add", "--", rel) is not None:
                 staged.append(rel)
+            elif (
+                not (cwd / rel).exists()
+                and await _git(cwd, "cat-file", "-e", f"HEAD:{rel}") is not None
+            ):
+                # A deletion already staged (e.g. the source of a `git mv`):
+                # `git add` cannot re-add a path gone from index and tree, but
+                # it is still the session's change -- keep it in the commit,
+                # or a rename is committed as half an add (2.9.1 review).
+                staged.append(rel)
         if not staged:
             log.warning("auto-commit: nothing stageable in the session's delta")
             return None

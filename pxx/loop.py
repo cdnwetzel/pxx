@@ -150,11 +150,25 @@ async def _changed_paths(root: Path, pre_sha: str | None = None) -> list[str]:
     return sorted(p for p in paths if not _is_generated_artifact(p))
 
 
-async def _diff_since(root: Path, pre_sha: str | None, new_since: set[str] | None = None) -> str:
+#: The marker _diff_since appends when it could not list created files. A
+#: whole-line match: a patch line always starts with +, - or space, so file
+#: content can never produce it.
+_INCOMPLETE_DIFF_MARK = (
+    "# pxx: the list of created files could not be read; this diff is incomplete"
+)
+
+
+def _diff_incomplete(diff: str) -> bool:
+    return _INCOMPLETE_DIFF_MARK in diff.splitlines()
+
+
+async def _diff_since(
+    root: Path, pre_sha: str | None, new_since: dict[str, str | None] | None = None
+) -> str:
     """Diff of the working tree against the pre-loop state (renames expanded
     to delete+add so a rename can't shrink the accounted diff), PLUS a
     new-file hunk for every file created since the loop started when
-    ``new_since`` (the untracked set at loop start) is given. ``git diff
+    ``new_since`` (the untracked fingerprints at loop start) is given. ``git diff
     <sha>`` alone never shows a created file, so without it the review and
     the diff budget missed new files -- for every backend that leaves its
     work uncommitted (native always; aider since 2.9.1)."""
@@ -174,7 +188,7 @@ async def _diff_since(root: Path, pre_sha: str | None, new_since: set[str] | Non
             # reviewer and the operator see that this diff is incomplete.
             log.warning("loop: could not list created files; the diff may be incomplete")
             created = []
-            text += "\n# pxx: the list of created files could not be read; this diff may be incomplete\n"
+            text += "\n" + _INCOMPLETE_DIFF_MARK + "\n"
         for rel in created:
             patch = await new_file_patch(root, rel)
             if not patch:
@@ -825,6 +839,23 @@ async def run_loop(
         diff_text = ""
         if in_repo:
             diff_text = await _diff_since(root, pre_sha, untracked_start)
+            if _diff_incomplete(diff_text):
+                # Fail closed (2.9.1 review): a diff that cannot list the
+                # files the round created can be neither budgeted nor
+                # reviewed faithfully -- no reviewer verdict overrides that.
+                await parent_bus.emit(
+                    "gate_decision",
+                    {"gate": "diff_complete", "round": round_no, "allowed": False},
+                )
+                return await _complete(
+                    _outcome(
+                        TerminalCode.REVIEW_UNAVAILABLE,
+                        f"round {round_no}: the files this round created could not be "
+                        "listed (git failed); not approving an incomplete diff",
+                        round_no,
+                        findings,
+                    )
+                )
             total = _diff_line_count(diff_text)
             try:
                 budgets.consume(diff_lines=total - accounted_diff)

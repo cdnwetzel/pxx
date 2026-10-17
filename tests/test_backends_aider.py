@@ -561,7 +561,10 @@ def test_head_moved_is_reported_when_aider_fails(tmp_path, monkeypatch):
 
 
 def test_head_moved_is_reported_when_cancelled(tmp_path, monkeypatch):
-    backend = AiderBackend(aider_path=fake_aider(tmp_path, "sleep 30"))
+    # `exec`: no shell child left holding the pipes after cancel; cancel only
+    # once aider reported ready; bounded, so a hang fails instead of blocking
+    # (Codex review, 2.9.1 r3).
+    backend = AiderBackend(aider_path=fake_aider(tmp_path, "echo ready\nexec sleep 30"))
     calls = {"rev_parse": 0, "reset": []}
     monkeypatch.setattr(backend, "_git", _moved_head_git(calls))
     stub_delta(backend, monkeypatch, [], 0)
@@ -569,9 +572,12 @@ def test_head_moved_is_reported_when_cancelled(tmp_path, monkeypatch):
 
     async def main():
         task = asyncio.ensure_future(backend.run("t", ctx))
-        await asyncio.sleep(0.3)
+        for _ in range(500):
+            if any(e.kind == "model_response" for e in ctx.bus.history):
+                break
+            await asyncio.sleep(0.01)
         await backend.cancel()
-        return await task
+        return await asyncio.wait_for(task, timeout=10)
 
     outcome = asyncio.run(main())
     assert outcome.code is TerminalCode.INTERRUPTED
@@ -704,3 +710,50 @@ def test_session_commit_never_sweeps_in_pre_staged_work(tmp_path):
     committed = git("show", "--name-only", "--format=", "HEAD").split()
     assert committed == ["converter.py"]  # only the session's own delta
     assert git("status", "--porcelain") == "A  staged_by_operator.py\n"  # still staged
+
+
+@_NEEDS_GIT
+def test_session_commit_includes_a_staged_rename_whole(tmp_path):
+    """Codex review (2.9.1 r3): the path-limited commit dropped the source of
+    a staged rename (`git add` cannot re-add it), committing half a rename."""
+    from pxx.config import ModelRef
+    from pxx.session import Session
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    git = _git_repo(repo)
+    (repo / "unrelated.py").write_text("u = 1\n")
+    git("add", "unrelated.py")  # the operator's, staged before the run
+    settings = Settings(
+        model=ModelRef(provider="ollama", model="m"),
+        permission=PermissionMode.EDIT,
+        auto_commit=True,
+        safety_net=False,
+        memory_dir=tmp_path / "mem",
+        state_dir=tmp_path / "state",
+    )
+    backend = AiderBackend(aider_path=fake_aider(tmp_path, "git mv converter.py renamed.py"))
+    outcome = asyncio.run(Session(settings, backend, cwd=repo).run("rename it"))
+    assert "[committed " in outcome.summary
+    status = git("show", "--name-status", "--format=", "-M", "HEAD").split()
+    assert status[:3] == ["R100", "converter.py", "renamed.py"]  # the whole rename
+    assert git("status", "--porcelain") == "A  unrelated.py\n"  # still only staged
+
+
+@_NEEDS_GIT
+def test_real_git_an_out_of_scope_symlink_trips_the_fence(tmp_path):
+    """Codex review (2.9.1 r3): a newly created dangling symlink vanished from
+    the delta, so with no "Applied edit" line it slipped past the fence."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git_repo(repo)
+    (repo / "src").mkdir()
+    path = fake_aider(tmp_path, "ln -s /nowhere/at/all outside_link")
+    ctx = make_ctx(
+        repo,
+        settings=Settings(permission=PermissionMode.EDIT),
+        scope=ScopeGate(repo, ("src",)),
+    )
+    outcome = asyncio.run(AiderBackend(aider_path=path).run("t", ctx))
+    assert outcome.code is TerminalCode.OUT_OF_SCOPE
+    assert "outside_link" in outcome.summary

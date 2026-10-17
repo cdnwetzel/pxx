@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -676,6 +677,7 @@ def test_artifact_reviewer_rejects_protected_merge(tmp_path: Path) -> None:
     assert "artifact review" in outcome.summary
 
 
+@needs_git
 @pytest.mark.parametrize(
     ("rel", "content"),
     [
@@ -710,6 +712,7 @@ def test_artifact_reviewer_rejects_a_newly_created_protected_file(
     assert "artifact review" in outcome.summary
 
 
+@needs_git
 def test_a_recreated_stashed_protected_file_is_still_reviewed(tmp_path: Path) -> None:
     """agy review (2.9.1 r2): the baseline was taken BEFORE the net stashed a
     pre-existing untracked file, so a node re-creating that path was skipped
@@ -735,6 +738,7 @@ def test_a_recreated_stashed_protected_file_is_still_reviewed(tmp_path: Path) ->
     assert "artifact review" in outcome.summary
 
 
+@needs_git
 def test_a_node_created_github_directory_symlink_is_rejected(tmp_path: Path) -> None:
     """Grok review (2.9.1 r2): a node that creates `.github` as a DIRECTORY
     SYMLINK (pointing at an in-repo decoy) produced an empty patch, so the
@@ -775,6 +779,7 @@ def test_artifact_review_issues_never_carry_file_content() -> None:
     assert "supersecret" not in repr(art.payload)
 
 
+@needs_git
 def test_artifact_review_fails_closed_when_paths_cannot_be_listed(tmp_path, monkeypatch):
     """If the touched paths cannot be listed, the artifact is not approved."""
     import pxx.worktree as wt
@@ -784,11 +789,18 @@ def test_artifact_review_fails_closed_when_paths_cannot_be_listed(tmp_path, monk
     dag = _dag(_task("a"))
     factory = Factory([ScriptedBackend(edits={"app.py": "x = 2\n"})])
     real = wt.untracked_paths
-    calls = {"n": 0}
+    calls = {"root": 0}
+    root_real = os.path.realpath(repo)
 
     async def flaky(cwd):
-        calls["n"] += 1
-        return await real(cwd) if calls["n"] == 1 else None  # baseline ok, then git fails
+        # Only the ROOT repo's listing fails after its baseline; node
+        # worktrees list normally, so this exercises the goal boundary's own
+        # fail-closed branch (a node's loop fails closed on its own too).
+        if str(cwd) == str(repo) or str(cwd) == root_real:
+            calls["root"] += 1
+            if calls["root"] > 1:
+                return None
+        return await real(cwd)
 
     monkeypatch.setattr(wt, "untracked_paths", flaky)
     outcome = asyncio.run(

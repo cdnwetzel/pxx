@@ -489,6 +489,7 @@ class Session:
                             "allowed": False,
                             "restored": False,
                             "reason": "head_moved",
+                            "tag": self._net.tag or "",
                         },
                         session_id=self.session_id,
                     )
@@ -500,7 +501,12 @@ class Session:
                 elif await restore_safety_net(self.cwd, self._net):
                     await self.bus.emit(
                         "gate_decision",
-                        {"gate": "safety_net", "allowed": True, "restored": True},
+                        {
+                            "gate": "safety_net",
+                            "allowed": True,
+                            "restored": True,
+                            "tag": self._net.tag or "",
+                        },
                         session_id=self.session_id,
                     )
             return outcome

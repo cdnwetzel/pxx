@@ -213,7 +213,7 @@ def test_hook_coverage_warns_in_edit_mode_without_matching_hook():
     assert not _hook_coverage_check(settings).ok
 
 
-def test_hook_coverage_ok_with_matching_hook_and_other_modes():
+def test_hook_coverage_ok_with_matching_hook_and_other_modes(monkeypatch):
     from pxx.config import Settings
     from pxx.doctor import _hook_coverage_check
     from pxx.safety import Hook, PermissionMode
@@ -227,7 +227,9 @@ def test_hook_coverage_ok_with_matching_hook_and_other_modes():
     assert _hook_coverage_check(Settings(permission=PermissionMode.ASK)).ok
     # auto is write-capable too (2.3.5): it needs a safeguard like edit
     assert not _hook_coverage_check(Settings(permission=PermissionMode.AUTO)).ok
-    # the other two safeguards count, not only a hook
+    # the other two safeguards count, not only a hook (sandbox only when a
+    # sandboxer exists -- pinned, so the test does not depend on the host)
+    monkeypatch.setattr("pxx.tools.shell._sandbox_available", lambda: True)
     for extra in ({"sandbox_shell": True}, {"allow_ungated_shell": True}):
         assert _hook_coverage_check(Settings(permission=PermissionMode.AUTO, **extra)).ok
 

@@ -1,10 +1,14 @@
 """run_shell — the most dangerous tool, gated hardest.
 
-Policy (fail-closed, per DESIGN.md):
-- ``AUTO``: allowed (registry already ran PreToolUse hooks).
-- ``EDIT``: allowed only when at least one PreToolUse hook is configured —
-  the hook ran before this tool executed, so reaching ``run()`` means it
-  allowed the call. No hook configured -> denied.
+Policy (fail-closed, per DESIGN.md), checked in ``RunShell.preflight`` before
+anything is dispatched or recorded:
+- ``EDIT`` / ``AUTO``: allowed only with a shell safeguard -- a PreToolUse hook
+  that covers run_shell (the broker already ran it, so reaching here means it
+  allowed the call), an available sandbox (``sandbox_shell``), or the explicit
+  ``allow_ungated_shell`` opt-in. With none, ``ShellUnguarded`` is raised and
+  ``shell_unguarded`` decides: refuse it back to the model (default) or end
+  the run HOOKS_MISSING. A requested sandbox with no sandboxer is a setup
+  error: plain ``HooksMissing``, always terminal.
 - ``ASK`` / ``PLAN``: always denied.
 
 Execution: ``/bin/sh -c`` via asyncio subprocess, combined stdout+stderr

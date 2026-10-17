@@ -309,8 +309,10 @@ root**, not as an absolute path. A hook that enforces a path boundary MUST:
 **file** tools (it checks path targets); a shell command has no path target, so
 `scope` does **not** restrict what `run_shell` can touch. Because of that,
 `run_shell` in `edit` or `auto` mode (including unattended `pxx run`) requires an
-explicit shell safeguard, or it is denied with `HOOKS_MISSING`. Provide at least
-one (they're additive — any one satisfies the gate):
+explicit shell safeguard, or the command is never run — refused back to the model
+by default, or the session ends `HOOKS_MISSING` with `shell_unguarded = "abort"`
+(see **No safeguard at all** above). Provide at least one (they're additive — any
+one satisfies the gate):
 
 - a `PreToolUse` hook that **actually fires for `run_shell`** — `matcher =
   "run_shell"` or an empty matcher (deterministic allow/deny per command). A hook

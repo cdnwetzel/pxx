@@ -172,6 +172,13 @@ def _settings_hash(settings: Settings) -> str:
         "scope": sorted(settings.scope),
         "memory_enabled": settings.memory_enabled,
         "sandbox_shell": settings.sandbox_shell,
+        # how each gate treats a refusal, and the explicit shell opt-in: they
+        # change what a run DOES (end vs continue, shell runs vs not), so two
+        # configs differing only here are different agents.
+        "allow_ungated_shell": settings.allow_ungated_shell,
+        "hook_denial": settings.hook_denial,
+        "scope_violation": settings.scope_violation,
+        "shell_unguarded": settings.shell_unguarded,
         "test_command": settings.test_command,
         "hooks": [f"{h.event}:{h.command}" for h in settings.hooks],
         "fallback_models": [f"{m.provider}:{m.model}" for m in settings.fallback_models],

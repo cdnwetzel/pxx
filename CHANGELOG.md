@@ -20,7 +20,8 @@ preserved in git (tag `v1.3.3` and earlier).
   the correct edit, then ran `pytest` to check it, and the abort discarded the
   edit before `--commit` — only models that never verify could finish.
   **Migration for callers that read exit codes or events:** a run that used to
-  end `HOOKS_MISSING` (exit 3) can now finish `COMPLETED` (exit 0) — and, with
+  end `HOOKS_MISSING` (exit 2 if nothing was written, 3 if files changed) can
+  now finish `COMPLETED` (exit 0) — and, with
   `--commit`, commit — although the command the model wanted (often its own
   test run) never ran. `COMPLETED` never meant "tests were run"; use `pxx loop`
   with `test_command` for verified completion. Detect a refusal with the
@@ -28,7 +29,9 @@ preserved in git (tag `v1.3.3` and earlier).
   with `shell_unguarded = "abort"` in the user config. A refused command is
   checked before the `tool_call` event, so it is never recorded as a call and
   its text never reaches events or audit — the denial carries argument names
-  and sizes only.
+  and sizes only. `allow_ungated_shell`, `hook_denial`, `scope_violation` and
+  `shell_unguarded` now count toward the agent identity (`settings_hash`):
+  they change what a run does.
 - **`pxx doctor`'s `hooks:run_shell` check matches the gate.** It now covers
   `auto` (write-capable since 2.3.5), counts `sandbox_shell` and
   `allow_ungated_shell` as safeguards, and says whether an unguarded command

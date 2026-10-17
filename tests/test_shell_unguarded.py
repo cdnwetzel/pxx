@@ -23,7 +23,7 @@ from pxx.tools import ToolContext, default_registry
 
 
 def run(coro):
-    return asyncio.new_event_loop().run_until_complete(coro)
+    return asyncio.run(coro)
 
 
 def _ctx(
@@ -166,3 +166,49 @@ def test_a_refused_command_never_appears_in_the_event_stream(tmp_path):
     run(default_registry().call("run_shell", {"command": f"TOKEN={sentinel} pytest"}, ctx))
     assert "tool_call" not in [e.kind for e in events]
     assert sentinel not in repr([(e.kind, e.data) for e in events])
+
+
+def _session(tmp_path, **overrides):
+    from dataclasses import replace
+
+    from pxx.backends.mock import MockBackend
+    from pxx.config import ModelRef
+    from pxx.session import Session
+
+    settings = replace(
+        Settings(
+            model=ModelRef(provider="ollama", model="test-model"),
+            permission=PermissionMode.EDIT,
+            memory_dir=tmp_path / "mem",
+            state_dir=tmp_path / "state",
+        ),
+        **overrides,
+    )
+    backend = MockBackend(
+        [{"tool": "run_shell", "args": _touch_cmd(tmp_path)}, {"done": "edited; could not test"}]
+    )
+    (tmp_path / "proj").mkdir(exist_ok=True)
+    return Session(settings, backend, cwd=tmp_path / "proj")
+
+
+def test_a_session_with_default_settings_refuses_and_completes(tmp_path):
+    # SDET review: the other tests set ToolContext.refuse_unguarded_shell by
+    # hand; this one goes through Settings -> make_tool_context, the wiring a
+    # real `pxx edit` uses.
+    from pxx.outcome import TerminalCode
+
+    session = _session(tmp_path)
+    outcome = run(session.run("edit, then try to run the tests"))
+    assert outcome.code is TerminalCode.COMPLETED
+    assert not (tmp_path / "proj" / "ran.txt").exists()
+    kinds = [e.kind for e in session.bus.history]
+    assert "tool_denied" in kinds and "tool_call" not in kinds
+
+
+def test_a_session_with_abort_ends_hooks_missing(tmp_path):
+    from pxx.outcome import TerminalCode
+
+    session = _session(tmp_path, shell_unguarded="abort")
+    outcome = run(session.run("edit, then try to run the tests"))
+    assert outcome.code is TerminalCode.HOOKS_MISSING
+    assert not (tmp_path / "proj" / "ran.txt").exists()

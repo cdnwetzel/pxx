@@ -694,6 +694,10 @@ async def run_loop(
 
     async def _complete(outcome: RunOutcome) -> RunOutcome:
         """End-of-loop commit when --commit is on (once per completed loop)."""
+        # Every loop exit comes through here, so this is where the loop's own
+        # id replaces a forwarded round session's (2.9.3 review: a backend
+        # failure returned the CHILD session's id, naming the wrong record).
+        outcome = replace(outcome, session_id=loop_id)
         # Record first, act second: the diff and the outcome are written
         # while the tree still holds the loop's work, so a restore below
         # discards nothing that was not already on disk under runs/.

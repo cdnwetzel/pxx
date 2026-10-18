@@ -625,3 +625,34 @@ def test_a_loop_outcome_session_id_names_its_run_directory(tmp_path) -> None:
     [loop_dir] = [d for d in (tmp_path / "state" / "runs").iterdir() if "-loop-" in d.name]
     assert re.fullmatch(r"[0-9a-f]{8}", outcome.session_id)
     assert loop_dir.name.endswith(f"-loop-{outcome.session_id}")
+
+
+@needs_git
+@pytest.mark.parametrize(
+    "code", [TerminalCode.MODEL_UNAVAILABLE, TerminalCode.HOOK_DENIED, TerminalCode.INTERRUPTED]
+)
+def test_a_failed_loop_still_reports_its_own_id(tmp_path, code) -> None:
+    """Codex review (2.9.3): a backend-level failure forwarded the CHILD
+    session's outcome, so `session=` named a round session instead of the
+    loop's run directory."""
+    from test_loop import Factory, ScriptedBackend, _init_repo, _settings
+
+    from pxx.loop import run_loop
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_repo(repo)
+    child = RunOutcome(code=code, summary="child failed", session_id="c0ffee00")
+    outcome = asyncio.run(
+        run_loop(
+            "task",
+            _settings(tmp_path),
+            cwd=repo,
+            backend_factory=Factory([ScriptedBackend(outcome=child)]),
+            test_command="true",
+        )
+    )
+    assert outcome.code is code
+    [loop_dir] = [d for d in (tmp_path / "state" / "runs").iterdir() if "-loop-" in d.name]
+    assert outcome.session_id != "c0ffee00"
+    assert loop_dir.name.endswith(f"-loop-{outcome.session_id}")

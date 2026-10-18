@@ -765,7 +765,9 @@ def test_a_failed_head_update_names_its_cause(tmp_path: Path, monkeypatch, moved
         if args and args[0] == "update-ref":
             if not moved:
                 return None
-            _git(repo, "commit", "--allow-empty", "-q", "-m", "racer")
+            _ident(
+                repo, "-c", "commit.gpgsign=false", "commit", "--allow-empty", "-q", "-m", "racer"
+            )
         return await real(cwd, *args, **kw)
 
     monkeypatch.setattr(sn, "_git_io", fake)

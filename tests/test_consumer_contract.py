@@ -274,6 +274,18 @@ def _dx_reads_gate_events(events: list[dict]) -> None:
         assert isinstance(data["allowed"], bool), ev
 
 
+def _bool_by_construction(node: ast.expr) -> bool:
+    """True when the expression is a bool however its operands evaluate:
+    a True/False constant, `not ...`, or `bool(...)`. The closed set keeps the
+    sweep sound without type inference (Codex review: `allowed=[]` passed a
+    rule that only rejected non-bool constants)."""
+    if isinstance(node, ast.Constant):
+        return isinstance(node.value, bool)
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
+        return True
+    return isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "bool"
+
+
 def test_every_gate_decision_emit_is_checkable_and_carries_allowed() -> None:
     """Static half: every `emit("gate_decision", X)` passes a dict LITERAL (or
     is a documented pass-through), no `dict(gate=...)` call builds one, and
@@ -299,6 +311,10 @@ def test_every_gate_decision_emit_is_checkable_and_carries_allowed() -> None:
             args = node.args
             if args and isinstance(args[0], ast.Constant) and args[0].value == "gate_decision":
                 payload = args[1] if len(args) > 1 else None
+                if isinstance(payload, ast.Dict) and None in payload.keys:
+                    offenders.append(
+                        f"{self._where(node)} `**` unpacking in a gate_decision payload"
+                    )
                 if not isinstance(payload, ast.Dict) and not (
                     isinstance(payload, ast.Name)
                     and self.fn
@@ -317,12 +333,18 @@ def test_every_gate_decision_emit_is_checkable_and_carries_allowed() -> None:
                 if isinstance(k, ast.Constant) and isinstance(k.value, str)
             }
             gate = keys.get("gate")
+            if "gate" in keys and None in node.keys:
+                # `{**other, "gate": ...}`: the unpacked part is unreadable here.
+                offenders.append(f"{self._where(node)}: `**` unpacking in a gate payload")
             if isinstance(gate, ast.Constant) and gate.value not in _DX_NON_VERDICT_GATES:
                 allowed = keys.get("allowed")
                 if allowed is None:
                     offenders.append(f"{self._where(node)} {gate.value}: no `allowed`")
-                elif isinstance(allowed, ast.Constant) and not isinstance(allowed.value, bool):
-                    offenders.append(f"{self._where(node)} {gate.value}: non-bool `allowed`")
+                elif not _bool_by_construction(allowed):
+                    offenders.append(
+                        f"{self._where(node)} {gate.value}: `allowed` must be True/False, "
+                        f"`not ...` or `bool(...)`, got `{ast.unparse(allowed)}`"
+                    )
             self.generic_visit(node)
 
     for path in sorted(_PXX.rglob("*.py")):

@@ -90,6 +90,21 @@ This is not hypothetical: a home path committed in `greptile.json` passed the ba
 local check (the file was untracked at the time, so nothing scanned it) and turned
 `v2` red for three consecutive pushes before anyone noticed.
 
+## Git hooks
+
+`scripts/install-git-hooks.sh` copies the repo's hooks into `.git/hooks`
+(git does not version hooks). `pre-commit` refuses to commit the local-only
+planes (`private/`, `review/`, `services/`, `.aider.*` histories) even when
+force-added; `PXX_PRECOMMIT_SKIP=1 git commit ...` bypasses it, so use it
+sparingly and never for those paths. `pre-push` runs the same
+`ruff check` / `ruff format --check` CI runs, so a push fails before a red run.
+
+CI arms the governance scan's denylist from the `PXX_CONTENT_DENYLIST`
+repository secret (written to `~/.config/pxx/public-denylist`), and
+`--require-denylist` fails the scan if it loads empty. Fork PRs have no access
+to the secret, so there the scan runs unarmed (built-in patterns only) with a
+warning.
+
 ## Releases
 
 Every shipped change bumps the version in `pyproject.toml`, `pxx/__init__.py`, and

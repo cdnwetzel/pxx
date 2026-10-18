@@ -1987,3 +1987,7 @@ def test_a_loop_whose_commit_is_skipped_says_why(tmp_path: Path) -> None:
     assert [e.data for e in bus.history if e.data.get("source") == "auto_commit_skipped"] == [
         {"source": "auto_commit_skipped", "reason": "secrets"}
     ]
+    # The run record carries the final summary, reason included.
+    (d,) = _loop_run_dirs(tmp_path)
+    rec = json.loads((d / "outcome.json").read_text())
+    assert "[not committed: secrets]" in rec["summary"]

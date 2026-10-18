@@ -698,9 +698,9 @@ async def run_loop(
         # id replaces a forwarded round session's (2.9.3 review: a backend
         # failure returned the CHILD session's id, naming the wrong record).
         outcome = replace(outcome, session_id=loop_id)
-        # Record first, act second: the diff and the outcome are written
-        # while the tree still holds the loop's work, so a restore below
-        # discards nothing that was not already on disk under runs/.
+        # Record first, act second: the diff is written while the tree still
+        # holds the loop's work, so a restore below discards nothing that was
+        # not already on disk under runs/.
         try:
             loop_diff = await _record_diff(
                 root, pre_sha, untracked_start, flagged_start, control_start
@@ -709,77 +709,83 @@ async def run_loop(
                 loop_writer.write_diff(loop_diff)
         except Exception:
             log.exception("loop diff write failed (best-effort)")
-        loop_writer.write_outcome(
-            {
-                "mode": "loop",
-                "run_id": loop_run_id,
-                "ts": loop_started,
-                "code": str(outcome.code),
-                "summary": outcome.summary[:500],
-                "rounds": outcome.rounds,
-                "tokens": outcome.tokens,
-                "diff_lines": outcome.diff_lines,
-                "cost_usd": outcome.cost_usd,
-                "contributing_codes": list(outcome.contributing_codes),
-                "findings_by_severity": dict(outcome.findings_by_severity),
-                "test_command": command,
-                "sandbox_shell": settings.sandbox_shell,
-                **legs,
-                "safety_net": {"tag": net.tag, "stash": net.stash_message} if net else None,
-            }
-        )
-        if settings.auto_commit and outcome.code is TerminalCode.COMPLETED:
-            from .safety_net import commit_session_work_checked
-            from .worktree import worktree_delta_checked
+        try:
+            if settings.auto_commit and outcome.code is TerminalCode.COMPLETED:
+                from .safety_net import commit_session_work_checked
+                from .worktree import worktree_delta_checked
 
-            sha, skipped = None, "unmeasurable"
-            if worktree_start is None:
-                # Fail CLOSED: the delta is unknown; add -A would sweep
-                # baseline dirt. Skip the commit instead.
-                log.warning(
-                    "auto-commit skipped: worktree snapshot unavailable "
-                    "(git failed) — nothing committed"
-                )
-            else:
-                delta = await worktree_delta_checked(root, worktree_start)
-                if delta is None:
-                    # Unmeasurable -- git failed, or the run changed the
-                    # repository's git configuration: commit nothing.
+                sha, skipped = None, "unmeasurable"
+                if worktree_start is None:
+                    # Fail CLOSED: the delta is unknown; add -A would sweep
+                    # baseline dirt. Skip the commit instead.
                     log.warning(
-                        "auto-commit skipped: the loop's changes could not be "
-                        "measured — nothing committed"
+                        "auto-commit skipped: worktree snapshot unavailable "
+                        "(git failed) — nothing committed"
                     )
                 else:
-                    sha, skipped = await commit_session_work_checked(
-                        root,
-                        task_preview=task,
-                        net_tag=net.tag if net else None,
-                        only=set(delta[0]),  # the loop's own delta, never baseline dirt
-                        control_start=worktree_start.get("control"),
+                    delta = await worktree_delta_checked(root, worktree_start)
+                    if delta is None:
+                        # Unmeasurable -- git failed, or the run changed the
+                        # repository's git configuration: commit nothing.
+                        log.warning(
+                            "auto-commit skipped: the loop's changes could not be "
+                            "measured — nothing committed"
+                        )
+                    else:
+                        sha, skipped = await commit_session_work_checked(
+                            root,
+                            task_preview=task,
+                            net_tag=net.tag if net else None,
+                            only=set(delta[0]),  # the loop's own delta, never baseline dirt
+                            control_start=worktree_start.get("control"),
+                        )
+                if sha:
+                    await parent_bus.emit("observation", {"source": "auto_commit", "sha": sha})
+                    outcome = replace(outcome, summary=f"{outcome.summary} [committed {sha[:8]}]")
+                else:
+                    # Never a silent skip (2.9.3): see Session.
+                    await parent_bus.emit(
+                        "observation", {"source": "auto_commit_skipped", "reason": skipped}
                     )
-            if sha:
-                await parent_bus.emit("observation", {"source": "auto_commit", "sha": sha})
-                outcome = replace(outcome, summary=f"{outcome.summary} [committed {sha[:8]}]")
-            else:
-                # Never a silent skip (2.9.3): see Session.
-                await parent_bus.emit(
-                    "observation", {"source": "auto_commit_skipped", "reason": skipped}
-                )
-                outcome = replace(outcome, summary=f"{outcome.summary} [not committed: {skipped}]")
-        elif net is not None and outcome.code is not TerminalCode.COMPLETED:
-            # F1: a run that did NOT complete kept nothing worth reviewing — give
-            # the user their pre-run tree back (tracked-dirty AND untracked, and
-            # a tag-only net is reset too) instead of stranding it / leaving the
-            # failed run's garbage. On COMPLETED the net is left for the user to
-            # reconcile with pxx's work (pop is their move).
-            from .safety_net import settle_failed_run
+                    outcome = replace(
+                        outcome, summary=f"{outcome.summary} [not committed: {skipped}]"
+                    )
+            elif net is not None and outcome.code is not TerminalCode.COMPLETED:
+                # F1: a run that did NOT complete kept nothing worth reviewing — give
+                # the user their pre-run tree back (tracked-dirty AND untracked, and
+                # a tag-only net is reset too) instead of stranding it / leaving the
+                # failed run's garbage. On COMPLETED the net is left for the user to
+                # reconcile with pxx's work (pop is their move).
+                from .safety_net import settle_failed_run
 
-            async def _emit_net(data: dict) -> None:
-                await parent_bus.emit("gate_decision", data)
+                async def _emit_net(data: dict) -> None:
+                    await parent_bus.emit("gate_decision", data)
 
-            suffix = await settle_failed_run(root, net, _emit_net)
-            if suffix:
-                outcome = replace(outcome, summary=outcome.summary + suffix)
+                suffix = await settle_failed_run(root, net, _emit_net)
+                if suffix:
+                    outcome = replace(outcome, summary=outcome.summary + suffix)
+        finally:
+            # Written last so outcome.json carries the final summary -- the
+            # commit tag or [not committed: <reason>] (2.9.3 review).
+            loop_writer.write_outcome(
+                {
+                    "mode": "loop",
+                    "run_id": loop_run_id,
+                    "ts": loop_started,
+                    "code": str(outcome.code),
+                    "summary": outcome.summary[:500],
+                    "rounds": outcome.rounds,
+                    "tokens": outcome.tokens,
+                    "diff_lines": outcome.diff_lines,
+                    "cost_usd": outcome.cost_usd,
+                    "contributing_codes": list(outcome.contributing_codes),
+                    "findings_by_severity": dict(outcome.findings_by_severity),
+                    "test_command": command,
+                    "sandbox_shell": settings.sandbox_shell,
+                    **legs,
+                    "safety_net": {"tag": net.tag, "stash": net.stash_message} if net else None,
+                }
+            )
         return outcome
 
     baseline_failures: set[str] | None = None

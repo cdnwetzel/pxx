@@ -767,6 +767,7 @@ def test_auto_commit_fails_closed_when_snapshot_unavailable(tmp_path, monkeypatc
     assert (repo / ".env").read_text() == "SECRET=hunter2\n"  # dirt unswept
 
 
+@needs_git
 def test_a_session_whose_commit_is_skipped_says_why(tmp_path):
     # 2.9.3 (plan B2): --commit that commits nothing reports the reason in
     # the summary and a metadata-only observation (it used to log only).

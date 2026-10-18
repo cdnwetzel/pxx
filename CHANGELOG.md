@@ -5,6 +5,8 @@ preserved in git (tag `v1.3.3` and earlier).
 
 ## [Unreleased]
 
+## [2.9.3] — 2026-10-18
+
 ### Fixed
 
 - **Bare mode and structured output never land on aider.** The auto lane picked aider for `ask` whenever a

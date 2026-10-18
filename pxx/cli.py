@@ -605,6 +605,12 @@ def _resolve_backend_name(command: str, requested: str | None, settings) -> str:
     # than silently voiding the degrade config.
     if settings.fallback_models:
         return "native"
+    # The same for a pinned payload: bare mode and structured output are
+    # honoured only by the native backend (aider ignores both), so a caller
+    # that asked for either must never land on aider just because one is
+    # installed (2.9.3; the session refuses an explicit aider).
+    if settings.bare or settings.response_format is not None:
+        return "native"
     # else: aider when available AND working, else pxx's native loop
     aider = shutil.which("aider")
     if aider:

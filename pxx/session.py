@@ -124,6 +124,20 @@ class Session:
                 f"(ask, plan); got {settings.permission}"
             )
 
+        # Bare payload and structured output are honoured only by the native
+        # backend: aider builds its own prompt and ignores both. An explicit
+        # aider (--backend aider, backend = "aider", or a library caller) is
+        # refused here rather than sent a payload it would silently replace
+        # (2.9.3; the CLI's auto lane already prefers native for these).
+        if (settings.bare or settings.response_format is not None) and getattr(
+            self.backend, "name", None
+        ) == "aider":
+            what = "bare mode" if settings.bare else "response_format (structured output)"
+            raise ConfigError(
+                f"{what} needs the native backend; the aider backend ignores it "
+                '(drop --backend aider / backend = "aider")'
+            )
+
         # Structured output (Settings.response_format, 2.7.0): ask-mode AND
         # bare-payload only — the tools + response_format interaction is
         # deliberately unsupported. Same entry-point enforcement as bare

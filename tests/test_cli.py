@@ -2351,3 +2351,20 @@ def test_review_flags_on_reviewer_subcommands():
 def test_review_overlay_empty_without_flags():
     args = cli._build_parser().parse_args(["review"])
     assert cli._review_overlay(args) == {}
+
+
+@pytest.mark.parametrize("pin", ["bare", "response_format"])
+def test_auto_backend_prefers_native_for_a_pinned_payload(monkeypatch, pin):
+    """2.9.3: bare mode and structured output are honoured only by the native
+    backend. A healthy aider on PATH must not capture an `ask` that pinned its
+    payload (acp's isolation config sets bare = true and fallback_models = [],
+    so the fallback-chain rule did not apply)."""
+    from pxx.config import Settings
+
+    monkeypatch.setattr(cli.shutil, "which", lambda name: "/usr/bin/aider")
+    monkeypatch.setattr(cli, "_aider_health", lambda path: True)
+    assert cli._resolve_backend_name("ask", None, Settings()) == "aider"  # control: aider wins
+    pinned = Settings(bare=True) if pin == "bare" else Settings(response_format={"type": "object"})
+    assert cli._resolve_backend_name("ask", None, pinned) == "native"
+    # an explicit choice is not overridden here -- the session refuses it
+    assert cli._resolve_backend_name("ask", "aider", pinned) == "aider"

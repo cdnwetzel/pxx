@@ -1820,6 +1820,10 @@ class _PlantsGitState(ScriptedBackend):
             _git(root, "replace", head, fake)  # `git diff HEAD` now shows nothing for out.py
         elif self.how == "binary":  # a plain file write -- what write_file can do
             (root / ".gitattributes").write_text("* -diff\n")
+        elif self.how == "binary-hidden":  # ignored + case-variant (Grok r9/r10)
+            (root / "sub").mkdir(exist_ok=True)
+            (root / "sub" / ".gitignore").write_text(".gitattributes\n")
+            (root / "sub" / ".GitAttributes").write_text("* -diff\n")
         else:
             _git(root, "config", "diff.hide.textconv", "true")
             (root / ".git" / "info").mkdir(exist_ok=True)
@@ -1827,7 +1831,7 @@ class _PlantsGitState(ScriptedBackend):
 
 
 @needs_git
-@pytest.mark.parametrize("how", ["replace", "textconv", "binary"])
+@pytest.mark.parametrize("how", ["replace", "textconv", "binary", "binary-hidden"])
 def test_a_round_that_changes_git_state_is_never_approved(tmp_path: Path, how: str) -> None:
     # Grok review (2.9.1 r7, P0): `git replace` blinded the loop's path list
     # and diff, so an out-of-scope tracked edit read as "nothing changed".
@@ -1838,7 +1842,9 @@ def test_a_round_that_changes_git_state_is_never_approved(tmp_path: Path, how: s
     bus = EventBus()
     # The attributes file is IN scope (Codex r9): only the incomplete-diff
     # guard can stop that round, not the scope re-check.
-    scope = ("a.py", ".gitattributes") if how == "binary" else ("a.py",)
+    scope = {"binary": ("a.py", ".gitattributes"), "binary-hidden": ("a.py", "sub")}.get(
+        how, ("a.py",)
+    )
     outcome = asyncio.run(
         run_loop(
             "edit a.py",
@@ -1849,7 +1855,7 @@ def test_a_round_that_changes_git_state_is_never_approved(tmp_path: Path, how: s
             bus=bus,
         )
     )
-    if how == "binary":
+    if how.startswith("binary"):
         assert outcome.code is TerminalCode.REVIEW_UNAVAILABLE
         assert _gate_events(bus, "diff_complete")[0]["allowed"] is False
     assert outcome.code in (TerminalCode.REVIEW_UNAVAILABLE, TerminalCode.OUT_OF_SCOPE)

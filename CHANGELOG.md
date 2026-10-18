@@ -29,12 +29,17 @@ preserved in git (tag `v1.3.3` and earlier).
     measuring or reverting, the goal's artifact review rejects, `--commit`
     commits nothing, and the safety net is not restored (`gate_decision`
     `safety_net`, `reason: "git_state_changed"`) -- the tag and stash stay;
+  - a restore whose stash cannot pop (e.g. the failed run created a file at
+    a stashed path) is reported as such (`restored: false`,
+    `reason: "stash_not_restored"`, summary names the stash) instead of a
+    bare `restored: true`;
   - `--commit` commits nothing when any path in the session's delta has a
     git `filter` attribute (e.g. LFS), rather than run its clean command --
     the work stays in the tree; commit it by hand;
   - a restore resets to the start commit's SHA, not the tag name, so a
     re-tag between the check and the reset cannot redirect it.
-  - in-tree `.gitattributes` files (tracked, untracked or gitignored) are
+  - in-tree `.gitattributes` files (tracked, untracked or gitignored, any
+    letter case) are
     part of that control state: a run
     that writes `* -diff` (review diff becomes a binary stub, zero diff
     budget) is blocked like any other change.
@@ -43,6 +48,10 @@ preserved in git (tag `v1.3.3` and earlier).
   acting through pxx's gated tools and aider's detected edits. A model with
   ungated shell, the operator's own environment and git configuration, and
   operator-chosen repository layouts are documented as out of scope.
+- **aider's scope fence removes out-of-scope droppings with any name.** It
+  parsed `git status` without `-z`, so a created file with a quotable name
+  (`evil"file.txt`) was never removed, silently; it now lists NUL-exact and
+  reports any dropping it could not remove (`undropped_untracked`).
 - **The goal path rejects edits git cannot show, and rolls a rejected merge
   back.** An `assume-unchanged` edit of a protected file on the root index
   left `git diff` empty and the goal `COMPLETED`; the artifact review now
@@ -133,17 +142,17 @@ preserved in git (tag `v1.3.3` and earlier).
   one whose edits are all out of scope — an extra in-scope edit used to carry
   an out-of-scope file through, and `--commit` committed it. The loop's
   re-check already used "any".
-- **pxx's commit is path-limited.** With `--commit`, `git commit` now names
-  exactly the session's delta (a staged rename's source included); anything
-  the operator had already staged stays staged and is no longer swept into
-  pxx's (secrets-gated) commit. Paths are matched literally
-  (`--literal-pathspecs`): a file named `*.py` is that file, not every
-  `.py`.
+- **pxx's commit is path-limited.** With `--commit`, pxx commits exactly
+  the session's delta (a staged rename's source included); anything the
+  operator had already staged stays staged and is no longer swept into
+  pxx's (secrets-gated) commit. Paths are taken literally (NUL-separated
+  index entries, never pathspecs): a file named `*.py` is that file, not
+  every `.py`.
 - **Unmeasurable runs fail closed.** If the files a loop round created cannot
   be listed, the round ends `REVIEW_UNAVAILABLE` (`gate_decision` gate
-  `diff_complete`) before review — on the main path, in budget-overrun
-  salvage and in the stale-review refresh — and the done-signal never fires
-  on such a diff. An aider run whose baseline cannot be snapshotted is not
+  `diff_complete`) before review on the main path and in the stale-review
+  refresh; budget-overrun salvage and the done-signal never approve such a
+  diff (the run keeps its own terminal code). An aider run whose baseline cannot be snapshotted is not
   started, and one whose result cannot be measured ends `EDIT_FAILED` instead
   of a clean zero-change success; a failed `git diff --numstat` makes the
   snapshot unavailable rather than empty; a HEAD that cannot be read after the
@@ -204,7 +213,8 @@ preserved in git (tag `v1.3.3` and earlier).
   whitespace differs (e.g. "your old_string indents line 8 with 4 spaces, the
   file with no indentation"). Matching is unchanged — still exact, never
   applied on a near-match; ambiguous or genuinely different snippets get no
-  hint; the diagnosis is bounded on huge inputs; a line-ending difference that
+  hint; the diagnosis is bounded on huge inputs and on adversarial ones (each
+  line normalized once, at most 2,000 candidate windows); a line-ending difference that
   is not the only one falls through to the indentation check; whitespace-only
   edge lines count as edge lines. Line numbers and whitespace
   facts only, never file content. Observed 2026-10-17: a 4B model sent the

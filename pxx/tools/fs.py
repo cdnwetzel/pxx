@@ -239,17 +239,30 @@ _HINT_MAX_FILE_CHARS = 2_000_000
 _HINT_MAX_SNIPPET_LINES = 400
 
 
+#: Most first-line prefilter hits the window search verifies before giving
+#: up -- a file of identical lines would otherwise cost lines x snippet.
+_HINT_MAX_CANDIDATES = 2_000
+
+
 def _unique_line_window(have: list[str], want: list[str], norm) -> int | None:
     """Start index of the ONE window of ``have`` equal to ``want`` under
-    ``norm``; None when there are zero or several (stops at the second)."""
+    ``norm``; None when there are zero or several (stops at the second), or
+    when too many first lines match to check cheaply. Each line is
+    normalized once (2.9.1 review: re-normalizing per window was quadratic
+    inside the documented bounds -- ~27 s on adversarial input)."""
     if not want or len(want) > len(have):
         return None
-    head = norm(want[0])
+    have_n = [norm(line) for line in have]
+    want_n = [norm(line) for line in want]
     hit = None
-    for i in range(len(have) - len(want) + 1):
-        if norm(have[i]) != head:  # cheap first-line prefilter
+    candidates = 0
+    for i in range(len(have_n) - len(want_n) + 1):
+        if have_n[i] != want_n[0]:  # cheap first-line prefilter
             continue
-        if all(norm(have[i + k]) == norm(want[k]) for k in range(1, len(want))):
+        candidates += 1
+        if candidates > _HINT_MAX_CANDIDATES:
+            return None  # too ambiguous to be certain: no hint
+        if have_n[i : i + len(want_n)] == want_n:
             if hit is not None:
                 return None  # ambiguous: never guess which one was meant
             hit = i

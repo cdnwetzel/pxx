@@ -175,16 +175,18 @@ class AiderBackend:
     # -- run ------------------------------------------------------------------
 
     @staticmethod
-    def _parse_porcelain(status: str) -> tuple[set[str], bool]:
-        """(untracked paths, tracked-dirty?) from ``git status --porcelain=v1``."""
-        untracked: set[str] = set()
-        tracked_dirty = False
-        for line in status.splitlines():
-            if line[:2] == "??":
-                untracked.add(line[3:])
-            elif line.strip():
-                tracked_dirty = True
-        return untracked, tracked_dirty
+    async def _status(cwd: Path) -> tuple[set[str], bool] | None:
+        """(untracked paths, tracked-dirty?) from NUL-exact ``git status -z``
+        (pxx.worktree's one status parser); None when git fails. Unquoted
+        paths matter: a quoted ``"evil\"file"`` could never be removed
+        (2.9.1 review)."""
+        from ..worktree import _git_status_entries
+
+        entries = await _git_status_entries(cwd)
+        if entries is None:
+            return None
+        untracked = {path for status, path in entries if status == "??"}
+        return untracked, any(status != "??" for status, _ in entries)
 
     async def run(self, task: str, ctx: SessionContext) -> RunOutcome:
         pre_head = await self._git(ctx.cwd, "rev-parse", "HEAD")
@@ -201,10 +203,11 @@ class AiderBackend:
         tracked_dirty_start = False
         snapshot: dict | None = None
         if use_git:
-            status = await self._git(ctx.cwd, "status", "--porcelain=v1", "--untracked-files=all")
-            untracked_start, tracked_dirty_start = self._parse_porcelain(status or "")
+            start_status = await self._status(ctx.cwd)
+            if start_status is not None:
+                untracked_start, tracked_dirty_start = start_status
             snapshot = await self._snapshot(ctx.cwd)
-            if snapshot is None:
+            if snapshot is None or start_status is None:
                 # Fail closed (2.9.1 review): without a baseline nothing aider
                 # changes could be measured or scope-checked afterwards.
                 raise BackendError(
@@ -311,16 +314,18 @@ class AiderBackend:
                     else:
                         reverted_to = pre_head[:7]
             dropped: list[str] = []
+            undropped: list[str] = []  # out-of-scope droppings that stayed
             if use_git:
-                status_now = await self._git(
-                    ctx.cwd, "status", "--porcelain=v1", "--untracked-files=all"
-                )
-                untracked_now, _ = self._parse_porcelain(status_now or "")
+                status_now = await self._status(ctx.cwd)
+                untracked_now = status_now[0] if status_now is not None else set()
+                if status_now is None:
+                    undropped.append("<untracked files could not be listed>")
                 for rel in sorted(untracked_now - untracked_start):
                     if not ctx.scope.in_scope(rel):
                         try:
                             (ctx.cwd / rel).unlink()
                         except OSError:
+                            undropped.append(rel)  # never silent (2.9.1 review)
                             continue
                         dropped.append(rel)
             summary = (
@@ -333,6 +338,8 @@ class AiderBackend:
                 summary += f" — {not_reverted}"
             if dropped:
                 summary += f"; session droppings removed: {', '.join(dropped[:3])}"
+            if undropped:
+                summary += f"; droppings NOT removed: {', '.join(undropped[:3])}"
             await ctx.bus.emit(
                 "gate_decision",
                 {
@@ -344,6 +351,7 @@ class AiderBackend:
                     "reverted_to": reverted_to,
                     "not_reverted": not_reverted,
                     "dropped_untracked": dropped[:10],
+                    "undropped_untracked": undropped[:10],
                 },
                 session_id=ctx.session_id,
             )

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import shlex
 import shutil
 
 import pytest
@@ -58,6 +59,21 @@ def stub_delta(backend, monkeypatch, paths, lines):
 
     monkeypatch.setattr(backend, "_snapshot", snapshot)
     monkeypatch.setattr(backend, "_delta", delta)
+    stub_status(backend, monkeypatch)
+
+
+def stub_status(backend, monkeypatch, untracked=(), dirty=False, sequence=None):
+    """Stub the NUL-exact status seam: a clean tree by default, or one
+    ``(untracked, dirty)`` per call from ``sequence`` (start, then end)."""
+    states = list(sequence or [])
+
+    async def status(cwd):
+        if states:
+            u, d = states.pop(0) if len(states) > 1 else states[0]
+            return set(u), d
+        return set(untracked), dirty
+
+    monkeypatch.setattr(backend, "_status", status)
 
 
 def test_missing_binary_raises_backend_unavailable(monkeypatch, tmp_path):
@@ -358,6 +374,14 @@ def test_block_removes_only_session_created_droppings(tmp_path, monkeypatch):
         ),
     )
     stub_delta(backend, monkeypatch, [], 0)
+    stub_status(
+        backend,
+        monkeypatch,
+        sequence=[
+            ({"pre_existing.txt"}, False),
+            ({"pre_existing.txt", "converter_notes.txt"}, False),
+        ],
+    )
     ctx = make_ctx(tmp_path, scope=ScopeGate(tmp_path, ("other_dir",)))
     outcome = asyncio.run(backend.run("add a comment", ctx))
     assert outcome.code is TerminalCode.OUT_OF_SCOPE
@@ -378,6 +402,7 @@ def test_block_skips_revert_with_preexisting_dirt(tmp_path, monkeypatch):
         backend, "_git", _blocking_fake_git(calls, [" M dirty.txt", " M dirty.txt"])
     )
     stub_delta(backend, monkeypatch, ["converter.py"], 2)
+    stub_status(backend, monkeypatch, dirty=True)
     ctx = make_ctx(tmp_path, scope=ScopeGate(tmp_path, ("other_dir",)))
     outcome = asyncio.run(backend.run("add a comment", ctx))
     assert outcome.code is TerminalCode.OUT_OF_SCOPE
@@ -791,6 +816,7 @@ def test_an_unmeasurable_run_is_not_a_clean_zero_change_success(tmp_path, monkey
     monkeypatch.setattr(backend, "_git", fake_git)
     monkeypatch.setattr(backend, "_snapshot", snapshot)
     monkeypatch.setattr(backend, "_delta", no_delta)
+    stub_status(backend, monkeypatch)
     ctx = make_ctx(tmp_path, settings=Settings(permission=PermissionMode.EDIT))
     with pytest.raises(BackendError, match="could not measure what aider changed"):
         asyncio.run(backend.run("t", ctx))
@@ -927,3 +953,22 @@ def test_real_git_a_flagged_edit_counts_against_the_diff_budget(tmp_path, flag):
     ctx = type(ctx)(**{**ctx.__dict__, "budgets": BudgetGuard(Budgets(max_diff_lines=2))})
     with pytest.raises(BudgetExceeded):
         asyncio.run(AiderBackend(aider_path=path).run("t", ctx))
+
+
+@_NEEDS_GIT
+@pytest.mark.parametrize("name", ['evil"file.txt', "tab\tfile.txt", "wörk.txt"])
+def test_real_git_the_fence_removes_droppings_with_quotable_names(tmp_path, name):
+    """Kimi review (2.9.1 r9, P1): the fence parsed `git status` without
+    -z, so a quoted name (`"evil\\"file.txt"`) was never removed -- silently."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git_repo(repo)
+    (repo / "src").mkdir()
+    script = f"printf x > {shlex.quote(name)} && echo evil > outside.txt"
+    ctx = make_ctx(
+        repo, settings=Settings(permission=PermissionMode.EDIT), scope=ScopeGate(repo, ("src",))
+    )
+    outcome = asyncio.run(AiderBackend(aider_path=fake_aider(tmp_path, script)).run("t", ctx))
+    assert outcome.code is TerminalCode.OUT_OF_SCOPE
+    assert not (repo / name).exists()
+    assert "NOT removed" not in outcome.summary

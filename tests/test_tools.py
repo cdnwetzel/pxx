@@ -641,3 +641,17 @@ def test_recall_awaits_async_store(reg: ToolRegistry, tmp_path: Path) -> None:
     call(reg, "remember", {"content": "seeded via tool"}, make_ctx(tmp_path, memory=mem))
     out = call(reg, "recall_memory", {"query": "seeded", "k": 5}, make_ctx(tmp_path, memory=mem))
     assert "- [note] seeded via tool" in out
+
+
+def test_mismatch_hint_is_fast_at_its_own_bounds() -> None:
+    # Kimi review (2.9.1 r9, P1): a file of identical lines at the size cap
+    # with a max-size snippet took ~27 s -- synchronously, per edit_file miss.
+    import time
+
+    from pxx.tools.fs import mismatch_hint
+
+    text = "a\n" * 1_000_000  # 2,000,000 chars: exactly the file cap
+    old = "a\n" * 400 + "b"  # 401 lines: exactly the snippet cap, never matches
+    start = time.monotonic()
+    assert mismatch_hint(text, old) == ""
+    assert time.monotonic() - start < 3.0

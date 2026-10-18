@@ -335,12 +335,14 @@ async def run_goal(
     # by the boundary review (2.9.1 review). A failed listing becomes an
     # empty baseline: over-counting is visible, hiding is not.
     untracked_start: dict[str, str | None] = {}
+    untracked_raw: dict[str, str | None] | None = None  # None: listing failed
     flagged_start: dict[str, str] = {}
     control_start: dict[str, str] = {}
     if isolated:
         from .worktree import flagged_state, git_control_state, untracked_fingerprints
 
-        untracked_start = await untracked_fingerprints(root) or {}
+        untracked_raw = await untracked_fingerprints(root)
+        untracked_start = untracked_raw or {}
         # Same moment, same fail-closed rule: index-flag states (git shows no
         # diff for a flagged edit) and the git control state (filter/diff
         # drivers, attributes, replace refs -- nodes share the root's git
@@ -456,7 +458,13 @@ async def run_goal(
 
         names_rc, names = await _git(root, "diff", "--no-renames", "--name-only", "-z", "HEAD")
         created = await new_files_since(root, untracked_start)
-        created_by_merge = [p for p in created or [] if p not in untracked_start]
+        # Removed on rollback ONLY against a baseline that was really read
+        # (2.9.1 review): an empty stand-in would delete the operator's files.
+        created_by_merge = (
+            [p for p in created or [] if p not in untracked_raw]
+            if untracked_raw is not None
+            else []
+        )
         flagged_now = await flagged_state(root)
         git_changed = await git_state_changed_since(root, control_start)
         if names_rc != 0 or created is None or flagged_now is None:

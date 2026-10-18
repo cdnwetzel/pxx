@@ -51,7 +51,8 @@ pxx/
                        # if HEAD/branch/tag/tree AND the git control state are unchanged
                        # (SafetyNet: tag, stash_message, head_sha, head_ref, stash_sha,
                        # head_tree, control_state; refusal -> gate_decision safety_net
-                       # restored:false reason:head_moved|git_state_changed);
+                       # restored:false reason:head_moved|git_state_changed;
+                       # a reset whose stash cannot pop: stash_not_restored);
                        # commit_session_work commits exactly the scanned blobs (temp
                        # index + commit-tree, no hooks, no filter-attributed paths)
   loop.py              # bounded autonomous loop (edit -> test -> review)

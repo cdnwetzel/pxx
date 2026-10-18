@@ -242,6 +242,7 @@ def test_a_sparse_skip_worktree_file_absent_throughout_is_not_a_change(tmp_path:
         ("attributes/in-tree", "root"),
         ("attributes/in-tree", "nested"),
         ("attributes/in-tree", "ignored"),
+        ("attributes/in-tree", "case"),
     ],
 )
 def test_git_control_state_sees_changes_git_status_hides(tmp_path: Path, change) -> None:
@@ -259,9 +260,10 @@ def test_git_control_state_sees_changes_git_status_hides(tmp_path: Path, change)
     elif name == "attributes/in-tree":
         # Grok review (2.9.1 r8, P1): `* -diff` makes the review diff a
         # binary stub and zeroes the diff budget -- reachable via write_file.
-        target = repo / (".gitattributes" if args == "root" else "sub/.gitattributes")
+        planted = "sub/.GitAttributes" if args == "case" else "sub/.gitattributes"
+        target = repo / (".gitattributes" if args == "root" else planted)
         target.parent.mkdir(exist_ok=True)
-        if args == "ignored":  # the run hides its own attributes file (Grok r9)
+        if args in ("ignored", "case"):  # the run hides its own attributes file (Grok r9/r10)
             (repo / "sub" / ".gitignore").write_text(".gitattributes\n")
         target.write_text("* -diff\n")
     elif name == "info/attributes":

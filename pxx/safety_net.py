@@ -269,22 +269,34 @@ async def restore_safety_net(cwd: Path, net: SafetyNet | None) -> bool:
     """
     if net is None or (net.tag is None and not net.stash_message):
         return False
+    did, _problem = await _restore(cwd, net)
+    return did
+
+
+async def _restore(cwd: Path, net: SafetyNet) -> tuple[bool, str]:
+    """(something restored?, what did NOT come back -- "" when nothing)."""
     reason, _ = await restore_blocker(cwd, net)
     if reason:
-        return False
+        return False, ""
     did = False
     if net.tag:
         # Reset to the SHA that was just checked, never the tag NAME: a
         # re-tag between the check and the reset is not covered (2.9.1
         # review). Old nets without a recorded SHA fall back to the tag.
         if await _git(cwd, "reset", "--hard", net.head_sha or net.tag) is None:
-            return False  # reset failed — do NOT pop onto an unexpected tree
+            return False, ""  # reset failed — do NOT pop onto an unexpected tree
         did = True
     if net.stash_message:
         ref = await _stash_ref(cwd, net.stash_message, net.stash_sha)
         if ref is not None and await _git(cwd, "stash", "pop", ref) is not None:
             did = True
-    return did
+        else:
+            # The operator's pre-run work is still in the stash: say so, never
+            # a bare "restored" (2.9.1 review: a file the run created at a
+            # stashed path made the pop fail behind `restored: true`).
+            where = (net.stash_sha or "")[:12] or net.stash_message
+            return did, f"the pre-run changes are still stashed ({where}); git stash pop it"
+    return did, ""
 
 
 async def _filtered_paths(cwd: Path, names: list[str]) -> list[str] | None:
@@ -372,7 +384,21 @@ async def settle_failed_run(
         )
         return f" [net not restored: {detail}; the start is tagged {net.tag or '(untagged)'}]"
     _remove_created(cwd, created)
-    if await restore_safety_net(cwd, net):
+    if net.tag is None and not net.stash_message:
+        return ""
+    did, problem = await _restore(cwd, net)
+    if problem:
+        await emit(
+            {
+                "gate": "safety_net",
+                "allowed": True,
+                "restored": False,
+                "reason": "stash_not_restored",
+                "tag": net.tag or "",
+            }
+        )
+        return f" [net partly restored: {problem}]"
+    if did:
         await emit({"gate": "safety_net", "allowed": True, "restored": True, "tag": net.tag or ""})
     return ""
 
@@ -399,8 +425,10 @@ async def commit_session_work(
     or the stash fail-soft path). ``only=None`` stages everything (direct
     callers/tests only).
 
-    Fail-closed secrets gate: after staging and before committing, the staged
-    delta is scanned with :func:`pxx.governance.scan_staged`. ANY finding —
+    Fail-closed secrets gate: each path's bytes are hashed once and those
+    exact blobs are scanned with :func:`pxx.governance.scan_blobs` before
+    the commit is built from them (the operator's index is never the
+    staging area). ANY finding —
     or a scan that cannot run (``PxxError``; per governance doctrine a scan
     that can't run is NOT a clean scan) — skips the commit and returns None:
     the work stays in the tree, fail-closed on the commit, fail-soft on the

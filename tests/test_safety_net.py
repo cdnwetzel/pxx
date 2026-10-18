@@ -648,3 +648,30 @@ def test_restore_resets_to_the_checked_sha_not_the_tag_name(tmp_path: Path, monk
     resets = [a for a in seen if a[:2] == ("reset", "--hard")]
     assert resets == [("reset", "--hard", net.head_sha)]
     assert (repo / "a.py").read_text() == "x = 1\n"
+
+
+@needs_git
+def test_a_stash_that_cannot_pop_is_never_reported_restored(tmp_path: Path) -> None:
+    # Kimi review (2.9.1 r9, P1): the failed run created a file at a path the
+    # net had stashed, so the pop failed -- behind `restored: true`, with the
+    # operator's work still in the stash.
+    from pxx.safety_net import settle_failed_run
+
+    repo = tmp_path / "repo"
+    _init_repo(repo, files={"a.py": "x = 1\n"})
+    for key, val in (("user.name", "t"), ("user.email", "t@e.c")):
+        _git(repo, "config", key, val)
+    (repo / "wip.txt").write_text("operator work\n")
+    net = run(tie_safety_net(repo, "run-pop"))
+    assert net.stash_message and not (repo / "wip.txt").exists()
+    (repo / "wip.txt").write_text("the run's file\n")  # collides with the stash
+    events: list[dict] = []
+
+    async def emit(data: dict) -> None:
+        events.append(data)
+
+    suffix = run(settle_failed_run(repo, net, emit))
+    assert "partly restored" in suffix and "still stashed" in suffix
+    assert [e.get("restored") for e in events] == [False]
+    assert events[0]["reason"] == "stash_not_restored"
+    assert _git(repo, "stash", "list")  # the operator's work is still there

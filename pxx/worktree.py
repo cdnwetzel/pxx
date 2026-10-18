@@ -332,7 +332,7 @@ async def git_control_state(cwd: Path) -> dict[str, str] | None:
         "--others",
         "--exclude-standard",
         "--",
-        ":(glob)**/.gitattributes",
+        ":(icase,glob)**/.gitattributes",
     )
     # ...and IGNORED ones: a run can write `sub/.gitignore` hiding its own
     # `sub/.gitattributes` (2.9.1 review). `--directory` keeps a wholly
@@ -347,14 +347,16 @@ async def git_control_state(cwd: Path) -> dict[str, str] | None:
         "--exclude-standard",
         "--directory",
         "--",
-        ":(glob)**/.gitattributes",
+        ":(icase,glob)**/.gitattributes",
     )
     if attrs is None or ignored is None:
         return None
     found = {
         rel
         for rel in (*attrs.split("\0"), *ignored.split("\0"))
-        if rel == ".gitattributes" or rel.endswith("/.gitattributes")
+        # case-folded: on a case-insensitive filesystem git reads
+        # `sub/.GitAttributes` as `sub/.gitattributes` (2.9.1 review)
+        if rel and rel.rsplit("/", 1)[-1].casefold() == ".gitattributes"
     }
     digest = hashlib.sha256()
     for rel in sorted(found | {".gitattributes"}):

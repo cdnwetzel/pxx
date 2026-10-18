@@ -1093,7 +1093,7 @@ async def run_loop(
             lint_ok, lint_tail = await _run_lint(root, lint_command)
             await parent_bus.emit(
                 "gate_decision",
-                {"gate": "lint", "round": round_no, "allowed": lint_ok},
+                {"gate": "lint", "round": round_no, "allowed": bool(lint_ok)},
             )
             if not lint_ok:
                 legs["lint_errors"] += 1

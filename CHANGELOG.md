@@ -5,6 +5,15 @@ preserved in git (tag `v1.3.3` and earlier).
 
 ## [Unreleased]
 
+### Tests
+
+- **Downstream consumer contract** (`tests/test_consumer_contract.py`). It pins, in one place, the surfaces
+  other tools read from pxx by name: the outcome trailer and summary tags, the `prompt_rendered` audit
+  fields and the audit chain's hashing, the `gate_decision` `allowed` invariant (checked by a source sweep,
+  with a guard that the sweep still sees the real emitters), the loop run directory and its run-intent
+  agreement, the imported Python API, and the PreToolUse hook protocol. Each test names the consumer code
+  that depends on its surface. Each was negative-controlled: break the producer and the test fails.
+
 ## [2.9.2] — 2026-10-18
 
 ### Fixed

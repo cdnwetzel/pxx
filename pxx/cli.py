@@ -605,6 +605,12 @@ def _resolve_backend_name(command: str, requested: str | None, settings) -> str:
     # than silently voiding the degrade config.
     if settings.fallback_models:
         return "native"
+    # The same for a pinned payload: bare mode and structured output are
+    # honoured only by the native backend (aider ignores both), so a caller
+    # that asked for either must never land on aider just because one is
+    # installed (2.9.3; the session refuses an explicit aider).
+    if settings.bare or settings.response_format is not None:
+        return "native"
     # else: aider when available AND working, else pxx's native loop
     aider = shutil.which("aider")
     if aider:
@@ -879,7 +885,13 @@ def _cmd_loop(args: argparse.Namespace, unknown: list[str]) -> int:
     if args.budget_rounds is not None:
         loop_kwargs["max_rounds"] = args.budget_rounds
     outcome = asyncio.run(run_loop(task, settings, **loop_kwargs))
-    print(f"[{outcome.code}] {outcome.summary}")
+    # Same trailer as run/edit/ask (2.9.3): consumers parse one format;
+    # `session=` is the loop record's id (its run directory's hex suffix).
+    print(
+        f"[{outcome.code}] {outcome.summary} "
+        f"(rounds={outcome.rounds} tokens={outcome.tokens} diff_lines={outcome.diff_lines} "
+        f"session={outcome.session_id})"
+    )
     return exit_code_for(outcome)
 
 

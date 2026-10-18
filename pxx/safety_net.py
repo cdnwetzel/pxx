@@ -430,6 +430,21 @@ async def settle_failed_run(
     return ""
 
 
+#: Why :func:`commit_session_work_checked` committed nothing. Metadata only.
+COMMIT_SKIP_REASONS = frozenset(
+    {
+        "nothing_to_commit",
+        "unmeasurable",
+        "git_state_changed",
+        "filter_attribute",
+        "secrets",
+        "scan_failed",
+        "head_moved",
+        "git_failed",
+    }
+)
+
+
 async def commit_session_work(
     cwd: Path,
     *,
@@ -438,7 +453,26 @@ async def commit_session_work(
     only: set[str] | None = None,
     control_start: dict[str, str] | None = None,
 ) -> str | None:
-    """Commit the session's work after a COMPLETED outcome; return the sha.
+    """:func:`commit_session_work_checked`, returning only the sha (None when
+    nothing was committed)."""
+    sha, _reason = await commit_session_work_checked(
+        cwd, task_preview=task_preview, net_tag=net_tag, only=only, control_start=control_start
+    )
+    return sha
+
+
+async def commit_session_work_checked(
+    cwd: Path,
+    *,
+    task_preview: str,
+    net_tag: str | None,
+    only: set[str] | None = None,
+    control_start: dict[str, str] | None = None,
+) -> tuple[str | None, str]:
+    """Commit the session's work after a COMPLETED outcome: ``(sha, "")``, or
+    ``(None, reason)`` when nothing was committed -- one of
+    :data:`COMMIT_SKIP_REASONS` (2.9.3: callers report the reason instead of a
+    silent skip). :func:`commit_session_work` returns just the sha.
 
     Opt-in only (``settings.auto_commit`` / ``--commit``). Fail-soft by
     contract: nothing-to-commit or any git failure returns None — the
@@ -462,13 +496,13 @@ async def commit_session_work(
     session (the function's contract above).
     """
     if only is not None and not only:
-        return None  # the session changed nothing
+        return None, "nothing_to_commit"  # the session changed nothing
     # A run that changed filter drivers, attributes or replace refs can make
     # git hash or report other bytes than the tree holds (2.9.1 review).
     changed = await git_state_changed_since(cwd, control_start)
     if changed:
         log.warning("auto-commit skipped: %s; nothing committed", changed)
-        return None
+        return None, "git_state_changed"
     # The commit is built from blobs pxx hashed ONCE and scanned, in a
     # temporary index, with `commit-tree` (2.9.1 reviews): `git commit --
     # <paths>` re-read the working tree (and re-ran clean filters) AFTER the
@@ -483,7 +517,7 @@ async def commit_session_work(
             cwd, "status", "--porcelain=v1", "-z", "--no-renames", "--untracked-files=all", raw=True
         )
         if listing is None:
-            return None
+            return None, "git_failed"
         names = {e[3:] for e in listing.split("\0") if len(e) > 3}
     else:
         names = set(only)
@@ -499,7 +533,7 @@ async def commit_session_work(
             if filtered is None
             else f"{len(filtered)} path(s) carry a git filter attribute",
         )
-        return None
+        return None, ("git_failed" if filtered is None else "filter_attribute")
     # git's own rule for the executable bit: with core.fileMode=false (WSL
     # /mnt/c, FAT, some network mounts report 0o777) the worktree bits are
     # ignored and the recorded mode is kept (2.9.1 review).
@@ -521,7 +555,7 @@ async def commit_session_work(
             try:
                 data = target.read_bytes()  # the ONE read of these bytes
             except OSError:
-                return None
+                return None, "unmeasurable"
             sha = await _git_io(cwd, "hash-object", "-w", "--stdin", f"--path={rel}", stdin=data)
             mode = await _file_mode(cwd, rel, target.stat().st_mode, filemode)
         elif not target.exists():
@@ -541,11 +575,11 @@ async def commit_session_work(
             continue  # a directory (e.g. a submodule): not the session's file
         if mode != "0" and not sha:
             log.warning("auto-commit: could not hash %s; leaving work uncommitted", rel)
-            return None
+            return None, "git_failed"
         entries.append((mode, sha, rel))
     if not entries:
         log.warning("auto-commit: nothing stageable in the session's delta")
-        return None
+        return None, "nothing_to_commit"
     # Fail-closed secrets gate on the EXACT blobs the commit will record.
     from .governance import load_denylist, scan_blobs
 
@@ -556,7 +590,7 @@ async def commit_session_work(
     except PxxError as exc:
         # A scan that cannot run is NOT a clean scan — skip the commit.
         log.warning("auto-commit: governance scan could not run (%s); not committing", exc)
-        return None
+        return None, "scan_failed"
     if findings:
         detail = "; ".join(f"{f.rule} at {f.path}:{f.line} [{f.preview}]" for f in findings)
         log.warning(
@@ -565,7 +599,7 @@ async def commit_session_work(
             len(findings),
             detail,
         )
-        return None
+        return None, "secrets"
     preview = " ".join(task_preview.split())[:72] or "session work"
     message = f"pxx: {preview}" + (f" [net: {net_tag}]" if net_tag else "")
     # CI runners (and some sandboxes) have no git identity configured; use
@@ -585,37 +619,45 @@ async def commit_session_work(
         index = str(Path(tmp) / "index")
         base = ["read-tree", head] if head else ["read-tree", "--empty"]
         if await _git_io(cwd, *base, index_file=index) is None:
-            return None
+            return None, "git_failed"
         if (
             await _git_io(cwd, "update-index", "-z", "--index-info", stdin=info, index_file=index)
             is None
         ):
             log.warning("auto-commit: could not build the commit's index; leaving work uncommitted")
-            return None
+            return None, "git_failed"
         tree = await _git_io(cwd, "write-tree", index_file=index)
     if not tree:
-        return None
+        return None, "git_failed"
     if head and tree == await _git(cwd, "rev-parse", "--verify", f"{head}^{{tree}}"):
-        return None  # the session's paths already match HEAD: nothing to commit
+        return None, "nothing_to_commit"  # the session's paths already match HEAD
     parents = ["-p", head] if head else []
     commit = await _git_io(cwd, *identity, "commit-tree", tree, *parents, "-m", message)
     if not commit:
         log.warning("auto-commit: git commit-tree failed; leaving work uncommitted")
-        return None
+        return None, "git_failed"
     # Move HEAD only if it is still where we read it (no race, no surprise).
     update = ["update-ref", "-m", f"pxx: {preview}", "HEAD", commit] + ([head] if head else [])
     if await _git_io(cwd, *update) is None:
-        log.warning("auto-commit: HEAD moved under the commit; not updating it")
-        return None
+        # Name the cause only when HEAD is seen to have moved; a lock, timeout
+        # or OS error leaves HEAD where it was (2.9.3 review).
+        now = await _git(cwd, "rev-parse", "--verify", "-q", "HEAD")
+        if now is not None and now != head:
+            log.warning("auto-commit: HEAD moved under the commit; not updating it")
+            return None, "head_moved"
+        log.warning("auto-commit: git update-ref failed; leaving work uncommitted")
+        return None, "git_failed"
     # Bring the real index in line for exactly the committed paths, so they
     # read as clean; every other entry (the operator's staging) is untouched.
     await _git_io(cwd, "update-index", "-z", "--index-info", stdin=info)
-    return commit
+    return commit, ""
 
 
 __all__ = [
+    "COMMIT_SKIP_REASONS",
     "SafetyNet",
     "commit_session_work",
+    "commit_session_work_checked",
     "git_state_changed_since",
     "head_moved_since",
     "restore_blocker",

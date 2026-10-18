@@ -458,3 +458,36 @@ def test_cli_outcome_line_includes_session_id(tmp_path: Path, monkeypatch, capsy
     assert cli.main(["ask", "-m", "x"]) == 0
     out = capsys.readouterr().out
     assert "session=abc123" in out
+
+
+class _AiderNamedBackend(MockBackend):
+    """A backend that identifies as aider -- the one backend that ignores the
+    payload contract. Records whether it was ever run."""
+
+    name = "aider"
+
+    def __init__(self) -> None:
+        super().__init__([])
+        self.ran = False
+
+    async def run(self, task, ctx):  # pragma: no cover - must never run
+        self.ran = True
+        return await super().run(task, ctx)
+
+
+@pytest.mark.parametrize("pin", ["bare", "response_format"])
+def test_a_pinned_payload_on_the_aider_backend_is_refused(tmp_path: Path, pin) -> None:
+    """2.9.3: aider builds its own prompt and silently ignores bare mode and
+    structured output. An explicit aider backend is refused at session entry,
+    before it runs, for CLI, serve and library callers alike."""
+    from dataclasses import replace
+
+    settings = _session_settings(tmp_path, PermissionMode.ASK)
+    if pin == "response_format":
+        settings = replace(settings, response_format={"type": "object"})
+    else:
+        settings = replace(settings, bare=True)
+    backend = _AiderNamedBackend()
+    with pytest.raises(ConfigError, match="native backend"):
+        asyncio.run(Session(settings, backend, cwd=tmp_path).run("say hello"))
+    assert backend.ran is False

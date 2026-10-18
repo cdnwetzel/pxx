@@ -1098,3 +1098,32 @@ def test_config_reference_documents_every_key_and_env_var():
     env = [e for e in cfg._CONSUMED_ENV - cfg._ROLE_ENV_KEYS if f"`{e}`" not in doc]
     assert keys == [], f"undocumented config keys: {keys}"
     assert env == [], f"undocumented env vars: {env}"
+
+
+@pytest.mark.parametrize(
+    ("current", "legacy", "expect_url", "expect_model"),
+    [
+        ({"PXX_BASE_URL": "http://new:1", "PXX_MODEL": "new"}, {}, "http://new:1", "new"),
+        ({}, {"PXX_OLLAMA_BASE": "http://old:2", "PXX_OLLAMA_MODEL": "old"}, "http://old:2", "old"),
+        (
+            {"PXX_BASE_URL": "http://new:1", "PXX_MODEL": "new"},
+            {"PXX_OLLAMA_BASE": "http://old:2", "PXX_OLLAMA_MODEL": "old"},
+            "http://new:1",
+            "new",
+        ),
+    ],
+)
+def test_a_legacy_alias_never_overrides_its_current_name(
+    tmp_path, monkeypatch, caplog, current, legacy, expect_url, expect_model
+):
+    # 2.9.3: with both set, PXX_OLLAMA_* used to win, silently re-routing a
+    # caller (dx) that sets PXX_BASE_URL on every run.
+    for key in ("PXX_BASE_URL", "PXX_MODEL", "PXX_OLLAMA_BASE", "PXX_OLLAMA_MODEL"):
+        monkeypatch.delenv(key, raising=False)
+    for key, val in {**current, **legacy}.items():
+        monkeypatch.setenv(key, val)
+    with caplog.at_level(logging.WARNING, logger="pxx"):
+        s = load_settings(cwd=tmp_path)
+    assert (s.model.base_url, s.model.model) == (expect_url, expect_model)
+    if legacy:
+        assert "1.x alias" in caplog.text  # deprecated either way, and said so

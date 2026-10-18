@@ -367,7 +367,8 @@ Reviewer role overlay (see `[roles.review]`): `PXX_REVIEW_MODEL`,
 `PXX_REVIEW_PROVIDER`, `PXX_REVIEW_BASE_URL`, `PXX_REVIEW_API_KEY`. The other
 role lanes (see `[roles.<name>]`) use `PXX_<ROLE>_{MODEL,PROVIDER,BASE_URL,API_KEY}`
 — e.g. `PXX_EMBED_MODEL`, `PXX_PLAN_BASE_URL`, `PXX_VERIFY_MODEL`.
-Legacy: `PXX_OLLAMA_BASE`, `PXX_OLLAMA_MODEL`.
+Legacy: `PXX_OLLAMA_BASE`, `PXX_OLLAMA_MODEL`, the 1.x aliases of `PXX_BASE_URL` / `PXX_MODEL`. They
+apply only when the current name is unset, log a deprecation warning, and never override it.
 
 A `PXX_*` variable that is set but that pxx does not read (e.g. a typo such
 as `PXX_REVEIW_TIMEOUT`) logs a warning once per process; it never fails a

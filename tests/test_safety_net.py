@@ -714,3 +714,77 @@ def test_a_control_state_unreadable_at_tie_blocks_the_restore(tmp_path, monkeypa
     assert reason == "git_state_changed" and "could not be read" in detail
     assert run(restore_safety_net(repo, net)) is False
     assert (repo / "a.py").read_text() == "x = 2\n"
+
+
+@needs_git
+@pytest.mark.parametrize(
+    "reason", ["nothing_to_commit", "secrets", "filter_attribute", "git_state_changed"]
+)
+def test_a_skipped_commit_says_why(tmp_path: Path, reason: str) -> None:
+    # 2.9.3 (plan B2): every path that commits nothing returns a reason
+    # consumers can act on, instead of a bare None.
+    from pxx.safety_net import COMMIT_SKIP_REASONS, commit_session_work_checked
+    from pxx.worktree import git_control_state
+
+    repo = tmp_path / "repo"
+    _init_repo(repo, files={"ok.py": "x = 1\n"})
+    control = run(git_control_state(repo))
+    only = {"ok.py"}
+    if reason == "nothing_to_commit":
+        only = set()
+    elif reason == "secrets":
+        (repo / "ok.py").write_text(_SECRET)
+    elif reason == "filter_attribute":
+        _plant_filter(repo, "ok.py", clean="cat")
+        control = run(git_control_state(repo))  # pre-existing: control state unchanged
+        (repo / "ok.py").write_text("x = 2\n")
+    else:
+        (repo / "ok.py").write_text("x = 2\n")
+        _git(repo, "config", "pxx.test.marker", "changed")
+    sha, why = run(
+        commit_session_work_checked(
+            repo, task_preview="t", net_tag=None, only=only, control_start=control
+        )
+    )
+    assert sha is None and why == reason and why in COMMIT_SKIP_REASONS
+
+
+@needs_git
+@pytest.mark.parametrize("moved", [False, True])
+def test_a_failed_head_update_names_its_cause(tmp_path: Path, monkeypatch, moved: bool) -> None:
+    # 2.9.3 review: update-ref failing (lock, timeout) is git_failed; only a
+    # HEAD seen to move is head_moved.
+    import pxx.safety_net as sn
+
+    repo = tmp_path / "repo"
+    _init_repo(repo, files={"ok.py": "x = 1\n"})
+    (repo / "ok.py").write_text("x = 2\n")
+    real = sn._git_io
+
+    async def fake(cwd, *args, **kw):
+        if args and args[0] == "update-ref":
+            if not moved:
+                return None
+            _ident(
+                repo, "-c", "commit.gpgsign=false", "commit", "--allow-empty", "-q", "-m", "racer"
+            )
+        return await real(cwd, *args, **kw)
+
+    monkeypatch.setattr(sn, "_git_io", fake)
+    sha, why = run(
+        sn.commit_session_work_checked(repo, task_preview="t", net_tag=None, only={"ok.py"})
+    )
+    assert sha is None and why == ("head_moved" if moved else "git_failed")
+
+
+@needs_git
+def test_a_committed_change_reports_no_skip_reason(tmp_path: Path) -> None:
+    from pxx.safety_net import commit_session_work_checked
+
+    repo = tmp_path / "repo"
+    _init_repo(repo, files={"ok.py": "x = 1\n"})
+    (repo / "ok.py").write_text("x = 2\n")
+    sha, why = run(
+        commit_session_work_checked(repo, task_preview="t", net_tag=None, only={"ok.py"})
+    )
+    assert sha and why == ""

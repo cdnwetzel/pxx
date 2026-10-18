@@ -128,6 +128,14 @@ DESIGN.md "Threat model" section.
     budget-blown run skips the fence's cleanup;
   - add a regression test for unmerged index entries in `scan_staged`
     (already fail-closed).
+- **Reviewer verdicts via structured output; a fixed-answer-space classifier as a later A/B.** A local
+  reviewer sometimes returns output pxx cannot parse, so the review degrades to `NO_REVIEW`. Observed
+  2026-10-18 with gpt-oss on the home fleet. First, constrain the verdict with pxx's own `response_format`
+  (structured output, 2.7.0), which needs no new dependency. Only if that stays unreliable, A/B a
+  fixed-answer-space decision classifier such as OpenJev, which scores a declared label set instead of
+  generating free text. Compare on the same diffs and models, measuring the unparseable rate and the
+  agreement. Prerequisites: OpenJev is days old, with an unclear license and name. It would be an optional
+  extra, never core. Model verdicts stay advisory; deterministic gates stay authoritative.
 - **The safety-net log line echoes a secret preview** to the log (not to
   events or audit). Pre-existing.
 

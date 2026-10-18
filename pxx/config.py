@@ -813,9 +813,14 @@ _ENV_MAP = {
     "PXX_DONE_SIGNAL": "done_signal",
     "PXX_MEMORY_CAPTURE_SUCCESSES": "memory_capture_successes",
     "PXX_BACKEND": "backend",
-    # 1.x compat
-    "PXX_OLLAMA_BASE": "base_url",
-    "PXX_OLLAMA_MODEL": "model",
+}
+
+#: 1.x aliases, honoured only when their current name is unset: an alias must
+#: never override the variable that replaced it (2.9.3 -- with both set, the
+#: alias used to win, silently re-routing callers that set PXX_BASE_URL).
+_LEGACY_ENV_MAP = {
+    "PXX_OLLAMA_BASE": ("base_url", "PXX_BASE_URL"),
+    "PXX_OLLAMA_MODEL": ("model", "PXX_MODEL"),
 }
 
 # Per-role reviewer overlay via env (maps to the ``[roles.review]`` sub-keys).
@@ -831,6 +836,23 @@ _REVIEW_ENV_MAP = {
 
 def _settings_from_env(base: Settings) -> Settings:
     data: dict[str, Any] = {}
+    for legacy_key, (cfg_key, current_key) in _LEGACY_ENV_MAP.items():
+        legacy = os.environ.get(legacy_key)
+        if not legacy:
+            continue
+        current = os.environ.get(current_key)
+        if current:
+            if current != legacy:
+                log.warning(
+                    "%s is set and differs from %s; using %s (the 1.x alias is ignored "
+                    "when its current name is set)",
+                    legacy_key,
+                    current_key,
+                    current_key,
+                )
+            continue
+        log.warning("%s is a 1.x alias; set %s instead", legacy_key, current_key)
+        data[cfg_key] = legacy
     for env_key, cfg_key in _ENV_MAP.items():
         value = os.environ.get(env_key)
         if value:
@@ -1280,6 +1302,7 @@ _ROLE_ENV_KEYS = frozenset(
 )
 _CONSUMED_ENV = (
     frozenset(_ENV_MAP)
+    | frozenset(_LEGACY_ENV_MAP)
     | frozenset(_REVIEW_ENV_MAP)
     | _ROLE_ENV_KEYS
     | {

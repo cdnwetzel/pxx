@@ -94,9 +94,9 @@ struck through with their release when they ship. Review bar for these: the
 DESIGN.md "Threat model" section.
 
 - **Prompt / gate read-scope drift.** The native and aider prompts describe
-  the read scope differently from what the gates enforce. Every model reads
-  that prompt on every run, so this changes the default payload (pinned by
-  `tests/test_bare.py`) and needs a measured before/after on the 8 GB, home
+  the read scope differently from what the gates enforce. Every non-bare run
+  sends that prompt (bare mode sends only the task), so this changes the
+  default payload (pinned by `tests/test_bare.py`) and needs a measured before/after on the 8 GB, home
   and work setups before it ships. Highest impact on this list.
 - **Failed session/loop runs and the files they created** *(decision
   needed)*. On abort, the safety net resets tracked files, but files the run

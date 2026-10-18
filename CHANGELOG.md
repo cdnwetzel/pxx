@@ -5,6 +5,33 @@ preserved in git (tag `v1.3.3` and earlier).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Bare mode and structured output never land on aider.** The auto lane picked aider for `ask` whenever a
+  healthy aider was installed, and aider silently ignores `bare` and `response_format`. A contract-pinned
+  caller (`bare = true`, `fallback_models = []`) got aider's full scaffolding instead of its pinned payload,
+  and no `prompt_rendered` receipt. The auto lane now prefers native for a pinned payload, as it already
+  does for a fallback chain. Session refuses an explicit aider backend with a pinned payload, raising
+  `ConfigError` before it runs.
+- **`--commit` that commits nothing says why.** Every skip used to be only a log line, so callers that asked
+  for a commit saw a generic "no candidate" or "no change". A skip now adds a `[not committed: <reason>]`
+  summary tag and a metadata-only `observation` (`source: "auto_commit_skipped"`, `reason`). The reasons are
+  `nothing_to_commit`, `unmeasurable`, `git_state_changed`, `filter_attribute`, `secrets`, `scan_failed`,
+  `head_moved` and `git_failed` (`safety_net.COMMIT_SKIP_REASONS`; `commit_session_work_checked` returns
+  them).
+- **`PXX_OLLAMA_BASE` / `PXX_OLLAMA_MODEL` never override `PXX_BASE_URL` / `PXX_MODEL`.** With both set, the
+  1.x alias won, silently re-routing callers that set the current name. The aliases now apply only when the
+  current name is unset, and log a deprecation warning.
+
+### Changed
+
+- **`pxx loop` prints the same outcome trailer as run/edit/ask**: `(rounds= tokens= diff_lines= session=)`.
+  A loop's `session=` is the loop record's own id, the hex suffix of its `<ts>-loop-<hex>` run directory.
+
+Downstream: the new summary tags, observation, trailer and loop `session_id` are additive. A caller that
+pairs `bare`/`response_format` with an explicit aider backend now gets `ConfigError` instead of a silently
+ignored payload. Each new surface is pinned in `tests/test_consumer_contract.py`.
+
 ### Tests
 
 - **Downstream consumer contract** (`tests/test_consumer_contract.py`). It pins, in one place, the surfaces

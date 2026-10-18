@@ -96,8 +96,10 @@ pxx/
 ### Downstream consumer contract
 Other tools read pxx's outputs by name. `tests/test_consumer_contract.py` pins each surface, and each
 test names the consumer code that depends on it:
-- the run/edit/ask outcome trailer `(rounds= tokens= diff_lines= session=)`, which must stay last on the line;
-- the `[net: …]` / `[committed …]` summary tags;
+- the run/edit/ask/loop outcome trailer `(rounds= tokens= diff_lines= session=)`, which must stay last on the
+  line (for `loop`, `session=` is the loop record's id);
+- the `[net: …]` / `[committed …]` / `[not committed: <reason>]` summary tags, and the
+  `auto_commit_skipped` observation;
 - the native backend's `prompt_rendered` audit fields;
 - the audit chain's file layout and hashing;
 - every `gate_decision` carrying a boolean `allowed`, except `transport_retry` / `fallback`;
@@ -490,7 +492,11 @@ class ToolRegistry:  # register(tool), specs() -> [openai tool schema],
   `Session.run` entry covers CLI, serve, and library callers; the tools +
   response_format interaction is deliberately unsupported, and the 1.x
   shim's warn-and-ignore is overridden by a hard usage error in `main()`
-  for any non-ask verb. Loud failure, never fallback: finish_reason=length
+  for any non-ask verb. Bare mode and structured output are honoured only
+  by the native backend (aider builds its own prompt). The CLI's auto lane
+  therefore prefers native for either one, and `Session.run` refuses an
+  explicit aider backend with `ConfigError` before it runs (2.9.3).
+  Loud failure, never fallback: finish_reason=length
   or a non-JSON reply body is a BackendError. Audit stays body-free:
   `prompt_rendered` and `model_request` carry `response_format_present`,
   `response_format_sha256` (canonical JSON: sorted keys, tight separators),

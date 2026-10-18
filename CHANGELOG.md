@@ -5,6 +5,8 @@ preserved in git (tag `v1.3.3` and earlier).
 
 ## [Unreleased]
 
+## [2.9.2] — 2026-10-18
+
 ### Fixed
 
 - **`PXX_SANDBOX_SHELL` is parsed strictly, as documented.** docs/CONFIG.md

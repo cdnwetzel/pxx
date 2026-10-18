@@ -5,7 +5,222 @@ preserved in git (tag `v1.3.3` and earlier).
 
 ## [Unreleased]
 
-_Nothing yet._
+## [2.9.1] — 2026-10-17
+
+### Security
+
+- **Git state the run can change no longer steers pxx's own git.** Filter,
+  textconv and diff drivers (`.git/config`), `.git/info/attributes`,
+  excludes and `git replace` refs change what git reports -- a smudge filter
+  made a "restore" check out other bytes than the start tree, a replace ref
+  hid an out-of-scope tracked edit from the scope fence and the loop, and a
+  clean filter ran on the bytes pxx was about to commit -- and none of them
+  shows in `git status`. Now:
+  - a `.git` directory (any case) is never a `write_file` / `edit_file` /
+    `delete_file` target, whatever the scope;
+  - every git command pxx runs on its own behalf (measurement, review diff,
+    scan, commit, restore -- never the model's shell) ignores replace refs and
+    runs no fsmonitor and no hooks, and every reviewed or replayed diff is
+    git's own patch text (`--no-ext-diff --no-textconv`);
+  - the repository's git control state -- the configuration as git resolves
+    it (every scope and `include.path` target), the attributes, excludes,
+    sparse-checkout, grafts and shallow files (including the global
+    attributes/excludes files) and the replace refs -- is fingerprinted when
+    the run starts (`SafetyNet.control_state`); if it changed, the loop's round is
+    `REVIEW_UNAVAILABLE`, the aider fence ends `EDIT_FAILED` without
+    measuring or reverting, the goal's artifact review rejects, `--commit`
+    commits nothing, and the safety net is not restored (`gate_decision`
+    `safety_net`, `reason: "git_state_changed"`) -- the tag and stash stay;
+  - a restore whose stash cannot pop (e.g. the failed run created a file at
+    a stashed path) is reported as such (`restored: false`,
+    `reason: "stash_not_restored"`, summary names the stash) instead of a
+    bare `restored: true`;
+  - `--commit` commits nothing when any path in the session's delta has a
+    git `filter` attribute (e.g. LFS), rather than run its clean command --
+    the work stays in the tree; commit it by hand;
+  - a restore resets to the start commit's SHA, not the tag name, so a
+    re-tag between the check and the reset cannot redirect it.
+  - in-tree `.gitattributes` files (tracked, untracked or gitignored, any
+    letter case) are
+    part of that control state: a run
+    that writes `* -diff` (review diff becomes a binary stub, zero diff
+    budget) is blocked like any other change.
+
+  The boundary is written down in DESIGN.md ("Threat model"): the model
+  acting through pxx's gated tools and aider's detected edits. A model with
+  ungated shell, the operator's own environment and git configuration, and
+  operator-chosen repository layouts are documented as out of scope.
+- **aider's scope fence removes out-of-scope droppings with any name.** It
+  parsed `git status` without `-z`, so a created file with a quotable name
+  (`evil"file.txt`) was never removed, silently; it now lists NUL-exact and
+  reports any dropping it could not remove (`undropped_untracked`).
+- **The goal path rejects edits git cannot show, and rolls a rejected merge
+  back.** An `assume-unchanged` edit of a protected file on the root index
+  left `git diff` empty and the goal `COMPLETED`; the artifact review now
+  compares index-flag states too. A merge the artifact review rejects is
+  rolled back to the pre-goal tree through the safety net -- including the
+  files the merge created, which `reset --hard` alone leaves behind (and
+  which would block the stash from popping) -- while a merge conflict or a
+  test regression keeps its merged state, as before.
+- **The secrets gate scans what is actually committed.** `scan_staged` (used
+  by `--commit` and `pxx check`) listed staged names without `-z`, so git
+  C-quoted any non-ASCII or unusual name (`café.txt`, a quote, a newline, a
+  lone space), the quoted name could not be opened, the file was skipped —
+  and its secret was committed. It also read the working tree, so a clean
+  filter could commit bytes the scan never saw. It now lists names with
+  `-z` (never stripped) and scans each staged **index blob**; a blob it
+  cannot read fails the scan closed (no commit).
+- **pxx's commit records exactly the bytes it scanned.** `--commit` used to
+  `git add` each path, scan the index, then `git commit -- <paths>` — which
+  re-read the working tree after the scan: an `assume-unchanged` file's add
+  did nothing (the scan saw the old blob, the commit took the secret), a
+  clean filter could run differently the second time, and a `git replace`
+  could show the scan different bytes. Now each session path is read once and
+  hashed once (`git hash-object -w --stdin --path=…`: eol/ident conversions
+  apply; a delta with any `filter`-attributed path, e.g. LFS, is not
+  auto-committed at all — see the Security entry above), those blob SHAs are scanned (by SHA, replace refs ignored)
+  and the commit is built from them in a temporary index with `commit-tree`,
+  then `update-ref` (old HEAD checked). The operator's index is updated only
+  for the committed paths. `scan_staged` (`pxx check`) likewise reads staged
+  blobs by SHA from `diff-index --cached -z` — a filename is never parsed as
+  a revision, so a file named `0:notes.txt` is scanned as itself, not as
+  stage 0 of `notes.txt`. All of these git calls ignore replace refs and run
+  no `core.fsmonitor` hook.
+- **pxx's own commit runs no repository hooks.** A hook written during the
+  run (`.git/hooks` is invisible to every scope check) could add paths or
+  bytes after the secrets scan; `--commit` now commits with `--no-verify` and
+  `core.hooksPath=/dev/null` — pxx's gate is the check for that commit (it is
+  now built with `commit-tree`, which runs no hooks at all).
+  Behaviour change: repository pre-commit/commit-msg hooks no longer run on
+  pxx's auto-commits.
+- **The safety net and aider's scope fence are not fooled by `git replace`,
+  and edits hidden behind index flags are seen.** The fence's revert runs only
+  when HEAD's tree is still the start tree and is reported only once the tree
+  is verified afterwards. Every safety-net and aider-backend git command runs
+  with `--no-replace-objects` and no repository hooks (a `reference-transaction`
+  hook fires even on `update-ref`), and a restore also requires the start commit's tree
+  to be unchanged. Tracked files flagged `assume-unchanged` or
+  `skip-worktree` — which git reports as clean — are fingerprinted at the
+  run's start and compared at the end, so an edit or a deletion behind the
+  flag reaches the scope fence, the loop's re-check, the done-signal and
+  over-work salvage checks, and the session's delta — where it counts against
+  the diff budget at the file's full line count, since git cannot show what
+  changed (a sparse-checkout file absent throughout is not a change); because `git
+  diff` cannot show such an edit, the loop treats it as incomplete evidence
+  and blocks the round (`REVIEW_UNAVAILABLE`) rather than reviewing around
+  it. Names are never stripped, so a file named
+  with only whitespace is not dropped.
+- **The goal path's boundary review now sees every file the artifact
+  touches.** Node patches merge with `git apply`, which leaves created files
+  untracked, and the Artifact-Reviewer read `git diff HEAD`, which never shows
+  them — so a node that *created* a file at a protected path (e.g. under
+  `.github/`) finished `COMPLETED` instead of `OUT_OF_SCOPE`. Its header-only
+  scan also missed empty, binary and oddly named files. The reviewer now gets
+  the exact paths (`git diff --name-only -z` plus files created since the goal
+  started), and fails closed: if the paths cannot be listed, the artifact is
+  rejected. `ArtifactReviewer.review_artifact` gains an optional `paths`
+  argument. Found reviewing 2.9.1. With exact paths the reviewer no longer
+  parses the diff text at all, so a file body that *looks* like a diff
+  header can no longer copy its content into the issue text (and so into
+  events); a node that creates `.github` as a directory symlink is rejected;
+  and the created-file baseline is taken after the safety net's stash, so a
+  node re-creating a stashed path is still reviewed.
+- **The safety net never resets over history the run did not own.** On a
+  failed run it ran `git reset --hard <pxx-pre tag>` unconditionally — so if
+  the run had committed, or switched branches (a model can run `git
+  checkout`), the reset orphaned those commits or moved the other branch. It
+  now restores only when HEAD and the checked-out branch are where they were
+  when the net was tied; otherwise it leaves the tree, tag and stash, emits
+  `gate_decision` (`gate: "safety_net", allowed: false, restored: false,
+  reason: "head_moved", tag`) and says so in the summary — so `pxx verify`
+  lists `gate_denied:safety_net` among the run's risks. It also refuses when
+  the `pxx-pre` tag no longer points at the run's start (a run that can run
+  git can move it), and it pops the net's own stash by commit SHA, never a
+  newer stash that reuses the message. `SafetyNet` gains optional
+  `head_sha` / `head_ref` / `stash_sha` / `head_tree` fields
+  (`head_moved_since()` is public). The aider backend also treats a branch
+  switch at the same commit as a moved HEAD.
+- **aider's scope fence blocks a run with ANY out-of-scope edit,** not only
+  one whose edits are all out of scope — an extra in-scope edit used to carry
+  an out-of-scope file through, and `--commit` committed it. The loop's
+  re-check already used "any".
+- **pxx's commit is path-limited.** With `--commit`, pxx commits exactly
+  the session's delta (a staged rename's source included); anything the
+  operator had already staged stays staged and is no longer swept into
+  pxx's (secrets-gated) commit. Paths are taken literally (NUL-separated
+  index entries, never pathspecs): a file named `*.py` is that file, not
+  every `.py`.
+- **Unmeasurable runs fail closed.** If the files a loop round created cannot
+  be listed, the round ends `REVIEW_UNAVAILABLE` (`gate_decision` gate
+  `diff_complete`) before review on the main path and in the stale-review
+  refresh; budget-overrun salvage and the done-signal never approve such a
+  diff (the run keeps its own terminal code). An aider run whose baseline cannot be snapshotted is not
+  started, and one whose result cannot be measured ends `EDIT_FAILED` instead
+  of a clean zero-change success; a failed `git diff --numstat` makes the
+  snapshot unavailable rather than empty; a HEAD that cannot be read after the
+  run is "could not verify HEAD", not "unmoved". The loop's scope re-check
+  ends `REVIEW_UNAVAILABLE` when the round's changed paths cannot be listed,
+  and the recorded `diff.patch` carries the incomplete marker instead of
+  looking complete. A created file whose patch cannot be read, or a tracked
+  `git diff` that fails, counts as incomplete too. A cancelled aider task (the
+  session's wall-clock timeout) kills and reaps the aider process instead of
+  orphaning it, and records a moved HEAD/branch as an `observation`
+  (`source: "aider_head_moved"`). New-file patches for symlinks are the link
+  text (mode 120000) — also for links to directories, which `git diff
+  --no-index` cannot produce — with names C-quoted as git writes them and
+  multi-line link texts kept whole, so the recorded patch applies.
+
+### Fixed
+
+- **`--commit` is opt-in under the aider backend too, and goes through pxx's
+  commit gate.** aider committed its own edits, so with a healthy aider
+  installed every successful `pxx edit` was committed whether or not
+  `--commit` was passed — and with `--commit`, aider's commits bypassed the
+  session's commit path: its fail-closed secrets scan, the `[net:]` trailer
+  and the commit telemetry. In a repo aider now runs with
+  `--no-auto-commits --no-dirty-commits`; the run's changes are measured from
+  the working tree (`worktree_delta`, as the session and loop do: tracked
+  edits plus created files, pre-existing dirt excluded), and pxx alone
+  commits. The run's work is never reset (the K2b scope fence still reverts a
+  run with any out-of-scope edit, and now reports a failed revert as failed), so the operator's index and pre-existing changes are untouched.
+  If HEAD moves anyway (an aider that ignores the flags), every exit says so
+  — `EDIT_FAILED` naming the commits and the undo (`git reset --soft
+  <pre-run HEAD>`), or the `INTERRUPTED` summary — and pxx rewrites nothing. Found
+  by an independent docs review of 2.9.0; the design follows the 2.9.1
+  reviews (Codex as SDET, agy as tech lead).
+- **`pxx loop`'s review and diff budget include files the run created.**
+  `git diff <pre-loop sha>` never shows an untracked file, so a file a round
+  created was missing from the reviewer's diff and from the diff budget — for
+  the native backend always, and for aider once it stopped committing. Files
+  untracked before the loop started are not counted. If git cannot list them,
+  the round is blocked — see "Unmeasurable runs fail closed" above.
+- **`worktree_delta` sees paths that disappear.** A dirty file the run
+  restored to HEAD, or a pre-existing untracked file it deleted, was missing
+  from the delta (and from the session's mutation report). The delta now
+  compares the baseline and final path sets.
+- **`worktree_snapshot` lists paths exactly.** Its `git diff HEAD --numstat`
+  ran without `-z --no-renames`, so a staged rename came back as one
+  synthetic `a => b` path and unusual names quoted — unusable for the scope
+  check, fingerprints and staging. `new_file_patch` also refuses paths that
+  resolve outside the repository, and directories.
+- **Goals can merge binary files.** Node patches were built without
+  `--binary`, so any goal touching a binary file ended `MERGE_CONFLICT`.
+
+### Changed
+
+- **`edit_file` says what to fix when an `old_string` misses, if it can be
+  certain.** CRLF vs LF line endings; blank lines at the snippet's edges that
+  the file does not have there; or, when the snippet matches exactly one
+  place with whitespace ignored, the first line whose indentation or trailing
+  whitespace differs (e.g. "your old_string indents line 8 with 4 spaces, the
+  file with no indentation"). Matching is unchanged — still exact, never
+  applied on a near-match; ambiguous or genuinely different snippets get no
+  hint; the diagnosis is bounded on huge inputs and on adversarial ones (each
+  line normalized once, at most 2,000 candidate windows); a line-ending difference that
+  is not the only one falls through to the indentation check; whitespace-only
+  edge lines count as edge lines. Line numbers and whitespace
+  facts only, never file content. Observed 2026-10-17: a 4B model sent the
+  same over-indented `old_string` five times against the generic message.
 
 ## [2.9.0] — 2026-10-17
 

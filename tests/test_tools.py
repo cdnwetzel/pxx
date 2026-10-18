@@ -202,6 +202,79 @@ def test_edit_file_zero_and_multiple_matches(reg: ToolRegistry, tmp_path: Path) 
     assert (tmp_path / "m.txt").read_text() == "dup\ndup\n"  # unchanged
 
 
+def test_edit_file_names_an_indentation_mismatch(reg: ToolRegistry, tmp_path: Path) -> None:
+    # 2026-10-17: a 4B model sent this old_string (four extra leading spaces)
+    # five times against a generic "not found". The edit must still fail --
+    # exact match only -- but say what to fix.
+    src = "def c2f(c):\n    return c\n\n\ndef f2c(f):\n    raise NotImplementedError\n"
+    (tmp_path / "converter.py").write_text(src)
+    ctx = make_ctx(tmp_path)
+    old = "    def f2c(f):\n        raise NotImplementedError"
+    out = call(
+        reg, "edit_file", {"path": "converter.py", "old_string": old, "new_string": "x"}, ctx
+    )
+    assert "not found" in out
+    assert "matches line 5 if indentation is ignored" in out
+    assert "4 spaces, the file with no indentation" in out
+    assert (tmp_path / "converter.py").read_text() == src  # nothing applied
+
+
+def test_mismatch_hint_only_when_certain() -> None:
+    from pxx.tools.fs import mismatch_hint
+
+    text = "a:\n    x = 1\nb:\n    x = 1\n"
+    assert mismatch_hint(text, "x = 1") == ""  # two places: ambiguous, no hint
+    assert mismatch_hint(text, "y = 2") == ""  # genuinely different text
+    assert mismatch_hint(text, "\n\n") == ""  # whitespace-only snippet
+    tab = mismatch_hint("def f():\n    return 1\n", "\treturn 1")
+    assert "indents line 2 with 1 tab, the file with 4 spaces" in tab
+    # first line agrees; the hint names the line that actually differs
+    later = mismatch_hint("def f():\n    return 1\n", "def f():\nreturn 1")
+    assert "matches line 1" in later
+    assert "indents line 2 with no indentation, the file with 4 spaces" in later
+
+
+def test_mismatch_hint_names_line_endings_edges_and_trailing_space() -> None:
+    from pxx.tools.fs import mismatch_hint
+
+    # CRLF vs LF (Codex review): diagnosed as line endings, not indentation
+    crlf = mismatch_hint("a = 1\nb = 2\n", "a = 1\r\nb = 2")
+    assert "text being matched uses LF line endings and your old_string uses CRLF" in crlf
+    lf = mismatch_hint("a = 1\r\nb = 2\r\n", "a = 1\nb = 2")
+    assert "text being matched uses CRLF line endings and your old_string uses LF" in lf
+    # an edge newline the file does not have there (Codex: "x\n" vs "\nx")
+    edge = mismatch_hint("x\ny\n", "\nx")
+    assert "blank lines at its start/end" in edge and "indent" not in edge
+    # same indentation, trailing whitespace differs on line 2
+    trail = mismatch_hint("a = 1\nb = 2\n", "a = 1\nb = 2   ")
+    assert "trailing whitespace differs on line 2" in trail
+    # agy review (2.9.1 r2): CRLF *and* an indentation difference fell silent
+    both = mismatch_hint("def f():\n    return 1\n", "def f():\r\nreturn 1")
+    assert "indents line 2 with no indentation, the file with 4 spaces" in both
+    # whitespace-only edge lines count as edge lines
+    ws_edge = mismatch_hint("x = 1\ny = 2\n", "  \nx = 1\n")
+    assert "blank lines at its start/end" in ws_edge
+    # exotic indentation is described, never an empty phrase
+    nbsp = mismatch_hint("def f():\n    return 1\n", "\u00a0return 1")
+    assert "1 other whitespace char" in nbsp
+
+
+def test_mismatch_hint_bounds_its_work() -> None:
+    from pxx.tools import fs
+
+    big = "x = 1\n" * (fs._HINT_MAX_FILE_CHARS // 6 + 10)
+    assert fs.mismatch_hint(big, "  x = 1") == ""  # past the size bound: no diagnosis
+    long_snippet = "\n".join(["  y = 1"] * (fs._HINT_MAX_SNIPPET_LINES + 5))
+    assert fs.mismatch_hint("y = 1\n" * 3, long_snippet) == ""
+
+
+def test_mismatch_hint_carries_no_file_content() -> None:
+    from pxx.tools.fs import mismatch_hint
+
+    hint = mismatch_hint("SECRET_TOKEN = 'abc'\n", "  SECRET_TOKEN = 'abc'")
+    assert hint and "SECRET" not in hint and "abc" not in hint
+
+
 # --------------------------------------------------------------- list_files
 
 
@@ -568,3 +641,17 @@ def test_recall_awaits_async_store(reg: ToolRegistry, tmp_path: Path) -> None:
     call(reg, "remember", {"content": "seeded via tool"}, make_ctx(tmp_path, memory=mem))
     out = call(reg, "recall_memory", {"query": "seeded", "k": 5}, make_ctx(tmp_path, memory=mem))
     assert "- [note] seeded via tool" in out
+
+
+def test_mismatch_hint_is_fast_at_its_own_bounds() -> None:
+    # Kimi review (2.9.1 r9, P1): a file of identical lines at the size cap
+    # with a max-size snippet took ~27 s -- synchronously, per edit_file miss.
+    import time
+
+    from pxx.tools.fs import mismatch_hint
+
+    text = "a\n" * 1_000_000  # 2,000,000 chars: exactly the file cap
+    old = "a\n" * 400 + "b"  # 401 lines: exactly the snippet cap, never matches
+    start = time.monotonic()
+    assert mismatch_hint(text, old) == ""
+    assert time.monotonic() - start < 3.0

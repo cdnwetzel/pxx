@@ -30,7 +30,7 @@ from .backends.base import AgentBackend
 from .config import Settings
 from .errors import BackendUnavailable, ConfigError, ScopeViolation
 from .events import EventBus
-from .gitenv import communicate_bounded, git_env
+from .gitenv import INTERNAL_GIT, communicate_bounded, git_env
 from .loop import run_loop
 from .outcome import RunOutcome, TerminalCode
 from .safety import canonicalize
@@ -205,7 +205,7 @@ async def _git(cwd: Path, *args: str, stdin_text: str | None = None) -> tuple[in
     """Run a git command; return (returncode, combined output). Bounded by
     git_timeout() — a wedged git or a blocking hook is a git failure, not a hang."""
     proc = await asyncio.create_subprocess_exec(
-        "git",
+        *INTERNAL_GIT,
         "-C",
         str(cwd),
         *args,
@@ -238,7 +238,19 @@ async def _merge_node(root: Path, worktree: Path, node_id: str, base_sha: str) -
     rc, out = await _git(worktree, "add", "-A")
     if rc != 0:
         return False, f"git add failed in {node_id}: {out[:200]}"
-    rc, patch = await _git(worktree, "diff", "--cached", "--no-renames", base_sha)
+    # --binary: without it a binary file becomes a "Binary files differ"
+    # stub that `git apply` rejects, so any goal touching a binary file
+    # ended MERGE_CONFLICT (2.9.1 review).
+    rc, patch = await _git(
+        worktree,
+        "diff",
+        "--cached",
+        "--no-renames",
+        "--no-ext-diff",
+        "--no-textconv",
+        "--binary",
+        base_sha,
+    )
     if rc != 0:
         return False, f"git diff failed in {node_id}: {patch[:200]}"
     if not patch.strip():
@@ -317,6 +329,27 @@ async def run_goal(
                     "stash": net.stash_message or "",
                 },
             )
+    # Baseline for "files the nodes created", taken AFTER the net's stash
+    # (which removes pre-existing untracked files): taken before it, a stashed
+    # path a node re-creates -- e.g. a protected workflow file -- was skipped
+    # by the boundary review (2.9.1 review). A failed listing becomes an
+    # empty baseline: over-counting is visible, hiding is not.
+    untracked_start: dict[str, str | None] = {}
+    untracked_raw: dict[str, str | None] | None = None  # None: listing failed
+    flagged_start: dict[str, str] = {}
+    control_start: dict[str, str] = {}
+    if isolated:
+        from .worktree import flagged_state, git_control_state, untracked_fingerprints
+
+        untracked_raw = await untracked_fingerprints(root)
+        untracked_start = untracked_raw or {}
+        # Same moment, same fail-closed rule: index-flag states (git shows no
+        # diff for a flagged edit) and the git control state (filter/diff
+        # drivers, attributes, replace refs -- nodes share the root's git
+        # directory) -- 2.9.1 review.
+        flagged_start = await flagged_state(root) or {}
+        control_start = await git_control_state(root) or {}
+
     net_suffix = ""
     if net is not None:
         net_suffix = f" [net: {net.tag or 'no-tag'}{'+stash' if net.stash_message else ''}]"
@@ -406,24 +439,68 @@ async def run_goal(
     # integration boundary (typed handoff artifact; protected-path content
     # rejects as OUT_OF_SCOPE).
     artifact_rejection = ""
+    created_by_merge: list[str] = []  # files absent from the post-stash baseline
     if isolated and not failed_codes and not merge_conflict:
         from .roles import DeterministicArtifactReviewer
 
-        _rc, merged_diff = await _git(root, "diff", "--no-renames", "HEAD")
-        artifact = await DeterministicArtifactReviewer().review_artifact(
-            merged_diff, f"goal-{len(tasks)}-nodes"
+        _rc, merged_diff = await _git(
+            root, "diff", "--no-renames", "--no-ext-diff", "--no-textconv", "HEAD"
         )
+        # `git apply` leaves files the nodes CREATED untracked, and
+        # `git diff HEAD` never shows them -- a new file at a protected path
+        # slipped past this review. Created files are part of the artifact,
+        # and the reviewer gets the EXACT paths (NUL-separated, so binary,
+        # empty and oddly named files are covered), not only diff headers.
+        # Fail closed: if the touched paths cannot be listed, the artifact is
+        # not approved.
+        from .safety_net import git_state_changed_since
+        from .worktree import flagged_changed, flagged_state, new_file_patch, new_files_since
+
+        names_rc, names = await _git(root, "diff", "--no-renames", "--name-only", "-z", "HEAD")
+        created = await new_files_since(root, untracked_start)
+        # Removed on rollback ONLY against a baseline that was really read
+        # (2.9.1 review): an empty stand-in would delete the operator's files.
+        created_by_merge = (
+            [p for p in created or [] if p not in untracked_raw]
+            if untracked_raw is not None
+            else []
+        )
+        flagged_now = await flagged_state(root)
+        git_changed = await git_state_changed_since(root, control_start)
+        if names_rc != 0 or created is None or flagged_now is None:
+            artifact_rejection = "could not list the merged artifact's paths (git failed)"
+        elif git_changed:
+            artifact_rejection = f"{git_changed}; the artifact cannot be reviewed"
+        elif hidden := flagged_changed(flagged_start, flagged_now):
+            # git shows no diff for an edit behind assume-unchanged /
+            # skip-worktree, so the reviewer cannot vet it (2.9.1 review).
+            artifact_rejection = (
+                f"{len(hidden)} edit(s) behind git index flags cannot be reviewed: "
+                + ", ".join(hidden[:5])
+            )
+        else:
+            touched = [p for p in names.split("\0") if p] + created
+            for rel in created:
+                patch = await new_file_patch(root, rel)
+                merged_diff = (
+                    merged_diff.rstrip("\n")
+                    + "\n"
+                    + (patch or f"# new file {rel}: content unavailable\n")
+                )
+            artifact = await DeterministicArtifactReviewer().review_artifact(
+                merged_diff, f"goal-{len(tasks)}-nodes", paths=touched
+            )
+            if not artifact.payload["ok"]:
+                artifact_rejection = "; ".join(artifact.payload["issues"])
         await _emit(
             bus,
             "goal_node",
             {
                 "task": "artifact-review",
-                "status": "ok" if artifact.payload["ok"] else "rejected",
-                "issues": len(artifact.payload["issues"]),
+                "status": "rejected" if artifact_rejection else "ok",
+                "issues": artifact_rejection.count("; ") + 1 if artifact_rejection else 0,
             },
         )
-        if not artifact.payload["ok"]:
-            artifact_rejection = "; ".join(artifact.payload["issues"])
 
     # Integration: full test command over the combined tree, only when every
     # node completed and a command is configured.
@@ -452,13 +529,28 @@ async def run_goal(
     else:
         code = TerminalCode.COMPLETED
 
+    # A merge the artifact review REJECTED must not stay applied (2.9.1
+    # review): the root goes back to the pre-run tree, unless restoring is
+    # unsafe (settle_failed_run says why). A merge conflict, a node failure
+    # or a test regression keeps its merged state for the operator to
+    # resolve, as before -- the net tag and stash are the way back.
+    restore_suffix = ""
+    if net is not None and artifact_rejection:
+        from .safety_net import settle_failed_run
+
+        async def _emit_net(data: dict) -> None:
+            if bus is not None:  # a gate decision, like the net's tie above
+                await bus.emit("gate_decision", data)
+
+        restore_suffix = await settle_failed_run(root, net, _emit_net, created=created_by_merge)
+
     parts = [f"{len(completed)}/{len(tasks)} tasks completed"]
     if failed:
         parts.append("failed: " + ", ".join(f"{tid} ({c})" for tid, c in failed.items()))
     if skipped:
         parts.append("skipped: " + ", ".join(skipped))
     parts.append(f"integration {integration}")
-    summary = "; ".join(parts) + net_suffix
+    summary = "; ".join(parts) + net_suffix + restore_suffix
     await _emit(
         bus,
         "goal_end",

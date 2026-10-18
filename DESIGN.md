@@ -44,7 +44,22 @@ pxx/
   audit_sampling.py    # deterministic human audit sampling (14.5)
   router.py            # Endpoint probing, ModelRegistry, fallback chains
   session.py           # Session: wires config+backend+memory+safety+events
+  gitenv.py            # GIT_* env scrub, git timeout; INTERNAL_GIT argv prefix for every
+                       # git command pxx runs on its own behalf (no replace refs, no
+                       # fsmonitor, no hooks) -- never for the model's shell
+  safety_net.py        # stash+tag at start; restore on a failed run (to the start SHA) only
+                       # if HEAD/branch/tag/tree AND the git control state are unchanged
+                       # (SafetyNet: tag, stash_message, head_sha, head_ref, stash_sha,
+                       # head_tree, control_state; refusal -> gate_decision safety_net
+                       # restored:false reason:head_moved|git_state_changed;
+                       # a reset whose stash cannot pop: stash_not_restored);
+                       # commit_session_work commits exactly the scanned blobs (temp
+                       # index + commit-tree, no hooks, no filter-attributed paths)
   loop.py              # bounded autonomous loop (edit -> test -> review)
+  worktree.py          # shared "what did this run change": snapshot/delta, created files,
+                       # index-flag states, git control state (effective config incl.
+                       # includes, attributes/excludes incl. global files,
+                       # sparse/grafts/shallow, replace refs)
   review.py            # review gate: Finding, Verdict, backends, policy
   memory/
     __init__.py        # re-exports MemoryStore, capture, inject
@@ -238,6 +253,23 @@ DIFF_CAP≡DIFF_BUDGET_EXCEEDED, ROUND_CAP≡ROUND_CAP_EXCEEDED,
 BUDGET_EXCEEDED≡TIME_BUDGET_EXCEEDED; INTERRUPTED/CLARIFICATION_REQUIRED/
 HOOK_DENIED are repo additions.
 
+### Threat model (what the git-based gates defend)
+The adversary is the model acting through what pxx lets it touch: the gated
+tools (`write_file`, `edit_file`, `delete_file`, and `run_shell` only behind
+a covering hook, a sandbox, `allow_ungated_shell`, or the default
+`refuse_tool`) and aider's edits, which are detected after the fact through
+git. Against that adversary the gates fail closed: `.git` is never writable,
+the git control state (effective config, attributes incl. in-tree
+`.gitattributes`, excludes, replace refs) is fingerprinted and any change
+blocks review, commit and restore, and pxx's own git runs without replace
+refs, fsmonitor, hooks, external diff or textconv. Out of scope, documented
+rather than defended: a model with UNGATED shell (it can do far worse than
+poison git); the operator's own environment and configuration
+(`GIT_CONFIG_*`, `GIT_EXTERNAL_DIFF`, pre-existing drivers or includes);
+operator-chosen repository layouts (a separate git dir or a `.git` symlink
+inside the work tree); and operator commands (`pxx review`, `improve`,
+`eval`) on a repository the operator already trusts.
+
 ### safety.py
 ```python
 class PermissionMode(StrEnum):
@@ -249,6 +281,8 @@ class PermissionMode(StrEnum):
 class ScopeGate:
     def __init__(self, root: Path, scope: tuple[str, ...], trusted: tuple[str, ...])
     def check(self, path: str | Path) -> Path   # -> canonical Path or raises ScopeViolation
+    def check_write(self, path, permission) -> Path  # + a `.git` directory (any case) is
+                                                     #   never writable, whatever the scope
     def is_write_allowed(self, path) -> bool    # permission-aware
 class HookRunner:
     # hooks fire PreToolUse / PostToolUse; JSON on stdin, exit 0 = allow,
@@ -326,7 +360,11 @@ class ToolRegistry:  # register(tool), specs() -> [openai tool schema],
                      # async call(name, args_json) -> str
 ```
 - `fs.py`: read_file (offset/limit), write_file (permission>=EDIT, in-scope),
-  edit_file (exact old/new string replace, unique match), delete_file (a
+  edit_file (exact old/new string replace, unique match; a miss says what
+  to fix only when certain — CRLF vs LF, edge blank lines, or the first line
+  whose indentation/trailing whitespace differs in a unique
+  whitespace-insensitive match; line numbers and whitespace facts only,
+  never applied, bounded work), delete_file (a
   STAGED move of one in-scope regular file to
   `<delete_staging>/<project dir>/<relative path>`, never an unlink; action
   class DELETE, HIGH tier, allowed in EDIT; disabled with an error for the
@@ -472,8 +510,29 @@ class AgentBackend(Protocol):
 - `aider.py`: runs `aider --message <task> --yes-always --no-stream
   [--no-git]` as an async subprocess; maps permission ASK->`--chat-mode ask`,
   EDIT->`--chat-mode diff`-ish defaults; passes scope context via a temp
-  `--read` file; captures file changes via pre/post `git rev-parse HEAD`
-  diff; streams stdout lines as `model_response` events. Import/launch
+  `--read` file; streams stdout lines as `model_response` events. In a repo aider runs
+  with `--no-auto-commits --no-dirty-commits`: pxx owns committing on every
+  backend, so `--commit` goes through the session's commit path (secrets scan,
+  `[net:]` trailer, telemetry) and without it the edits stay uncommitted. What
+  the run changed comes from `worktree_snapshot`/`worktree_delta` (the
+  Session's and loop's helpers): tracked edits plus created files,
+  pre-existing dirt excluded. If HEAD moves anyway (an aider that ignores the
+  flags) the run says so on every exit — `EDIT_FAILED` with an undo hint,
+  in an `INTERRUPTED` summary, or as an `observation` (`source:
+  "aider_head_moved"`) when the task itself is cancelled; pxx never rewrites
+  history. The one reset
+  is the K2b scope fence: when ANY edit is out of scope, `reset --hard` to
+  the (unchanged) pre-run HEAD, never over pre-existing dirt, and a failed
+  reset is reported as failed, never as a revert. If the run changed the
+  repository's git control state (filter/diff drivers, attributes, excludes,
+  replace refs -- none of which `git status` shows), git's report of the tree
+  is not trusted: `EDIT_FAILED`, nothing measured or reverted.
+  Limit (unchanged by 2.9.1): aider edits outside pxx's tool gates, so its
+  scope enforcement is detection after the fact through git. A file git
+  ignores and nobody adds is invisible to that detection; a force-added one
+  (`git add -f`) is staged and caught. Run aider only with a scope you would
+  also enforce in review, or use the native backend, whose tools are gated.
+  Import/launch
   guarded: `shutil.which("aider")` or importable `aider`; else
   `BackendUnavailable` with install hint. aider is an **optional** extra.
 - `mock.py`: `MockBackend(script: list[Step])` — scripted tool calls /
@@ -504,7 +563,17 @@ records it identically in `task.json` and the `session_start` event;
   (default 3): native/aider backend edit round -> run `test_command` ->
   review gate -> heal with reviewer findings. Same guards as 1.x: round cap,
   diff budget, monotonic failing-set progress (NO_PROGRESS), scope re-check
-  after each round (aider commits can bypass hooks), lint gate.
+  after each round (aider edits bypass pxx's tool gates), lint gate. The
+  review and the diff budget see files the round created (baseline taken
+  after the safety-net stash); if they cannot be listed, the round ends
+  `REVIEW_UNAVAILABLE` with `gate_decision` `diff_complete` before any review,
+  salvage or done-signal can approve it. The scope re-check likewise ends
+  `REVIEW_UNAVAILABLE` (`gate_decision` `scope_recheck`, `allowed: false`)
+  when the round's changed paths cannot be listed. A diff is also incomplete
+  when it cannot show the round's work: an edit behind an `assume-unchanged`
+  / `skip-worktree` flag, or a change to the git control state. Every diff
+  the loop reviews or replays is git's own patch text (`--no-ext-diff
+  --no-textconv`).
 - `review.py`: `Finding(id, severity, file, line, message)`,
   `Verdict(StrEnum): APPROVE|REVISE|NO_REVIEW`; fail-closed: unknown output
   -> REVISE, no evidence -> NO_REVIEW; `mode` blocking|advisory (advisory

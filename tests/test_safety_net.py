@@ -99,7 +99,8 @@ def test_commit_blocked_when_staged_delta_contains_secret(tmp_path: Path) -> Non
 @needs_git
 def test_commit_blocked_when_scan_indeterminable(tmp_path: Path, monkeypatch) -> None:
     """A scan that cannot run is NOT a clean scan (governance doctrine):
-    PxxError from scan_staged also skips the commit and keeps the work."""
+    PxxError from the scan (scan_blobs, since the commit scans the exact
+    blobs it records) also skips the commit and keeps the work."""
     import pxx.governance
     from pxx.errors import PxxError
 
@@ -108,10 +109,10 @@ def test_commit_blocked_when_scan_indeterminable(tmp_path: Path, monkeypatch) ->
     before = _git(repo, "rev-parse", "HEAD")
     (repo / "a.py").write_text("x = 2\n")
 
-    def boom(*, cwd, denylist):
+    def boom(cwd, blobs, *, denylist):
         raise PxxError("governance: cannot scan staged files: simulated index lock")
 
-    monkeypatch.setattr(pxx.governance, "scan_staged", boom)
+    monkeypatch.setattr(pxx.governance, "scan_blobs", boom)
     assert run(commit_session_work(repo, task_preview="x", net_tag=None)) is None
     assert _git(repo, "rev-parse", "HEAD") == before  # no commit happened
     assert (repo / "a.py").read_text() == "x = 2\n"  # work remains
@@ -378,3 +379,338 @@ def test_commit_falls_back_to_pxx_identity_when_unconfigured(tmp_path: Path, mon
     assert sha
     assert _git(repo, "log", "-1", "--format=%an") == "pxx[bot]"
     assert _git(repo, "log", "-1", "--format=%ae") == "pxx[bot]@localhost"
+
+
+def _ident(repo: Path, *args: str) -> str:
+    return _git(repo, "-c", "user.name=t", "-c", "user.email=t@e.c", *args)
+
+
+@needs_git
+def test_restore_refuses_when_the_net_tag_was_retargeted(tmp_path: Path) -> None:
+    """Grok review (2.9.1 r4, P0): the guard checked HEAD and the branch but
+    not the reset TARGET -- a run that `git tag -f`s pxx-pre onto a planted
+    commit and then fails had the branch reset onto it."""
+    from pxx.safety_net import head_moved_since, restore_safety_net, tie_safety_net
+
+    repo = tmp_path / "repo"
+    _init_repo(repo, files={"a.py": "x = 1\n"})
+    tip = _git(repo, "rev-parse", "HEAD")
+    net = run(tie_safety_net(repo, "run-tag"))
+    assert net is not None and net.tag
+    tree = _git(repo, "rev-parse", "HEAD^{tree}")
+    planted = _ident(repo, "commit-tree", tree, "-m", "planted")
+    _git(repo, "tag", "-f", net.tag, planted)
+    assert "no longer points" in run(head_moved_since(repo, net))
+    assert run(restore_safety_net(repo, net)) is False
+    assert _git(repo, "rev-parse", "HEAD") == tip  # the branch never moved
+
+
+@needs_git
+def test_restore_pops_the_nets_own_stash_not_a_newer_same_named_one(tmp_path: Path) -> None:
+    """Grok review (2.9.1 r4): the stash was chosen by message, so a newer
+    stash reusing the net's message was popped instead of the user's WIP."""
+    from pxx.safety_net import restore_safety_net, tie_safety_net
+
+    repo = tmp_path / "repo"
+    _init_repo(repo, files={"a.py": "x = 1\n"})
+    (repo / "wip.txt").write_text("user wip\n")
+    net = run(tie_safety_net(repo, "run-stash"))
+    assert net is not None and net.stash_message and net.stash_sha
+    (repo / "planted.txt").write_text("planted\n")
+    _ident(repo, "stash", "push", "-u", "-q", "-m", net.stash_message)
+    assert run(restore_safety_net(repo, net)) is True
+    assert (repo / "wip.txt").read_text() == "user wip\n"  # the user's WIP is back
+    assert not (repo / "planted.txt").exists()
+    remaining = _git(repo, "stash", "list")
+    assert remaining.count("\n") == 0 and net.stash_message in remaining  # the planted one stays
+
+
+@needs_git
+def test_restore_is_not_fooled_by_git_replace(tmp_path: Path) -> None:
+    """Grok review (2.9.1 r5, P0): `git replace <start> <planted>` left every
+    SHA the guard compared unchanged, and `reset --hard` followed the replace
+    ref -- the "restore" checked out the attacker's tree."""
+    from pxx.safety_net import restore_safety_net, tie_safety_net
+
+    repo = tmp_path / "repo"
+    _init_repo(repo, files={"ok.py": "safe = True\n"})
+    start = _git(repo, "rev-parse", "HEAD")
+    net = run(tie_safety_net(repo, "run-replace"))
+    assert net is not None and net.head_tree
+    (repo / "ok.py").write_text("safe = False\n")
+    (repo / "evil.txt").write_text("planted\n")
+    _git(repo, "add", "-A")
+    _ident(repo, "commit", "-q", "-m", "planted")
+    planted = _git(repo, "rev-parse", "HEAD")
+    _git(repo, "reset", "-q", "--hard", start)
+    _git(repo, "replace", start, planted)
+    run(restore_safety_net(repo, net))  # whatever it decides, it must not plant
+    assert (repo / "ok.py").read_text() == "safe = True\n"
+    assert not (repo / "evil.txt").exists()
+
+
+@needs_git
+def test_pxx_commit_ignores_a_hook_written_during_the_run(tmp_path: Path) -> None:
+    """Grok review (2.9.1 r5): a pre-commit hook (invisible to every scope
+    check) staged a protected file into pxx's path-limited commit."""
+    repo = tmp_path / "repo"
+    _init_repo(repo, files={"ok.py": "x = 1\n", "pxx/safety.py": "SAFE = True\n"})
+    hook = repo / ".git" / "hooks" / "pre-commit"
+    hook.write_text("#!/bin/sh\necho 'SAFE = False' > pxx/safety.py\ngit add pxx/safety.py\n")
+    hook.chmod(0o755)
+    (repo / "ok.py").write_text("x = 2\n")
+    sha = run(commit_session_work(repo, task_preview="t", net_tag=None, only={"ok.py"}))
+    assert sha
+    assert _git(repo, "show", "--name-only", "--format=", "HEAD").split() == ["ok.py"]
+    assert (repo / "pxx" / "safety.py").read_text() == "SAFE = True\n"  # the hook never ran
+
+
+# Assembled so no source line matches the CI governance gate; same bytes.
+_SECRET = "api_key = '" + "sk-" + "live-" + "0123456789abcdef" * 2 + "'\n"
+
+
+def _no_secret_committed(repo: Path) -> bool:
+    names = _git(repo, "ls-tree", "-r", "--name-only", "HEAD").splitlines()
+    return all("sk-live" not in _git(repo, "show", f"HEAD:{n}") for n in names if n)
+
+
+@needs_git
+def test_commit_never_ships_a_secret_behind_assume_unchanged(tmp_path: Path) -> None:
+    """Grok review (2.9.1 r6, P0): `git add` of an assume-unchanged file did
+    nothing, the scan saw the old index blob, `git commit -- path` committed
+    the worktree secret."""
+    repo = tmp_path / "repo"
+    _init_repo(repo, files={"ok.py": "x = 1\n"})
+    _git(repo, "update-index", "--assume-unchanged", "ok.py")
+    (repo / "ok.py").write_text(_SECRET)
+    assert run(commit_session_work(repo, task_preview="t", net_tag=None, only={"ok.py"})) is None
+    assert _no_secret_committed(repo)
+
+
+@needs_git
+def test_commit_records_exactly_the_bytes_it_scanned(tmp_path: Path) -> None:
+    """Grok review (2.9.1 r6, P0): a clean filter that redacts on its FIRST
+    run only -- the scan saw the redacted blob, the commit's second filter run
+    stored the secret. The worktree is now hashed once and that blob is both
+    scanned and committed."""
+    repo = tmp_path / "repo"
+    _init_repo(repo, files={"ok.py": "x = 1\n"})
+    counter = tmp_path / "runs"
+    script = tmp_path / "filter.sh"
+    script.write_text(
+        f"#!/bin/sh\nn=$(cat {counter} 2>/dev/null || echo 0); echo $((n+1)) > {counter}\n"
+        'if [ "$n" = 0 ]; then cat >/dev/null; echo "x = 1"; else cat; fi\n'
+    )
+    script.chmod(0o755)
+    _git(repo, "config", "filter.twophase.clean", str(script))
+    (repo / ".gitattributes").write_text("*.py filter=twophase\n")
+    _git(repo, "add", ".gitattributes")
+    _ident(repo, "commit", "-q", "-m", "attrs")
+    (repo / "ok.py").write_text(_SECRET)
+    run(commit_session_work(repo, task_preview="t", net_tag=None, only={"ok.py"}))
+    assert _no_secret_committed(repo)
+
+
+@needs_git
+def test_a_name_that_looks_like_an_index_stage_is_scanned_as_itself(tmp_path: Path) -> None:
+    """Grok review (2.9.1 r6, P0): `cat-file blob :0:notes.txt` read stage 0
+    of notes.txt, so a secret in a file named `0:notes.txt` was scanned as the
+    clean decoy and committed."""
+    repo = tmp_path / "repo"
+    _init_repo(repo, files={"notes.txt": "clean\n"})
+    (repo / "0:notes.txt").write_text(_SECRET)
+    assert (
+        run(commit_session_work(repo, task_preview="t", net_tag=None, only={"0:notes.txt"})) is None
+    )
+    assert _no_secret_committed(repo)
+
+
+@needs_git
+def test_scan_staged_ignores_git_replace(tmp_path: Path) -> None:
+    """Grok review (2.9.1 r6, P0): with the staged secret blob replaced by a
+    clean one, the scanner (following replace refs) saw clean bytes."""
+    from pxx.governance import scan_staged
+
+    repo = tmp_path / "repo"
+    _init_repo(repo, files={"ok.py": "x = 1\n"})
+    (repo / "ok.py").write_text(_SECRET)
+    _git(repo, "add", "ok.py")
+    secret_blob = _git(repo, "rev-parse", ":ok.py")
+    clean_blob = _git(repo, "rev-parse", "HEAD:ok.py")
+    _git(repo, "replace", secret_blob, clean_blob)
+    assert scan_staged(cwd=repo), "the replace ref hid the staged secret"
+
+
+@needs_git
+def test_pxx_commit_runs_no_reference_transaction_hook(tmp_path: Path) -> None:
+    """Codex review (2.9.1 r7, P0): `update-ref` fires reference-transaction,
+    so moving from `git commit` to commit-tree still ran a planted hook."""
+    repo = tmp_path / "repo"
+    _init_repo(repo, files={"ok.py": "x = 1\n", "pxx/safety.py": "SAFE = True\n"})
+    marker = tmp_path / "hook-ran"
+    hook = repo / ".git" / "hooks" / "reference-transaction"
+    hook.write_text(f"#!/bin/sh\ntouch {marker}\necho 'SAFE = False' > pxx/safety.py\n")
+    hook.chmod(0o755)
+    (repo / "ok.py").write_text("x = 2\n")
+    sha = run(commit_session_work(repo, task_preview="t", net_tag=None, only={"ok.py"}))
+    assert sha
+    assert not marker.exists()  # the hook never ran
+    assert (repo / "pxx" / "safety.py").read_text() == "SAFE = True\n"
+
+
+def _plant_filter(repo: Path, attr_path: str, clean: str, smudge: str = "cat") -> None:
+    """A filter driver + attribute, both invisible to `git status`."""
+    _git(repo, "config", "filter.evil.clean", clean)
+    _git(repo, "config", "filter.evil.smudge", smudge)
+    (repo / ".git" / "info").mkdir(exist_ok=True)
+    (repo / ".git" / "info" / "attributes").write_text(f"{attr_path} filter=evil\n")
+
+
+@needs_git
+def test_restore_refuses_after_the_run_planted_a_smudge_filter(tmp_path: Path) -> None:
+    # Grok review (2.9.1 r7, P0): `reset --hard` under a smudge filter planted
+    # during the run checked out other bytes than the tree holds, and the
+    # restore reported success with `git status` clean.
+    from pxx.safety_net import restore_blocker, restore_safety_net
+
+    repo = tmp_path / "repo"
+    _init_repo(repo, files={"guard.py": "SAFE = True\n"})
+    net = run(tie_safety_net(repo, "run-smudge"))
+    _plant_filter(repo, "guard.py", clean="cat", smudge="sed s/True/False/")
+    (repo / "guard.py").write_text("SAFE = 1\n")  # the failed run's edit
+    reason, detail = run(restore_blocker(repo, net))
+    assert reason == "git_state_changed" and "info/attributes" in detail
+    assert run(restore_safety_net(repo, net)) is False
+    assert (repo / "guard.py").read_text() == "SAFE = 1\n"  # nothing smudged in
+
+
+@needs_git
+def test_commit_never_runs_a_clean_filter(tmp_path: Path) -> None:
+    # Grok review (2.9.1 r7, P0): `hash-object --path=<rel>` ran a clean
+    # filter on the bytes before the scan; the filter rewrote a protected
+    # file and hid it behind assume-unchanged. Even a filter that predates
+    # the run (the control state is unchanged) must not run for pxx's commit.
+    from pxx.worktree import git_control_state
+
+    repo = tmp_path / "repo"
+    _init_repo(repo, files={"ok.py": "x = 1\n", "guard.py": "SAFE = True\n"})
+    marker = tmp_path / "filter-ran"
+    _plant_filter(repo, "ok.py", clean=f"sh -c 'touch {marker}; cat'")
+    control = run(git_control_state(repo))
+    (repo / "ok.py").write_text("x = 2\n")
+    head = _git(repo, "rev-parse", "HEAD")
+    sha = run(
+        commit_session_work(
+            repo, task_preview="t", net_tag=None, only={"ok.py"}, control_start=control
+        )
+    )
+    assert sha is None
+    assert _git(repo, "rev-parse", "HEAD") == head
+    assert not marker.exists()  # the clean command never ran
+
+
+@needs_git
+def test_commit_refuses_after_the_git_configuration_changed(tmp_path: Path) -> None:
+    from pxx.worktree import git_control_state
+
+    repo = tmp_path / "repo"
+    _init_repo(repo, files={"ok.py": "x = 1\n"})
+    control = run(git_control_state(repo))
+    _git(repo, "config", "core.attributesFile", str(tmp_path / "elsewhere"))
+    (repo / "ok.py").write_text("x = 2\n")
+    sha = run(
+        commit_session_work(
+            repo, task_preview="t", net_tag=None, only={"ok.py"}, control_start=control
+        )
+    )
+    assert sha is None
+
+
+@needs_git
+def test_restore_resets_to_the_checked_sha_not_the_tag_name(tmp_path: Path, monkeypatch) -> None:
+    # Grok review (2.9.1 r7, P2): the tag was checked, then the reset named
+    # the tag -- a re-tag between the two was not covered.
+    import pxx.safety_net as sn
+
+    repo = tmp_path / "repo"
+    _init_repo(repo, files={"a.py": "x = 1\n"})
+    net = run(tie_safety_net(repo, "run-sha"))
+    (repo / "a.py").write_text("x = 2\n")
+    seen: list[tuple[str, ...]] = []
+    real = sn._git
+
+    async def spy(cwd, *args):
+        seen.append(args)
+        return await real(cwd, *args)
+
+    monkeypatch.setattr(sn, "_git", spy)
+    assert run(sn.restore_safety_net(repo, net)) is True
+    resets = [a for a in seen if a[:2] == ("reset", "--hard")]
+    assert resets == [("reset", "--hard", net.head_sha)]
+    assert (repo / "a.py").read_text() == "x = 1\n"
+
+
+@needs_git
+def test_a_stash_that_cannot_pop_is_never_reported_restored(tmp_path: Path) -> None:
+    # Kimi review (2.9.1 r9, P1): the failed run created a file at a path the
+    # net had stashed, so the pop failed -- behind `restored: true`, with the
+    # operator's work still in the stash.
+    from pxx.safety_net import settle_failed_run
+
+    repo = tmp_path / "repo"
+    _init_repo(repo, files={"a.py": "x = 1\n"})
+    for key, val in (("user.name", "t"), ("user.email", "t@e.c")):
+        _git(repo, "config", key, val)
+    (repo / "wip.txt").write_text("operator work\n")
+    net = run(tie_safety_net(repo, "run-pop"))
+    assert net.stash_message and not (repo / "wip.txt").exists()
+    (repo / "wip.txt").write_text("the run's file\n")  # collides with the stash
+    events: list[dict] = []
+
+    async def emit(data: dict) -> None:
+        events.append(data)
+
+    suffix = run(settle_failed_run(repo, net, emit))
+    assert "partly restored" in suffix and "still stashed" in suffix
+    assert [e.get("restored") for e in events] == [False]
+    assert events[0]["reason"] == "stash_not_restored"
+    assert _git(repo, "stash", "list")  # the operator's work is still there
+
+
+@needs_git
+def test_commit_keeps_the_recorded_mode_when_filemode_is_off(tmp_path: Path) -> None:
+    # CodeRabbit (2.9.1, PR #98): with core.fileMode=false (WSL /mnt/c, FAT)
+    # files report 0o777, and every committed file became 100755.
+    import os as _os
+
+    repo = tmp_path / "repo"
+    _init_repo(repo, files={"a.py": "x = 1\n"})
+    _git(repo, "config", "core.fileMode", "false")
+    (repo / "a.py").write_text("x = 2\n")
+    _os.chmod(repo / "a.py", 0o777)
+    sha = run(commit_session_work(repo, task_preview="t", net_tag=None, only={"a.py"}))
+    assert sha
+    assert _git(repo, "ls-tree", "HEAD", "a.py").split()[0] == "100644"
+
+
+@needs_git
+def test_a_control_state_unreadable_at_tie_blocks_the_restore(tmp_path, monkeypatch) -> None:
+    # CodeRabbit (2.9.1, PR #98, Major): an unreadable state at tie time was
+    # stored as None ("unknown"), so restore never checked it -- fail open.
+    import pxx.worktree as wt
+    from pxx.safety_net import restore_blocker, restore_safety_net
+
+    repo = tmp_path / "repo"
+    _init_repo(repo, files={"a.py": "x = 1\n"})
+
+    async def unreadable(cwd):
+        return None
+
+    monkeypatch.setattr(wt, "git_control_state", unreadable)
+    net = run(tie_safety_net(repo, "run-unreadable"))
+    monkeypatch.undo()
+    (repo / "a.py").write_text("x = 2\n")
+    reason, detail = run(restore_blocker(repo, net))
+    assert reason == "git_state_changed" and "could not be read" in detail
+    assert run(restore_safety_net(repo, net)) is False
+    assert (repo / "a.py").read_text() == "x = 2\n"

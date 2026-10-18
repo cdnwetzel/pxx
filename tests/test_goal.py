@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -677,6 +678,191 @@ def test_artifact_reviewer_rejects_protected_merge(tmp_path: Path) -> None:
 
 
 @needs_git
+@pytest.mark.parametrize(
+    ("rel", "content"),
+    [
+        (".github/workflows/sneaky.yml", "on: push\n"),  # plain text
+        (".github/workflows/empty.yml", ""),  # empty: no +++ header
+        (".github/workflows/blob.bin", "\x00\x01\x02binary\x00"),  # binary: no +++ header
+        (".github/workflows/with space.yml", "on: push\n"),  # quoted/escaped by git
+        (".github/workflows/wörk.yml", "on: push\n"),  # non-ASCII: quoted by git
+    ],
+)
+def test_artifact_reviewer_rejects_a_newly_created_protected_file(
+    tmp_path: Path, rel: str, content: str
+) -> None:
+    """A node that CREATES a file at a protected path: `git apply` leaves it
+    untracked, so `git diff HEAD` alone never showed it to the boundary
+    review, and header parsing missed binary/empty/quoted names (2.9.1
+    reviews). The reviewer now gets the exact paths."""
+    repo = tmp_path / "repo"
+    _init_repo(repo, files={"app.py": "x = 1\n"})
+    dag = _dag(_task("a"))
+    factory = Factory([ScriptedBackend(edits={rel: content})])
+    outcome = asyncio.run(
+        run_goal(
+            "goal",
+            _settings(tmp_path),
+            cwd=repo,
+            planner=_planner(dag),
+            backend_factory=factory,
+        )
+    )
+    assert outcome.code is TerminalCode.OUT_OF_SCOPE
+    assert "artifact review" in outcome.summary
+    # Codex review (2.9.1 r8, P1): the rollback's `reset --hard` left the
+    # rejected merge's CREATED file behind; it is removed, with its now-empty
+    # directories, and the user's own file is untouched.
+    assert not (repo / rel).exists()
+    assert not (repo / ".github").exists()
+    assert (repo / "app.py").read_text() == "x = 1\n"
+
+
+@needs_git
+def test_a_recreated_stashed_protected_file_is_still_reviewed(tmp_path: Path) -> None:
+    """agy review (2.9.1 r2): the baseline was taken BEFORE the net stashed a
+    pre-existing untracked file, so a node re-creating that path was skipped
+    by the boundary review. Different bytes, so the case holds whether or not
+    the stash succeeds on this machine."""
+    repo = tmp_path / "repo"
+    _init_repo(repo, files={"app.py": "x = 1\n"})
+    workflow = repo / ".github" / "workflows" / "sneaky.yml"
+    workflow.parent.mkdir(parents=True)
+    workflow.write_text("# the operator's draft\n")
+    dag = _dag(_task("a"))
+    factory = Factory([ScriptedBackend(edits={".github/workflows/sneaky.yml": "on: push\n"})])
+    outcome = asyncio.run(
+        run_goal(
+            "goal",
+            _settings(tmp_path),
+            cwd=repo,
+            planner=_planner(dag),
+            backend_factory=factory,
+        )
+    )
+    assert outcome.code is TerminalCode.OUT_OF_SCOPE
+    assert "artifact review" in outcome.summary
+
+
+@needs_git
+def test_a_node_created_github_directory_symlink_is_rejected(tmp_path: Path) -> None:
+    """Grok review (2.9.1 r2): a node that creates `.github` as a DIRECTORY
+    SYMLINK (pointing at an in-repo decoy) produced an empty patch, so the
+    header scan never saw it. git lists the link as the path `.github`."""
+    repo = tmp_path / "repo"
+    _init_repo(repo, files={"app.py": "x = 1\n"})
+
+    class Linker(ScriptedBackend):
+        async def run(self, task, ctx):
+            root = Path(ctx.cwd)
+            (root / "decoy" / "workflows").mkdir(parents=True)
+            (root / "decoy" / "workflows" / "pwn.yml").write_text("on: push\n")
+            (root / ".github").symlink_to("decoy", target_is_directory=True)
+            return RunOutcome(code=TerminalCode.COMPLETED, summary="ok", tokens=1)
+
+    outcome = asyncio.run(
+        run_goal(
+            "goal",
+            _settings(tmp_path),
+            cwd=repo,
+            planner=_planner(_dag(_task("a"))),
+            backend_factory=Factory([Linker()]),
+        )
+    )
+    assert outcome.code is TerminalCode.OUT_OF_SCOPE
+    assert "touches protected path: .github" in outcome.summary
+
+
+def test_artifact_review_issues_never_carry_file_content() -> None:
+    """Grok review (2.9.1 r2): with exact paths supplied, hunk bodies are not
+    parsed -- a created file whose body looks like a diff header must not
+    copy its content into the issue text (events are metadata-only)."""
+    from pxx.roles import DeterministicArtifactReviewer
+
+    planted = "TOK" + "EN=" + "supersecretvalue"  # assembled: no literal for the CI gate
+    diff = f"diff --git a/x.txt b/x.txt\n+++ b/x.txt\n+++ b/../{planted}\n"
+    art = asyncio.run(DeterministicArtifactReviewer().review_artifact(diff, "a", paths=["x.txt"]))
+    assert art.payload["ok"] is True
+    assert "supersecret" not in repr(art.payload)
+
+
+@needs_git
+def test_a_recreated_stashed_protected_file_with_identical_bytes_is_reviewed(
+    tmp_path: Path,
+) -> None:
+    """Codex review (2.9.1 r5): with DIFFERENT bytes the fingerprint alone
+    caught the re-created file, hiding a wrong baseline order. Identical bytes
+    isolate the order: only a baseline taken after the stash sees it."""
+    import subprocess
+
+    repo = tmp_path / "repo"
+    _init_repo(repo, files={"app.py": "x = 1\n"})
+    for key, val in (("user.name", "t"), ("user.email", "t@e.c")):  # so the stash runs
+        subprocess.run(["git", "config", key, val], cwd=repo, check=True)
+    workflow = repo / ".github" / "workflows" / "sneaky.yml"
+    workflow.parent.mkdir(parents=True)
+    workflow.write_text("on: push\n")
+    factory = Factory([ScriptedBackend(edits={".github/workflows/sneaky.yml": "on: push\n"})])
+    outcome = asyncio.run(
+        run_goal(
+            "goal",
+            _settings(tmp_path),
+            cwd=repo,
+            planner=_planner(_dag(_task("a"))),
+            backend_factory=factory,
+        )
+    )
+    assert "+stash" in outcome.summary  # the net really stashed the file
+    assert outcome.code is TerminalCode.OUT_OF_SCOPE
+    assert "artifact review" in outcome.summary
+    # The rollback brought the user's stashed original back (the node's
+    # re-created copy, which would block the pop, was removed first) and
+    # consumed the net's stash.
+    assert workflow.read_text() == "on: push\n"
+    listed = subprocess.run(
+        ["git", "stash", "list"], cwd=repo, check=True, capture_output=True, text=True
+    )
+    assert listed.stdout == ""
+
+
+@needs_git
+def test_artifact_review_fails_closed_when_paths_cannot_be_listed(tmp_path, monkeypatch):
+    """If the touched paths cannot be listed, the artifact is not approved."""
+    import pxx.worktree as wt
+
+    repo = tmp_path / "repo"
+    _init_repo(repo, files={"app.py": "x = 1\n"})
+    dag = _dag(_task("a"))
+    factory = Factory([ScriptedBackend(edits={"app.py": "x = 2\n"})])
+    real = wt.untracked_paths
+    calls = {"root": 0}
+    root_real = os.path.realpath(repo)
+
+    async def flaky(cwd):
+        # Only the ROOT repo's listing fails after its baseline; node
+        # worktrees list normally, so this exercises the goal boundary's own
+        # fail-closed branch (a node's loop fails closed on its own too).
+        if str(cwd) == str(repo) or str(cwd) == root_real:
+            calls["root"] += 1
+            if calls["root"] > 1:
+                return None
+        return await real(cwd)
+
+    monkeypatch.setattr(wt, "untracked_paths", flaky)
+    outcome = asyncio.run(
+        run_goal(
+            "goal",
+            _settings(tmp_path),
+            cwd=repo,
+            planner=_planner(dag),
+            backend_factory=factory,
+        )
+    )
+    assert outcome.code is TerminalCode.OUT_OF_SCOPE
+    assert "could not list" in outcome.summary
+
+
+@needs_git
 def test_goal_ties_one_net_at_start(tmp_path: Path) -> None:
     """K12: one net per goal run (merge-back mutates the root repo) — never
     per node."""
@@ -815,3 +1001,119 @@ def test_committed_worktree_still_merges_back(tmp_path: Path) -> None:
     )
     assert outcome.code is TerminalCode.COMPLETED
     assert (repo / "alpha.py").read_text() == "A = 1\n"
+
+
+def test_artifact_reviewer_explicit_empty_paths_means_none_touched() -> None:
+    # agy review (2.9.1 r4): paths=[] fell back to parsing diff headers.
+    from pxx.roles import DeterministicArtifactReviewer
+
+    diff = "+++ b/.github/workflows/x.yml\n"
+    art = asyncio.run(DeterministicArtifactReviewer().review_artifact(diff, "a", paths=[]))
+    assert art.payload["ok"] is True  # supplied-and-empty: the diff text is not consulted
+    legacy = asyncio.run(DeterministicArtifactReviewer().review_artifact(diff, "a"))
+    assert legacy.payload["ok"] is False  # no paths supplied: header scan still applies
+
+
+class _TouchesRoot(ScriptedBackend):
+    """A node that reaches past its worktree into the root repository."""
+
+    def __init__(self, root: Path, how: str) -> None:
+        super().__init__(edits={"note.txt": "n\n"})
+        self.root = root
+        self.how = how
+
+    async def run(self, task: str, ctx: object) -> RunOutcome:
+        await asyncio.to_thread(self._reach, Path(ctx.cwd))  # type: ignore[attr-defined]
+        return await super().run(task, ctx)
+
+    def _reach(self, worktree: Path) -> None:
+        if self.how == "flag":
+            subprocess.run(
+                [GIT, "update-index", "--assume-unchanged", "pxx/safety.py"],
+                cwd=self.root,
+                check=True,
+            )
+            (self.root / "pxx" / "safety.py").write_text("SAFE = False\n")
+        else:  # the node's worktree shares the root's git config
+            subprocess.run([GIT, "config", "diff.hide.textconv", "true"], cwd=worktree, check=True)
+
+
+@needs_git
+@pytest.mark.parametrize("how", ["flag", "config"])
+def test_artifact_review_rejects_what_git_cannot_show(tmp_path: Path, how: str) -> None:
+    # Grok review (2.9.1 r7, P0): an assume-unchanged edit of a protected file
+    # on the root index left `git diff` empty, and the goal COMPLETED.
+    repo = tmp_path / "repo"
+    _init_repo(repo, files={"pxx/safety.py": "SAFE = True\n"})
+    outcome = asyncio.run(
+        run_goal(
+            "goal",
+            _settings(tmp_path),
+            cwd=repo,
+            planner=_planner(_dag(_task("a"))),
+            backend_factory=Factory([_TouchesRoot(repo, how)]),
+        )
+    )
+    if how == "flag":
+        assert outcome.code is TerminalCode.OUT_OF_SCOPE
+        assert "index flags" in outcome.summary
+    else:  # the node's own loop already refuses its round
+        assert outcome.code is TerminalCode.REVIEW_UNAVAILABLE
+
+
+@needs_git
+def test_a_rejected_merge_is_rolled_back(tmp_path: Path) -> None:
+    # Grok review (2.9.1 r7, P2): an artifact rejection left the merged
+    # protected edit applied in the root tree.
+    repo = tmp_path / "repo"
+    _init_repo(repo, files={"pxx/safety.py": "SAFE = True\n"})
+    bus = EventBus()
+    outcome = asyncio.run(
+        run_goal(
+            "goal",
+            _settings(tmp_path),
+            cwd=repo,
+            planner=_planner(_dag(_task("a"))),
+            backend_factory=Factory([ScriptedBackend(edits={"pxx/safety.py": "SAFE = False\n"})]),
+            bus=bus,
+        )
+    )
+    assert outcome.code is TerminalCode.OUT_OF_SCOPE
+    assert (repo / "pxx" / "safety.py").read_text() == "SAFE = True\n"
+    restored = [
+        e.data for e in bus.history if e.kind == "gate_decision" and e.data.get("restored") is True
+    ]
+    assert restored and restored[0]["gate"] == "safety_net"
+
+
+@needs_git
+def test_the_boundary_rejects_a_git_state_change_after_the_merge(tmp_path, monkeypatch) -> None:
+    # Codex review (2.9.1 r8, P2): the config case above is stopped by the
+    # node's own loop, so it never reached the goal's guard. Here the change
+    # lands after a clean node, during the merge -- only the boundary sees it.
+    import pxx.goal as goal_mod
+
+    repo = tmp_path / "repo"
+    _init_repo(repo, files={"app.py": "x = 1\n"})
+    real_merge = goal_mod._merge_node
+
+    async def merge_then_plant(root, *args, **kwargs):
+        result = await real_merge(root, *args, **kwargs)
+        await asyncio.to_thread(
+            subprocess.run, [GIT, "config", "diff.hide.textconv", "true"], cwd=root, check=True
+        )
+        return result
+
+    monkeypatch.setattr(goal_mod, "_merge_node", merge_then_plant)
+    outcome = asyncio.run(
+        run_goal(
+            "goal",
+            _settings(tmp_path),
+            cwd=repo,
+            planner=_planner(_dag(_task("a"))),
+            backend_factory=Factory([ScriptedBackend(edits={"app.py": "x = 2\n"})]),
+        )
+    )
+    assert outcome.code is TerminalCode.OUT_OF_SCOPE
+    assert "git configuration changed" in outcome.summary
+    assert "net not restored" in outcome.summary  # nor is the tree reset under it

@@ -1487,3 +1487,475 @@ def test_a_later_round_abort_reports_the_accumulated_tokens(tmp_path):
     )
     assert outcome.code is TerminalCode.HOOKS_MISSING
     assert (outcome.rounds, outcome.tokens) == (2, 17)
+
+
+@needs_git
+def test_a_file_the_round_created_reaches_review_and_the_diff_budget(tmp_path: Path) -> None:
+    # Codex review (2.9.1): `git diff <pre_sha>` never shows a created file, so
+    # the review and the diff budget missed new files for every backend that
+    # leaves work uncommitted. A pre-existing untracked file is not the run's.
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_repo(repo, {"a.py": "a = 1\n"})
+    (repo / "notes.txt").write_text("the operator's, untracked before the loop\n")
+    reviewer = ScriptedReviewer(["VERDICT: APPROVE"])
+    created = "".join(f"line{i} = {i}\n" for i in range(6))
+    outcome = asyncio.run(
+        run_loop(
+            "add new.py",
+            _settings(tmp_path),
+            cwd=repo,
+            backend_factory=Factory([ScriptedBackend(edits={"new.py": created})]),
+            reviewer=reviewer,
+        )
+    )
+    assert outcome.code is TerminalCode.COMPLETED
+    reviewed = reviewer.calls[0][0]
+    assert "new.py" in reviewed and "+line5 = 5" in reviewed
+    assert "notes.txt" not in reviewed  # untracked at loop start: not the run's work
+    assert outcome.diff_lines == 6  # the created file's lines count toward the budget
+
+
+@needs_git
+def test_a_force_added_ignored_file_outside_scope_is_caught(tmp_path: Path) -> None:
+    # Grok review (2.9.1): a run that `git add -f`s a gitignored file outside
+    # the scope, beside an in-scope edit, must not slip past the loop's scope
+    # re-check. aider no longer commits, so the file stays staged -- and
+    # staged paths are part of `git diff <pre_sha>`.
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_repo(repo, {"src/ok.py": "a = 1\n", ".gitignore": ".secret\n"})
+
+    class ForceAdding(ScriptedBackend):
+        async def run(self, task, ctx):
+            (Path(ctx.cwd) / "src" / "ok.py").write_text("a = 2\n")
+            (Path(ctx.cwd) / ".secret").write_text("SECRET_TOKEN=abc\n")
+            _git(Path(ctx.cwd), "add", "-f", ".secret")
+            return RunOutcome(code=TerminalCode.COMPLETED, summary="ok", tokens=1)
+
+    outcome = asyncio.run(
+        run_loop(
+            "edit",
+            _settings(tmp_path, scope=("src",)),
+            cwd=repo,
+            backend_factory=Factory([ForceAdding()]),
+        )
+    )
+    assert outcome.code is TerminalCode.OUT_OF_SCOPE
+    assert ".secret" in outcome.summary
+
+
+@needs_git
+def test_a_failed_created_file_listing_is_visible_not_silent(tmp_path: Path, monkeypatch) -> None:
+    # Codex review (2.9.1 r2): a listing failure read as "no files created".
+    import pxx.worktree as wt
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_repo(repo, {"a.py": "a = 1\n"})
+    real = wt.untracked_paths
+    calls = {"n": 0}
+
+    async def flaky(cwd):
+        calls["n"] += 1
+        return await real(cwd) if calls["n"] == 1 else None  # baseline ok, then git fails
+
+    monkeypatch.setattr(wt, "untracked_paths", flaky)
+    reviewer = ScriptedReviewer(["VERDICT: APPROVE"])
+    outcome = asyncio.run(
+        run_loop(
+            "add new.py",
+            _settings(tmp_path),
+            cwd=repo,
+            backend_factory=Factory([ScriptedBackend(edits={"new.py": "n = 1\n"})]),
+            reviewer=reviewer,
+        )
+    )
+    # Codex review (2.9.1 r3): visible is not enough -- an approving reviewer
+    # must not be able to pass an incomplete diff. Blocked before review.
+    assert outcome.code is TerminalCode.REVIEW_UNAVAILABLE
+    assert "diff is incomplete" in outcome.summary
+    assert reviewer.calls == []
+
+
+@needs_git
+def test_a_recreated_preexisting_untracked_file_reaches_review(tmp_path: Path) -> None:
+    # agy review (2.9.1 r2): a path untracked before the loop (then stashed by
+    # the net) and re-created by a round was invisible to review and budget.
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_repo(repo, {"a.py": "a = 1\n"})
+    (repo / "new.py").write_text("old = 0\n")
+    reviewer = ScriptedReviewer(["VERDICT: APPROVE"])
+    asyncio.run(
+        run_loop(
+            "write new.py",
+            _settings(tmp_path),
+            cwd=repo,
+            backend_factory=Factory([ScriptedBackend(edits={"new.py": "fresh = 1\n"})]),
+            reviewer=reviewer,
+        )
+    )
+    assert "+fresh = 1" in reviewer.calls[0][0]
+
+
+@needs_git
+def test_an_incomplete_diff_is_never_salvaged_after_a_budget_overrun(
+    tmp_path: Path, monkeypatch
+) -> None:
+    # Codex review (2.9.1 r4): budget-overrun salvage bypassed the
+    # completeness block -- tests green + an approving reviewer => COMPLETED.
+    import pxx.worktree as wt
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_repo(repo, {"a.py": "a = 1\n"})
+    real = wt.untracked_paths
+    calls = {"n": 0}
+
+    async def flaky(cwd):
+        calls["n"] += 1
+        return await real(cwd) if calls["n"] == 1 else None
+
+    monkeypatch.setattr(wt, "untracked_paths", flaky)
+    overrun = ScriptedBackend(
+        edits={"new.py": "n = 1\n"},
+        outcome=RunOutcome(code=TerminalCode.BUDGET_EXCEEDED, summary="over", tokens=5),
+    )
+    reviewer = ScriptedReviewer(["VERDICT: APPROVE"])
+    outcome = asyncio.run(
+        run_loop(
+            "add new.py",
+            _settings(tmp_path, test_command="true"),
+            cwd=repo,
+            backend_factory=Factory([overrun]),
+            reviewer=reviewer,
+        )
+    )
+    assert outcome.code is not TerminalCode.COMPLETED
+    assert reviewer.calls == []
+
+
+@needs_git
+def test_a_scope_recheck_that_cannot_list_changes_blocks(tmp_path: Path, monkeypatch) -> None:
+    # Grok review (2.9.1 r4): a failed `git status` read as "no changes", so
+    # the scope re-check saw nothing out of scope.
+    import pxx.loop as loop_mod
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_repo(repo, {"a.py": "a = 1\n"})
+    state = {"ran": False}
+
+    class Editing(ScriptedBackend):
+        async def run(self, task, ctx):
+            outcome = await super().run(task, ctx)
+            state["ran"] = True
+            return outcome
+
+    real_git = loop_mod._git
+
+    async def git_after_round(root, *args, **kw):
+        if state["ran"] and args and args[0] == "status":
+            return None  # git fails once the round has run
+        return await real_git(root, *args, **kw)
+
+    monkeypatch.setattr(loop_mod, "_git", git_after_round)
+    outcome = asyncio.run(
+        run_loop(
+            "edit",
+            _settings(tmp_path),
+            cwd=repo,
+            backend_factory=Factory([Editing(edits={"a.py": "a = 2\n"})]),
+        )
+    )
+    assert outcome.code is TerminalCode.REVIEW_UNAVAILABLE
+    assert "scope cannot be verified" in outcome.summary
+
+
+@needs_git
+def test_the_recorded_patch_says_when_it_is_incomplete(tmp_path: Path, monkeypatch) -> None:
+    # Grok review (2.9.1 r4, P2): a listing failure wrote a patch that looked
+    # complete.
+    import pxx.loop as loop_mod
+    import pxx.worktree as wt
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_repo(repo, {"a.py": "a = 1\n"})
+
+    async def failing(cwd):
+        return None
+
+    monkeypatch.setattr(wt, "untracked_paths", failing)
+    patch = asyncio.run(loop_mod._record_diff(repo, None, {}))
+    assert loop_mod._INCOMPLETE_DIFF_MARK in patch.splitlines()
+
+
+@needs_git
+@pytest.mark.parametrize("overrun", [False, True], ids=["main-path", "budget-salvage"])
+def test_a_created_file_whose_patch_cannot_be_read_blocks_like_a_failed_listing(
+    tmp_path: Path, monkeypatch, overrun: bool
+) -> None:
+    # Codex review (2.9.1 r5): a failed new_file_patch became a comment the
+    # completeness gate did not recognise -> COMPLETED with zero diff lines.
+    import pxx.worktree as wt
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_repo(repo, {"a.py": "a = 1\n"})
+
+    async def unreadable(cwd, rel, *, binary=False):
+        return ""
+
+    monkeypatch.setattr(wt, "new_file_patch", unreadable)
+    backend = ScriptedBackend(
+        edits={"new.py": "n = 1\n"},
+        outcome=RunOutcome(code=TerminalCode.BUDGET_EXCEEDED, summary="over", tokens=5)
+        if overrun
+        else None,
+    )
+    reviewer = ScriptedReviewer(["VERDICT: APPROVE"])
+    outcome = asyncio.run(
+        run_loop(
+            "add new.py",
+            _settings(tmp_path, test_command="true"),
+            cwd=repo,
+            backend_factory=Factory([backend]),
+            reviewer=reviewer,
+        )
+    )
+    assert outcome.code is not TerminalCode.COMPLETED
+    assert reviewer.calls == []
+
+
+@needs_git
+def test_a_recreated_untracked_file_with_identical_bytes_reaches_review(tmp_path: Path) -> None:
+    # Codex review (2.9.1 r5): identical bytes isolate the baseline ORDER.
+    import subprocess
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_repo(repo, {"a.py": "a = 1\n"})
+    for key, val in (("user.name", "t"), ("user.email", "t@e.c")):  # so the stash runs
+        subprocess.run(["git", "config", key, val], cwd=repo, check=True)
+    (repo / "new.py").write_text("same = 1\n")
+    reviewer = ScriptedReviewer(["VERDICT: APPROVE"])
+    outcome = asyncio.run(
+        run_loop(
+            "write new.py",
+            _settings(tmp_path),
+            cwd=repo,
+            backend_factory=Factory([ScriptedBackend(edits={"new.py": "same = 1\n"})]),
+            reviewer=reviewer,
+        )
+    )
+    assert "+stash" in outcome.summary  # the net really stashed the file
+    assert "+same = 1" in reviewer.calls[0][0]
+
+
+@needs_git
+def test_changed_paths_see_flagged_edits_and_whitespace_names(tmp_path: Path) -> None:
+    # Grok review (2.9.1 r5): index flags hid tracked edits from the scope
+    # re-check, and a name that strip() empties was dropped.
+    import pxx.loop as loop_mod
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_repo(repo, {"a.py": "a = 1\n", "b.py": "b = 1\n"})
+    pre = subprocess.run(
+        [GIT, "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True
+    ).stdout.strip()
+    _git(repo, "update-index", "--assume-unchanged", "a.py")
+    from pxx.worktree import flagged_state
+
+    flagged_start = asyncio.run(flagged_state(repo))  # the loop's baseline moment
+    (repo / "a.py").write_text("a = 'hidden'\n")
+    (repo / " ").write_text("space\n")
+    _git(repo, "add", " ")
+    changed = asyncio.run(loop_mod._changed_paths_checked(repo, pre, flagged_start))
+    assert "a.py" in changed and " " in changed
+
+
+class _PlantsGitState(ScriptedBackend):
+    """Edits a file in scope, then changes git's view of the tree the way a
+    shell command could: a replace ref over HEAD, or a textconv driver."""
+
+    def __init__(self, how: str) -> None:
+        super().__init__(edits={"a.py": "a = 2\n"})
+        self.how = how
+
+    async def run(self, task: str, ctx: object) -> RunOutcome:
+        outcome = await super().run(task, ctx)
+        await asyncio.to_thread(self._plant, Path(ctx.cwd))  # type: ignore[attr-defined]
+        return outcome
+
+    def _plant(self, root: Path) -> None:
+        if self.how == "replace":
+            (root / "out.py").write_text("o = 'hidden'\n")
+            _git(root, "add", "out.py")
+            tree = subprocess.run(
+                [GIT, "write-tree"], cwd=root, check=True, capture_output=True, text=True
+            ).stdout.strip()
+            head = subprocess.run(
+                [GIT, "rev-parse", "HEAD"], cwd=root, check=True, capture_output=True, text=True
+            ).stdout.strip()
+            fake = subprocess.run(
+                [
+                    GIT,
+                    "-c",
+                    "user.name=t",
+                    "-c",
+                    "user.email=t@e.c",
+                    "commit-tree",
+                    tree,
+                    "-m",
+                    "f",
+                ],
+                cwd=root,
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+            _git(root, "replace", head, fake)  # `git diff HEAD` now shows nothing for out.py
+        elif self.how == "binary":  # a plain file write -- what write_file can do
+            (root / ".gitattributes").write_text("* -diff\n")
+        elif self.how == "binary-hidden":  # ignored + case-variant (Grok r9/r10)
+            (root / "sub").mkdir(exist_ok=True)
+            (root / "sub" / ".gitignore").write_text(".gitattributes\n")
+            (root / "sub" / ".GitAttributes").write_text("* -diff\n")
+        else:
+            _git(root, "config", "diff.hide.textconv", "true")
+            (root / ".git" / "info").mkdir(exist_ok=True)
+            (root / ".git" / "info" / "attributes").write_text("a.py diff=hide\n")
+
+
+@needs_git
+@pytest.mark.parametrize("how", ["replace", "textconv", "binary", "binary-hidden"])
+def test_a_round_that_changes_git_state_is_never_approved(tmp_path: Path, how: str) -> None:
+    # Grok review (2.9.1 r7, P0): `git replace` blinded the loop's path list
+    # and diff, so an out-of-scope tracked edit read as "nothing changed".
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_repo(repo, {"a.py": "a = 1\n", "out.py": "o = 1\n"})
+    reviewer = ScriptedReviewer(["VERDICT: APPROVE"])
+    bus = EventBus()
+    # The attributes file is IN scope (Codex r9): only the incomplete-diff
+    # guard can stop that round, not the scope re-check.
+    scope = {"binary": ("a.py", ".gitattributes"), "binary-hidden": ("a.py", "sub")}.get(
+        how, ("a.py",)
+    )
+    outcome = asyncio.run(
+        run_loop(
+            "edit a.py",
+            _settings(tmp_path, scope=scope),
+            cwd=repo,
+            backend_factory=Factory([_PlantsGitState(how)]),
+            reviewer=reviewer,
+            bus=bus,
+        )
+    )
+    if how.startswith("binary"):
+        assert outcome.code is TerminalCode.REVIEW_UNAVAILABLE
+        assert _gate_events(bus, "diff_complete")[0]["allowed"] is False
+    assert outcome.code in (TerminalCode.REVIEW_UNAVAILABLE, TerminalCode.OUT_OF_SCOPE)
+    assert reviewer.calls == []
+    # the restore refuses too: git's view of the tree is not trusted
+    assert "net not restored" in outcome.summary
+
+
+@needs_git
+@pytest.mark.parametrize("helper", ["done", "salvage"])
+def test_done_and_salvage_see_an_out_of_scope_flagged_edit(tmp_path: Path, helper: str) -> None:
+    # agy review (2.9.1 r7, P2): the done-check and the over-work salvage
+    # re-listed changed paths without the flagged baseline, so an
+    # out-of-scope edit behind an index flag passed their scope check.
+    import pxx.loop as loop_mod
+    from pxx.safety import ScopeGate
+    from pxx.worktree import flagged_state
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_repo(repo, {"a.py": "a = 1\n", "out.py": "o = 1\n"})
+    pre = subprocess.run(
+        [GIT, "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True
+    ).stdout.strip()
+    _git(repo, "update-index", "--skip-worktree", "out.py")
+    flagged_start = asyncio.run(flagged_state(repo))
+    (repo / "a.py").write_text("a = 2\n")
+    (repo / "out.py").write_text("o = 'hidden'\n")
+    kwargs = dict(
+        root=repo,
+        pre_sha=pre,
+        diff="-a = 1\n+a = 2\n",
+        scope=ScopeGate(repo, ("a.py",)),
+        max_diff_lines=100,
+        command=f"{sys.executable} -c pass",  # green: only the scope check can refuse
+        lint_command=None,
+        flagged_start=flagged_start,
+    )
+    assert asyncio.run(loop_mod._edit_objectively_done(**{**kwargs, "flagged_start": None}))
+    if helper == "done":
+        call = loop_mod._edit_objectively_done
+    else:
+        call = loop_mod._overwork_salvageable
+        kwargs.update(task="t", reviewer=None, review_mode=ReviewMode.BLOCKING)
+    assert asyncio.run(call(**kwargs)) is False
+
+
+@needs_git
+def test_an_edit_behind_an_index_flag_blocks_before_review(tmp_path: Path) -> None:
+    # Codex review (2.9.1 r6): a flagged edit reached the path check but not
+    # the reviewer or the budget (git diff omits it) -- COMPLETED, 0 lines.
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_repo(repo, {"a.py": "a = 1\n"})
+    _git(repo, "update-index", "--assume-unchanged", "a.py")
+    reviewer = ScriptedReviewer(["VERDICT: APPROVE"])
+    outcome = asyncio.run(
+        run_loop(
+            "edit a.py",
+            _settings(tmp_path),
+            cwd=repo,
+            backend_factory=Factory([ScriptedBackend(edits={"a.py": "a = 'hidden'\n"})]),
+            reviewer=reviewer,
+        )
+    )
+    assert outcome.code is TerminalCode.REVIEW_UNAVAILABLE
+    assert reviewer.calls == []
+
+
+@needs_git
+@pytest.mark.parametrize("failure", ["tracked-diff", "listing", "patch"])
+def test_the_recorded_patch_is_marked_for_every_kind_of_failure(
+    tmp_path: Path, monkeypatch, failure: str
+) -> None:
+    # Codex review (2.9.1 r6, P2): a failed tracked diff became "" unmarked.
+    import pxx.loop as loop_mod
+    import pxx.worktree as wt
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_repo(repo, {"a.py": "a = 1\n"})
+    (repo / "new.py").write_text("n = 1\n")
+    if failure == "tracked-diff":
+        real = loop_mod._git
+
+        async def no_diff(root, *args, **kw):
+            return None if args[:1] == ("diff",) else await real(root, *args, **kw)
+
+        monkeypatch.setattr(loop_mod, "_git", no_diff)
+    elif failure == "listing":
+
+        async def no_listing(cwd):
+            return None
+
+        monkeypatch.setattr(wt, "untracked_paths", no_listing)
+    else:
+
+        async def no_patch(cwd, rel, *, binary=False):
+            return ""
+
+        monkeypatch.setattr(wt, "new_file_patch", no_patch)
+    patch = asyncio.run(loop_mod._record_diff(repo, None, {}))
+    assert loop_mod._INCOMPLETE_DIFF_MARK in patch.splitlines()

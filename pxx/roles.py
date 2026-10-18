@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -79,8 +80,12 @@ class BoundaryReviewer(Protocol):
 class ArtifactReviewer(Protocol):
     """Integration boundary: review the merged artifact before it ships."""
 
-    async def review_artifact(self, diff: str, artifact_id: str) -> HandoffArtifact:
-        """payload: {artifact_id, ok, issues: [str]}"""
+    async def review_artifact(
+        self, diff: str, artifact_id: str, paths: Sequence[str] | None = None
+    ) -> HandoffArtifact:
+        """payload: {artifact_id, ok, issues: [str]}. ``paths``: the exact
+        repo-relative paths the artifact touches, when the caller has them
+        (more reliable than parsing diff headers)."""
         ...
 
 
@@ -108,15 +113,29 @@ class DeterministicArtifactReviewer:
     """An artifact reviewer that needs no model: rejects artifacts that
     touch protected paths, approves everything else (with an audit trail)."""
 
-    async def review_artifact(self, diff: str, artifact_id: str) -> HandoffArtifact:
+    async def review_artifact(
+        self, diff: str, artifact_id: str, paths: Sequence[str] | None = None
+    ) -> HandoffArtifact:
         from .protected_paths import is_protected_path
 
+        # Exact paths when the caller has them, and ONLY those: diff headers
+        # are absent for binary and empty files and quoted for unusual names
+        # (a header scan let created protected files through), and a scan
+        # also matched `+++ b/...` lines inside hunk BODIES, copying file
+        # content into the issue text that reaches events (2.9.1 reviews).
+        # The header scan remains only for callers that pass a diff alone.
+        if paths is not None:  # supplied -- even empty -- means "these, only"
+            touched: list[str] = list(paths)
+        else:
+            touched = [
+                line[6:].strip()
+                for line in diff.splitlines()
+                if line.startswith(("+++ b/", "--- a/"))
+            ]
         issues: list[str] = []
-        for line in diff.splitlines():
-            if line.startswith(("+++ b/", "--- a/")):
-                rel = line[6:].strip()
-                if is_protected_path(rel):
-                    issues.append(f"touches protected path: {rel}")
+        for rel in dict.fromkeys(touched):
+            if is_protected_path(rel):
+                issues.append(f"touches protected path: {rel}")
         return HandoffArtifact(
             kind="artifact_review",
             payload={

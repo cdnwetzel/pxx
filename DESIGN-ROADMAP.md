@@ -202,6 +202,15 @@ candidate, or prior identical candidate failed. File lock
    tree. Parallel execution only for independent nodes with disjoint
    scopes (asyncio.gather); a node failure skips dependents, never rewrites
    completed nodes.
+4. Boundary review: the Artifact-Reviewer (`roles.py`,
+   `review_artifact(diff, artifact_id, paths=None)`) vets the merged
+   artifact from its EXACT paths (`paths`: tracked changes plus files the
+   nodes created; `None` = not supplied, fall back to diff headers). It
+   rejects (`OUT_OF_SCOPE`) a protected path, an edit behind a git index
+   flag, a changed git control state, or a path list that cannot be built;
+   a rejected merge is rolled back to the pre-goal tree through the safety
+   net (merge conflicts and test regressions keep their merged state for
+   the operator).
 `GoalOutcome(code, completed: [ids], failed: {id: code}, summary)`.
 
 ### CLI additions

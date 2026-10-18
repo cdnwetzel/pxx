@@ -249,3 +249,30 @@ def test_consume_records_all_usage_before_raising():
     with pytest.raises(BudgetExceeded, match="max_rounds"):
         guard.consume(rounds=1, tokens=12)
     assert guard.rounds == 2 and guard.tokens == 24
+
+
+@pytest.mark.parametrize(
+    "rel", [".git/config", ".GIT/info/attributes", "sub/.git/hooks/pre-commit", ".git"]
+)
+def test_the_git_directory_is_never_writable(tmp_path, rel) -> None:
+    # Grok review (2.9.1 r7): a whole-repo write_file could install a filter
+    # driver (.git/config + .git/info/attributes) that no `git status` shows.
+    gate = ScopeGate(tmp_path)
+    with pytest.raises(ScopeViolation, match="git directory"):
+        gate.check_write(rel, PermissionMode.EDIT)
+
+
+@pytest.mark.parametrize("rel", [".github/workflows/ci.yml", ".gitignore", "a.git/x", "git/x"])
+def test_git_lookalike_paths_stay_writable(tmp_path, rel) -> None:
+    assert ScopeGate(tmp_path).check_write(rel, PermissionMode.EDIT) == tmp_path.resolve() / rel
+
+
+def test_a_project_that_lives_under_a_git_directory_stays_writable(tmp_path) -> None:
+    # CodeRabbit (2.9.1, PR #98): the `.git` block matched components ABOVE
+    # the project root too, refusing every write in such a project.
+    root = tmp_path / ".git" / "worktrees-elsewhere" / "proj"
+    root.mkdir(parents=True)
+    gate = ScopeGate(root)
+    assert gate.check_write("a.py", PermissionMode.EDIT) == root.resolve() / "a.py"
+    with pytest.raises(ScopeViolation, match="git directory"):
+        gate.check_write(".git/config", PermissionMode.EDIT)

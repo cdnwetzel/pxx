@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .errors import PxxError
-from .gitenv import git_env
+from .gitenv import INTERNAL_GIT, git_env
 
 log = logging.getLogger("pxx.governance")
 
@@ -174,30 +174,94 @@ def load_denylist(path: Path | None = None) -> tuple[str, ...]:
 
 
 def scan_staged(*, cwd: Path | None = None, denylist: tuple[str, ...] = ()) -> list[Finding]:
-    """Scan files staged in git (``git diff --cached --name-only``).
+    """Scan what is STAGED in git -- each changed index entry's blob, i.e. the
+    exact bytes a commit of the index would record.
 
     FAIL-CLOSED: raises :class:`PxxError` when the staged fileset cannot be
-    determined (not a git repository, git missing, index/lock error) — a
-    scan that cannot run is NOT a clean scan, and must never read as one.
-    Rename detection is disabled so a staged rename can't hide its source.
-    Staged files that no longer exist on disk are skipped by
-    :func:`scan_content`'s unreadable-file handling."""
+    determined (not a git repository, git missing, index/lock error) or a
+    staged blob cannot be read -- a scan that cannot run is NOT a clean scan,
+    and must never read as one. Rename detection is disabled so a staged
+    rename can't hide its source; deletions have no blob and are not read.
+
+    Entries come from ``git diff-index --cached -z`` -- NUL-separated names
+    (never quoted, never stripped) with each entry's blob SHA -- and blobs
+    are read BY SHA with replace refs ignored (2.9.1 reviews): a quoted name
+    was "unreadable" and skipped, a clean filter or a `git replace` could
+    show the scan different bytes from the commit, and a name like
+    ``0:notes.txt`` parsed as an index-stage revision of another file."""
     root = cwd or Path.cwd()
+    head = _git_bytes_or_none(root, "rev-parse", "--verify", "-q", "HEAD")
+    entries: list[tuple[str, str]] = []
+    if head:
+        raw = _git_bytes(root, "diff-index", "--cached", "-z", "--no-renames", "HEAD")
+        fields = raw.decode("utf-8", "surrogateescape").split("\0")
+        # ":<old mode> <new mode> <old sha> <new sha> <status>" NUL "<path>" NUL
+        for meta, name in zip(fields[0::2], fields[1::2], strict=False):
+            parts = meta.lstrip(":").split()
+            if len(parts) == 5 and parts[4] != "D":
+                entries.append((name, parts[1] + " " + parts[3]))
+    else:  # no commit yet: everything in the index is staged
+        raw = _git_bytes(root, "ls-files", "-s", "-z")
+        for record in raw.decode("utf-8", "surrogateescape").split("\0"):
+            meta, _, name = record.partition("\t")
+            parts = meta.split()
+            if len(parts) == 3 and name:
+                entries.append((name, parts[0] + " " + parts[1]))
+    return scan_blobs(
+        root,
+        [(name, ms.split()[1]) for name, ms in entries if not ms.startswith("160000")],
+        denylist=denylist,
+    )
+
+
+def scan_blobs(
+    root: Path, blobs: list[tuple[str, str]], *, denylist: tuple[str, ...] = ()
+) -> list[Finding]:
+    """Scan git blobs BY SHA -- ``[(repo-relative name, blob sha)]`` -- with
+    replace refs ignored, so the bytes scanned are the bytes a commit built
+    from those SHAs records. Lockfiles, binary-ish and non-UTF-8 blobs are
+    skipped (as for files); an unreadable blob raises :class:`PxxError`
+    (fail-closed). The name is only a label and an attribute key -- never
+    parsed as a revision."""
+    findings: list[Finding] = []
+    for name, sha in blobs:
+        if Path(name).name in LOCKFILE_NAMES:
+            continue
+        data = _git_bytes(root, "cat-file", "blob", sha)
+        if _is_binaryish(data):
+            continue
+        try:
+            text = data.decode("utf-8")
+        except UnicodeDecodeError:
+            log.debug("governance: skipping non-utf-8 blob %s", name)
+            continue
+        findings.extend(scan_text(text, str(root / name), denylist=denylist))
+    return findings
+
+
+def _git_bytes_or_none(root: Path, *args: str) -> bytes | None:
+    try:
+        return _git_bytes(root, *args)
+    except PxxError:
+        return None
+
+
+def _git_bytes(root: Path, *args: str) -> bytes:
+    """Run git; return raw stdout. Raises PxxError on any failure (fail-closed)."""
     try:
         proc = subprocess.run(
-            ["git", "diff", "--cached", "--name-only", "--no-renames"],
+            # INTERNAL_GIT: the scan must see the real objects, and must not
+            # run repository-controlled code
+            [*INTERNAL_GIT, *args],
             cwd=root,
             capture_output=True,
-            text=True,
             timeout=15,
             env=git_env(),
         )
     except (OSError, subprocess.SubprocessError) as exc:
         raise PxxError(f"governance: cannot scan staged files: {exc}") from exc
     if proc.returncode != 0:
-        detail = (proc.stderr or "").strip().splitlines()
+        detail = proc.stderr.decode(errors="replace").strip().splitlines()
         reason = detail[0] if detail else f"git exited {proc.returncode}"
         raise PxxError(f"governance: cannot scan staged files: {reason}")
-    names = [n for n in proc.stdout.splitlines() if n.strip()]
-    paths = [root / name for name in names]
-    return scan_content(paths, denylist=denylist)
+    return proc.stdout

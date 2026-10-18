@@ -217,6 +217,124 @@ class DeleteFile:
         )
 
 
+def _indent(line: str) -> str:
+    return line[: len(line) - len(line.lstrip())]
+
+
+def _describe_indent(indent: str) -> str:
+    if not indent:
+        return "no indentation"
+    tabs, spaces = indent.count("\t"), indent.count(" ")
+    parts = [
+        f"{n} {name}{'s' if n != 1 else ''}" for n, name in ((spaces, "space"), (tabs, "tab")) if n
+    ]
+    other = len(indent) - tabs - spaces  # e.g. a non-breaking space
+    if other:
+        parts.append(f"{other} other whitespace char{'s' if other != 1 else ''}")
+    return " + ".join(parts)
+
+
+#: Bounds for the hint's diagnosis -- it is advice, never worth real time.
+_HINT_MAX_FILE_CHARS = 2_000_000
+_HINT_MAX_SNIPPET_LINES = 400
+
+
+#: Most first-line prefilter hits the window search verifies before giving
+#: up -- a file of identical lines would otherwise cost lines x snippet.
+_HINT_MAX_CANDIDATES = 2_000
+
+
+def _unique_line_window(have: list[str], want: list[str], norm) -> int | None:
+    """Start index of the ONE window of ``have`` equal to ``want`` under
+    ``norm``; None when there are zero or several (stops at the second), or
+    when too many first lines match to check cheaply. Each line is
+    normalized once (2.9.1 review: re-normalizing per window was quadratic
+    inside the documented bounds -- ~27 s on adversarial input)."""
+    if not want or len(want) > len(have):
+        return None
+    have_n = [norm(line) for line in have]
+    want_n = [norm(line) for line in want]
+    hit = None
+    candidates = 0
+    for i in range(len(have_n) - len(want_n) + 1):
+        if have_n[i] != want_n[0]:  # cheap first-line prefilter
+            continue
+        candidates += 1
+        if candidates > _HINT_MAX_CANDIDATES:
+            return None  # too ambiguous to be certain: no hint
+        if have_n[i : i + len(want_n)] == want_n:
+            if hit is not None:
+                return None  # ambiguous: never guess which one was meant
+            hit = i
+    return hit
+
+
+def mismatch_hint(text: str, old: str) -> str:
+    """A concrete reason an ``edit_file`` old_string missed, ONLY when one is
+    certain; "" otherwise. Never changes what matches -- the edit still needs
+    the exact text; this only names what to fix. Reports line numbers and
+    whitespace facts, never file content (audit is metadata-only). Bounded
+    work: huge files or snippets get no diagnosis. Observed 2026-10-17: a 4B
+    model repeated an old_string with four extra leading spaces five times
+    against a generic "not found"."""
+    if len(text) > _HINT_MAX_FILE_CHARS or old.count("\n") > _HINT_MAX_SNIPPET_LINES:
+        return ""
+    # 1) line endings: the snippet matches once its CRLF/LF are normalized
+    # (edit_file reads with universal newlines, so "the text being matched"
+    # is LF even for a CRLF file on disk.)
+    file_crlf, old_crlf = "\r\n" in text, "\r\n" in old
+    if file_crlf != old_crlf:
+        ends = ("CRLF", "LF") if file_crlf else ("LF", "CRLF")
+        target = "\r\n" if file_crlf else "\n"
+        normalized = old.replace("\r\n", "\n").replace("\n", target)
+        if text.count(normalized) == 1:
+            return (
+                f" Hint: the text being matched uses {ends[0]} line endings and your "
+                f"old_string uses {ends[1]}; send it with {ends[0]} line endings."
+            )
+        old = normalized  # line endings were not the only difference: keep looking
+    # 2) blank (or whitespace-only) lines at the snippet's edges are the
+    # only difference
+    edge_lines = old.split("\n")
+    while edge_lines and not edge_lines[0].strip():
+        edge_lines.pop(0)
+    while edge_lines and not edge_lines[-1].strip():
+        edge_lines.pop()
+    core = "\n".join(edge_lines)
+    if core and core != old and text.count(core) == 1:
+        return (
+            " Hint: without the blank lines at its start/end your old_string matches "
+            "exactly once — those edge lines are not in the file there; drop them."
+        )
+    # 3) the same lines, but indentation or trailing whitespace differs
+    want = old.splitlines()
+    while want and not want[0].strip():
+        want.pop(0)
+    while want and not want[-1].strip():
+        want.pop()
+    have = text.splitlines()
+    start = _unique_line_window(have, want, str.strip)
+    if start is None:
+        return ""
+    for k, line in enumerate(want):
+        file_line = have[start + k]
+        if line == file_line:
+            continue
+        n = start + k + 1
+        if _indent(line) != _indent(file_line):
+            return (
+                f" Hint: it matches line {start + 1} if indentation is ignored — your "
+                f"old_string indents line {n} with {_describe_indent(_indent(line))}, "
+                f"the file with {_describe_indent(_indent(file_line))}. Copy the "
+                "file's indentation exactly."
+            )
+        return (
+            f" Hint: it matches line {start + 1} if whitespace is ignored — trailing "
+            f"whitespace differs on line {n}. Copy that line exactly as read_file shows it."
+        )
+    return ""
+
+
 class EditFile:
     spec = ToolSpec(
         name="edit_file",
@@ -249,7 +367,7 @@ class EditFile:
             return _err(
                 f"old_string not found in {path} — the file's current content "
                 "differs from what you expected. Call read_file on it and retry "
-                "with an exact substring (match whitespace exactly)."
+                "with an exact substring (match whitespace exactly)." + mismatch_hint(text, old)
             )
         if count > 1:
             return _err(

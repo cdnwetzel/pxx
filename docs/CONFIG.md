@@ -346,7 +346,9 @@ its tools as `mcp__<name>__<tool>`.
 `PXX_TEST_COMMAND`, `PXX_SANDBOX_SHELL`, `PXX_ALLOW_UNGATED_SHELL`,
 `PXX_MEMORY_CAPTURE_SUCCESSES`
 (`1`/`true`/`yes`/`on` or `0`/`false`/`no`/`off` — an unrecognized value is
-rejected, since each switches a safety gate or a persistence surface),
+rejected, since each switches a safety gate or a persistence surface;
+an empty value counts as unset, like every `PXX_*` variable, so the lower
+config layers apply),
 `PXX_AUTO_COMMIT` (`1`/`true`/`yes` — see `auto_commit`),
 `PXX_LOOP_REVIEW` (default the `pxx loop`
 review gate on for this box), `PXX_DONE_SIGNAL` (`0` to disable the `pxx loop`

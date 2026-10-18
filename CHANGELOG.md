@@ -30,7 +30,10 @@ preserved in git (tag `v1.3.3` and earlier).
 - **`pxx loop` prints the same outcome trailer as run/edit/ask**: `(rounds= tokens= diff_lines= session=)`.
   A loop's `session=` is the loop record's own id, the hex suffix of its `<ts>-loop-<hex>` run directory.
 
-Downstream: the new summary tags, observation, trailer and loop `session_id` are additive. A caller that
+Downstream: the new summary tags, observation and trailer are additive. `run_loop`'s returned `session_id`
+changes meaning: it was `""`, or a round session's id when a backend failure was forwarded; it is now always
+the loop record's id. A caller that looked up a round's record by it should read the loop's `outcome.json`
+instead. A caller that
 pairs `bare`/`response_format` with an explicit aider backend now gets `ConfigError` instead of a silently
 ignored payload. Each new surface is pinned in `tests/test_consumer_contract.py`.
 

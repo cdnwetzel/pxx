@@ -750,6 +750,32 @@ def test_a_skipped_commit_says_why(tmp_path: Path, reason: str) -> None:
 
 
 @needs_git
+@pytest.mark.parametrize("moved", [False, True])
+def test_a_failed_head_update_names_its_cause(tmp_path: Path, monkeypatch, moved: bool) -> None:
+    # 2.9.3 review: update-ref failing (lock, timeout) is git_failed; only a
+    # HEAD seen to move is head_moved.
+    import pxx.safety_net as sn
+
+    repo = tmp_path / "repo"
+    _init_repo(repo, files={"ok.py": "x = 1\n"})
+    (repo / "ok.py").write_text("x = 2\n")
+    real = sn._git_io
+
+    async def fake(cwd, *args, **kw):
+        if args and args[0] == "update-ref":
+            if not moved:
+                return None
+            _git(repo, "commit", "--allow-empty", "-q", "-m", "racer")
+        return await real(cwd, *args, **kw)
+
+    monkeypatch.setattr(sn, "_git_io", fake)
+    sha, why = run(
+        sn.commit_session_work_checked(repo, task_preview="t", net_tag=None, only={"ok.py"})
+    )
+    assert sha is None and why == ("head_moved" if moved else "git_failed")
+
+
+@needs_git
 def test_a_committed_change_reports_no_skip_reason(tmp_path: Path) -> None:
     from pxx.safety_net import commit_session_work_checked
 

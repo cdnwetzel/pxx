@@ -639,8 +639,14 @@ async def commit_session_work_checked(
     # Move HEAD only if it is still where we read it (no race, no surprise).
     update = ["update-ref", "-m", f"pxx: {preview}", "HEAD", commit] + ([head] if head else [])
     if await _git_io(cwd, *update) is None:
-        log.warning("auto-commit: HEAD moved under the commit; not updating it")
-        return None, "head_moved"
+        # Name the cause only when HEAD is seen to have moved; a lock, timeout
+        # or OS error leaves HEAD where it was (2.9.3 review).
+        now = await _git(cwd, "rev-parse", "--verify", "-q", "HEAD")
+        if now is not None and now != head:
+            log.warning("auto-commit: HEAD moved under the commit; not updating it")
+            return None, "head_moved"
+        log.warning("auto-commit: git update-ref failed; leaving work uncommitted")
+        return None, "git_failed"
     # Bring the real index in line for exactly the committed paths, so they
     # read as clean; every other entry (the operator's staging) is untouched.
     await _git_io(cwd, "update-index", "-z", "--index-info", stdin=info)

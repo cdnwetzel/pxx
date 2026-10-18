@@ -93,6 +93,22 @@ pxx/
 
 ## Core contracts
 
+### Downstream consumer contract
+Other tools read pxx's outputs by name. `tests/test_consumer_contract.py` pins each surface, and each
+test names the consumer code that depends on it:
+- the run/edit/ask outcome trailer `(rounds= tokens= diff_lines= session=)`, which must stay last on the line;
+- the `[net: …]` / `[committed …]` summary tags;
+- the native backend's `prompt_rendered` audit fields;
+- the audit chain's file layout and hashing;
+- every `gate_decision` carrying a boolean `allowed`, except `transport_retry` / `fallback`;
+- the loop run directory (`task.json`, `outcome.json`, `events.jsonl`, `diff.patch`) and its run-intent agreement;
+- the Python API that consumers import;
+- the PreToolUse hook protocol. pxx passes its own environment to hooks and never sets `PXX_SCOPE` or
+  `PXX_SESSION_ID` itself.
+
+Changing any of these is deliberate: update the test, add a "downstream" note to the CHANGELOG, and
+coordinate with the consumer first.
+
 ### config.py
 ```python
 @dataclass(frozen=True)

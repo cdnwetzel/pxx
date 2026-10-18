@@ -5,6 +5,32 @@ preserved in git (tag `v1.3.3` and earlier).
 
 ## [Unreleased]
 
+## [2.9.2] — 2026-10-18
+
+### Fixed
+
+- **`PXX_SANDBOX_SHELL` is parsed strictly, as documented.** docs/CONFIG.md
+  promised that an unrecognized value is rejected because it switches a safety
+  gate, but the variable was read as `1`/`true`/`yes` only: `on`, or any typo,
+  silently left the shell sandbox **off**. It now accepts `1`/`true`/`yes`/`on`
+  and `0`/`false`/`no`/`off` and raises `ConfigError` on anything else, through
+  the same parser as `PXX_ALLOW_UNGATED_SHELL` and
+  `PXX_MEMORY_CAPTURE_SUCCESSES`. Behaviour change: a value that used to read
+  as off (`on` → now on; a typo → now an error).
+
+### Documentation
+
+- **docs/CONFIG.md documents every key and env var the loader accepts.**
+  Added `auto_commit`, `clarity_gate` and `delete_staging` to the keys table,
+  and `PXX_AUTO_COMMIT`, `PXX_NATIVE_TIMEOUT`, `PXX_REVIEW_TIMEOUT` and
+  `PXX_MEMORY_CAPTURE_SUCCESSES` to the environment section, plus the
+  unread-`PXX_*` warning and why there is no `PXX_RUN_INTENT`. A test now fails
+  when a TOML key, `[budgets]` key or consumed `PXX_*` variable is missing
+  from the reference.
+- **CONTRIBUTING.md documents the repo's git hooks** (`install-git-hooks.sh`,
+  `PXX_PRECOMMIT_SKIP`) and how CI arms the governance denylist
+  (`PXX_CONTENT_DENYLIST`).
+
 ## [2.9.1] — 2026-10-17
 
 ### Security

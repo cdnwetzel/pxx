@@ -1065,3 +1065,36 @@ def test_stable_overlay_non_settings_candidate_is_unchanged(tmp_path):
     ChannelManager(tmp_path).activate(Channel.STABLE, "c-prompt")
     settings = Settings(state_dir=tmp_path)
     assert apply_stable_overlay(settings, tmp_path) == settings
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"), [("on", True), ("1", True), ("YES", True), ("off", False), ("0", False)]
+)
+def test_sandbox_shell_env_tokens(tmp_path, monkeypatch, raw, expected):
+    # docs/CONFIG.md promised strict parsing for this safety switch; the code
+    # read only 1/true/yes, so `on` silently left the shell sandbox OFF.
+    monkeypatch.setenv("PXX_SANDBOX_SHELL", raw)
+    assert load_settings(cwd=tmp_path).sandbox_shell is expected
+
+
+def test_sandbox_shell_env_garbage_rejected(tmp_path, monkeypatch):
+    monkeypatch.setenv("PXX_SANDBOX_SHELL", "enabled")  # a typo must be loud, not "off"
+    with pytest.raises(ConfigError, match="PXX_SANDBOX_SHELL must be a boolean"):
+        load_settings(cwd=tmp_path)
+
+
+def test_config_reference_documents_every_key_and_env_var():
+    # docs/CONFIG.md had drifted: settings and env vars the loader accepts were
+    # missing from the reference. Every TOML key, [budgets] key and consumed
+    # PXX_* variable must appear in it (role lanes are documented by pattern).
+    from pathlib import Path
+
+    import pxx.config as cfg
+
+    doc = (Path(__file__).resolve().parent.parent / "docs" / "CONFIG.md").read_text()
+    keys = [k for k in cfg._KNOWN_KEYS | cfg._KNOWN_BUDGET_KEYS if f"`{k}`" not in doc]
+    sections = {"hooks": "[[hooks]]", "mcp_servers": "[[mcp_servers]]", "roles": "[roles."}
+    keys = [k for k in keys if sections.get(k, "\0") not in doc]
+    env = [e for e in cfg._CONSUMED_ENV - cfg._ROLE_ENV_KEYS if f"`{e}`" not in doc]
+    assert keys == [], f"undocumented config keys: {keys}"
+    assert env == [], f"undocumented env vars: {env}"

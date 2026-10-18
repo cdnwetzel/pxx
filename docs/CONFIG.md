@@ -25,12 +25,15 @@ Precedence (highest wins): CLI flags → `PXX_*` env vars → `./pxx.toml` or
 | `hook_denial` | `"abort"` \| `"refuse_tool"` | `"abort"` | what a `PreToolUse` denial does: end the run (default) or return `error: refused by policy: …` to the model and continue (see `[[hooks]]`) |
 | `scope_violation` | `"abort"` \| `"refuse_tool"` | `"abort"` | what an out-of-scope path does: end the run `OUT_OF_SCOPE` (default) or refuse the call back to the model and continue; user config only |
 | `shell_unguarded` | `"abort"` \| `"refuse_tool"` | `"refuse_tool"` | what `run_shell` does in `edit`/`auto` with **no** shell safeguard (hook, `sandbox_shell`, `allow_ungated_shell`): refuse the command back to the model and continue (default), or end the run `HOOKS_MISSING`; the command never runs either way; user config only (see `[[hooks]]`) |
+| `delete_staging` | path | `""` (tool disabled) | where `delete_file` moves a removed file instead of unlinking it, keeping its project-relative path under `<delete_staging>/<project dir name>/`; empty disables the tool (it tells the model to leave the file and say so); user config only, no env var or CLI flag — a repo must not choose where its own files are moved |
 | `safety_net` | bool | `true` | stash + `pxx-pre/<ts>` tag on edit-capable session starts (git repos) |
+| `auto_commit` | bool | `false` | commit the session's work after a `COMPLETED` outcome (also `--commit`, `PXX_AUTO_COMMIT`): pxx's own commit, limited to the session's changes and secrets-scanned; the `pxx-pre/<ts>` net tag still points at the pre-session HEAD, so `git reset --hard <tag>` undoes it. Repository hooks do not run on it. Nothing is committed when the changes cannot be measured, the repository's git configuration changed during the run, or a changed path carries a git `filter` attribute (e.g. LFS) — commit those by hand |
 | `bare` | bool | `false` | payload-only mode for `ask`/`plan`: single user message, no system prompt, no `tools` key, no tool schemas constructed — for contract-gated callers; everything else unchanged (see [bare-mode/](bare-mode/README.md)) |
 | `temperature` | float | unset | sampling temperature sent in the request payload, strict range [0.0, 2.0]; unset = key not sent, server default applies; deterministic generation surface for strict textual contracts |
 | `chat_template_kwargs` | table | unset | vLLM-style template switches sent in the request payload (e.g. `{ enable_thinking = false }` for Nemotron's no-reasoning mode); must be a JSON-serializable TOML table; unset = key not sent; generation only, no safety semantics |
 | `loop_review` | bool | `false` | per-box default for the `pxx loop` model-backed review gate (see below) |
 | `done_signal` | bool | `true` | in `pxx loop`, stop a coder session once its edit passes the objective gates (scope/diff/lint/tests) instead of running to the budget cap; set `false` for slow suites (`PXX_DONE_SIGNAL`) |
+| `clarity_gate` | bool | `true` | ambiguity gate: an underspecified task stops with a clarifying question before any backend round. Set `false` only for single-shot, contract-gated callers that validate their own artifacts (e.g. ACP's drill workers); it only skips the question, never widens a gate, so it is honoured from every config layer including repo-local. A disabled gate is recorded as a `gate_decision` event |
 | `memory_retrieval_limit` | int | `8` | how many hybrid-search hits session-start memory injection may include (positive int; `<= 0` is a `ConfigError`) |
 | `memory_capture_successes` | bool | `false` | opt-in: COMPLETED sessions write exactly one compact `session_outcome` exemplar to episodic memory (see below) |
 | `run_intent` | string | unset | declared run intent: `operational` / `probe` / `eval` / `drill`; unset = the run records `unknown` with no provenance; metadata-only (recorded in `task.json` + `session_start`, never consulted by any gate, budget, hook, route, or outcome); CLI: `--intent` on every session verb; provenance is pxx-assigned — a `run_intent_provenance` key is a `ConfigError` |
@@ -340,18 +343,31 @@ its tools as `mcp__<name>__<tool>`.
 
 `PXX_MODEL`, `PXX_PROVIDER`, `PXX_BASE_URL`, `PXX_API_KEY`, `PXX_PERMISSION`,
 `PXX_BACKEND` (`native`/`aider`/`auto`),
-`PXX_TEST_COMMAND`, `PXX_SANDBOX_SHELL`, `PXX_ALLOW_UNGATED_SHELL`
+`PXX_TEST_COMMAND`, `PXX_SANDBOX_SHELL`, `PXX_ALLOW_UNGATED_SHELL`,
+`PXX_MEMORY_CAPTURE_SUCCESSES`
 (`1`/`true`/`yes`/`on` or `0`/`false`/`no`/`off` — an unrecognized value is
-rejected, since it toggles a safety gate),
+rejected, since each switches a safety gate or a persistence surface),
+`PXX_AUTO_COMMIT` (`1`/`true`/`yes` — see `auto_commit`),
 `PXX_LOOP_REVIEW` (default the `pxx loop`
 review gate on for this box), `PXX_DONE_SIGNAL` (`0` to disable the `pxx loop`
 done-signal early-exit for a slow suite; default on),
 `PXX_MEMORY_ENABLED`, `PXX_MEMORY_DIR`,
 `PXX_SCOPE` (comma list), `PXX_SERVER_TOKEN` (auth for `pxx serve`),
 `PXX_GIT_TIMEOUT` (seconds; default 60 — the wall-clock bound on any single git
-subprocess, so a wedged git or a blocking git hook can't hang a run).
+subprocess, so a wedged git or a blocking git hook can't hang a run),
+`PXX_NATIVE_TIMEOUT` (seconds; default 300 — the native backend's per-round
+model request timeout; raise it on memory-constrained hardware, where a slow
+round otherwise surfaces as `MODEL_UNAVAILABLE`), `PXX_REVIEW_TIMEOUT`
+(seconds; default 120 — the reviewer's request timeout; when unset it falls
+back to `PXX_NATIVE_TIMEOUT`). A malformed or non-positive timeout logs a
+warning and uses the default.
 Reviewer role overlay (see `[roles.review]`): `PXX_REVIEW_MODEL`,
 `PXX_REVIEW_PROVIDER`, `PXX_REVIEW_BASE_URL`, `PXX_REVIEW_API_KEY`. The other
 role lanes (see `[roles.<name>]`) use `PXX_<ROLE>_{MODEL,PROVIDER,BASE_URL,API_KEY}`
 — e.g. `PXX_EMBED_MODEL`, `PXX_PLAN_BASE_URL`, `PXX_VERIFY_MODEL`.
 Legacy: `PXX_OLLAMA_BASE`, `PXX_OLLAMA_MODEL`.
+
+A `PXX_*` variable that is set but that pxx does not read (e.g. a typo such
+as `PXX_REVEIW_TIMEOUT`) logs a warning once per process; it never fails a
+run. There is deliberately no `PXX_RUN_INTENT`: run intent is declared per call
+(`--intent` or `run_intent`), never from the ambient environment.

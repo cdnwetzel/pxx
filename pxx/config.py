@@ -780,6 +780,25 @@ def _settings_from_dict(
     return replace(base, **kwargs)
 
 
+#: Env booleans that switch a safety gate or a persistence surface: a typo'd
+#: value is a ConfigError, never silently coerced. ``PXX_SANDBOX_SHELL`` was
+#: lenient -- `on` or a typo silently left the shell sandbox OFF, though
+#: docs/CONFIG.md promised rejection (2.9.2).
+_STRICT_ENV_BOOLS = frozenset({"sandbox_shell", "allow_ungated_shell", "memory_capture_successes"})
+
+
+def _strict_env_bool(env_key: str, value: str) -> bool:
+    """``1/true/yes/on`` -> True, ``0/false/no/off`` -> False, else ConfigError."""
+    low = value.strip().lower()
+    if low in ("1", "true", "yes", "on"):
+        return True
+    if low in ("0", "false", "no", "off"):
+        return False
+    raise ConfigError(
+        f"{env_key} must be a boolean (1/true/yes/on or 0/false/no/off), got " + repr(value)
+    )
+
+
 _ENV_MAP = {
     "PXX_MODEL": "model",
     "PXX_PROVIDER": "provider",
@@ -815,21 +834,8 @@ def _settings_from_env(base: Settings) -> Settings:
     for env_key, cfg_key in _ENV_MAP.items():
         value = os.environ.get(env_key)
         if value:
-            if cfg_key == "sandbox_shell":
-                data[cfg_key] = value.lower() in ("1", "true", "yes")
-            elif cfg_key == "allow_ungated_shell":
-                # Strict: this env var disables a safety gate, so a typo'd value
-                # is surfaced loudly (ConfigError) rather than silently coerced.
-                low = value.strip().lower()
-                if low in ("1", "true", "yes", "on"):
-                    data[cfg_key] = True
-                elif low in ("0", "false", "no", "off"):
-                    data[cfg_key] = False
-                else:
-                    raise ConfigError(
-                        f"{env_key} must be a boolean "
-                        "(1/true/yes/on or 0/false/no/off), got " + repr(value)
-                    )
+            if cfg_key in _STRICT_ENV_BOOLS:
+                data[cfg_key] = _strict_env_bool(env_key, value)
             elif cfg_key == "auto_commit":
                 data[cfg_key] = value.lower() in ("1", "true", "yes")
             elif cfg_key == "loop_review":
@@ -838,20 +844,6 @@ def _settings_from_env(base: Settings) -> Settings:
                 # Default-on: an explicit env value toggles it (e.g.
                 # PXX_DONE_SIGNAL=0 turns the early-exit off for this box).
                 data[cfg_key] = value.lower() in ("1", "true", "yes", "on")
-            elif cfg_key == "memory_capture_successes":
-                # Strict (enables a durable-memory persistence surface; a typo
-                # must be loud, not silently coerced). Env is a trusted source,
-                # so unlike repo-local TOML this IS honoured.
-                low = value.strip().lower()
-                if low in ("1", "true", "yes", "on"):
-                    data[cfg_key] = True
-                elif low in ("0", "false", "no", "off"):
-                    data[cfg_key] = False
-                else:
-                    raise ConfigError(
-                        f"{env_key} must be a boolean "
-                        "(1/true/yes/on or 0/false/no/off), got " + repr(value)
-                    )
             else:
                 data[cfg_key] = value
     if os.environ.get("PXX_MEMORY_ENABLED", "").lower() in ("0", "false", "no"):

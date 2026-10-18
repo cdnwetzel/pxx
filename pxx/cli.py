@@ -885,7 +885,13 @@ def _cmd_loop(args: argparse.Namespace, unknown: list[str]) -> int:
     if args.budget_rounds is not None:
         loop_kwargs["max_rounds"] = args.budget_rounds
     outcome = asyncio.run(run_loop(task, settings, **loop_kwargs))
-    print(f"[{outcome.code}] {outcome.summary}")
+    # Same trailer as run/edit/ask (2.9.3): consumers parse one format;
+    # `session=` is the loop record's id (its run directory's hex suffix).
+    print(
+        f"[{outcome.code}] {outcome.summary} "
+        f"(rounds={outcome.rounds} tokens={outcome.tokens} diff_lines={outcome.diff_lines} "
+        f"session={outcome.session_id})"
+    )
     return exit_code_for(outcome)
 
 

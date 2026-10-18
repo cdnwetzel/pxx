@@ -567,3 +567,61 @@ def test_a_pretooluse_hook_gets_tool_and_args_and_the_callers_env(tmp_path, monk
     monkeypatch.delenv("PXX_SCOPE")
     asyncio.run(runner.run_pre("read_file", {"path": "ok.txt"}))
     assert json.loads(out.read_text())["scope"] is None  # pxx never invents it
+
+
+def test_the_loop_outcome_line_carries_the_same_trailer(monkeypatch, tmp_path, capsys) -> None:
+    """2.9.3 (D-a): `pxx loop` prints the run/edit trailer too, so consumers
+    parse one format. psoperator harness/adapters.py:26 reads `diff_lines=`
+    from the loop line (it never had one); `session=` is the loop record's id,
+    the hex suffix of its `<ts>-loop-<hex>` run directory."""
+    import types
+
+    import pxx.cli as cli
+
+    for key in ("HOME", "XDG_CONFIG_HOME", "XDG_STATE_HOME"):
+        monkeypatch.setenv(key, str(tmp_path / key.lower()))
+    monkeypatch.chdir(tmp_path)
+
+    async def fake_run_loop(task, settings, **kwargs):
+        return RunOutcome(
+            code=TerminalCode.COMPLETED,
+            summary="looped [net: pxx-pre/T] [committed abcd1234]",
+            rounds=2,
+            tokens=9,
+            diff_lines=4,
+            session_id="0a1b2c3d",
+        )
+
+    monkeypatch.setitem(sys.modules, "pxx.loop", types.SimpleNamespace(run_loop=fake_run_loop))
+    cli.main(["loop", "-m", "x", "--backend", "native"])
+    line = [ln for ln in capsys.readouterr().out.splitlines() if ln.startswith("[")][-1]
+    m = re.search(
+        r"\(\s*rounds=\d+\s+tokens=\d+\s+diff_lines=(\d+)\s+session=([0-9a-f]+)\s*\)\s*$", line
+    )
+    assert m and m.group(1) == "4" and m.group(2) == "0a1b2c3d", line
+    assert re.findall(r"diff_lines=(\d+)", line)[-1] == "4"  # psoperator's read
+
+
+@needs_git
+def test_a_loop_outcome_session_id_names_its_run_directory(tmp_path) -> None:
+    """The loop's `session=` value is the hex suffix of its own run dir."""
+    from test_loop import Factory, ScriptedBackend, ScriptedReviewer, _init_repo, _settings
+
+    from pxx.loop import run_loop
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_repo(repo)
+    outcome = asyncio.run(
+        run_loop(
+            "task",
+            _settings(tmp_path),
+            cwd=repo,
+            backend_factory=Factory([ScriptedBackend(edits={"a.py": "x = 1\n"})]),
+            test_command="true",
+            reviewer=ScriptedReviewer(["VERDICT: APPROVE"]),
+        )
+    )
+    [loop_dir] = [d for d in (tmp_path / "state" / "runs").iterdir() if "-loop-" in d.name]
+    assert re.fullmatch(r"[0-9a-f]{8}", outcome.session_id)
+    assert loop_dir.name.endswith(f"-loop-{outcome.session_id}")

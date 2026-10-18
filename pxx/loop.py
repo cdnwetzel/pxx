@@ -565,7 +565,12 @@ async def run_loop(
     # (seen 2026-09-22 on a downstream orchestrator). This directory carries every parent-bus
     # event, the loop's outcome with its telemetry legs, and the whole-loop
     # diff written BEFORE the net resets the tree.
-    loop_run_id = f"{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}-loop-{uuid.uuid4().hex[:8]}"
+    # The loop's own id: the hex suffix of its run directory, and the
+    # `session=` its outcome line prints (2.9.3: one trailer format for run,
+    # edit, ask and loop -- a loop spans many round sessions, so it reports
+    # the id of the record that holds all of them).
+    loop_id = uuid.uuid4().hex[:8]
+    loop_run_id = f"{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}-loop-{loop_id}"
     loop_writer = RunDirWriter.open(settings.state_dir, loop_run_id)
 
     # Run-intent marker (metadata-only): the loop's own run record carries the
@@ -846,6 +851,7 @@ async def run_loop(
             findings=tuple(asdict(f) for f in finds),
             contributing_codes=tuple(dict.fromkeys(contributing)),
             findings_by_severity=by_severity,
+            session_id=loop_id,
             **legs,
         )
 

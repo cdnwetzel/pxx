@@ -87,6 +87,50 @@ milestone reviewer-verified by execution):
 - **Authority & legibility** — WORKFLOW.md machine contract hashed into
   agent identity, ambiguity gate, evidence-linked findings, audit sampling.
 
+## Open (post-2.9)
+
+Recorded 2026-10-18 from the 2.9.1 (#98) and 2.9.2 (#99) reviews. Items are
+struck through with their release when they ship. Review bar for these: the
+DESIGN.md "Threat model" section.
+
+- **Prompt / gate read-scope drift.** The native and aider prompts describe
+  the read scope differently from what the gates enforce. Every non-bare run
+  sends that prompt (bare mode sends only the task), so this changes the
+  default payload (pinned by `tests/test_bare.py`) and needs a measured before/after on the 8 GB, home
+  and work setups before it ships. Highest impact on this list.
+- **Failed session/loop runs and the files they created** *(decision
+  needed)*. On abort, the safety net resets tracked files, but files the run
+  created stay on disk and are reported (the K8 "report what landed"
+  contract). Goal rollback already removes them (2.9.1). Removing them for
+  session and loop too would change that contract (#98).
+- **`PXX_GIT_TIMEOUT` false-fires the "possible typo" warning.** It is read
+  by `gitenv.git_timeout` but missing from `config._CONSUMED_ENV`. One-line
+  fix; the CONFIG.md completeness test should also cover env vars read
+  outside `config.py` (#99).
+- **Completeness test: assert the role-lane env pattern**
+  (`PXX_<ROLE>_{MODEL,PROVIDER,BASE_URL,API_KEY}`) instead of excluding it
+  (#99).
+- **Operator commands on hardened git.** `pxx review`, `improve`, `eval` and
+  memory capture still run plain `git`; move them to `gitenv.INTERNAL_GIT`
+  with `--no-ext-diff --no-textconv` (#98).
+- **Git directories not named `.git`.** A separate git dir inside the work
+  tree, or a `.git` symlink into it, is not covered by the `.git` write
+  block (an operator-chosen layout; out of the threat model today) (#98).
+- **Older-git compatibility test.** It cannot detect a reintroduced
+  `--path-format` / `--show-scope`; reject those options at the git
+  boundary in a test (#98).
+- **Smaller reviewer findings** (#98):
+  - a created file git treats as binary costs 0 diff-budget lines and its
+    content never reaches review;
+  - `worktree.py` decodes names with `errors="replace"` instead of
+    `surrogateescape`, and its 15 s timeouts ignore `gitenv.git_timeout()`;
+  - the aider backend checks the diff budget before the scope fence, so a
+    budget-blown run skips the fence's cleanup;
+  - add a regression test for unmerged index entries in `scan_staged`
+    (already fail-closed).
+- **The safety-net log line echoes a secret preview** to the log (not to
+  events or audit). Pre-existing.
+
 ## Next (2.x hardening)
 
 **Sequencing (recorded 2026-08-08, post-2.4.0 / post-n8n battery R-035–R-040).**

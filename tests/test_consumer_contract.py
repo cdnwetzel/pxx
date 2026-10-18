@@ -292,6 +292,8 @@ def test_every_gate_decision_emit_is_checkable_and_carries_allowed() -> None:
     every literal naming a verdict gate has an `allowed` that is not a
     non-boolean constant. Payloads the sweep cannot read fail it."""
     offenders = []
+    emits: list[str] = []  # every emit("gate_decision", ...) site matched
+    gates_seen: set[str] = set()  # every verdict gate named in a literal
 
     class Visit(ast.NodeVisitor):
         def __init__(self, path):
@@ -310,6 +312,7 @@ def test_every_gate_decision_emit_is_checkable_and_carries_allowed() -> None:
         def visit_Call(self, node):
             args = node.args
             if args and isinstance(args[0], ast.Constant) and args[0].value == "gate_decision":
+                emits.append(self._where(node))
                 payload = args[1] if len(args) > 1 else None
                 if isinstance(payload, ast.Dict) and None in payload.keys:
                     offenders.append(
@@ -333,6 +336,8 @@ def test_every_gate_decision_emit_is_checkable_and_carries_allowed() -> None:
                 if isinstance(k, ast.Constant) and isinstance(k.value, str)
             }
             gate = keys.get("gate")
+            if isinstance(gate, ast.Constant) and isinstance(gate.value, str):
+                gates_seen.add(gate.value)
             if "gate" in keys and None in node.keys:
                 # `{**other, "gate": ...}`: the unpacked part is unreadable here.
                 offenders.append(f"{self._where(node)}: `**` unpacking in a gate payload")
@@ -350,6 +355,20 @@ def test_every_gate_decision_emit_is_checkable_and_carries_allowed() -> None:
     for path in sorted(_PXX.rglob("*.py")):
         Visit(path).visit(ast.parse(path.read_text(), filename=str(path)))
     assert offenders == [], offenders
+    # Not vacuous (CodeRabbit): the sweep must actually match the emit sites and
+    # the gates pxx is known to produce; a change in how emits are written that
+    # hid them from this scan would otherwise pass with zero offenders.
+    assert len(emits) >= 20, emits
+    for gate in (
+        "tests",
+        "review",
+        "scope_recheck",
+        "diff_complete",
+        "safety_net",
+        "scope",
+        "lint",
+    ):
+        assert gate in gates_seen, (gate, sorted(gates_seen))
 
 
 @needs_git

@@ -720,10 +720,10 @@ async def run_loop(
             }
         )
         if settings.auto_commit and outcome.code is TerminalCode.COMPLETED:
-            from .safety_net import commit_session_work
+            from .safety_net import commit_session_work_checked
             from .worktree import worktree_delta_checked
 
-            sha = None
+            sha, skipped = None, "unmeasurable"
             if worktree_start is None:
                 # Fail CLOSED: the delta is unknown; add -A would sweep
                 # baseline dirt. Skip the commit instead.
@@ -741,7 +741,7 @@ async def run_loop(
                         "measured — nothing committed"
                     )
                 else:
-                    sha = await commit_session_work(
+                    sha, skipped = await commit_session_work_checked(
                         root,
                         task_preview=task,
                         net_tag=net.tag if net else None,
@@ -751,6 +751,12 @@ async def run_loop(
             if sha:
                 await parent_bus.emit("observation", {"source": "auto_commit", "sha": sha})
                 outcome = replace(outcome, summary=f"{outcome.summary} [committed {sha[:8]}]")
+            else:
+                # Never a silent skip (2.9.3): see Session.
+                await parent_bus.emit(
+                    "observation", {"source": "auto_commit_skipped", "reason": skipped}
+                )
+                outcome = replace(outcome, summary=f"{outcome.summary} [not committed: {skipped}]")
         elif net is not None and outcome.code is not TerminalCode.COMPLETED:
             # F1: a run that did NOT complete kept nothing worth reviewing — give
             # the user their pre-run tree back (tracked-dirty AND untracked, and

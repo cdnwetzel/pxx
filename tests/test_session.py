@@ -765,3 +765,24 @@ def test_auto_commit_fails_closed_when_snapshot_unavailable(tmp_path, monkeypatc
     ).stdout
     assert "pxx:" not in head  # nothing committed
     assert (repo / ".env").read_text() == "SECRET=hunter2\n"  # dirt unswept
+
+
+def test_a_session_whose_commit_is_skipped_says_why(tmp_path):
+    # 2.9.3 (plan B2): --commit that commits nothing reports the reason in
+    # the summary and a metadata-only observation (it used to log only).
+    from dataclasses import replace as _replace
+
+    repo = tmp_path / "repo"
+    _git_repo(repo)
+    secret = "api_key = '" + "sk-" + "live-" + "0123456789abcdef" * 2 + "'\n"
+    backend = MockBackend(
+        [{"tool": "write_file", "args": {"path": "a.txt", "content": secret}}, {"done": "ok"}]
+    )
+    session = Session(_replace(_settings(tmp_path), auto_commit=True), backend, cwd=repo)
+    outcome = run(session.run("edit"))
+    assert outcome.code is TerminalCode.COMPLETED
+    assert "[not committed: secrets]" in outcome.summary
+    assert "[committed " not in outcome.summary
+    obs = [e.data for e in session.bus.history if e.kind == "observation"]
+    skipped = [d for d in obs if d.get("source") == "auto_commit_skipped"]
+    assert skipped == [{"source": "auto_commit_skipped", "reason": "secrets"}]  # metadata only

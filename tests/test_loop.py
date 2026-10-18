@@ -1959,3 +1959,31 @@ def test_the_recorded_patch_is_marked_for_every_kind_of_failure(
         monkeypatch.setattr(wt, "new_file_patch", no_patch)
     patch = asyncio.run(loop_mod._record_diff(repo, None, {}))
     assert loop_mod._INCOMPLETE_DIFF_MARK in patch.splitlines()
+
+
+@needs_git
+def test_a_loop_whose_commit_is_skipped_says_why(tmp_path: Path) -> None:
+    # 2.9.3 (plan B2): the loop reports why --commit committed nothing.
+    from dataclasses import replace
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_repo(repo, {"a.py": "x = 0\n"})
+    secret = "api_key = '" + "sk-" + "live-" + "0123456789abcdef" * 2 + "'\n"
+    bus = EventBus()
+    outcome = asyncio.run(
+        run_loop(
+            "task",
+            replace(_settings(tmp_path), auto_commit=True),
+            cwd=repo,
+            backend_factory=Factory([ScriptedBackend(edits={"a.py": secret})]),
+            test_command="true",
+            reviewer=ScriptedReviewer(["VERDICT: APPROVE"]),
+            bus=bus,
+        )
+    )
+    assert outcome.code is TerminalCode.COMPLETED
+    assert "[not committed: secrets]" in outcome.summary
+    assert [e.data for e in bus.history if e.data.get("source") == "auto_commit_skipped"] == [
+        {"source": "auto_commit_skipped", "reason": "secrets"}
+    ]

@@ -426,9 +426,9 @@ class Session:
             # Opt-in: commit the session's work after a COMPLETED outcome.
             # The net tag still points at pre-session HEAD — undo unchanged.
             if settings.auto_commit and outcome.code is TerminalCode.COMPLETED:
-                from .safety_net import commit_session_work
+                from .safety_net import commit_session_work_checked
 
-                sha = None
+                sha, skipped = None, "unmeasurable"
                 if worktree_start is None:
                     # Fail CLOSED: the delta is unknown, so add -A would sweep
                     # pre-existing dirt (.env, WIP notes). Skip the commit;
@@ -449,7 +449,7 @@ class Session:
                             "measured — nothing committed"
                         )
                     else:
-                        sha = await commit_session_work(
+                        sha, skipped = await commit_session_work_checked(
                             self.cwd,
                             task_preview=task,
                             net_tag=self._net.tag if self._net else None,
@@ -463,6 +463,18 @@ class Session:
                         session_id=self.session_id,
                     )
                     outcome = replace(outcome, summary=f"{outcome.summary} [committed {sha[:8]}]")
+                else:
+                    # Never a silent skip (2.9.3): the reason rides in the
+                    # summary and a metadata-only observation, for consumers
+                    # that asked for a commit and got none.
+                    await self.bus.emit(
+                        "observation",
+                        {"source": "auto_commit_skipped", "reason": skipped},
+                        session_id=self.session_id,
+                    )
+                    outcome = replace(
+                        outcome, summary=f"{outcome.summary} [not committed: {skipped}]"
+                    )
             await self.bus.emit(
                 "session_end",
                 {

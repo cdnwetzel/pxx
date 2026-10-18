@@ -284,16 +284,16 @@ async def git_control_state(cwd: Path) -> dict[str, str] | None:
     git's view of the tree -- what status, diff, a hash or a checkout reports
     -- may have been redirected during the run, so callers that gate on that
     view must fail closed. None when it cannot be read (fail closed too)."""
-    dirs = await _git_raw(
-        cwd, "rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir"
-    )
+    # No `--path-format=absolute` (git >= 2.31 only): the paths come back
+    # absolute or relative to `cwd` (the -C directory), resolved here.
+    dirs = await _git_raw(cwd, "rev-parse", "--git-dir", "--git-common-dir")
     lines = [line for line in (dirs or "").split("\n") if line]
     if len(lines) != 2:
         return None
     state: dict[str, str] = {}
     for label, base in zip(("git-dir", "common-dir"), lines, strict=True):
         for name in _CONTROL_FILES:
-            target = Path(base) / name
+            target = (cwd / base) / name
             try:
                 state[f"{label}/{name}"] = hashlib.sha256(target.read_bytes()).hexdigest()[:16]
             except FileNotFoundError:
@@ -304,7 +304,9 @@ async def git_control_state(cwd: Path) -> dict[str, str] | None:
     # worktree and command-line scopes, with every included file resolved --
     # an include target is not one of the files above. Hashed, never logged
     # (values can hold credentials).
-    config = await _git_raw(cwd, "config", "--list", "--show-origin", "--show-scope", "-z")
+    # --show-origin (git >= 2.8) names every included file; no --show-scope,
+    # which older git lacks -- the origin already distinguishes the scopes.
+    config = await _git_raw(cwd, "config", "--list", "--show-origin", "-z")
     if config is None:
         return None
     state["config/effective"] = hashlib.sha256(config.encode()).hexdigest()[:16]

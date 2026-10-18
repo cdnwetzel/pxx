@@ -265,3 +265,14 @@ def test_the_git_directory_is_never_writable(tmp_path, rel) -> None:
 @pytest.mark.parametrize("rel", [".github/workflows/ci.yml", ".gitignore", "a.git/x", "git/x"])
 def test_git_lookalike_paths_stay_writable(tmp_path, rel) -> None:
     assert ScopeGate(tmp_path).check_write(rel, PermissionMode.EDIT) == tmp_path.resolve() / rel
+
+
+def test_a_project_that_lives_under_a_git_directory_stays_writable(tmp_path) -> None:
+    # CodeRabbit (2.9.1, PR #98): the `.git` block matched components ABOVE
+    # the project root too, refusing every write in such a project.
+    root = tmp_path / ".git" / "worktrees-elsewhere" / "proj"
+    root.mkdir(parents=True)
+    gate = ScopeGate(root)
+    assert gate.check_write("a.py", PermissionMode.EDIT) == root.resolve() / "a.py"
+    with pytest.raises(ScopeViolation, match="git directory"):
+        gate.check_write(".git/config", PermissionMode.EDIT)

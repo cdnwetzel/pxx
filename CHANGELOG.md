@@ -78,7 +78,7 @@ preserved in git (tag `v1.3.3` and earlier).
   could show the scan different bytes. Now each session path is read once and
   hashed once (`git hash-object -w --stdin --path=…`: eol/ident conversions
   apply; a delta with any `filter`-attributed path, e.g. LFS, is not
-  auto-committed at all — see below), those blob SHAs are scanned (by SHA, replace refs ignored)
+  auto-committed at all — see the Security entry above), those blob SHAs are scanned (by SHA, replace refs ignored)
   and the commit is built from them in a temporary index with `commit-tree`,
   then `update-ref` (old HEAD checked). The operator's index is updated only
   for the committed paths. `scan_staged` (`pxx check`) likewise reads staged
@@ -193,7 +193,7 @@ preserved in git (tag `v1.3.3` and earlier).
   created was missing from the reviewer's diff and from the diff budget — for
   the native backend always, and for aider once it stopped committing. Files
   untracked before the loop started are not counted. If git cannot list them,
-  the round is blocked — see "Unmeasurable runs fail closed" below.
+  the round is blocked — see "Unmeasurable runs fail closed" above.
 - **`worktree_delta` sees paths that disappear.** A dirty file the run
   restored to HEAD, or a pre-existing untracked file it deleted, was missing
   from the delta (and from the session's mutation report). The delta now

@@ -153,7 +153,9 @@ async def tie_safety_net(cwd: Path, run_id: str) -> SafetyNet | None:
         head_ref=(head_ref or "").strip(),
         stash_sha=(stash_sha or "").strip() or None,
         head_tree=(head_tree or "").strip() or None,
-        control_state=await git_control_state(cwd),
+        # Unreadable at tie time is recorded as such, never as "unknown"
+        # (None): restore and commit then refuse (2.9.1 review).
+        control_state=await git_control_state(cwd) or {_UNREADABLE_CONTROL: ""},
     )
 
 
@@ -208,6 +210,11 @@ async def head_moved_since(cwd: Path, net: SafetyNet | None) -> str:
     return ""
 
 
+#: :attr:`SafetyNet.control_state` marker: the state could not be read when
+#: the net was tied, so no later state can be shown unchanged.
+_UNREADABLE_CONTROL = "<unreadable at tie>"
+
+
 async def git_state_changed_since(cwd: Path, control_start: dict[str, str] | None) -> str:
     """Why the repository's git control state no longer matches
     ``control_start`` ("" when it does, or when the baseline is unknown).
@@ -215,6 +222,8 @@ async def git_state_changed_since(cwd: Path, control_start: dict[str, str] | Non
     committed on a view of the tree that cannot be checked."""
     if control_start is None:
         return ""
+    if _UNREADABLE_CONTROL in control_start:
+        return "the repository's git configuration could not be read when the run started"
     from .worktree import git_control_changed, git_control_state
 
     now = await git_control_state(cwd)
@@ -297,6 +306,24 @@ async def _restore(cwd: Path, net: SafetyNet) -> tuple[bool, str]:
             where = (net.stash_sha or "")[:12] or net.stash_message
             return did, f"the pre-run changes are still stashed ({where}); git stash pop it"
     return did, ""
+
+
+async def _file_mode(cwd: Path, rel: str, st_mode: int, filemode: bool) -> str:
+    """The mode to commit a regular file with, as `git add` would choose it:
+    the owner execute bit (``S_IXUSR``) when ``core.fileMode`` is on; else the
+    mode already in the index (or HEAD) for an existing entry, 100644 for a
+    new one."""
+    if filemode:
+        return "100755" if st_mode & 0o100 else "100644"
+    for args in (
+        ("ls-files", "-s", "-z", "--", f":(literal){rel}"),
+        ("ls-tree", "-z", "--full-tree", "HEAD", "--", f":(literal){rel}"),
+    ):
+        entry = await _git_io(cwd, *args, raw=True)
+        mode = (entry or "").split(" ", 1)[0]
+        if mode in ("100644", "100755"):
+            return mode
+    return "100644"
 
 
 async def _filtered_paths(cwd: Path, names: list[str]) -> list[str] | None:
@@ -473,6 +500,10 @@ async def commit_session_work(
             else f"{len(filtered)} path(s) carry a git filter attribute",
         )
         return None
+    # git's own rule for the executable bit: with core.fileMode=false (WSL
+    # /mnt/c, FAT, some network mounts report 0o777) the worktree bits are
+    # ignored and the recorded mode is kept (2.9.1 review).
+    filemode = (await _git(cwd, "config", "--type=bool", "core.fileMode") or "true") != "false"
     entries: list[tuple[str, str, str]] = []  # (mode, sha, path); mode "0" = delete
     for rel in sorted(names):
         target = cwd / rel
@@ -492,7 +523,7 @@ async def commit_session_work(
             except OSError:
                 return None
             sha = await _git_io(cwd, "hash-object", "-w", "--stdin", f"--path={rel}", stdin=data)
-            mode = "100755" if target.stat().st_mode & 0o111 else "100644"
+            mode = await _file_mode(cwd, rel, target.stat().st_mode, filemode)
         elif not target.exists():
             tracked = head and await _git_io(
                 cwd,

@@ -124,7 +124,10 @@ class ScopeGate:
         # sees (filter drivers, replace refs) -- and none of it shows in
         # `git status` (2.9.1 review). Case-folded: `.GIT/config` is the same
         # file on a case-insensitive filesystem.
-        if any(part.casefold() == ".git" for part in canon.parts):
+        # Only BELOW the allowed root it matched: a project (or a trusted
+        # root) that itself lives under a `.git` directory stays writable.
+        base = next(b for b in self._allowed_roots() if canon == b or b in canon.parents)
+        if any(part.casefold() == ".git" for part in canon.relative_to(base).parts):
             raise ScopeViolation(f"the git directory is never writable: {path}")
         return canon
 

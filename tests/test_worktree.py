@@ -377,3 +377,25 @@ def test_no_internal_diff_runs_a_textconv_or_external_diff_driver(tmp_path: Path
     assert not marker.exists()
     subprocess.run([GIT, "diff"], cwd=repo, capture_output=True, check=False)
     assert marker.exists()  # the planted driver is live: the check above is real
+
+
+@needs_git
+def test_git_control_state_reads_a_linked_worktree_and_a_subdirectory(tmp_path: Path) -> None:
+    # CodeRabbit (2.9.1, PR #98): no `rev-parse --path-format` (git >= 2.31);
+    # relative git-dir/common-dir output is resolved against cwd instead.
+    from pxx.worktree import git_control_changed, git_control_state
+
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    (repo / "sub").mkdir()
+    linked = tmp_path / "linked"
+    _git(repo, "worktree", "add", "-q", "--detach", str(linked))
+    exclude = repo / ".git" / "info" / "exclude"
+    exclude.parent.mkdir(exist_ok=True)
+    # repo root: git prints a RELATIVE `.git`, which must resolve against cwd
+    # (not the process's own directory); a file under it must be the one read.
+    for cwd in (repo, repo / "sub", linked):
+        start = run(git_control_state(cwd))
+        assert start is not None
+        exclude.write_text(f"marker-{cwd.name}\n")
+        assert "common-dir/info/exclude" in git_control_changed(start, run(git_control_state(cwd)))

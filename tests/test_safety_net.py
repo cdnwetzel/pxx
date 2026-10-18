@@ -675,3 +675,42 @@ def test_a_stash_that_cannot_pop_is_never_reported_restored(tmp_path: Path) -> N
     assert [e.get("restored") for e in events] == [False]
     assert events[0]["reason"] == "stash_not_restored"
     assert _git(repo, "stash", "list")  # the operator's work is still there
+
+
+@needs_git
+def test_commit_keeps_the_recorded_mode_when_filemode_is_off(tmp_path: Path) -> None:
+    # CodeRabbit (2.9.1, PR #98): with core.fileMode=false (WSL /mnt/c, FAT)
+    # files report 0o777, and every committed file became 100755.
+    import os as _os
+
+    repo = tmp_path / "repo"
+    _init_repo(repo, files={"a.py": "x = 1\n"})
+    _git(repo, "config", "core.fileMode", "false")
+    (repo / "a.py").write_text("x = 2\n")
+    _os.chmod(repo / "a.py", 0o777)
+    sha = run(commit_session_work(repo, task_preview="t", net_tag=None, only={"a.py"}))
+    assert sha
+    assert _git(repo, "ls-tree", "HEAD", "a.py").split()[0] == "100644"
+
+
+@needs_git
+def test_a_control_state_unreadable_at_tie_blocks_the_restore(tmp_path, monkeypatch) -> None:
+    # CodeRabbit (2.9.1, PR #98, Major): an unreadable state at tie time was
+    # stored as None ("unknown"), so restore never checked it -- fail open.
+    import pxx.worktree as wt
+    from pxx.safety_net import restore_blocker, restore_safety_net
+
+    repo = tmp_path / "repo"
+    _init_repo(repo, files={"a.py": "x = 1\n"})
+
+    async def unreadable(cwd):
+        return None
+
+    monkeypatch.setattr(wt, "git_control_state", unreadable)
+    net = run(tie_safety_net(repo, "run-unreadable"))
+    monkeypatch.undo()
+    (repo / "a.py").write_text("x = 2\n")
+    reason, detail = run(restore_blocker(repo, net))
+    assert reason == "git_state_changed" and "could not be read" in detail
+    assert run(restore_safety_net(repo, net)) is False
+    assert (repo / "a.py").read_text() == "x = 2\n"

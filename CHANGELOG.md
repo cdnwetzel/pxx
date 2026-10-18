@@ -5,6 +5,8 @@ preserved in git (tag `v1.3.3` and earlier).
 
 ## [Unreleased]
 
+## [2.9.1] — 2026-10-17
+
 ### Security
 
 - **Git state the run can change no longer steers pxx's own git.** Filter,

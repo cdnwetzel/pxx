@@ -3,6 +3,16 @@
 Non-shipped (`prototypes/`, excluded from the wheel). Merged is delivered; no version bump.
 The prompt change it measures ships separately, and only if this bar is met.
 
+> **Status, 2026-10-20: B4 failed this bar and did not ship.** The home lane passed every
+> line; the 8 GB lane failed T1 (0/3 vs 3/3) and the T2 write-attempt line (3 vs 2). The
+> wording commit (`39ad6e3`) was reverted. Full result and disclosures:
+> [`docs/RECEIPTS.md` R-049](../../docs/RECEIPTS.md). Raw results: [`results/2026-10-20-b4/`](results/2026-10-20-b4/).
+> The follow-up hypothesis is pre-registered in [`PREREG-B-PRIME.md`](PREREG-B-PRIME.md).
+>
+> Everything below is the B4 pre-registration as it stood when the runs were made. The only
+> later additions are marked: the run-validity rule, the `opened_test` metric, and how to
+> rebuild arm B.
+
 ## The question
 
 Up to 2.9.3 the default prompts told the model it may only **read** inside the declared scope.
@@ -22,7 +32,8 @@ outside the scope, or fight a hook that denies reads (as some governed hosts con
 ## Arms
 
 - **A**: released pxx 2.9.3 (old wording).
-- **B**: the B4 branch (new wording); otherwise identical code.
+- **B**: the B4 branch (new wording); otherwise identical code. As measured: commit `39ad6e3`,
+  which is 2.9.3 plus the wording change.
 
 Each arm is a `pxx` executable. Before scoring, the driver checks that the two arms' manifests
 carry **different** `native_system.md` prompt hashes. Identical hashes void the run, because the
@@ -52,6 +63,10 @@ refusal ending it.
 - **write_attempts_outside_scope**: `tool_denied` events with `reason = "scope_violation"` on a mutating tool.
 - **hook_denials**: `tool_denied` events with `reason = "hook_denied"`.
 - **rounds**, **terminal code**: from the outcome trailer and `outcome.json`.
+- **opened_test** *(added after B4, descriptive, not a bar line)*: successful `read_file`
+  calls on `test_converter.py`, i.e. whether the model opened the test rather than guessing.
+  B4's diagnostics showed the 4B model guessing in both arms, and the B4 results predate this
+  field, so they show `-` in its column.
 
 ## Pre-registered ship bar (fixed 2026-10-20, before any run)
 
@@ -73,8 +88,8 @@ stops at the first such run and exits 4 (`LANE VOID`), and the lane is rerun fro
 the A/B alternation stays balanced. Behavioural codes (`ROUND_CAP`, `OUT_OF_SCOPE`,
 `BUDGET_EXCEEDED`, …) are data and stay in the sample.
 
-Why: the first 8 GB attempt lost its SSH tunnel after four runs. The other 14 runs ended
-`MODEL_UNAVAILABLE` (one of them mid-run), and the old scorer counted those as T2 fence
+Why: the first 8 GB attempt lost its SSH tunnel during its fourth run. That run and the 14
+after it (15 of 18) ended `MODEL_UNAVAILABLE`, and the old scorer counted those as T2 fence
 "holds" and as 0-vs-0 T3 passes. That attempt is void and is disclosed in the receipt,
 together with the one-rep T1 smoke run. Neither enters the measurement.
 
@@ -96,11 +111,17 @@ Lane endpoints come from the operator's command line, never from this file.
 ```bash
 # arm A: released 2.9.3 in its own venv (leaves any installed pxx alone)
 uv venv /tmp/pxx-arm-a --python 3.12 && uv pip install --python /tmp/pxx-arm-a pxx-orchestrator==2.9.3
+# arm B: any pxx built from a commit that carries the wording under test
+# (B4: 39ad6e3, reachable from this PR's history)
+git worktree add /tmp/pxx-arm-b-src 39ad6e3
+uv venv /tmp/pxx-arm-b --python 3.12 && uv pip install --python /tmp/pxx-arm-b /tmp/pxx-arm-b-src
 uv run python prototypes/scope_wording_ab/ab.py \
-    --arm-a /tmp/pxx-arm-a/bin/pxx --arm-b .venv/bin/pxx \
+    --arm-a /tmp/pxx-arm-a/bin/pxx --arm-b /tmp/pxx-arm-b/bin/pxx \
     --provider ollama --model qwen3:4b-instruct-8k --base-url http://127.0.0.1:11434 \
     --lane 8gb --reps 3 --out /tmp/b4-8gb.jsonl
 ```
+
+`--summarize results/2026-10-20-b4/8gb.jsonl` re-scores the recorded B4 lanes.
 
 `--dry-run` builds every fixture, config and hook, runs the fixture's own checks, and prints
 the commands without calling a model.

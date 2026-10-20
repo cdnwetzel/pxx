@@ -83,6 +83,12 @@ TASKS = {
     "T3": {"scope": "converter.py", "message": T1_TASK, "hook": True},
 }
 
+# Terminal codes that mean the run never measured the model (endpoint gone,
+# harness misconfigured, run cancelled). Behavioural codes -- ROUND_CAP,
+# OUT_OF_SCOPE, BUDGET_EXCEEDED -- are data and stay in the sample.
+INFRA_CODES = frozenset(
+    {"MODEL_UNAVAILABLE", "CONFIGURATION_INVALID", "HOOKS_MISSING", "INTERRUPTED"}
+)
 READ_TOOLS = ("read_file", "search_files")
 WRITE_TOOLS = ("write_file", "edit_file", "delete_file")
 TRAILER = re.compile(r"\(rounds=(\d+) tokens=(\d+) diff_lines=(\d+) session=(\S+)\)\s*$", re.M)
@@ -322,22 +328,54 @@ def summarize(results: list[RunResult]) -> bool:
     return passed
 
 
+def verdict(results: list[RunResult]) -> int:
+    """0 = bar met, 1 = bar failed, 3 = arms void, 4 = lane void (a run never
+    reached the model). Void outcomes are not measurements: rerun from scratch."""
+    infra = [r for r in results if r.terminal_code in INFRA_CODES]
+    if infra:
+        first = infra[0]
+        print(
+            f"LANE VOID: {len(infra)}/{len(results)} runs never reached the model "
+            f"(first: {first.task} {first.arm} rep{first.rep} {first.terminal_code}); "
+            "rerun the lane from scratch",
+            file=sys.stderr,
+        )
+        return 4
+    hashes = {name: {r.prompt_hash for r in results if r.arm == name} for name in ("A", "B")}
+    if any(len(h) != 1 or "" in h for h in hashes.values()) or hashes["A"] == hashes["B"]:
+        print(f"ARMS VOID: native_system.md prompt hashes {hashes}", file=sys.stderr)
+        return 3
+    return 0 if summarize(results) else 1
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    p.add_argument("--arm-a", required=True, help="pxx executable with the old wording")
-    p.add_argument("--arm-b", required=True, help="pxx executable with the new wording")
-    p.add_argument("--provider", required=True)
-    p.add_argument("--model", required=True)
-    p.add_argument("--base-url", required=True)
-    p.add_argument("--lane", required=True, help="label recorded with every result")
+    p.add_argument("--summarize", type=Path, help="re-score a saved JSONL file and exit")
+    p.add_argument("--arm-a", help="pxx executable with the old wording")
+    p.add_argument("--arm-b", help="pxx executable with the new wording")
+    p.add_argument("--provider")
+    p.add_argument("--model")
+    p.add_argument("--base-url")
+    p.add_argument("--lane", help="label recorded with every result")
     p.add_argument("--reps", type=int, default=3)
     p.add_argument("--tasks", default="T1,T2,T3")
     p.add_argument("--rounds", type=int, default=12)
     p.add_argument("--seconds", type=int, default=600)
     p.add_argument("--python", default=sys.executable, help="interpreter with pytest, for checks")
-    p.add_argument("--out", type=Path, required=True, help="JSONL results (appended)")
+    p.add_argument("--out", type=Path, help="JSONL results (appended)")
     p.add_argument("--dry-run", action="store_true")
     args = p.parse_args()
+
+    if args.summarize:
+        lines = args.summarize.read_text().splitlines()
+        return verdict([RunResult(**json.loads(line)) for line in lines if line])
+    missing = [
+        f"--{k.replace('_', '-')}"
+        for k in ("arm_a", "arm_b", "provider", "model", "base_url", "lane", "out")
+        if getattr(args, k) is None
+    ]
+    if missing:
+        p.error(f"required unless --summarize: {', '.join(missing)}")
 
     check_fixture(args.python)
     # Runs execute inside each temp repo, so a relative binary path must be
@@ -355,15 +393,12 @@ def main() -> int:
                         fh.write(json.dumps(asdict(r)) + "\n")
                     print(f"{task} {name} rep{rep}: pass={r.passed} code={r.terminal_code} "
                           f"rounds={r.rounds} {r.seconds}s", flush=True)  # fmt: skip
+                    if r.terminal_code in INFRA_CODES:
+                        return verdict(results)  # stop: further runs would only burn time
     if args.dry_run:
         print("dry run: fixture check passed; no model was called")
         return 0
-
-    hashes = {name: {r.prompt_hash for r in results if r.arm == name} for name in binaries}
-    if any(len(h) != 1 or "" in h for h in hashes.values()) or hashes["A"] == hashes["B"]:
-        print(f"ARMS VOID: native_system.md prompt hashes {hashes}", file=sys.stderr)
-        return 3
-    return 0 if summarize(results) else 1
+    return verdict(results)
 
 
 if __name__ == "__main__":

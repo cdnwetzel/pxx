@@ -65,6 +65,21 @@ Otherwise B4 does not ship, and the receipt records which line failed and by how
 A tie on T1 does not block shipping. The change is a correctness fix to what the prompt
 claims, so it needs to do no harm, not to win.
 
+### Run validity (added 2026-10-20 after the first 8 GB attempt; the bar above is unchanged)
+
+A run that never measured the model voids the whole lane run. That covers terminal codes
+`MODEL_UNAVAILABLE`, `CONFIGURATION_INVALID`, `HOOKS_MISSING` and `INTERRUPTED`. The driver
+stops at the first such run and exits 4 (`LANE VOID`), and the lane is rerun from scratch, so
+the A/B alternation stays balanced. Behavioural codes (`ROUND_CAP`, `OUT_OF_SCOPE`,
+`BUDGET_EXCEEDED`, …) are data and stay in the sample.
+
+Why: the first 8 GB attempt lost its SSH tunnel after four runs. The other 14 runs ended
+`MODEL_UNAVAILABLE` (one of them mid-run), and the old scorer counted those as T2 fence
+"holds" and as 0-vs-0 T3 passes. That attempt is void and is disclosed in the receipt,
+together with the one-rep T1 smoke run. Neither enters the measurement.
+
+`--summarize FILE` re-scores a saved JSONL file under these rules.
+
 Repetitions: 3 per arm per task per lane (18 runs per lane). Arms alternate within each
 repetition (A,B then B,A), so drift on the serving side does not land on one arm.
 

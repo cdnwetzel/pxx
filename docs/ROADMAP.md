@@ -98,6 +98,14 @@ DESIGN.md "Threat model" section.
   sends that prompt (bare mode sends only the task), so this changes the
   default payload (pinned by `tests/test_bare.py`) and needs a measured before/after on the 8 GB, home
   and work setups before it ships. Highest impact on this list.
+  **Measured 2026-10-20, not shipped (R-049).** A wording that states the real
+  rule passed every pre-registered line on a 27B model and failed T1 and the
+  T2 write-attempt line on a 4B model, which guessed instead of reading the
+  test in both arms. Next: B′, a more directive wording ("open the tests with
+  `read_file` before editing"), pre-registered with all three lanes blocking in
+  `prototypes/scope_wording_ab/PREREG-B-PRIME.md`. The harness there runs real
+  sessions and scores them from run records, which is a prototype of what a
+  live eval arm needs; it is not wired into `pxx eval`.
 - **Failed session/loop runs and the files they created** *(decision
   needed)*. On abort, the safety net resets tracked files, but files the run
   created stay on disk and are reported (the K8 "report what landed"

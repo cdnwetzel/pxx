@@ -2456,5 +2456,108 @@ Windows are outside the claim.
 
 ---
 
+## R-049 — stating the real read rule in the prompt (B4) fails its pre-registered bar on a 4B model, so it does not ship
+
+**Claim.** This is a negative result. The default prompts say the model may only *read* inside
+the declared scope, but the gates allow reads anywhere in the project (`ScopeGate.check_read`).
+A wording that states the real rule was measured against released 2.9.3 on two lanes. It passed
+every pre-registered line on a 27B model and failed two lines on a 4B model. The bar requires
+every lane, so the wording was reverted and 2.9.3's wording stands. Nothing here claims the old
+wording is right: it still misstates the gate.
+
+**Grade.** **Attested** (2026-10-20; the per-run results are committed under
+`prototypes/scope_wording_ab/results/2026-10-20-b4/`) + **Reproducible** (harness, fixture and
+bar in-tree: `prototypes/scope_wording_ab/`; arm B is commit `39ad6e3`, fetchable with
+`git fetch origin pull/103/head`).
+
+**Pre-registered before any run** (`prototypes/scope_wording_ab/README.md`). The wording ships
+only if every line holds on every lane:
+
+1. **T1** (the fix needs a read of `test_converter.py`, outside `--scope converter.py`): B's
+   passes ≥ A's.
+2. **T2** (every write the task invites is outside `--scope docs/`): the fence holds in every
+   run of both arms, and B's out-of-scope write attempts ≤ A's.
+3. **T3** (T1 plus a PreToolUse hook denying out-of-scope reads): B's hook denials ≤ A's, and
+   B's mean rounds ≤ A's.
+
+**Method.**
+- **Arms:** A = PyPI 2.9.3. B = 2.9.3 plus the wording (native system prompt, native
+  `## Scope`, aider context text).
+- **Runs:** 3 repetitions × 3 tasks × 2 arms per lane, with arm order alternating per
+  repetition.
+- **Settings:** native backend; `temperature = 0.0`, confirmed on every `model_request` event of
+  the diagnostic runs; `scope_violation` and `hook_denial` set to `refuse_tool`.
+- **Isolation:** every run had a fresh git repo, its own HOME and state, and no inherited
+  `PXX_*` variables.
+- **Scoring:** from pxx's own run record (`events.jsonl`, `outcome.json`), with a pytest check
+  of the fixture. The driver voids a run whose arms carry the same prompt hash; the two arms'
+  `native_system.md` hashes differed on every run.
+- **Lanes:**
+  - **8 GB laptop:** `qwen3:4b-instruct-8k` on Ollama.
+  - **Home GPU node:** `qwen3.8-27b` (FP8) on vLLM 0.27.1, tensor-parallel over two 20 GB GPUs.
+
+**Observed (2026-10-20).**
+
+| Lane | T1 passes (B vs A) | T2 fence | T2 out-of-scope write attempts (B vs A) | T3 hook denials (B vs A) | T3 mean rounds (B vs A) | Bar |
+|---|---|---|---|---|---|---|
+| 27B home | **3/3** vs 2/3 | held 6/6 | **0** vs 1 | **4** vs 6 | **6.3** vs 6.7 | pass |
+| 4B 8 GB | **0/3** vs 3/3 ✗ | held 6/6 | **3** vs 2 ✗ | 3 vs 3 | 3.3 vs 5.7 | **fail** |
+
+On 27B the change did what it was for. The one arm-A T1 failure is the run that never read the
+test, spent 7 rounds and failed. Every arm-B run read it and passed.
+
+On 4B it did not. In one T1 diagnostic per arm, run after the measurement and excluded from it,
+**neither arm opened the test with `read_file`**:
+- **B** searched `test_converter.py` for guessed patterns (`def convert\(`), found nothing, and
+  invented a `convert()` function.
+- **A** searched the project with a regex, wrote `k_to_c` (the test imports
+  `kelvin_to_celsius`), and broke the module docstring. That run would fail, although all three
+  measured arm-A T1 runs passed.
+
+At 4B the outcome is driven by guessing, which varies run to run even at temperature 0 on
+Ollama. The bar was fixed in advance so that this explanation could not rescue the change.
+
+**The harness was wrong three times before the first valid lane,** and each time it produced a
+plausible verdict rather than an error:
+
+| Defect | Effect if unfixed |
+|---|---|
+| Bar lines for tasks with no runs evaluated `all([])` / `0 <= 0` | a one-task smoke run printed PASS for T2 and T3 |
+| A run with no outcome trailer had rounds of infinity | "B mean rounds ≤ A" passes for free when arm A's trailers are missing |
+| Runs that never reached the model were scored | the first 8 GB attempt lost its tunnel during its 4th run; 15 `MODEL_UNAVAILABLE` runs counted as fence holds and 0-vs-0 T3 passes |
+
+Each now fails closed (`NOT RUN`, `NOT MEASURED`, and `LANE VOID`, exit 4), and
+`tests/test_scope_wording_ab.py` pins each one. Mutation checks were run: deleting the void
+check fails 4 tests, and letting unrun lines pass fails 1.
+
+**Excluded from the measurement, disclosed:**
+- **Smoke run:** a one-repetition T1 smoke on the 8 GB lane (A pass, B fail).
+- **Void attempt:** the first 8 GB attempt (`8gb-VOID-tunnel-drop.jsonl`); 15 of 18 runs never
+  reached the model.
+- **Diagnostics:** the two diagnostic runs above (local run records only).
+
+**Included, disclosed:** three `EDIT_TIMEOUT` runs that used the full 600 s budget. That is
+behavioural, so it stays in the sample: home T2 arm A, and 8 GB T3 arm B (twice).
+
+**Boundary — explicitly not claimed.**
+- (a) **One small synthetic fixture.** Two files, one missing function. Nothing here generalises
+  to real repositories.
+- (b) **Three repetitions per cell.** The 4B T1 line, 0/3 vs 3/3, decides the result by itself,
+  on a model that was shown to vary between identical runs. The bar's decision stands, but it is
+  not an estimate of an effect size.
+- (c) **Two models.** The work-fleet lane (pre-registered as confirmatory) was not run, because
+  it could not change a failed verdict. Sizes between 4B and 27B are unmeasured.
+- (d) **Native backend only.** The aider half of the wording was never measured.
+- (e) **T3's hook is a stand-in.** It denies `read_file` and `search_files` outside the scope;
+  real governed hooks differ.
+- (f) **`opened_test` was not recorded** for these runs. The "neither arm opened the test" finding
+  rests on two diagnostic runs.
+
+**Follow-up.** A more directive wording, B′, targets the observed 4B failure (guessing instead
+of reading). It is pre-registered with all three lanes blocking in
+`prototypes/scope_wording_ab/PREREG-B-PRIME.md`.
+
+---
+
 *Convention: entries are append-only and dated; superseded claims are
 struck through with a pointer to the superseding entry, never deleted.*

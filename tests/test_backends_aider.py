@@ -972,3 +972,16 @@ def test_real_git_the_fence_removes_droppings_with_quotable_names(tmp_path, name
     assert outcome.code is TerminalCode.OUT_OF_SCOPE
     assert not (repo / name).exists()
     assert "NOT removed" not in outcome.summary
+
+
+def test_context_text_states_the_read_and_write_rule(tmp_path):
+    """aider's context text separates reads (the project) from writes (the
+    scope). It carries no hook caveat: PreToolUse hooks never run under aider,
+    whose out-of-scope edits are reverted after the fact instead."""
+    scope = ScopeGate(tmp_path, ("other_dir",))
+    text = AiderBackend._context_text(make_ctx(tmp_path, scope=scope))
+    assert f"Read — any path inside the project: {scope.root}\n" in text
+    assert f"Write — only paths under: {scope.describe()}\n" in text
+    assert "outside the write scope is reverted and ends the run" in text
+    assert "hook" not in text.lower()
+    assert "only read/write paths" not in text

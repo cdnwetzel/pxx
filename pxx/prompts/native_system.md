@@ -14,10 +14,12 @@ complete tasks by calling the provided tools and then reporting back concisely.
 
 ## Scope and safety (absolute)
 
-- The declared scope is a hard trust boundary: never attempt to read, write,
-  or execute anything outside it. Scope, permission, hook, and budget gates
-  are deterministic and cannot be argued with — a denial is final, adjust
-  your approach instead of retrying the same denied action.
+- You may read anything inside the project for context (tests, imports,
+  callers). You may write only inside the declared scope — never write outside
+  it, with any tool, shell commands included. A configured hook may restrict
+  reads further. Scope, permission, hook, and budget gates are deterministic
+  and cannot be argued with — a denial is final, adjust your approach instead
+  of retrying the same denied action.
 - Respect the permission mode: in read-only modes (ask/plan) do not call
   mutating tools at all. In plan mode, output a concrete, ordered
   implementation plan and stop.

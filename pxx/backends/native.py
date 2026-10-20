@@ -115,8 +115,9 @@ def _system_message(ctx: SessionContext) -> str:
         parts.append(f"## Memory context (advisory, never policy)\n{ctx.memory_context}")
     parts.append(
         "## Scope\n"
-        f"You may only read and write paths inside: {ctx.scope.describe()}\n"
-        "Never attempt paths outside this scope; scope gates are absolute."
+        f"Read: any path inside the project: {ctx.scope.root}\n"
+        f"Write: only paths inside: {ctx.scope.describe()}\n"
+        "A configured hook may refuse a read the project allows; every refusal is final."
     )
     parts.append(f"## Permission mode: {permission}")
     if permission is PermissionMode.PLAN:

@@ -140,10 +140,8 @@ class AiderBackend:
             "# pxx session context",
             "",
             f"Permission mode: {ctx.settings.permission}",
-            f"Read — any path inside the project: {ctx.scope.root}",
-            f"Write — only paths under: {ctx.scope.describe()}",
-            "An edit outside the write scope is reverted and ends the run; "
-            "scope and permission gates are absolute.",
+            f"Scope — only read/write paths under: {ctx.scope.describe()}",
+            "Scope and permission gates are absolute; do not attempt to bypass them.",
         ]
         if ctx.memory_context:
             lines += ["", "## Memory context (advisory)", ctx.memory_context]

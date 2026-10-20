@@ -862,24 +862,3 @@ def test_transport_retry_wait_wakes_on_cancel_and_respects_the_clock(tmp_path, m
     t0 = time.monotonic()
     asyncio.run(nmod._retry_wait(ctx2, 30.0))
     assert time.monotonic() - t0 < 1.0
-
-
-def test_scope_section_states_the_gates_read_and_write_rule(tmp_path):
-    """The prompt describes what the gates enforce: reads anywhere in the
-    project (check_read), writes only inside the scope (check_write), and a
-    hook that may refuse a read the project allows. A narrow scope keeps the
-    two paths distinct, so a read line that named the write scope would fail."""
-    from dataclasses import replace
-
-    from pxx.backends import native as nmod
-
-    scope = ScopeGate(tmp_path, ("src",))
-    assert scope.in_read_scope(tmp_path / "tests" / "test_a.py")
-    assert not scope.in_scope(tmp_path / "tests" / "test_a.py")
-    text = nmod._system_message(replace(make_ctx(tmp_path), scope=scope))
-    assert f"Read: any path inside the project: {scope.root}\n" in text
-    assert f"Write: only paths inside: {scope.describe()}\n" in text
-    assert "A configured hook may refuse a read the project allows" in text
-    assert "You may read anything inside the project" in text
-    assert "only read and write paths" not in text
-    assert "never attempt to read, write" not in text

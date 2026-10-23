@@ -1,10 +1,12 @@
 # B′ pre-registration: a directive read instruction for small models
 
-**Status: DRAFT, revision 3, 2026-10-23.** It becomes binding when the owner approves it, before
-any B′ run. After that, nothing below changes for this experiment.
+**Status: APPROVED by the owner, revision 4, 2026-10-23. Binding.** Nothing below changes for
+this experiment. No B′ run has been made. Approval does not start the runs: the harness work
+listed below must be built and reviewed first.
 
 Revision 2 answered an independent review (Codex and Kimi, 2026-10-20) of revision 1, and
-revision 3 answers their review of revision 2. Revision 1's
+revision 3 answered their review of revision 2. Revision 4 adds the lane order and the stop
+rule, and is the approved text. Revision 1's
 rounds line rewarded timeouts, its T3 hook also unblocked the shell, its fence checked one file,
 its rerun rules were discretionary, its time estimates were about half the real figures, and it
 called a bar that cannot detect a moderate harm "no harm". What changed is listed at the end.
@@ -144,6 +146,13 @@ The work lane is promoted from confirmatory to blocking. It is the writer the go
 actually use. It is also a different kind of model from the other two: a mixture-of-experts
 model with about 30B parameters, of which about 3B are active per token.
 
+**Lane order and stopping.** Lanes run one at a time, in this order: 8 GB, then home, then
+work. Each lane runs to completion. If a valid lane fails the bar, the experiment stops: the
+outcome is already "do not ship", and further lanes could not change it. The lanes not run are
+recorded as not run in R-050. A void lane does not stop the experiment; it is rerun under the
+rules below. This order was fixed before any B′ run, and it is chosen because the 8 GB lane is
+where B4 failed, not because of any B′ result.
+
 **If a lane cannot be run at all** (hardware gone, model withdrawn), B′ does not ship. A lane is
 not dropped to reach a verdict.
 
@@ -252,3 +261,10 @@ pxx is consumed by other tools, and a release must not regress them. If B′ pas
 | serving versions held within a lane | model digest, serving version and launch settings frozen across every attempt | an attempt could otherwise run on a different model build |
 | "roughly ten times the runs" | no number given | the figure had no stated margin behind it |
 | work model "between" the two sizes | described as a mixture-of-experts model, about 30B total and 3B active | it is not between them by any one size measure |
+
+## Changes from revision 3
+
+| Revision 3 | Revision 4 | Why |
+|---|---|---|
+| lane order unstated; all lanes run | 8 GB, home, work, one at a time; stop at the first valid failing lane, recording the rest as not run | after one lane fails the outcome is fixed, so further lanes cost hours without changing it (suggested by Codex) |
+| draft | approved by the owner, 2026-10-23 | — |

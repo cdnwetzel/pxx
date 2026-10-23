@@ -101,11 +101,16 @@ DESIGN.md "Threat model" section.
   **Measured 2026-10-20, not shipped (R-049).** A wording that states the real
   rule passed every pre-registered line on a 27B model and failed T1 and the
   T2 write-attempt line on a 4B model. In one diagnostic run per arm, the 4B
-  model guessed instead of reading the test. Next: B′, a more directive wording ("open the tests with
-  `read_file` before editing"), pre-registered with all three lanes blocking in
-  `prototypes/scope_wording_ab/PREREG-B-PRIME.md`. The harness there runs real
-  sessions and scores them from run records, which is a prototype of what a
-  live eval arm needs; it is not wired into `pxx eval`.
+  model guessed instead of reading the test.
+  **B′ measured 2026-10-23, not shipped (R-050).** A directive wording ("open
+  the tests with `read_file` before editing") tied the old wording on T1 and
+  T3 passes on the 4B lane but made more out-of-scope write attempts (5 vs 3)
+  and drew more hook denials (8 vs 6), failing its pre-registered screen; the
+  home and work lanes were not run, by the stop rule. On that lane the old
+  wording's arm already opened the test in every T1 run. Parked: no third
+  wording without new evidence. The harness in `prototypes/scope_wording_ab/`
+  runs real sessions and scores them from run records, which is a prototype of
+  what a live eval arm needs; it is not wired into `pxx eval`.
 - **Failed session/loop runs and the files they created** *(decision
   needed)*. On abort, the safety net resets tracked files, but files the run
   created stay on disk and are reported (the K8 "report what landed"

@@ -2,8 +2,11 @@
 
 **Status: APPROVED by the owner, revision 4, 2026-10-23, with erratum 4.1 (same day, before any
 B′ run; see the end). Binding.** Nothing below changes for
-this experiment. No B′ run has been made. Approval does not start the runs: the harness work
-listed below must be built and reviewed first.
+this experiment.
+
+**Outcome, 2026-10-23: failed on the 8 GB lane (attempt 1, valid); home and work not run, by the
+stop rule; B′ does not ship. See `docs/RECEIPTS.md` R-050.** Everything below is the
+pre-registration as approved before the run.
 
 Revision 2 answered an independent review (Codex and Kimi, 2026-10-20) of revision 1, and
 revision 3 answered their review of revision 2. Revision 4 adds the lane order and the stop

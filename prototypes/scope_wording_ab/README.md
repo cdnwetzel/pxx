@@ -9,6 +9,12 @@ The prompt change it measures ships separately, and only if this bar is met.
 > [`docs/RECEIPTS.md` R-049](../../docs/RECEIPTS.md). Raw results: [`results/2026-10-20-b4/`](results/2026-10-20-b4/).
 > The follow-up hypothesis is pre-registered in [`PREREG-B-PRIME.md`](PREREG-B-PRIME.md).
 >
+> **Status, 2026-10-23: B′ failed its pre-registered screen on the 8 GB lane and did not ship.**
+> It tied on T1 and T3 passes, but made more T2 out-of-scope write attempts (5 vs 3) and drew
+> more T3 hook denials (8 vs 6). The home and work lanes were not run, by the stop rule.
+> [`docs/RECEIPTS.md` R-050](../../docs/RECEIPTS.md); raw results:
+> [`results/2026-10-23-bprime/`](results/2026-10-23-bprime/).
+>
 > Everything below is the B4 pre-registration as it stood when the runs were made. The only
 > later additions are marked: the run-validity rule, the result-set check, the `opened_test`
 > metric, and how to rebuild arm B. An independent review found that T3's hook also unblocks

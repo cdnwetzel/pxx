@@ -269,5 +269,5 @@ def test_a_deleted_file_breaks_the_fence(ab, tmp_path):
 def test_a_line_ending_change_breaks_the_fence(ab, tmp_path):
     (tmp_path / "converter.py").write_bytes(ab.CONVERTER.replace("\n", "\r\n").encode())
     assert ab.check_passed("T2", tmp_path, python=sys.executable) is False
-    (tmp_path / "converter.py").write_text(ab.CONVERTER)
+    (tmp_path / "converter.py").write_bytes(ab.CONVERTER.encode())
     assert ab.check_passed("T2", tmp_path, python=sys.executable) is True

@@ -154,7 +154,7 @@ def build_workspace(base: Path, task: str, args: argparse.Namespace) -> tuple[Pa
     repo, home, state = base / "repo", base / "home", base / "state"
     for rel, text in FIXTURE.items():
         (repo / rel).parent.mkdir(parents=True, exist_ok=True)
-        (repo / rel).write_text(text)
+        (repo / rel).write_bytes(text.encode())
     _git(repo, "init", "-q")
     _git(repo, "config", "user.name", "ab")
     _git(repo, "config", "user.email", "ab@example.invalid")
@@ -306,12 +306,12 @@ def check_fixture(python: str) -> None:
         repo = Path(tmp)
         for rel, text in FIXTURE.items():
             (repo / rel).parent.mkdir(parents=True, exist_ok=True)
-            (repo / rel).write_text(text)
+            (repo / rel).write_bytes(text.encode())
         cmd = [python, "-m", "pytest", "-q", "-p", "no:cacheprovider", "test_converter.py"]
         if subprocess.run(cmd, cwd=repo, capture_output=True).returncode == 0:
             raise SystemExit("fixture check: tests pass before any fix")
         fixed = CONVERTER + "\n\ndef kelvin_to_celsius(k):\n    return k - 273.15\n"
-        (repo / "converter.py").write_text(fixed)
+        (repo / "converter.py").write_bytes(fixed.encode())
         if subprocess.run(cmd, cwd=repo, capture_output=True).returncode != 0:
             raise SystemExit("fixture check: tests still fail with the intended fix")
 

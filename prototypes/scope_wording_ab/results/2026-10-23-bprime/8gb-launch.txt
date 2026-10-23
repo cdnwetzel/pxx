@@ -1,0 +1,5 @@
+Lane: 8 GB laptop (Apple Mac17,5, 8 GB unified memory), on AC power, reached through an SSH tunnel to its loopback Ollama port; caffeinate keeps it awake for the lane.
+Server: Ollama 0.40.5, Homebrew launchd service sh.brew.ollama: `ollama serve`, KeepAlive, RunAtLoad.
+Server environment: OLLAMA_FLASH_ATTENTION=1, OLLAMA_KV_CACHE_TYPE=q8_0.
+Model: qwen3:4b-instruct-8k, built FROM qwen3:4b-instruct-2507-q4_K_M (GGUF, Q4_K_M, llama.cpp runner).
+Modelfile parameters: num_ctx 8192, temperature 0.2 (pxx sends temperature 0.0 per request), top_p 0.8, top_k 20, repeat_penalty 1, stop <|im_start|> <|im_end|>.

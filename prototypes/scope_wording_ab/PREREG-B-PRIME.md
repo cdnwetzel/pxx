@@ -1,8 +1,12 @@
 # B′ pre-registration: a directive read instruction for small models
 
-**Status: APPROVED by the owner, revision 4, 2026-10-23. Binding.** Nothing below changes for
-this experiment. No B′ run has been made. Approval does not start the runs: the harness work
-listed below must be built and reviewed first.
+**Status: APPROVED by the owner, revision 4, 2026-10-23, with erratum 4.1 (same day, before any
+B′ run; see the end). Binding.** Nothing below changes for
+this experiment.
+
+**Outcome, 2026-10-23: failed on the 8 GB lane (attempt 1, valid); home and work not run, by the
+stop rule; B′ does not ship. See `docs/RECEIPTS.md` R-050.** Everything below is the
+pre-registration as approved before the run.
 
 Revision 2 answered an independent review (Codex and Kimi, 2026-10-20) of revision 1, and
 revision 3 answered their review of revision 2. Revision 4 adds the lane order and the stop
@@ -189,7 +193,8 @@ screen, not win.
 
 - **Valid run:** any terminal code except the void codes in `ab.py` (`MODEL_UNAVAILABLE`,
   `CONFIGURATION_INVALID`, `HOOKS_MISSING`, `INTERRUPTED`, `HARNESS_TIMEOUT`, `NO_RUN_RECORD`,
-  `NO_OUTCOME_CODE`). A void run stops the lane at once (exit 4).
+  `NO_OUTCOME_CODE`, `NO_MODEL_RESPONSE`, `SERVING_CHANGED`). A void run stops the lane at once
+  (exit 4). A preflight that fails or cannot run stops the lane before any run (exit 6).
 - **Valid lane:** one complete results file, as `ab.py` checks (exit 5 otherwise).
 - **Reruns:** a void lane is rerun from scratch, **at most twice**. If the third attempt is also
   void, the lane cannot be run, and B′ does not ship. Nobody stops a lane by hand. If one is
@@ -268,3 +273,21 @@ pxx is consumed by other tools, and a release must not regress them. If B′ pas
 |---|---|---|
 | lane order unstated; all lanes run | 8 GB, home, work, one at a time; stop at the first valid failing lane, recording the rest as not run | after one lane fails the outcome is fixed, so further lanes cost hours without changing it (suggested by Codex) |
 | draft | approved by the owner, 2026-10-23 | — |
+
+## Erratum 4.1 (2026-10-23, approved by the owner before any B′ run)
+
+Revision 4's list of void codes left out two codes. The bar, lanes, repetitions, budgets and
+outcomes are unchanged.
+
+- `NO_MODEL_RESPONSE` was already in `ab.py` when revision 4 was approved (a run whose event
+  log holds no model response). Revision 4 meant "the void codes in `ab.py`" but its list missed
+  this one.
+- `SERVING_CHANGED` is how the harness carries out this document's own rule that a serving
+  change voids the lane.
+- Exit 6 (`PREFLIGHT FAIL`) is recorded: a preflight that fails or cannot run stops the lane
+  before any run, and no run is made.
+
+Also disclosed here, though not a change to this document: the harness checks the T3 shell
+refusal on **both** arms, which is stricter than the arm-A check written above. On the
+OpenAI-compatible lanes the operator states the model revision (`--model-revision`), because
+those servers do not report it.

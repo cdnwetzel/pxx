@@ -341,13 +341,19 @@ def test_bprime_an_unfinished_run_on_arm_a_only_is_not_a_failure(ab):
 
 
 def test_bprime_table_reports_mean_seconds_and_shell_refusals(ab, capsys):
-    results = _swap(_bp_full(ab), "T1", "B", seconds=7.0, shell_refusals=2)
+    seconds = {1: 1.0, 2: 2.0, 3: 3.0, 4: 4.0, 5: 10.0}  # mean 4.0; not first, min, max, median
+    results = [
+        replace(r, seconds=seconds[r.rep], shell_refusals=r.rep)
+        if (r.task, r.arm) == ("T1", "B")
+        else r
+        for r in _bp_full(ab)
+    ]
     ab.verdict(results, REPS, "bprime")
     out = capsys.readouterr().out
     assert "shell_ref" in out and "secs" in out
     row = next(line for line in out.splitlines() if line.startswith("T1   B"))
-    assert row.split()[-3:-1] == ["3.0", "7.0"]  # mean rounds, mean seconds
-    assert "10" in row.split()  # 5 runs x 2 shell refusals
+    assert row.split()[-3:-1] == ["3.0", "4.0"]  # mean rounds, mean seconds
+    assert "15" in row.split()  # shell refusals 1+2+3+4+5
 
 
 def test_results_scored_under_the_other_bar_are_void(ab, capsys):
@@ -750,3 +756,43 @@ def test_arm_argv_keeps_the_shebang_options(ab, tmp_path):
     script = tmp_path / "pxx"
     script.write_text("#!/opt/venv/bin/python3 -s\nimport sys\n")
     assert ab.arm_argv(str(script)) == ["/opt/venv/bin/python3", "-s"]
+
+
+@pytest.mark.parametrize("arm", ["A", "B"])
+def test_a_null_prompt_hash_on_one_arm_is_void(ab, arm):
+    results = [replace(r, prompt_hash=None) if r.arm == arm else r for r in _bp_full(ab)]
+    assert ab.verdict(results, REPS, "bprime") == 3
+
+
+def _fake_pxx(root, scope_text, rest="## Tool discipline\nread first"):
+    """A stand-in pxx package whose renderer returns fixed sections, so the
+    probe's sensitivity can be checked without a second install."""
+    (root / "pxx" / "backends").mkdir(parents=True)
+    (root / "pxx" / "__init__.py").write_text("")
+    (root / "pxx" / "backends" / "__init__.py").write_text("")
+    (root / "pxx" / "safety.py").write_text("class PermissionMode:\n    EDIT = 'edit'\n")
+    (root / "pxx" / "backends" / "native.py").write_text(
+        f"def _system_message(ctx):\n    return {rest!r} + '\\n\\n' + {scope_text!r}\n"
+    )
+    return root
+
+
+def test_the_scope_probe_hashes_the_scope_section_and_nothing_else(ab, tmp_path):
+    def probe(name, scope_text, **kw):
+        return ab.scope_hash(sys.executable, cwd=_fake_pxx(tmp_path / name, scope_text, **kw))
+
+    old = probe("old", "## Scope\nYou may only read and write paths inside: converter.py")
+    new = probe("new", "## Scope\nRead: any path inside the project: /repo")
+    same = probe("same", "## Scope\nYou may only read and write paths inside: converter.py",
+                 rest="## Tool discipline\nsomething else entirely")  # fmt: skip
+    assert old != new  # the Scope text changed
+    assert old == same  # only another section changed
+    with pytest.raises(SystemExit, match="found 0"):
+        probe("none", "## Not scope\nx")
+
+
+def test_the_scope_probe_ignores_the_operators_pythonpath(ab, tmp_path, monkeypatch):
+    real = ab.scope_hash(sys.executable)
+    decoy = _fake_pxx(tmp_path / "decoy", "## Scope\nnot the arm's own pxx")
+    monkeypatch.setenv("PYTHONPATH", str(decoy))
+    assert ab.scope_hash(sys.executable) == real

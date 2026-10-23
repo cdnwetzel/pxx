@@ -206,9 +206,9 @@ def build_workspace(base: Path, task: str, args: argparse.Namespace) -> tuple[Pa
     state.mkdir()
 
     # Neither the operator's pxx settings nor their Python environment
-    # (PYTHONPATH and friends) reaches the arm, so the measured run imports
-    # the same pxx the isolated (-I) probes import.
-    env = {k: v for k, v in os.environ.items() if not k.startswith(("PXX_", "PYTHON"))}
+    # (PYTHONPATH and friends) reaches the arm; the Scope probe starts the
+    # same way (scope_hash).
+    env = _arm_env()
     env.update(HOME=str(home), XDG_CONFIG_HOME=str(home / ".config"), XDG_STATE_HOME=str(state))
     return repo, env
 
@@ -422,11 +422,28 @@ print(hashlib.sha256(parts[0].encode()).hexdigest()[:16])
 """
 
 
-def scope_hash(python: str | list[str]) -> str:
+def _arm_env() -> dict[str, str]:
+    """The operator's environment without pxx settings or Python startup
+    variables (PYTHONPATH and friends). Measured runs and probes both use it."""
+    return {k: v for k, v in os.environ.items() if not k.startswith(("PXX_", "PYTHON"))}
+
+
+def scope_hash(python: str | list[str], cwd: Path | None = None) -> str:
     """Hash of the ## Scope section that `python`'s pxx renders. `python` is
-    an interpreter path, or an arm's shebang argv (`arm_argv`)."""
+    an interpreter path, or an arm's shebang argv (`arm_argv`). It starts
+    the way a measured run does -- the shebang's options, the same scrubbed
+    environment -- from an empty directory, so nothing but the arm's own
+    packages can be imported. One difference stays: a console script puts
+    its own directory (the venv's bin/) first on sys.path, -c puts `cwd`."""
     argv = [python] if isinstance(python, str) else list(python)
-    proc = subprocess.run([*argv, "-I", "-c", SCOPE_PROBE], capture_output=True, text=True)
+    with tempfile.TemporaryDirectory(prefix="ab-probe-") as empty:
+        proc = subprocess.run(
+            [*argv, "-c", SCOPE_PROBE],
+            cwd=cwd or empty,
+            env=_arm_env(),
+            capture_output=True,
+            text=True,
+        )
     if proc.returncode != 0:
         raise SystemExit(f"scope probe failed under {python}: {proc.stderr.strip()}")
     return proc.stdout.strip()
@@ -759,7 +776,7 @@ def verdict(results: list[RunResult], reps: int, bar: str = "b4") -> int:
         print(f"DATA VOID: {why}", file=sys.stderr)
         return 5
     hashes = {name: {r.prompt_hash for r in results if r.arm == name} for name in ("A", "B")}
-    if any(len(h) != 1 or "" in h for h in hashes.values()) or hashes["A"] == hashes["B"]:
+    if any(len(h) != 1 or not all(h) for h in hashes.values()) or hashes["A"] == hashes["B"]:
         print(f"ARMS VOID: native_system.md prompt hashes {hashes}", file=sys.stderr)
         return 3
     if bar == "bprime":

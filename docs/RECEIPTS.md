@@ -2600,8 +2600,9 @@ behavioural, so it stays in the sample: home T2 arm A, and 8 GB T3 arm B (twice)
 
 **Follow-up.** A more directive wording, B′, targets the suspected 4B failure (guessing instead
 of reading). Its pre-registration, `prototypes/scope_wording_ab/PREREG-B-PRIME.md` (approved
-2026-10-23, before any B′ run), makes all three lanes blocking and closes (g), (h) and the
-† rounds problem before any B′ run.
+2026-10-23, before any B′ run), makes all three lanes blocking, drops the † rounds line, and
+addresses (g) and (h). One limit of (h) remains in B′: a write that a failed run's safety net
+rolls back before the check can still go unseen by the whole-tree fence.
 
 ---
 

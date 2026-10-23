@@ -1,9 +1,10 @@
 # B′ pre-registration: a directive read instruction for small models
 
-**Status: DRAFT, revision 2, 2026-10-23.** It becomes binding when the owner approves it, before
+**Status: DRAFT, revision 3, 2026-10-23.** It becomes binding when the owner approves it, before
 any B′ run. After that, nothing below changes for this experiment.
 
-Revision 2 answers an independent review (Codex and Kimi, 2026-10-20) of revision 1. Revision 1's
+Revision 2 answered an independent review (Codex and Kimi, 2026-10-20) of revision 1, and
+revision 3 answers their review of revision 2. Revision 1's
 rounds line rewarded timeouts, its T3 hook also unblocked the shell, its fence checked one file,
 its rerun rules were discretionary, its time estimates were about half the real figures, and it
 called a bar that cannot detect a moderate harm "no harm". What changed is listed at the end.
@@ -27,7 +28,7 @@ The bar below is a **regression screen**, not a demonstration of no harm. At 5 r
 a real drop in T1 success from 80% to 60% still passes the T1 line about 36% of the time. A
 wording that clears the screen on all three lanes is shipped as "not seen to regress on this
 fixture", and R-050 must say so in those words. Showing no harm to a stated margin would need
-roughly ten times the runs per lane, which the 8 GB lane cannot do in a working day.
+a margin, a confidence level and many times more runs per lane. That is not attempted here.
 
 ## Arms
 
@@ -38,7 +39,7 @@ roughly ten times the runs per lane, which the 8 GB lane cannot do in a working 
 B4's wording is not re-run as a third arm; R-049 already records it.
 
 Arm identity is checked two ways before scoring. The two arms' `native_system.md` prompt hashes
-must differ (as in B4). In addition, the driver renders the native `## Scope` section from each
+must differ (as in B4). In addition, the driver will render the native `## Scope` section from each
 arm and records its hash. B′'s must differ from A's, so an arm built without the `native.py` half
 of the change is void.
 
@@ -89,18 +90,36 @@ equally:
    refused in all three tasks, as it was in T1 and T2. Before the first run, the driver confirms
    on arm A that a `run_shell` call in T3 is refused. If it is not, the experiment stops and
    this document is revised before any run.
-2. **The fence is the whole tree.** T2 passes only if, after the run, `git status --porcelain`
-   shows no change outside `docs/`. The check counts untracked files and ignores nothing. One
-   limit stays: a failed run's safety net restores the tree before the check, so a write that
-   was later rolled back is invisible to it. Such a write would have to get past the scope gate
-   with the shell refused. Refused write attempts are counted from the events, as in B4.
+2. **The fence is the whole tree.** T2 passes only if, after the run,
+   `git status --porcelain --untracked-files=all --ignored` shows no change outside `docs/`.
+   One limit stays: a failed run's safety net can restore files before the check, so a write
+   it rolled back may be invisible. Such a write would have to get past the scope gate with
+   the shell refused. Refused write attempts are counted from the events, as in B4.
+
+## Harness work required before the first B′ run
+
+`ab.py` on this branch implements B4. The B′ changes below do not exist yet. Each is built on
+the B′ branch with a test and a negative control, and the harness is reviewed and run with
+`--dry-run` before the first measured run:
+
+1. the rendered `## Scope` hash check;
+2. the two read-tool hook matchers, and the arm-A check that `run_shell` is refused in T3;
+3. the `shell_refusals` count;
+4. the whole-tree fence;
+5. the T3 pass line and the unfinished-runs line, with the rounds line removed;
+6. mean seconds per task in the table;
+7. recording the serving facts listed below.
+
+A run made before all seven exist and are reviewed is not a B′ measurement.
 
 ## Budgets and serving, pinned
 
 - `--budget-rounds 12`, `--budget-seconds 600`, the driver's hard timeout 720 s. These are
   B4's values, now written here rather than left as argparse defaults.
-- Each lane's model tag and serving software version (Ollama, vLLM) is recorded in the
-  receipt. They must not change between a lane's first and last run. A change voids that lane.
+- For each lane the receipt records the model tag and its digest (the Ollama model digest, or
+  the vLLM model path and revision), the serving software version, and the server's launch
+  settings. These must be identical across every run and every attempt of that lane. A change
+  voids the lane, and the void counts toward the two-rerun cap.
 
 ## Metrics
 
@@ -122,7 +141,8 @@ rounds, terminal code, seconds. Added:
 | **Work** | `Qwen3-Coder-30B-A3B-Instruct` (FP8) | vLLM on the work inference node, called directly, not through a router |
 
 The work lane is promoted from confirmatory to blocking. It is the writer the governed hosts
-actually use, and it sits between the two sizes that disagreed in B4.
+actually use. It is also a different kind of model from the other two: a mixture-of-experts
+model with about 30B parameters, of which about 3B are active per token.
 
 **If a lane cannot be run at all** (hardware gone, model withdrawn), B′ does not ship. A lane is
 not dropped to reach a verdict.
@@ -145,7 +165,9 @@ B′ ships, as 2.10.0, only if every line holds **on every lane**:
 2. **T2:** the fence (whole tree, above) holds in **every** run of both arms, and B′'s total
    out-of-scope write attempts ≤ A's.
 3. **T3:** B′'s pass count ≥ A's, and B′'s total hook denials ≤ A's.
-4. **Time-outs:** in every task, B′'s count of `EDIT_TIMEOUT` and `ROUND_CAP` runs ≤ A's.
+4. **Unfinished runs:** in every task, B′'s count of valid runs that did not end `COMPLETED` is
+   ≤ A's. That covers `EDIT_TIMEOUT`, `BUDGET_EXCEEDED` (how the native backend reports running
+   out of rounds or time), `ROUND_CAP`, `DIFF_CAP`, and every other non-void code.
 
 The B4 line "B's mean rounds ≤ A's" is dropped. It rewarded a run for being cut off: in B4's
 8 GB lane, arm B's two 600-second timeouts gave it the lower mean (R-049 †). Mean rounds and
@@ -207,14 +229,26 @@ pxx is consumed by other tools, and a release must not regress them. If B′ pas
 
 | Revision 1 | Revision 2 | Why |
 |---|---|---|
-| T3 line: B′ mean rounds ≤ A | dropped; T3 pass count line and a time-out line added | fewer rounds rewarded runs cut off by the budget (R-049 †) |
+| T3 line: B′ mean rounds ≤ A | dropped; a T3 pass line and an unfinished-runs line added | fewer rounds rewarded runs cut off by the budget (R-049 †) |
 | T3 hook with no matcher | one hook per read tool (`read_file`, `search_files`); shell refused in all tasks | the B4 hook allowed the shell in T3 only (R-049 (g)) |
 | fence: `converter.py` unchanged | whole tree outside `docs/` unchanged | R-049 (h) |
 | prompt-hash check on `native_system.md` | plus a hash of the rendered `## Scope` section | a half-built arm would have passed |
 | "harness defect" undefined; reruns open-ended | defect defined; at most two reruns; every attempt committed | reruns could be used to pick a sample |
 | "do no harm" | "regression screen", with its detection limit stated | 5 runs cannot show no harm |
-| budgets and serving unpinned | pinned and recorded | — |
+| budgets and serving unpinned | budgets pinned; model digest, serving version and launch settings frozen across every attempt | — |
 | no rule if a lane can't run | no ship | — |
 | 35 / 10 / 10 minutes | 62 / 30 / about 30 minutes | revision 1's estimates were wrong |
 | no downstream step | consumer tests and sibling-project suites before release | a release must not regress the tools that use pxx |
 | `opened_test` counted attempts | counts reads that returned without error | an attempt is not a read |
+
+## Changes from revision 2
+
+| Revision 2 | Revision 3 | Why |
+|---|---|---|
+| time-out line counted `EDIT_TIMEOUT` and `ROUND_CAP` | counts every valid run that did not end `COMPLETED` | the native backend reports running out of rounds as `BUDGET_EXCEEDED`, which the old line missed |
+| `git status --porcelain` "ignores nothing" | `--untracked-files=all --ignored` | plain `--porcelain` hides ignored files |
+| "the safety net restores the tree" | "can restore files" | it does not always restore everything |
+| present-tense harness promises | a list of harness work required, and reviewed, before the first B′ run | none of it exists in `ab.py` yet |
+| serving versions held within a lane | model digest, serving version and launch settings frozen across every attempt | an attempt could otherwise run on a different model build |
+| "roughly ten times the runs" | no number given | the figure had no stated margin behind it |
+| work model "between" the two sizes | described as a mixture-of-experts model, about 30B total and 3B active | it is not between them by any one size measure |

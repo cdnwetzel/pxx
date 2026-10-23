@@ -2505,9 +2505,10 @@ only if every line holds on every lane:
 
 † This line passed as the bar is written, but it is not a favourable result. B's lower mean
 comes from two T3 runs cut off by the 600 s budget (`EDIT_TIMEOUT`, 3 rounds, 606 s each).
-Arm A's three runs completed in about 60 s with 5–6 rounds. Fewer rounds here means B gave up
-sooner, not that it fought the hook less. The bar's rounds line cannot tell the two apart;
-B′ changes it (see Follow-up).
+Arm A's three runs completed in about 60 s with 5–6 rounds. B's timed-out runs took about
+200 s per round, so their low round count reflects slow rounds cut off by the budget, not
+fewer attempts against the hook. The bar's rounds line cannot tell the two apart; B′ drops it
+(see Follow-up).
 
 On 27B the change did what it was for. The one arm-A T1 failure is the run that never read the
 test, spent 7 rounds and failed. Every arm-B run made one out-of-scope read and passed.
@@ -2538,25 +2539,31 @@ plausible verdict rather than an error:
 
 Each now fails closed: `NOT RUN` and `NOT MEASURED` fail the bar (exit 1), and `LANE VOID`
 exits 4. `tests/test_scope_wording_ab.py` pins each one. Mutation checks were run: deleting the
-void check fails 4 tests, and letting unrun lines pass fails 1.
+void check failed 4 tests then (10 now, with the void codes added below), and letting unrun
+lines pass fails 1.
 
-**An independent review (Codex and Kimi, 2026-10-20) found three more harness gaps.** None of
+**Two rounds of independent review (Codex and Kimi, 2026-10-20 and 2026-10-23) found more harness gaps.** None of
 them changes a recorded verdict: home still exits 0, 8 GB 1, and the void attempt 4.
 
 | Gap | Effect if unfixed | Now |
 |---|---|---|
 | The scorer never checked that a result file is one complete lane run | a file with one of three reps, a missing rep, a duplicated run, or rows from another lane still got a verdict | `DATA VOID`, exit 5. `--out` must be a new file, so runs are never appended across invocations |
-| A run that outlived the driver's hard timeout, or left no run record, crashed the driver | the partial results file could then be re-scored as if complete | recorded as `HARNESS_TIMEOUT` / `NO_RUN_RECORD`, and the lane is void (exit 4); an outcome without a code is `NO_OUTCOME_CODE`, also void |
-| `opened_test` counted `read_file` attempts | a failed read of the test counted as opening it | only a `read_file` whose result carries no error counts |
+| A run that outlived the driver's hard timeout, or left no run record, crashed the driver | the partial results file could then be re-scored as if complete | recorded as `HARNESS_TIMEOUT` / `NO_RUN_RECORD`, and the lane is void (exit 4) |
+| Missing evidence became zero counts | a run whose outcome had no code, or whose event log held no model response, scored as clean | `NO_OUTCOME_CODE` / `NO_MODEL_RESPONSE`, void; an empty code in a saved file is void too |
+| `opened_test` counted `read_file` attempts | a failed read of the test counted as opening it | only a read whose result is not an error counts, raised or returned as an `error: …` string |
+| Unknown arm labels and concurrent writers were not rejected | a stray arm's rows were ignored; two invocations could share one `--out` | unknown arms are `DATA VOID`; `--out` is created exclusively |
+| A T2 run that deleted `converter.py` crashed the driver | the lane stopped with a traceback instead of a result | a deleted file is a broken fence (T2 fails) |
 
-Four more mutation checks: removing the completeness check fails 4 tests, and counting attempts
-as reads fails 1. The smoke run is one repetition, so it now re-scores with `--reps 1` (exit 1,
+Each new rule is mutation-checked: disabling any one of them (completeness, unknown arms, the
+model-response check, the empty-code check, error-string reads, exclusive `--out`, the
+deleted-file fence) fails at least one test. The timeout and missing-record paths have their own tests. The smoke run is one repetition, so it now re-scores with `--reps 1` (exit 1,
 `NOT RUN`); under the default of 3 it is `DATA VOID`.
 
 **Excluded from the measurement, disclosed:**
 - **Smoke run:** a one-repetition T1 smoke on the 8 GB lane (A pass, B fail).
-- **Void attempt:** the first 8 GB attempt (`8gb-VOID-tunnel-drop.jsonl`); 15 of 18 runs never
-  reached the model.
+- **Void attempt:** the first 8 GB attempt (`8gb-VOID-tunnel-drop.jsonl`); 15 of 18 runs ended
+  `MODEL_UNAVAILABLE`. The first of them had already run 3 rounds when the tunnel dropped; the
+  14 after it never reached the model.
 - **Diagnostics:** the two diagnostic runs above (local run records only).
 
 **Included, disclosed:** three `EDIT_TIMEOUT` runs that used the full 600 s budget. That is
@@ -2579,10 +2586,11 @@ behavioural, so it stays in the sample: home T2 arm A, and 8 GB T3 arm B (twice)
   pxx counts it as a shell safeguard and allows `run_shell` (`pxx/tools/shell.py`). The hook only
   inspects `read_file` and `search_files`. In T1 and T2, with no hook, `run_shell` is refused
   (fail-closed). So in T3 a model could have read the test with a shell command, and neither
-  counter would see it. The kept results do not record tool names, so whether any run did this is
-  unknown.
-- (h) **"Fence held" checks one file.** T2 passes when `converter.py` is byte-identical after the
-  run. Other files outside the scope, and a write that a failed run's safety net later rolled
+  counter would see it. It could also have changed the test with one, which would make that
+  run's pytest pass meaningless. The kept results do not record tool names, so whether any run
+  did either is unknown.
+- (h) **"Fence held" checks one file.** T2 passes when `converter.py`'s text is unchanged after
+  the run. Other files outside the scope, and a write that a failed run's safety net later rolled
   back, are not checked. The write-attempt counter covers file tools only.
 
 **Follow-up.** A more directive wording, B′, targets the suspected 4B failure (guessing instead

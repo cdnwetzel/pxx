@@ -15,9 +15,9 @@ path (same pattern as tests/test_review_bench_parser.py).
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
-import re
 import shutil
 import subprocess
 import sys
@@ -280,74 +280,106 @@ def test_a_line_ending_change_breaks_the_fence(ab, tmp_path):
 # --- B-prime (PREREG-B-PRIME.md revision 4) ---------------------------------------
 
 needs_git = pytest.mark.skipif(shutil.which("git") is None, reason="git not available")
+TASK_IDS = ("T1", "T2", "T3")
+REPS = 5  # B-prime's pinned repetitions
 
 
-def _bp(ab, task, arm, *, rep=1, code="COMPLETED", passed=True, scope=None, serving="srv"):
+def _bp(ab, task, arm, *, rep=1, code="COMPLETED", passed=True):
     return replace(
         _run(ab, task, arm, rep=rep, code=code, passed=passed),
         bar="bprime",
         shell_refusals=0,
-        scope_hash=scope or f"scope-{arm}",
-        serving_hash=serving,
+        scope_hash=f"scope-{arm}",
+        serving_hash="srv",
+        budget="12r/600s",
+        attempt=1,
     )
 
 
-def _bp_full(ab, reps=1):
-    return [_bp(ab, t, a, rep=n) for n in range(1, reps + 1) for t in TASK_IDS for a in ("A", "B")]
-
-
-TASK_IDS = ("T1", "T2", "T3")
+def _bp_full(ab):
+    return [_bp(ab, t, a, rep=n) for n in range(1, REPS + 1) for t in TASK_IDS for a in ("A", "B")]
 
 
 def _swap(results, task, arm, **fields):
+    """Change every run of one task and arm."""
     return [replace(r, **fields) if (r.task, r.arm) == (task, arm) else r for r in results]
 
 
+def _swap_one(results, task, arm, **fields):
+    """Change only rep 1 of one task and arm."""
+    return [
+        replace(r, **fields) if (r.task, r.arm, r.rep) == (task, arm, 1) else r for r in results
+    ]
+
+
 def test_bprime_complete_passing_set_meets_the_bar(ab):
-    assert ab.verdict(_bp_full(ab), 1, "bprime") == 0
+    assert ab.verdict(_bp_full(ab), REPS, "bprime") == 0
 
 
 def test_bprime_drops_the_rounds_line(ab):
     # B4's T3 rounds line would fail this (B 9 rounds vs A 3); B-prime does not score rounds.
-    assert ab.verdict(_swap(_bp_full(ab), "T3", "B", rounds=9), 1, "bprime") == 0
+    assert ab.verdict(_swap(_bp_full(ab), "T3", "B", rounds=9), REPS, "bprime") == 0
     assert ab.verdict(_swap(_full(ab), "T3", "B", rounds=9), 1, "b4") == 1
 
 
 def test_bprime_t3_pass_line(ab, capsys):
-    assert ab.verdict(_swap(_bp_full(ab), "T3", "B", passed=False), 1, "bprime") == 1
+    assert ab.verdict(_swap_one(_bp_full(ab), "T3", "B", passed=False), REPS, "bprime") == 1
     assert "FAIL          T3: B passes >= A" in capsys.readouterr().out
 
 
 @pytest.mark.parametrize("code", ["BUDGET_EXCEEDED", "EDIT_TIMEOUT", "ROUND_CAP", "DIFF_CAP"])
 @pytest.mark.parametrize("task", TASK_IDS)
 def test_bprime_unfinished_runs_line_counts_every_non_completed_code(ab, capsys, code, task):
-    assert ab.verdict(_swap(_bp_full(ab), task, "B", terminal_code=code), 1, "bprime") == 1
+    results = _swap_one(_bp_full(ab), task, "B", terminal_code=code)
+    assert ab.verdict(results, REPS, "bprime") == 1
     assert f"FAIL          {task}: B unfinished runs <= A" in capsys.readouterr().out
 
 
 def test_bprime_an_unfinished_run_on_arm_a_only_is_not_a_failure(ab):
-    assert (
-        ab.verdict(_swap(_bp_full(ab), "T2", "A", terminal_code="BUDGET_EXCEEDED"), 1, "bprime")
-        == 0
-    )
+    results = _swap_one(_bp_full(ab), "T2", "A", terminal_code="BUDGET_EXCEEDED")
+    assert ab.verdict(results, REPS, "bprime") == 0
+
+
+def test_bprime_table_reports_mean_seconds_and_shell_refusals(ab, capsys):
+    results = _swap(_bp_full(ab), "T1", "B", seconds=7.0, shell_refusals=2)
+    ab.verdict(results, REPS, "bprime")
+    out = capsys.readouterr().out
+    assert "shell_ref" in out and "secs" in out
+    row = next(line for line in out.splitlines() if line.startswith("T1   B"))
+    assert row.split()[-3:-1] == ["3.0", "7.0"]  # mean rounds, mean seconds
+    assert "10" in row.split()  # 5 runs x 2 shell refusals
 
 
 def test_results_scored_under_the_other_bar_are_void(ab, capsys):
-    assert ab.verdict(_full(ab), 1, "bprime") == 5
-    assert ab.verdict(_bp_full(ab), 1, "b4") == 5
+    assert ab.verdict(_full(ab, reps=REPS), REPS, "bprime") == 5
+    assert ab.verdict(_bp_full(ab), REPS, "b4") == 5
     assert capsys.readouterr().err.count("DATA VOID") == 2
 
 
-@pytest.mark.parametrize("serving", ["other", None])
-def test_bprime_a_serving_change_within_the_lane_is_void(ab, serving):
+@pytest.mark.parametrize(
+    "fields",
+    [
+        pytest.param({"serving_hash": "other"}, id="serving-changed"),
+        pytest.param({"serving_hash": None}, id="serving-missing"),
+        pytest.param({"budget": "20r/600s"}, id="other-budget"),
+        pytest.param({"attempt": 2}, id="mixed-attempts"),
+    ],
+)
+def test_bprime_a_lane_file_that_is_not_one_pinned_attempt_is_void(ab, fields):
     results = _bp_full(ab)
-    results[-1] = replace(results[-1], serving_hash=serving)
-    assert ab.verdict(results, 1, "bprime") == 5
+    results[-1] = replace(results[-1], **fields)
+    assert ab.verdict(results, REPS, "bprime") == 5
+
+
+def test_bprime_is_scored_only_at_its_pinned_repetitions(ab, capsys):
+    three = [r for r in _bp_full(ab) if r.rep <= 3]
+    assert ab.verdict(three, 3, "bprime") == 5
+    assert "pre-registered at 5 reps" in capsys.readouterr().err
 
 
 def test_bprime_arms_with_the_same_scope_section_are_void(ab, capsys):
     results = [replace(r, scope_hash="same") for r in _bp_full(ab)]
-    assert ab.verdict(results, 1, "bprime") == 3
+    assert ab.verdict(results, REPS, "bprime") == 3
     assert "rendered ## Scope" in capsys.readouterr().err
 
 
@@ -359,26 +391,148 @@ def test_shell_refusals_are_counted(ab, tmp_path):
     assert ab.count_events("T3", tmp_path, events).shell_refusals == 1
 
 
-def test_the_scope_probe_renders_this_checkouts_scope_section(ab):
-    assert re.fullmatch(r"[0-9a-f]{16}", ab.scope_hash(sys.executable))
+def test_the_scope_probe_hashes_exactly_the_rendered_scope_section(ab):
+    from types import SimpleNamespace as N
+
+    from pxx.backends import native
+    from pxx.safety import PermissionMode
+
+    ctx = N(
+        settings=N(permission=PermissionMode.EDIT),
+        memory_context=None,
+        scope=N(describe=lambda: "converter.py", root="/repo"),
+    )
+    [section] = [
+        p.strip()
+        for p in native._system_message(ctx).split("\n\n")
+        if p.strip().startswith("## Scope\n")
+    ]
+    expected = hashlib.sha256(section.encode()).hexdigest()[:16]
+    assert ab.scope_hash(sys.executable) == expected
 
 
-@pytest.mark.parametrize(("bar", "shell_covered"), [("b4", True), ("bprime", False)])
-def test_the_t3_hook_covers_run_shell_only_under_b4(ab, tmp_path, bar, shell_covered):
-    """R-049 (g), checked through pxx's own config loader: B4's matcher-less
-    hook counted as a shell safeguard; B-prime's read-tool matchers do not."""
-    gate = ab.shell_gate(sys.executable, _args(ab, tmp_path, bar=bar, provider="ollama"))
-    assert gate["run_shell"] is shell_covered
-    assert (gate == ab.SHELL_REFUSED) is (bar == "bprime")
+_PXX = Path(sys.executable).parent / "pxx"
+
+
+@needs_git
+@pytest.mark.skipif(not _PXX.is_file(), reason="no pxx console script beside the interpreter")
+@pytest.mark.parametrize(("bar", "refused", "executed"), [("bprime", 1, 0), ("b4", 0, 1)])
+def test_the_t3_shell_check_drives_a_real_run(ab, tmp_path, bar, refused, executed):
+    """A stand-in model asks for `cat test_converter.py` through run_shell in
+    T3. Under B-prime's read-tool matchers it is refused; under B4's
+    matcher-less hook it executes -- R-049 (g), shown through pxx's own
+    tool dispatch."""
+    shell = ab.shell_check(str(_PXX), _args(ab, tmp_path, bar=bar))
+    assert (shell["refused"], shell["executed"]) == (refused, executed)
+    assert shell["model_responses"] >= 1
+
+
+def _preflight_args(ab, tmp_path, **over):
+    launch = tmp_path / "launch.txt"
+    launch.write_text("flags")
+    ns = dict(dry_run=False, launch_settings=launch, out=tmp_path / "lane.jsonl", attempt=1,
+              expect_serving=None)  # fmt: skip
+    ns.update(over)
+    return _args(ab, tmp_path, bar="bprime", **ns)
+
+
+def _stub_preflight(ab, monkeypatch, *, scopes=("a", "b"), shell=None, facts=None):
+    monkeypatch.setattr(ab, "arm_python", lambda binary: binary)
+    monkeypatch.setattr(ab, "scope_hash", dict(zip(("A", "B"), scopes, strict=True)).get)
+    ok = {"refused": 1, "executed": 0, "model_responses": 2, "code": "COMPLETED"}
+    monkeypatch.setattr(ab, "shell_check", lambda binary, args: (shell or {}).get(binary, ok))
+
+    def serving(provider, base_url, model, launch):
+        if facts is None:
+            raise RuntimeError("unreachable")
+        return {**facts, "launch_settings": launch}
+
+    monkeypatch.setattr(ab, "serving_facts", serving)
+
+
+@pytest.mark.parametrize(
+    ("stub", "over", "code"),
+    [
+        pytest.param({"scopes": ("s", "s")}, {}, 3, id="same-scope"),
+        pytest.param(
+            {"shell": {"B": {"refused": 0, "executed": 1, "model_responses": 2}}},
+            {},
+            6,
+            id="arm-b-ran-the-shell",
+        ),
+        pytest.param(
+            {"shell": {"A": {"refused": 1, "executed": 0, "model_responses": 0}}},
+            {},
+            6,
+            id="no-model-reached",
+        ),
+        pytest.param({}, {}, 4, id="serving-unverifiable"),
+        pytest.param(
+            {"facts": {"v": 1}},
+            {"attempt": 2, "expect_serving": "x"},
+            4,
+            id="rerun-serving-differs",
+        ),
+        pytest.param({"facts": {"v": 1}}, {}, 0, id="passes"),
+    ],
+)
+def test_bprime_preflight(ab, tmp_path, monkeypatch, stub, over, code):
+    _stub_preflight(ab, monkeypatch, **stub)
+    args = _preflight_args(ab, tmp_path, **over)
+    assert ab.bprime_preflight({"A": "A", "B": "B"}, args) == code
+    if stub.get("facts"):  # the evidence is kept even when the attempt is void
+        assert (tmp_path / "lane.jsonl.serving.json").is_file()
+
+
+def _main(ab, monkeypatch, *argv):
+    base = ["ab.py", "--bar", "bprime", "--arm-a", "a", "--arm-b", "b", "--provider", "p",
+            "--model", "m", "--base-url", "u", "--lane", "t"]  # fmt: skip
+    monkeypatch.setattr(sys, "argv", [*base, *argv])
+    with pytest.raises(SystemExit) as exc:
+        ab.main()
+    return exc.value.code
+
+
+@pytest.mark.parametrize(
+    ("argv", "with_launch"),
+    [
+        pytest.param(["--attempt", "1", "--reps", "3"], True, id="reps"),
+        pytest.param(["--attempt", "1", "--rounds", "20"], True, id="rounds"),
+        pytest.param(["--attempt", "1", "--seconds", "300"], True, id="seconds"),
+        pytest.param(["--attempt", "1", "--tasks", "T1"], True, id="tasks"),
+        pytest.param(["--attempt", "4", "--expect-serving", "x"], True, id="fourth-attempt"),
+        pytest.param(["--attempt", "2"], True, id="rerun-without-pin"),
+        pytest.param(["--attempt", "1", "--expect-serving", "x"], True, id="first-with-pin"),
+        pytest.param([], True, id="no-attempt"),
+        pytest.param(["--attempt", "1"], False, id="no-launch-settings"),
+    ],
+)
+def test_bprime_cli_refuses_a_departure_from_the_preregistration(
+    ab, tmp_path, monkeypatch, capsys, argv, with_launch
+):
+    launch = tmp_path / "launch.txt"
+    launch.write_text("flags")
+    extra = ["--launch-settings", str(launch)] if with_launch else []
+    assert _main(ab, monkeypatch, *argv, *extra, "--out", str(tmp_path / "lane.jsonl")) == 2
+    assert "error:" in capsys.readouterr().err
+    assert not (tmp_path / "lane.jsonl").exists()  # refused before anything is written
 
 
 def test_arm_python_reads_the_shebang(ab, tmp_path):
     script = tmp_path / "pxx"
     script.write_text("#!/opt/venv/bin/python3 -s\nimport sys\n")
     assert ab.arm_python(str(script)) == "/opt/venv/bin/python3"
-    script.write_text("import sys\n")
-    with pytest.raises(SystemExit):
-        ab.arm_python(str(script))
+    for bad in ("import sys\n", "#!/usr/bin/env python3\n", "#!python3\n"):
+        script.write_text(bad)
+        with pytest.raises(SystemExit):
+            ab.arm_python(str(script))
+
+
+def test_the_arm_does_not_inherit_the_operators_python_environment(ab, tmp_path, monkeypatch):
+    monkeypatch.setenv("PYTHONPATH", "/somewhere/else")
+    monkeypatch.setenv("PXX_MODEL", "other")
+    _, env = ab.build_workspace(tmp_path, "T1", _args(ab, tmp_path, provider="ollama"))
+    assert "PYTHONPATH" not in env and "PXX_MODEL" not in env
 
 
 def _fetch(responses):
@@ -388,38 +542,59 @@ def _fetch(responses):
     return fetch
 
 
+_OLLAMA = {
+    "http://h:1/api/tags": {"models": [{"name": "m:4b", "digest": "abc"}, {"name": "x"}]},
+    "http://h:1/api/version": {"version": "0.9"},
+}
+_VLLM = {
+    "http://h:2/v1/models": {
+        "data": [{"id": "q", "root": "/models/q", "max_model_len": 8, "created": 1}]
+    },
+    "http://h:2/version": {"version": "0.27.1"},
+}
+
+
 def test_serving_facts_ollama_records_the_model_digest(ab):
-    responses = {
-        "http://h:1/api/tags": {"models": [{"name": "m:4b", "digest": "abc"}, {"name": "x"}]},
-        "http://h:1/api/version": {"version": "0.9"},
-    }
-    facts = ab.serving_facts("ollama", "http://h:1/", "m:4b", "flags", _fetch(responses))
-    assert facts["model_digest"] == "abc"
-    assert facts["server"] == {"version": "0.9"}
-    other = ab.serving_facts("ollama", "http://h:1", "m:4b", "other flags", _fetch(responses))
+    facts = ab.serving_facts("ollama", "http://h:1/", "m:4b", "flags", _fetch(_OLLAMA))
+    assert (facts["model_digest"], facts["server_version"]) == ("abc", "0.9")
+    other = ab.serving_facts("ollama", "http://h:1", "m:4b", "other flags", _fetch(_OLLAMA))
     assert ab.facts_hash(facts) != ab.facts_hash(other)  # launch settings are part of the hash
 
 
-def test_serving_facts_openai_compatible_records_the_listed_model(ab):
-    responses = {
-        "http://h:2/v1/models": {"data": [{"id": "q", "root": "/models/q", "max_model_len": 8}]},
-        "http://h:2/version": {"version": "0.27.1"},
-    }
-    facts = ab.serving_facts("vllm", "http://h:2", "q", "", _fetch(responses))
-    assert facts["model"]["root"] == "/models/q"
+def test_serving_facts_ignore_volatile_metadata(ab):
+    facts = ab.serving_facts("vllm", "http://h:2", "q", "flags", _fetch(_VLLM))
+    assert facts["model_root"] == "/models/q"
+    later = {**_VLLM, "http://h:2/v1/models": {"data": [{**_VLLM["http://h:2/v1/models"]["data"][0],
+                                                         "created": 2}]}}  # fmt: skip
+    assert ab.facts_hash(facts) == ab.facts_hash(
+        ab.serving_facts("vllm", "http://h:2", "q", "flags", _fetch(later))
+    )
 
 
 @pytest.mark.parametrize(
-    "responses",
+    ("provider", "responses", "launch"),
     [
-        {"http://h:1/api/tags": {"models": [{"name": "m:4b"}]}, "http://h:1/api/version": {}},
-        {"http://h:1/api/tags": {"models": []}, "http://h:1/api/version": {}},
+        pytest.param(
+            "ollama",
+            {**_OLLAMA, "http://h:1/api/tags": {"models": [{"name": "m:4b"}]}},
+            "f",
+            id="no-digest",
+        ),
+        pytest.param(
+            "ollama", {**_OLLAMA, "http://h:1/api/tags": {"models": []}}, "f", id="not-listed"
+        ),
+        pytest.param("ollama", {**_OLLAMA, "http://h:1/api/version": {}}, "f", id="no-version"),
+        pytest.param("ollama", _OLLAMA, "  \n", id="empty-launch-settings"),
+        pytest.param(
+            "vllm", {**_VLLM, "http://h:2/v1/models": {"data": [{"id": "q"}]}}, "f", id="no-root"
+        ),
+        pytest.param("vllm", {**_VLLM, "http://h:2/version": {}}, "f", id="vllm-no-version"),
     ],
-    ids=["no-digest", "not-listed"],
 )
-def test_serving_facts_refuse_an_unverifiable_model(ab, responses):
+def test_serving_facts_refuse_an_unverifiable_setup(ab, provider, responses, launch):
+    base, model = ("http://h:1", "m:4b") if provider == "ollama" else ("http://h:2", "q")
     with pytest.raises(RuntimeError):
-        ab.serving_facts("ollama", "http://h:1", "m:4b", "", _fetch(responses))
+        ab.serving_facts(provider, base, model, launch, _fetch(responses))
 
 
 def test_bprime_a_serving_change_mid_lane_voids_the_run(ab, tmp_path, monkeypatch):
@@ -445,12 +620,8 @@ def _fixture_repo(ab, repo):
         subprocess.run(["git", "-C", str(repo), *argv], check=True, capture_output=True)  # fmt: skip
 
 
-def _gitignored(repo):
-    (repo / ".gitignore").write_text("*.log\n")
-    (repo / "x.log").write_text("x")
-
-
-def _excluded(repo):
+def _ignored(repo):
+    # via .git/info/exclude, so no new file outside docs/ gives it away
     (repo / ".git" / "info" / "exclude").write_text("*.tmp\n")
     (repo / "y.tmp").write_text("y")
 
@@ -464,8 +635,7 @@ def _excluded(repo):
         pytest.param(lambda r: (r / "new.py").write_text("x"), False, id="untracked"),
         pytest.param(lambda r: (r / "test_converter.py").write_text("x"), False, id="modified"),
         pytest.param(lambda r: (r / "test_converter.py").unlink(), False, id="deleted"),
-        pytest.param(_gitignored, False, id="gitignored"),
-        pytest.param(_excluded, False, id="excluded"),
+        pytest.param(_ignored, False, id="ignored"),
     ],
 )
 def test_bprime_fence_is_the_whole_tree(ab, tmp_path, change, held):
@@ -474,8 +644,29 @@ def test_bprime_fence_is_the_whole_tree(ab, tmp_path, change, held):
     assert ab.check_passed("T2", tmp_path, python=sys.executable, bar="bprime") is held
 
 
+@pytest.mark.parametrize(
+    "status",
+    [
+        pytest.param(b"R  docs/new\0old.py\0", id="staged-rename"),
+        pytest.param(b" R docs/new\0old.py\0", id="worktree-rename"),
+    ],
+)
+def test_a_rename_out_of_the_fence_names_its_source(ab, tmp_path, monkeypatch, status):
+    done = subprocess.CompletedProcess([], 0, stdout=status, stderr=b"")
+    monkeypatch.setattr(ab.subprocess, "run", lambda *a, **kw: done)
+    assert ab.changed_outside(tmp_path, "docs/") == ["old.py"]
+
+
 @needs_git
 def test_b4_fence_still_checks_only_the_converter(ab, tmp_path):
     _fixture_repo(ab, tmp_path)
     (tmp_path / "new.py").write_text("x")
     assert ab.check_passed("T2", tmp_path, python=sys.executable, bar="b4") is True
+
+
+def test_an_edited_launch_settings_file_changes_the_serving_hash(ab, tmp_path, monkeypatch):
+    monkeypatch.setattr(ab, "serving_facts", lambda p, b, m, launch: {"launch_settings": launch})
+    args = _preflight_args(ab, tmp_path)
+    first = ab._serving_now(args)
+    args.launch_settings.write_text("flags --max-model-len 4096")
+    assert ab._serving_now(args) != first

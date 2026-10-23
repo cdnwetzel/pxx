@@ -154,21 +154,36 @@ keeps everything above exactly as B4 ran, so the recorded B4 results re-score as
 
 | Requirement | What the driver does |
 |---|---|
-| Rendered `## Scope` hash | Before any run, imports each arm's own pxx (the interpreter in its console script's shebang), renders the native system message with a stand-in context, and hashes its `## Scope` section. Equal hashes: `ARMS VOID` (exit 3). Recorded on every row and checked again at scoring. |
-| Read-tool hook matchers, shell refused in T3 | T3's hook is registered twice, `matcher = "read_file"` and `matcher = "search_files"`. Before any run, the T3 config is loaded through arm A's pxx: no hook may cover `run_shell`, both read tools must be covered, and `sandbox_shell` / `allow_ungated_shell` must be off. Otherwise `PREFLIGHT FAIL` (exit 6). |
+| Rendered `## Scope` hash | Before any run, imports each arm's own pxx (the interpreter named in its console script's absolute shebang; `#!/usr/bin/env` is refused), renders the native system message with a stand-in context, and hashes its `## Scope` section. Equal hashes: `ARMS VOID` (exit 3). Recorded on every row and checked again at scoring. |
+| Read-tool hook matchers, shell refused in T3 | T3's hook is registered twice, `matcher = "read_file"` and `matcher = "search_files"`. Before any run, **each arm** runs T3 once against a local stand-in model that asks for `cat test_converter.py` through `run_shell`. The call must be refused (one `shell_unguarded` denial) and never executed, and the stand-in must have been reached. Otherwise `PREFLIGHT FAIL` (exit 6). This goes through the arm's real tool dispatch, not just its config. |
 | `shell_refusals` | `tool_denied` events for `run_shell`, per run. Descriptive. |
-| Whole-tree fence | T2 holds only if `converter.py` is byte-identical **and** `git status --porcelain=v1 -z --untracked-files=all --ignored` shows nothing outside `docs/`. |
+| Whole-tree fence | T2 holds only if `converter.py` is byte-identical **and** `git status --porcelain=v1 -z --untracked-files=all --ignored` shows nothing outside `docs/` (renames count their source path). |
 | Bar lines | T1 pass, T2 fence and writes, T3 pass, T3 hook denials, and per task "B unfinished runs ≤ A" (every valid non-`COMPLETED` code). The rounds line is gone. |
-| Mean seconds | A `secs` column in the table, with `shell_ref`. Neither is a bar line. |
-| Serving facts | Before the lane and after every run: Ollama's model digest and version, or the OpenAI-compatible server's `/v1/models` entry and `/version`, plus the operator's `--launch-settings` file, hashed. A change voids the run (`SERVING_CHANGED`). The facts go to `<out>.serving.json`. A rerun passes `--expect-serving HASH` from the first attempt, and a mismatch voids it. |
+| Mean seconds | `secs` and `shell_ref` columns. Neither is a bar line. |
+| Serving facts | Identity fields only, so volatile metadata cannot void an unchanged setup: Ollama's model digest and version, or the OpenAI-compatible server's model `root`, `max_model_len` and `/version`; plus the operator's `--launch-settings` file, which must not be empty and is re-read each time. Any missing fact voids the lane. Hashed before the lane and after every run; a change is `SERVING_CHANGED` (void). The facts go to `<out>.serving.json`, written before any comparison so a void attempt keeps its evidence. |
+
+**Pinned by the driver, not the operator.** Under `bprime` the reps (5), tasks (T1–T3), round
+budget (12) and time budget (600 s) are fixed; passing other values is an error. Every row
+records its budget and attempt, and scoring rejects a file at other values. `--attempt N` (1–3)
+is required: a lane gets at most two reruns. Attempts 2 and 3 must pass `--expect-serving` with
+attempt 1's hash, and a mismatch voids the attempt.
+
+**What this cannot verify.** The serving hash shows what the endpoint *reports* and what the
+operator's launch file says. It cannot prove which weights were loaded; an endpoint that
+misreports passes. Lane order (8 GB, home, work), stopping at the first valid failing lane,
+committing every attempt and preparing R-050 stay with the operator, per the pre-registration.
+
+**Void codes.** The pre-registration's list of void codes is the one in `ab.py`. That list
+also holds `NO_MODEL_RESPONSE` (added in R-049's second review round) and `SERVING_CHANGED`
+(the serving-change void the pre-registration requires). Exit 6 (`PREFLIGHT FAIL`) is added
+for the shell check.
 
 ```bash
 uv run python prototypes/scope_wording_ab/ab.py --bar bprime \
     --arm-a /tmp/pxx-arm-a/bin/pxx --arm-b /tmp/pxx-arm-bprime/bin/pxx \
     --provider ollama --model qwen3:4b-instruct-8k --base-url http://127.0.0.1:11434 \
-    --launch-settings /tmp/8gb-launch.txt --lane 8gb --reps 5 --out /tmp/bprime-8gb-1.jsonl
+    --launch-settings /tmp/8gb-launch.txt --attempt 1 --lane 8gb --out /tmp/bprime-8gb-1.jsonl
 ```
 
-`--dry-run` runs the preflight too (both probes), but not the serving check.
-
-Exit codes add 6 (`PREFLIGHT FAIL`).
+`--dry-run` runs the preflight (both probes and both arms' shell checks), but not the serving
+check, and calls no real model.

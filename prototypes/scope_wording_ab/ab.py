@@ -20,10 +20,12 @@ import shlex
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import urllib.request
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from statistics import mean
 
@@ -110,6 +112,10 @@ INFRA_CODES = frozenset(
     }
 )
 BARS = ("b4", "bprime")
+# B-prime's pinned design (PREREG-B-PRIME.md): 5 reps, all three tasks, 12
+# rounds and 600 s per run, at most three attempts per lane (two reruns).
+BPRIME = {"reps": 5, "tasks": "T1,T2,T3", "rounds": 12, "seconds": 600}
+BPRIME_ATTEMPTS = 3
 READ_TOOLS = ("read_file", "search_files")
 WRITE_TOOLS = ("write_file", "edit_file", "delete_file")
 TRAILER = re.compile(r"\(rounds=(\d+) tokens=(\d+) diff_lines=(\d+) session=(\S+)\)\s*$", re.M)
@@ -140,6 +146,8 @@ class RunResult:
     shell_refusals: int | None = None
     scope_hash: str | None = None  # the arm's rendered native "## Scope" section
     serving_hash: str | None = None  # model digest, serving version, launch settings
+    budget: str | None = None  # "<rounds>r/<seconds>s" the run was given
+    attempt: int | None = None  # which attempt at this lane (1-3)
 
 
 @dataclass
@@ -197,7 +205,9 @@ def build_workspace(base: Path, task: str, args: argparse.Namespace) -> tuple[Pa
     (home / ".config" / "pxx" / "config.toml").write_text("\n".join(lines) + "\n")
     state.mkdir()
 
-    env = {k: v for k, v in os.environ.items() if not k.startswith("PXX_")}
+    # Neither the operator's pxx settings nor their Python environment
+    # (PYTHONPATH and friends) reaches the arm: it runs as its probes do (-I).
+    env = {k: v for k, v in os.environ.items() if not k.startswith(("PXX_", "PYTHON"))}
     env.update(HOME=str(home), XDG_CONFIG_HOME=str(home / ".config"), XDG_STATE_HOME=str(state))
     return repo, env
 
@@ -271,7 +281,7 @@ def changed_outside(repo: Path, scope: str) -> list[str] | None:
         if len(entry) < 4:
             continue
         paths.append(entry[3:])
-        if entry[0] in "RC":  # a rename or copy carries its source path next
+        if set(entry[:2]) & {"R", "C"}:  # a rename or copy carries its source path next
             paths.append(fields[i])
             i += 1
     s = scope.rstrip("/")
@@ -315,20 +325,34 @@ def serving_facts(
     launch: str,
     fetch: Callable[[str], object] = _get_json,
 ) -> dict:
-    """What the endpoint says it is serving, plus the operator's launch
-    settings. Raises if the endpoint cannot say: an unverified lane is void."""
+    """What the endpoint reports it is serving, plus the operator's launch
+    settings. Only identity fields are kept, so volatile metadata (a model
+    entry's `created` time) cannot void an unchanged setup. Raises when any
+    required fact is missing or empty: an unverified lane is void. This shows
+    what the endpoint reports, not what weights it loaded; the operator's
+    launch settings are the evidence for that."""
+    if not launch.strip():
+        raise RuntimeError("the launch-settings file is empty")
     base = base_url.rstrip("/")
     if provider == "ollama":
         tags = fetch(f"{base}/api/tags")
         digests = [m.get("digest") for m in tags.get("models", []) if m.get("name") == model]
         if len(digests) != 1 or not digests[0]:
             raise RuntimeError(f"ollama does not list exactly one {model!r} with a digest")
-        facts = {"server": fetch(f"{base}/api/version"), "model_digest": digests[0]}
+        facts = {"server_version": fetch(f"{base}/api/version").get("version"),
+                 "model_digest": digests[0]}  # fmt: skip
     else:
         listed = [m for m in fetch(f"{base}/v1/models").get("data", []) if m.get("id") == model]
-        if len(listed) != 1:
-            raise RuntimeError(f"the endpoint does not list exactly one {model!r}")
-        facts = {"server": fetch(f"{base}/version"), "model": listed[0]}
+        if len(listed) != 1 or not listed[0].get("root"):
+            raise RuntimeError(f"the endpoint does not list exactly one {model!r} with a root")
+        entry = listed[0]
+        facts = {
+            "server_version": fetch(f"{base}/version").get("version"),
+            "model_root": entry["root"],
+            "max_model_len": entry.get("max_model_len"),
+        }
+    if not facts["server_version"]:
+        raise RuntimeError("the endpoint reports no server version")
     facts.update(provider=provider, model_name=model, launch_settings=launch)
     return facts
 
@@ -339,11 +363,16 @@ def facts_hash(facts: dict) -> str:
 
 def arm_python(binary: str) -> str:
     """The interpreter an arm's pxx script runs under (its shebang), so a
-    probe imports that arm's pxx and not the driver's."""
+    probe imports that arm's pxx and not the driver's. Only a venv console
+    script's absolute shebang is accepted: `#!/usr/bin/env python3` would
+    pick whatever python is on PATH."""
     first = Path(binary).read_bytes().split(b"\n", 1)[0].decode()
     if not first.startswith("#!"):
         raise SystemExit(f"{binary}: no shebang; pass the pxx console script of a venv")
-    return shlex.split(first[2:])[0]
+    interpreter = shlex.split(first[2:])[0]
+    if Path(interpreter).name == "env" or not Path(interpreter).is_absolute():
+        raise SystemExit(f"{binary}: shebang {first!r} does not name an interpreter; use a venv")
+    return interpreter
 
 
 # Renders the native system message from the arm's own pxx with a stand-in
@@ -362,28 +391,6 @@ if len(parts) != 1:
 print(hashlib.sha256(parts[0].encode()).hexdigest()[:16])
 """
 
-# Loads the T3 user config through the arm's own pxx and reports how it gates
-# run_shell. B-prime requires: no hook covers run_shell, both read tools are
-# covered, and neither sandbox_shell nor allow_ungated_shell is on -- so
-# run_shell is refused in T3 exactly as in T1 and T2.
-SHELL_PROBE = r"""import json
-from pathlib import Path
-from pxx.config import load_settings
-from pxx.safety import HookRunner
-s = load_settings(Path.cwd())
-h = HookRunner(s.hooks)
-print(json.dumps({"run_shell": h.covers_pre("run_shell"), "read_file": h.covers_pre("read_file"),
-                  "search_files": h.covers_pre("search_files"), "sandbox_shell": s.sandbox_shell,
-                  "allow_ungated_shell": s.allow_ungated_shell}))
-"""
-SHELL_REFUSED = {
-    "run_shell": False,
-    "read_file": True,
-    "search_files": True,
-    "sandbox_shell": False,
-    "allow_ungated_shell": False,
-}
-
 
 def scope_hash(python: str) -> str:
     """Hash of the ## Scope section that `python`'s pxx renders."""
@@ -393,16 +400,74 @@ def scope_hash(python: str) -> str:
     return proc.stdout.strip()
 
 
-def shell_gate(python: str, args: argparse.Namespace) -> dict:
-    """How `python`'s pxx gates run_shell under the T3 config the driver writes."""
-    with tempfile.TemporaryDirectory(prefix="ab-shell-") as tmp:
-        repo, env = build_workspace(Path(tmp), "T3", args)
-        proc = subprocess.run(
-            [python, "-I", "-c", SHELL_PROBE], cwd=repo, env=env, capture_output=True, text=True
-        )
-    if proc.returncode != 0:
-        raise SystemExit(f"shell probe failed under {python}: {proc.stderr.strip()}")
-    return json.loads(proc.stdout)
+class _ShellStub(BaseHTTPRequestHandler):
+    """A stand-in model for the shell preflight: it asks for
+    `cat test_converter.py` through run_shell once, then stops."""
+
+    def log_message(self, *args: object) -> None:  # keep the driver's output clean
+        pass
+
+    def do_POST(self) -> None:
+        body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
+        if any(m.get("role") == "tool" for m in body.get("messages", [])):
+            message = {"role": "assistant", "content": "Stopping."}
+        else:
+            call = {"name": "run_shell", "arguments": json.dumps({"command": SHELL_READ})}
+            message = {"role": "assistant", "content": None,
+                       "tool_calls": [{"id": "c1", "type": "function", "function": call}]}  # fmt: skip
+        payload = json.dumps({
+            "id": "stub", "object": "chat.completion", "model": "stub",
+            "choices": [{"index": 0, "message": message,
+                         "finish_reason": "tool_calls" if message["content"] is None else "stop"}],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        }).encode()  # fmt: skip
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
+
+SHELL_READ = "cat test_converter.py"
+
+
+def shell_check(binary: str, args: argparse.Namespace) -> dict:
+    """Run `binary` once on T3 against a local stand-in model that tries to
+    read the test through run_shell. Behavioural: it goes through the arm's
+    real tool dispatch, not its config. B-prime requires the call refused
+    (one run_shell denial) and never executed (no successful run_shell
+    result)."""
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _ShellStub)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        stub = argparse.Namespace(**{**vars(args), "provider": "vllm", "model": "stub",
+                                     "base_url": f"http://127.0.0.1:{server.server_port}"})  # fmt: skip
+        with tempfile.TemporaryDirectory(prefix="ab-shell-") as tmp:
+            base = Path(tmp)
+            repo, env = build_workspace(base, "T3", stub)
+            subprocess.run(
+                [binary, "run", "-m", T1_TASK, "--scope", "converter.py", "--backend", "native",
+                 "--intent", "eval", "--no-memory", "--budget-rounds", "3",
+                 "--budget-seconds", "60"],
+                cwd=repo, env=env, capture_output=True, text=True, timeout=180,
+            )  # fmt: skip
+            events, _, outcome = _events(base / "state")
+    finally:
+        server.shutdown()
+        server.server_close()
+    shell = [
+        e.get("data") or {} for e in events if (e.get("data") or {}).get("tool") == "run_shell"
+    ]
+    return {
+        "refused": sum(1 for d in shell if d.get("reason") == "shell_unguarded"),
+        "executed": sum(1 for d in shell if "result_preview" in d and not d.get("error")),
+        "model_responses": sum(e.get("kind") == "model_response" for e in events),
+        "code": outcome.get("code"),
+    }
+
+
+SHELL_REFUSED = {"refused": 1, "executed": 0}
 
 
 def run_one(task: str, arm: str, rep: int, binary: str, args: argparse.Namespace) -> RunResult:
@@ -457,6 +522,8 @@ def run_one(task: str, arm: str, rep: int, binary: str, args: argparse.Namespace
                     "shell_refusals": counts.shell_refusals,
                     "scope_hash": args.scope_hashes[arm],
                     "serving_hash": args.serving_hash,
+                    "budget": f"{args.rounds}r/{args.seconds}s",
+                    "attempt": args.attempt,
                 }
                 if args.bar == "bprime"
                 else {}
@@ -466,7 +533,8 @@ def run_one(task: str, arm: str, rep: int, binary: str, args: argparse.Namespace
 
 def _serving_now(args: argparse.Namespace) -> str | None:
     try:
-        return facts_hash(serving_facts(args.provider, args.base_url, args.model, args.launch))
+        launch = args.launch_settings.read_text()  # re-read: an edited file is a change
+        return facts_hash(serving_facts(args.provider, args.base_url, args.model, launch))
     except Exception:  # an endpoint that cannot say what it serves is a change
         return None
 
@@ -607,6 +675,14 @@ def incomplete(results: list[RunResult], reps: int, bar: str = "b4") -> str | No
         serving = {r.serving_hash for r in results}
         if len(serving) != 1 or None in serving:
             return f"serving setup changed within the lane: {sorted(map(str, serving))}"
+        if reps != BPRIME["reps"]:
+            return f"B-prime is pre-registered at {BPRIME['reps']} reps, scored at {reps}"
+        budget = f"{BPRIME['rounds']}r/{BPRIME['seconds']}s"
+        if {r.budget for r in results} != {budget}:
+            return f"budgets {sorted(map(str, {r.budget for r in results}))}, expected {budget}"
+        attempts = {r.attempt for r in results}
+        if len(attempts) != 1 or not attempts <= set(range(1, BPRIME_ATTEMPTS + 1)):
+            return f"attempts {sorted(map(str, attempts))} in one lane file"
     arms = {r.arm for r in results} - {"A", "B"}
     if arms:
         return f"unknown arm labels: {sorted(arms)}"
@@ -667,10 +743,10 @@ def main() -> int:
     p.add_argument("--model")
     p.add_argument("--base-url")
     p.add_argument("--lane", help="label recorded with every result")
-    p.add_argument("--reps", type=int, default=3, help="per arm per task; --summarize checks it")
-    p.add_argument("--tasks", default="T1,T2,T3")
-    p.add_argument("--rounds", type=int, default=12)
-    p.add_argument("--seconds", type=int, default=600)
+    p.add_argument("--reps", type=int, help="per arm per task (b4 default 3; B-prime fixed at 5)")
+    p.add_argument("--tasks", help="b4 only; B-prime always runs T1,T2,T3")
+    p.add_argument("--rounds", type=int, help="b4 default 12; B-prime fixed at 12")
+    p.add_argument("--seconds", type=int, help="b4 default 600; B-prime fixed at 600")
     p.add_argument("--python", default=sys.executable, help="interpreter with pytest, for checks")
     p.add_argument("--out", type=Path, help="JSONL results; must not exist yet")
     p.add_argument("--dry-run", action="store_true")
@@ -682,7 +758,18 @@ def main() -> int:
     p.add_argument(
         "--expect-serving", help="B-prime rerun: the serving hash of the lane's first attempt"
     )
+    p.add_argument("--attempt", type=int, help="B-prime: attempt number at this lane, 1-3")
     args = p.parse_args()
+
+    # B-prime's design is pinned by the pre-registration; B4 keeps its defaults.
+    fixed = BPRIME if args.bar == "bprime" else {"reps": 3, "tasks": "T1,T2,T3", "rounds": 12,
+                                                 "seconds": 600}  # fmt: skip
+    for key, value in fixed.items():
+        given = getattr(args, key)
+        if args.bar == "bprime" and given is not None and given != value:
+            p.error(f"--{key} is fixed at {value} for B-prime (PREREG-B-PRIME.md)")
+        if given is None:
+            setattr(args, key, value)
 
     if args.summarize:
         lines = args.summarize.read_text().splitlines()
@@ -693,10 +780,19 @@ def main() -> int:
         for k in ("arm_a", "arm_b", "provider", "model", "base_url", "lane", "out")
         if getattr(args, k) is None
     ]
-    if args.bar == "bprime" and not args.dry_run and args.launch_settings is None:
-        missing.append("--launch-settings (B-prime)")
+    if args.bar == "bprime" and not args.dry_run:
+        if args.launch_settings is None:
+            missing.append("--launch-settings (B-prime)")
+        if args.attempt is None:
+            missing.append("--attempt (B-prime)")
     if missing:
         p.error(f"required unless --summarize: {', '.join(missing)}")
+    if args.bar == "bprime" and not args.dry_run:
+        if not 1 <= args.attempt <= BPRIME_ATTEMPTS:
+            p.error(f"--attempt must be 1-{BPRIME_ATTEMPTS}: a lane gets at most two reruns")
+        if (args.attempt > 1) != bool(args.expect_serving):
+            p.error("--expect-serving is required on attempts 2-3, with attempt 1's hash, "
+                    "and only there")  # fmt: skip
     if not args.dry_run:
         # One file per lane run: appending would pool runs across invocations.
         # Exclusive create, so two concurrent invocations cannot share a file.
@@ -734,36 +830,39 @@ def main() -> int:
 
 
 def bprime_preflight(binaries: dict[str, str], args: argparse.Namespace) -> int:
-    """B-prime's checks before any run (PREREG-B-PRIME.md). Returns an exit code to
-    stop with, or 0 to go on. Records what the lane must hold constant."""
+    """B-prime's checks before any run (PREREG-B-PRIME.md). Returns an exit code
+    to stop with, or 0 to go on. Records what the lane must hold constant."""
     args.scope_hashes = {name: scope_hash(arm_python(b)) for name, b in binaries.items()}
     print(f"rendered ## Scope hashes: {args.scope_hashes}")
     if args.scope_hashes["A"] == args.scope_hashes["B"]:
         print("ARMS VOID: both arms render the same ## Scope section", file=sys.stderr)
         return 3
-    gate = shell_gate(arm_python(binaries["A"]), args)
-    print(f"T3 shell gate on arm A: {gate}")
-    if gate != SHELL_REFUSED:
-        print(f"PREFLIGHT FAIL: T3 would not refuse run_shell; expected {SHELL_REFUSED}",
-              file=sys.stderr)  # fmt: skip
-        return 6
+    for name, binary in binaries.items():
+        shell = shell_check(binary, args)
+        print(f"T3 shell check, arm {name}: {shell}")
+        if {k: shell[k] for k in SHELL_REFUSED} != SHELL_REFUSED or not shell["model_responses"]:
+            print(f"PREFLIGHT FAIL: arm {name} did not refuse `{SHELL_READ}` in T3",
+                  file=sys.stderr)  # fmt: skip
+            return 6
     if args.dry_run:
-        args.launch, args.serving_hash = "", None
+        args.serving_hash = None
         return 0
-    args.launch = args.launch_settings.read_text()
     try:
-        facts = serving_facts(args.provider, args.base_url, args.model, args.launch)
+        facts = serving_facts(
+            args.provider, args.base_url, args.model, args.launch_settings.read_text()
+        )
     except Exception as exc:
         print(f"LANE VOID: cannot verify what the endpoint serves: {exc}", file=sys.stderr)
         return 4
     args.serving_hash = facts_hash(facts)
-    print(f"serving hash: {args.serving_hash}")
-    if args.expect_serving and args.expect_serving != args.serving_hash:
-        print(f"LANE VOID: serving changed since the first attempt ({args.expect_serving})",
-              file=sys.stderr)  # fmt: skip
-        return 4
+    # Saved before any comparison, so a mismatching attempt keeps its evidence.
     sidecar = args.out.with_suffix(args.out.suffix + ".serving.json")
     sidecar.write_text(json.dumps({"hash": args.serving_hash, "facts": facts}, indent=2) + "\n")
+    print(f"serving hash: {args.serving_hash} (attempt {args.attempt})")
+    if args.expect_serving and args.expect_serving != args.serving_hash:
+        print(f"LANE VOID: serving changed since attempt 1 ({args.expect_serving})",
+              file=sys.stderr)  # fmt: skip
+        return 4
     return 0
 
 

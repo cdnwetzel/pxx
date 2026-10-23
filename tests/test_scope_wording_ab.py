@@ -537,6 +537,7 @@ def test_arm_python_reads_the_shebang(ab, tmp_path):
             ab.arm_python(str(script))
 
 
+@needs_git
 def test_the_arm_does_not_inherit_the_operators_python_environment(ab, tmp_path, monkeypatch):
     monkeypatch.setenv("PYTHONPATH", "/somewhere/else")
     monkeypatch.setenv("PXX_MODEL", "other")
@@ -743,6 +744,7 @@ def test_main_runs_the_bprime_preflight_and_stops_on_it(ab, tmp_path, monkeypatc
     assert calls == [1]
 
 
+@needs_git
 def test_main_skips_the_bprime_preflight_under_b4(ab, tmp_path, monkeypatch):
     monkeypatch.setattr(ab, "bprime_preflight", lambda binaries, args: pytest.fail("ran"))
     argv = ["ab.py", "--bar", "b4", "--dry-run", "--arm-a", "a", "--arm-b", "b", "--tasks", "T1",
@@ -796,3 +798,33 @@ def test_the_scope_probe_ignores_the_operators_pythonpath(ab, tmp_path, monkeypa
     decoy = _fake_pxx(tmp_path / "decoy", "## Scope\nnot the arm's own pxx")
     monkeypatch.setenv("PYTHONPATH", str(decoy))
     assert ab.scope_hash(sys.executable) == real
+
+
+def test_a_preflight_that_cannot_run_is_a_preflight_failure(ab, tmp_path, monkeypatch):
+    _stub_preflight(ab, monkeypatch, facts={"v": 1})
+
+    def broken(binary, args):
+        raise subprocess.TimeoutExpired("pxx", 180)
+
+    monkeypatch.setattr(ab, "shell_check", broken)
+    assert ab.bprime_preflight({"A": "A", "B": "B"}, _preflight_args(ab, tmp_path)) == 6
+
+    def bad_shebang(binary):
+        raise SystemExit("no shebang")
+
+    monkeypatch.setattr(ab, "arm_argv", bad_shebang)
+    assert ab.bprime_preflight({"A": "A", "B": "B"}, _preflight_args(ab, tmp_path)) == 6
+
+
+def test_a_failed_preflight_leaves_no_empty_results_file(ab, tmp_path, monkeypatch):
+    launch = tmp_path / "launch.txt"
+    launch.write_text("flags")
+    out = tmp_path / "lane.jsonl"
+    monkeypatch.setattr(ab, "check_fixture", lambda python: None)
+    monkeypatch.setattr(ab, "bprime_preflight", lambda binaries, args: 6)
+    argv = ["ab.py", "--bar", "bprime", "--attempt", "1", "--arm-a", "a", "--arm-b", "b",
+            "--provider", "ollama", "--model", "m", "--base-url", "u", "--lane", "t",
+            "--launch-settings", str(launch), "--out", str(out)]  # fmt: skip
+    monkeypatch.setattr(sys, "argv", argv)
+    assert ab.main() == 6
+    assert not out.exists()

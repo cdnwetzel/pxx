@@ -177,7 +177,8 @@ committing every attempt and preparing R-050 stay with the operator, per the pre
 **Void codes.** The pre-registration's list of void codes is the one in `ab.py`. That list
 also holds `NO_MODEL_RESPONSE` (added in R-049's second review round) and `SERVING_CHANGED`
 (the serving-change void the pre-registration requires). Exit 6 (`PREFLIGHT FAIL`) is added
-for the shell check.
+for a preflight that fails or cannot run (a bad shebang, a probe or shell check that errors);
+the empty results file is then removed, and any serving sidecar is kept.
 
 ```bash
 uv run python prototypes/scope_wording_ab/ab.py --bar bprime \

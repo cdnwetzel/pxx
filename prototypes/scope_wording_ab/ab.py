@@ -868,6 +868,10 @@ def main() -> int:
     # resolved here, against the operator's cwd.
     binaries = {"A": str(Path(args.arm_a).resolve()), "B": str(Path(args.arm_b).resolve())}
     if args.bar == "bprime" and (code := bprime_preflight(binaries, args)):
+        # Nothing was measured: drop the empty results file (any serving
+        # sidecar stays as evidence) so the next attempt can use the path.
+        if not args.dry_run and args.out.exists() and args.out.stat().st_size == 0:
+            args.out.unlink()
         return code
     results: list[RunResult] = []
     for rep in range(1, args.reps + 1):
@@ -894,13 +898,21 @@ def main() -> int:
 def bprime_preflight(binaries: dict[str, str], args: argparse.Namespace) -> int:
     """B-prime's checks before any run (PREREG-B-PRIME.md). Returns an exit code
     to stop with, or 0 to go on. Records what the lane must hold constant."""
-    args.scope_hashes = {name: scope_hash(arm_argv(b)) for name, b in binaries.items()}
+    try:
+        args.scope_hashes = {name: scope_hash(arm_argv(b)) for name, b in binaries.items()}
+    except (SystemExit, OSError) as exc:  # a bad shebang, a missing binary, a failed probe
+        print(f"PREFLIGHT FAIL: cannot render the arms' ## Scope sections: {exc}", file=sys.stderr)
+        return 6
     print(f"rendered ## Scope hashes: {args.scope_hashes}")
     if args.scope_hashes["A"] == args.scope_hashes["B"]:
         print("ARMS VOID: both arms render the same ## Scope section", file=sys.stderr)
         return 3
     for name, binary in binaries.items():
-        shell = shell_check(binary, args)
+        try:
+            shell = shell_check(binary, args)
+        except Exception as exc:  # the check itself could not run: not a pass
+            print(f"PREFLIGHT FAIL: arm {name} shell check did not run: {exc!r}", file=sys.stderr)
+            return 6
         print(f"T3 shell check, arm {name}: {shell}")
         if {k: shell[k] for k in SHELL_REFUSED} != SHELL_REFUSED or not shell["model_responses"]:
             print(f"PREFLIGHT FAIL: arm {name} did not refuse `{SHELL_READ}` in T3",

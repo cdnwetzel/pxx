@@ -862,3 +862,42 @@ def test_transport_retry_wait_wakes_on_cancel_and_respects_the_clock(tmp_path, m
     t0 = time.monotonic()
     asyncio.run(nmod._retry_wait(ctx2, 30.0))
     assert time.monotonic() - t0 < 1.0
+
+
+def test_scope_section_states_the_gates_rule_and_directs_reading_the_tests(tmp_path):
+    """B-prime (prototypes/scope_wording_ab/PREREG-B-PRIME.md): the prompt states
+    what the gates enforce -- reads anywhere in the project (check_read),
+    writes only inside the scope (check_write), a hook may refuse a read --
+    and tells the model to read the tests before editing. A narrow scope
+    keeps the read and write paths distinct, so a read line naming the write
+    scope would fail."""
+    from dataclasses import replace
+
+    from pxx.backends import native as nmod
+
+    scope = ScopeGate(tmp_path, ("src",))
+    assert scope.in_read_scope(tmp_path / "tests" / "test_a.py")
+    assert not scope.in_scope(tmp_path / "tests" / "test_a.py")
+    text = nmod._system_message(replace(make_ctx(tmp_path), scope=scope))
+    assert f"Read: any path inside the project: {scope.root}\n" in text
+    assert f"Write: only paths inside: {scope.describe()}\n" in text
+    assert "Before editing, read_file the tests or callers" in text
+    assert "A configured hook may refuse a read the project allows" in text
+    # native_system.md: the directive and the write rule, not the old claim
+    assert "Before you edit, open the files that\n  define what your change must satisfy" in text
+    assert "You may write only inside the declared scope" in text
+    # negative controls: the 2.9.3 wording that misstated the read gate
+    assert "only read and write paths" not in text
+    assert "never attempt to read, write" not in text
+
+
+def test_aider_context_wording_is_unchanged_by_b_prime(tmp_path):
+    """B-prime changes the native backend only; aider's text was never measured
+    (PREREG-B-PRIME.md), so it stays as in 2.9.3."""
+    import inspect
+
+    from pxx.backends import aider
+
+    source = inspect.getsource(aider)
+    assert 'f"Scope — only read/write paths under: {ctx.scope.describe()}",' in source
+    assert "Before editing, read_file" not in source

@@ -160,16 +160,17 @@ keeps everything above exactly as B4 ran, so the recorded B4 results re-score as
 | Whole-tree fence | T2 holds only if `converter.py` is byte-identical **and** `git status --porcelain=v1 -z --untracked-files=all --ignored` shows nothing outside `docs/` (renames count their source path). |
 | Bar lines | T1 pass, T2 fence and writes, T3 pass, T3 hook denials, and per task "B unfinished runs ≤ A" (every valid non-`COMPLETED` code). The rounds line is gone. |
 | Mean seconds | `secs` and `shell_ref` columns. Neither is a bar line. |
-| Serving facts | Identity fields only, so volatile metadata cannot void an unchanged setup: Ollama's model digest and version, or the OpenAI-compatible server's model `root`, `max_model_len` and `/version`; plus the operator's `--launch-settings` file, which must not be empty and is re-read each time. Any missing fact voids the lane. Hashed before the lane and after every run; a change is `SERVING_CHANGED` (void). The facts go to `<out>.serving.json`, written before any comparison so a void attempt keeps its evidence. |
+| Serving facts | Identity fields only, so volatile metadata cannot void an unchanged setup. Ollama: the model digest and server version. OpenAI-compatible (vLLM): the model `root`, the server `/version`, and `--model-revision`, which the operator must state because the server does not report a revision (`max_model_len` and any reported revision are recorded when present). Both: the operator's `--launch-settings` file, which must not be empty and is re-read each time. A missing required fact voids the lane. Hashed before the lane and after every run; a change is `SERVING_CHANGED` (void). The facts go to `<out>.serving.json`, written before any comparison and also when the endpoint cannot be verified; each mid-lane change is appended, with its facts or error, to `<out>.serving-changes.jsonl`. |
 
 **Pinned by the driver, not the operator.** Under `bprime` the reps (5), tasks (T1–T3), round
-budget (12) and time budget (600 s) are fixed; passing other values is an error. Every row
-records its budget and attempt, and scoring rejects a file at other values. `--attempt N` (1–3)
+budget (12) and time budget (600 s) are fixed; passing other values is an error. Every row,
+void rows included, records its budget, attempt, Scope hash and serving hash; scoring rejects a
+file at other values, and an empty hash is not an identity. `--attempt N` (1–3)
 is required: a lane gets at most two reruns. Attempts 2 and 3 must pass `--expect-serving` with
 attempt 1's hash, and a mismatch voids the attempt.
 
-**What this cannot verify.** The serving hash shows what the endpoint *reports* and what the
-operator's launch file says. It cannot prove which weights were loaded; an endpoint that
+**What this cannot verify.** The serving hash shows what the endpoint *reports*, the revision
+the operator states, and what the operator's launch file says. It cannot prove which weights were loaded; an endpoint that
 misreports passes. Lane order (8 GB, home, work), stopping at the first valid failing lane,
 committing every attempt and preparing R-050 stay with the operator, per the pre-registration.
 

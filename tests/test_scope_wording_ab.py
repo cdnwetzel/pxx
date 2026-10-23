@@ -431,18 +431,18 @@ def _preflight_args(ab, tmp_path, **over):
     launch = tmp_path / "launch.txt"
     launch.write_text("flags")
     ns = dict(dry_run=False, launch_settings=launch, out=tmp_path / "lane.jsonl", attempt=1,
-              expect_serving=None)  # fmt: skip
+              expect_serving=None, model_revision=None)  # fmt: skip
     ns.update(over)
     return _args(ab, tmp_path, bar="bprime", **ns)
 
 
 def _stub_preflight(ab, monkeypatch, *, scopes=("a", "b"), shell=None, facts=None):
-    monkeypatch.setattr(ab, "arm_python", lambda binary: binary)
+    monkeypatch.setattr(ab, "arm_argv", lambda binary: binary)
     monkeypatch.setattr(ab, "scope_hash", dict(zip(("A", "B"), scopes, strict=True)).get)
     ok = {"refused": 1, "executed": 0, "model_responses": 2, "code": "COMPLETED"}
     monkeypatch.setattr(ab, "shell_check", lambda binary, args: (shell or {}).get(binary, ok))
 
-    def serving(provider, base_url, model, launch):
+    def serving(provider, base_url, model, launch, **kw):
         if facts is None:
             raise RuntimeError("unreachable")
         return {**facts, "launch_settings": launch}
@@ -485,7 +485,7 @@ def test_bprime_preflight(ab, tmp_path, monkeypatch, stub, over, code):
 
 
 def _main(ab, monkeypatch, *argv):
-    base = ["ab.py", "--bar", "bprime", "--arm-a", "a", "--arm-b", "b", "--provider", "p",
+    base = ["ab.py", "--bar", "bprime", "--arm-a", "a", "--arm-b", "b", "--provider", "ollama",
             "--model", "m", "--base-url", "u", "--lane", "t"]  # fmt: skip
     monkeypatch.setattr(sys, "argv", [*base, *argv])
     with pytest.raises(SystemExit) as exc:
@@ -505,6 +505,7 @@ def _main(ab, monkeypatch, *argv):
         pytest.param(["--attempt", "1", "--expect-serving", "x"], True, id="first-with-pin"),
         pytest.param([], True, id="no-attempt"),
         pytest.param(["--attempt", "1"], False, id="no-launch-settings"),
+        pytest.param(["--attempt", "1", "--provider", "vllm"], True, id="vllm-no-revision"),
     ],
 )
 def test_bprime_cli_refuses_a_departure_from_the_preregistration(
@@ -514,7 +515,9 @@ def test_bprime_cli_refuses_a_departure_from_the_preregistration(
     launch.write_text("flags")
     extra = ["--launch-settings", str(launch)] if with_launch else []
     assert _main(ab, monkeypatch, *argv, *extra, "--out", str(tmp_path / "lane.jsonl")) == 2
-    assert "error:" in capsys.readouterr().err
+    [error] = [line for line in capsys.readouterr().err.splitlines() if "error:" in line]
+    # each case fails for its own reason, not for a missing --model-revision
+    assert ("model-revision" in error) is ("vllm" in argv)
     assert not (tmp_path / "lane.jsonl").exists()  # refused before anything is written
 
 
@@ -562,12 +565,12 @@ def test_serving_facts_ollama_records_the_model_digest(ab):
 
 
 def test_serving_facts_ignore_volatile_metadata(ab):
-    facts = ab.serving_facts("vllm", "http://h:2", "q", "flags", _fetch(_VLLM))
+    facts = ab.serving_facts("vllm", "http://h:2", "q", "flags", _fetch(_VLLM), revision="r1")
     assert facts["model_root"] == "/models/q"
     later = {**_VLLM, "http://h:2/v1/models": {"data": [{**_VLLM["http://h:2/v1/models"]["data"][0],
                                                          "created": 2}]}}  # fmt: skip
     assert ab.facts_hash(facts) == ab.facts_hash(
-        ab.serving_facts("vllm", "http://h:2", "q", "flags", _fetch(later))
+        ab.serving_facts("vllm", "http://h:2", "q", "flags", _fetch(later), revision="r1")
     )
 
 
@@ -594,7 +597,7 @@ def test_serving_facts_ignore_volatile_metadata(ab):
 def test_serving_facts_refuse_an_unverifiable_setup(ab, provider, responses, launch):
     base, model = ("http://h:1", "m:4b") if provider == "ollama" else ("http://h:2", "q")
     with pytest.raises(RuntimeError):
-        ab.serving_facts(provider, base, model, launch, _fetch(responses))
+        ab.serving_facts(provider, base, model, launch, _fetch(responses), revision="r1")
 
 
 def test_bprime_a_serving_change_mid_lane_voids_the_run(ab, tmp_path, monkeypatch):
@@ -603,8 +606,8 @@ def test_bprime_a_serving_change_mid_lane_voids_the_run(ab, tmp_path, monkeypatc
     monkeypatch.setattr(ab, "build_workspace", lambda base, task, args: (tmp_path, {}))
     monkeypatch.setattr(ab.subprocess, "run", lambda *a, **kw: done)
     monkeypatch.setattr(ab, "_events", lambda state: (events, {}, {"code": "COMPLETED"}))
-    monkeypatch.setattr(ab, "_serving_now", lambda args: "changed")
-    args = _args(ab, tmp_path, bar="bprime", serving_hash="first", scope_hashes={"A": "s"})
+    monkeypatch.setattr(ab, "_serving_now", lambda args, **kw: "changed")
+    args = _preflight_args(ab, tmp_path, serving_hash="first", scope_hashes={"A": "s"})
     assert ab.run_one("T1", "A", 1, "pxx", args).terminal_code == "SERVING_CHANGED"
 
 
@@ -665,8 +668,85 @@ def test_b4_fence_still_checks_only_the_converter(ab, tmp_path):
 
 
 def test_an_edited_launch_settings_file_changes_the_serving_hash(ab, tmp_path, monkeypatch):
-    monkeypatch.setattr(ab, "serving_facts", lambda p, b, m, launch: {"launch_settings": launch})
+    monkeypatch.setattr(
+        ab, "serving_facts", lambda p, b, m, launch, **kw: {"launch_settings": launch}
+    )
     args = _preflight_args(ab, tmp_path)
     first = ab._serving_now(args)
     args.launch_settings.write_text("flags --max-model-len 4096")
     assert ab._serving_now(args) != first
+
+
+def test_serving_facts_need_a_stated_revision_for_an_openai_compatible_server(ab):
+    with pytest.raises(RuntimeError, match="model-revision"):
+        ab.serving_facts("vllm", "http://h:2", "q", "flags", _fetch(_VLLM))
+    one = ab.serving_facts("vllm", "http://h:2", "q", "flags", _fetch(_VLLM), revision="one")
+    two = ab.serving_facts("vllm", "http://h:2", "q", "flags", _fetch(_VLLM), revision="two")
+    assert ab.facts_hash(one) != ab.facts_hash(two)
+    reported = {
+        **_VLLM,
+        "http://h:2/v1/models": {"data": [{"id": "q", "root": "/m", "revision": "x"}]},
+    }
+    facts = ab.serving_facts("vllm", "http://h:2", "q", "f", _fetch(reported), revision="one")
+    assert facts["reported_revision"] == "x"
+
+
+@pytest.mark.parametrize(("field", "code"), [("serving_hash", 5), ("scope_hash", 3)])
+def test_an_empty_identity_hash_is_not_an_identity(ab, field, code):
+    results = [replace(r, **{field: ""}) if r.arm == "A" else r for r in _bp_full(ab)]
+    if field == "serving_hash":
+        results = [replace(r, serving_hash="") for r in results]
+    assert ab.verdict(results, REPS, "bprime") == code
+
+
+def test_a_void_bprime_row_still_records_its_attempt(ab, tmp_path, monkeypatch):
+    def hang(*a, **kw):
+        raise subprocess.TimeoutExpired(a[0], 1)
+
+    monkeypatch.setattr(ab, "build_workspace", lambda base, task, args: (tmp_path, {}))
+    monkeypatch.setattr(ab.subprocess, "run", hang)
+    args = _preflight_args(ab, tmp_path, serving_hash="srv", scope_hashes={"A": "s"})
+    row = ab.run_one("T1", "A", 1, "pxx", args)
+    assert row.terminal_code == "HARNESS_TIMEOUT"
+    assert (row.bar, row.attempt, row.budget, row.serving_hash) == ("bprime", 1, "1r/1s", "srv")
+
+
+def test_a_serving_change_mid_lane_keeps_its_evidence(ab, tmp_path, monkeypatch):
+    monkeypatch.setattr(ab, "serving_facts", lambda p, b, m, launch, **kw: {"v": 2})
+    args = _preflight_args(ab, tmp_path, serving_hash="lane-hash")
+    assert ab._serving_now(args, record=True) != "lane-hash"
+    [line] = (tmp_path / "lane.jsonl.serving-changes.jsonl").read_text().splitlines()
+    assert json.loads(line)["facts"] == {"v": 2}
+
+
+def test_an_unverifiable_endpoint_keeps_its_evidence(ab, tmp_path, monkeypatch):
+    _stub_preflight(ab, monkeypatch)  # serving_facts raises
+    assert ab.bprime_preflight({"A": "A", "B": "B"}, _preflight_args(ab, tmp_path)) == 4
+    saved = json.loads((tmp_path / "lane.jsonl.serving.json").read_text())
+    assert saved["hash"] is None and saved["error"]
+
+
+def test_main_runs_the_bprime_preflight_and_stops_on_it(ab, tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr(ab, "bprime_preflight", lambda binaries, args: calls.append(1) or 6)
+    argv = ["ab.py", "--bar", "bprime", "--dry-run", "--arm-a", "a", "--arm-b", "b",
+            "--provider", "p", "--model", "m", "--base-url", "u", "--lane", "t",
+            "--out", str(tmp_path / "x.jsonl")]  # fmt: skip
+    monkeypatch.setattr(sys, "argv", argv)
+    assert ab.main() == 6
+    assert calls == [1]
+
+
+def test_main_skips_the_bprime_preflight_under_b4(ab, tmp_path, monkeypatch):
+    monkeypatch.setattr(ab, "bprime_preflight", lambda binaries, args: pytest.fail("ran"))
+    argv = ["ab.py", "--bar", "b4", "--dry-run", "--arm-a", "a", "--arm-b", "b", "--tasks", "T1",
+            "--provider", "p", "--model", "m", "--base-url", "u", "--lane", "t",
+            "--out", str(tmp_path / "x.jsonl")]  # fmt: skip
+    monkeypatch.setattr(sys, "argv", argv)
+    assert ab.main() == 0
+
+
+def test_arm_argv_keeps_the_shebang_options(ab, tmp_path):
+    script = tmp_path / "pxx"
+    script.write_text("#!/opt/venv/bin/python3 -s\nimport sys\n")
+    assert ab.arm_argv(str(script)) == ["/opt/venv/bin/python3", "-s"]

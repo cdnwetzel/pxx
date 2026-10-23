@@ -24,7 +24,7 @@ import threading
 import time
 import urllib.request
 from collections.abc import Callable
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from statistics import mean
@@ -206,7 +206,8 @@ def build_workspace(base: Path, task: str, args: argparse.Namespace) -> tuple[Pa
     state.mkdir()
 
     # Neither the operator's pxx settings nor their Python environment
-    # (PYTHONPATH and friends) reaches the arm: it runs as its probes do (-I).
+    # (PYTHONPATH and friends) reaches the arm, so the measured run imports
+    # the same pxx the isolated (-I) probes import.
     env = {k: v for k, v in os.environ.items() if not k.startswith(("PXX_", "PYTHON"))}
     env.update(HOME=str(home), XDG_CONFIG_HOME=str(home / ".config"), XDG_STATE_HOME=str(state))
     return repo, env
@@ -313,6 +314,19 @@ def _void(lane: str, task: str, arm: str, rep: int, code: str, elapsed: float) -
     return RunResult(lane, task, arm, rep, -1, code, False, 0, 0, 0, None, round(elapsed, 1), "")
 
 
+def _bprime_fields(args: argparse.Namespace, arm: str) -> dict:
+    """What every B-prime row records, void or not."""
+    if args.bar != "bprime":
+        return {}
+    return {
+        "bar": "bprime",
+        "scope_hash": args.scope_hashes[arm],
+        "serving_hash": args.serving_hash,
+        "budget": f"{args.rounds}r/{args.seconds}s",
+        "attempt": args.attempt,
+    }
+
+
 def _get_json(url: str) -> object:
     with urllib.request.urlopen(url, timeout=10) as resp:
         return json.loads(resp.read())
@@ -324,13 +338,17 @@ def serving_facts(
     model: str,
     launch: str,
     fetch: Callable[[str], object] = _get_json,
+    *,
+    revision: str | None = None,
 ) -> dict:
     """What the endpoint reports it is serving, plus the operator's launch
     settings. Only identity fields are kept, so volatile metadata (a model
     entry's `created` time) cannot void an unchanged setup. Raises when any
     required fact is missing or empty: an unverified lane is void. This shows
     what the endpoint reports, not what weights it loaded; the operator's
-    launch settings are the evidence for that."""
+    launch settings are the evidence for that. An OpenAI-compatible server
+    does not report the model's revision, so the operator states it
+    (`--model-revision`); Ollama's digest identifies the exact build."""
     if not launch.strip():
         raise RuntimeError("the launch-settings file is empty")
     base = base_url.rstrip("/")
@@ -345,11 +363,15 @@ def serving_facts(
         listed = [m for m in fetch(f"{base}/v1/models").get("data", []) if m.get("id") == model]
         if len(listed) != 1 or not listed[0].get("root"):
             raise RuntimeError(f"the endpoint does not list exactly one {model!r} with a root")
+        if not (revision or "").strip():
+            raise RuntimeError("no --model-revision stated for an OpenAI-compatible server")
         entry = listed[0]
         facts = {
             "server_version": fetch(f"{base}/version").get("version"),
             "model_root": entry["root"],
-            "max_model_len": entry.get("max_model_len"),
+            "model_revision": revision.strip(),
+            "reported_revision": entry.get("revision"),  # if the server reports one
+            "max_model_len": entry.get("max_model_len"),  # optional
         }
     if not facts["server_version"]:
         raise RuntimeError("the endpoint reports no server version")
@@ -375,6 +397,14 @@ def arm_python(binary: str) -> str:
     return interpreter
 
 
+def arm_argv(binary: str) -> list[str]:
+    """The shebang's interpreter with its options (e.g. `-s`), so a probe
+    starts Python the way the measured run does."""
+    arm_python(binary)  # validates the shebang
+    first = Path(binary).read_bytes().split(b"\n", 1)[0].decode()
+    return shlex.split(first[2:])
+
+
 # Renders the native system message from the arm's own pxx with a stand-in
 # context and prints the sha256 of its "## Scope" section. Both B4 and B-prime
 # build that section in native._system_message.
@@ -392,9 +422,11 @@ print(hashlib.sha256(parts[0].encode()).hexdigest()[:16])
 """
 
 
-def scope_hash(python: str) -> str:
-    """Hash of the ## Scope section that `python`'s pxx renders."""
-    proc = subprocess.run([python, "-I", "-c", SCOPE_PROBE], capture_output=True, text=True)
+def scope_hash(python: str | list[str]) -> str:
+    """Hash of the ## Scope section that `python`'s pxx renders. `python` is
+    an interpreter path, or an arm's shebang argv (`arm_argv`)."""
+    argv = [python] if isinstance(python, str) else list(python)
+    proc = subprocess.run([*argv, "-I", "-c", SCOPE_PROBE], capture_output=True, text=True)
     if proc.returncode != 0:
         raise SystemExit(f"scope probe failed under {python}: {proc.stderr.strip()}")
     return proc.stdout.strip()
@@ -482,23 +514,29 @@ def run_one(task: str, arm: str, rep: int, binary: str, args: argparse.Namespace
         if args.dry_run:
             print(shlex.join(argv))
             return RunResult(args.lane, task, arm, rep, 0, "DRY_RUN", False, 0, 0, 0, None, 0.0, "")
+
+        def void(code: str, elapsed: float) -> RunResult:
+            return replace(
+                _void(args.lane, task, arm, rep, code, elapsed), **_bprime_fields(args, arm)
+            )
+
         t0 = time.monotonic()
         try:
             proc = subprocess.run(
                 argv, cwd=repo, env=env, capture_output=True, text=True, timeout=args.seconds + 120
             )
         except subprocess.TimeoutExpired:
-            return _void(args.lane, task, arm, rep, "HARNESS_TIMEOUT", time.monotonic() - t0)
+            return void("HARNESS_TIMEOUT", time.monotonic() - t0)
         elapsed = time.monotonic() - t0
         try:
             events, manifest, outcome = _events(base / "state")
         except (OSError, RuntimeError, ValueError):
-            return _void(args.lane, task, arm, rep, "NO_RUN_RECORD", elapsed)
+            return void("NO_RUN_RECORD", elapsed)
         if not any(ev.get("kind") == "model_response" for ev in events):
             # Zero counts from an event log with no model in it are not data.
-            return _void(args.lane, task, arm, rep, "NO_MODEL_RESPONSE", elapsed)
-        if args.bar == "bprime" and _serving_now(args) != args.serving_hash:
-            return _void(args.lane, task, arm, rep, "SERVING_CHANGED", elapsed)
+            return void("NO_MODEL_RESPONSE", elapsed)
+        if args.bar == "bprime" and _serving_now(args, record=True) != args.serving_hash:
+            return void("SERVING_CHANGED", elapsed)
         counts = count_events(task, repo, events)
         trailer = TRAILER.search(proc.stdout)
         return RunResult(
@@ -516,27 +554,28 @@ def run_one(task: str, arm: str, rep: int, binary: str, args: argparse.Namespace
             seconds=round(elapsed, 1),
             prompt_hash=_prompt_hash(manifest),
             opened_test=counts.opened_test,
-            **(
-                {
-                    "bar": "bprime",
-                    "shell_refusals": counts.shell_refusals,
-                    "scope_hash": args.scope_hashes[arm],
-                    "serving_hash": args.serving_hash,
-                    "budget": f"{args.rounds}r/{args.seconds}s",
-                    "attempt": args.attempt,
-                }
-                if args.bar == "bprime"
-                else {}
-            ),
+            **_bprime_fields(args, arm),
+            **({"shell_refusals": counts.shell_refusals} if args.bar == "bprime" else {}),
         )
 
 
-def _serving_now(args: argparse.Namespace) -> str | None:
+def _serving_now(args: argparse.Namespace, *, record: bool = False) -> str | None:
+    """The serving hash now, or None if the endpoint cannot say. With
+    `record`, a hash that differs from the lane's is appended, with its facts
+    or error, to `<out>.serving-changes.jsonl`, so a void keeps its evidence."""
     try:
         launch = args.launch_settings.read_text()  # re-read: an edited file is a change
-        return facts_hash(serving_facts(args.provider, args.base_url, args.model, launch))
-    except Exception:  # an endpoint that cannot say what it serves is a change
-        return None
+        facts = serving_facts(
+            args.provider, args.base_url, args.model, launch, revision=args.model_revision
+        )
+        now, entry = facts_hash(facts), {"facts": facts}
+    except Exception as exc:  # an endpoint that cannot say what it serves is a change
+        now, entry = None, {"error": str(exc)}
+    if record and now != args.serving_hash:
+        log = args.out.with_suffix(args.out.suffix + ".serving-changes.jsonl")
+        with log.open("a") as fh:
+            fh.write(json.dumps({"hash": now, "lane_hash": args.serving_hash, **entry}) + "\n")
+    return now
 
 
 def check_fixture(python: str) -> None:
@@ -673,7 +712,7 @@ def incomplete(results: list[RunResult], reps: int, bar: str = "b4") -> str | No
         return f"results are from {sorted(recorded)}, scored as {bar!r}"
     if bar == "bprime":
         serving = {r.serving_hash for r in results}
-        if len(serving) != 1 or None in serving:
+        if len(serving) != 1 or not all(serving):
             return f"serving setup changed within the lane: {sorted(map(str, serving))}"
         if reps != BPRIME["reps"]:
             return f"B-prime is pre-registered at {BPRIME['reps']} reps, scored at {reps}"
@@ -727,7 +766,7 @@ def verdict(results: list[RunResult], reps: int, bar: str = "b4") -> int:
         # B-prime also changes the native ## Scope section; an arm built without
         # that half would otherwise pass the prompt-file check above.
         scopes = {name: {r.scope_hash for r in results if r.arm == name} for name in ("A", "B")}
-        if any(len(h) != 1 or None in h for h in scopes.values()) or scopes["A"] == scopes["B"]:
+        if any(len(h) != 1 or not all(h) for h in scopes.values()) or scopes["A"] == scopes["B"]:
             print(f"ARMS VOID: rendered ## Scope hashes {scopes}", file=sys.stderr)
             return 3
     return 0 if summarize(results, bar) else 1
@@ -759,6 +798,10 @@ def main() -> int:
         "--expect-serving", help="B-prime rerun: the serving hash of the lane's first attempt"
     )
     p.add_argument("--attempt", type=int, help="B-prime: attempt number at this lane, 1-3")
+    p.add_argument(
+        "--model-revision",
+        help="B-prime, OpenAI-compatible servers: the model's revision (they do not report it)",
+    )
     args = p.parse_args()
 
     # B-prime's design is pinned by the pre-registration; B4 keeps its defaults.
@@ -785,6 +828,8 @@ def main() -> int:
             missing.append("--launch-settings (B-prime)")
         if args.attempt is None:
             missing.append("--attempt (B-prime)")
+        if args.provider != "ollama" and not args.model_revision:
+            missing.append("--model-revision (B-prime, OpenAI-compatible server)")
     if missing:
         p.error(f"required unless --summarize: {', '.join(missing)}")
     if args.bar == "bprime" and not args.dry_run:
@@ -832,7 +877,7 @@ def main() -> int:
 def bprime_preflight(binaries: dict[str, str], args: argparse.Namespace) -> int:
     """B-prime's checks before any run (PREREG-B-PRIME.md). Returns an exit code
     to stop with, or 0 to go on. Records what the lane must hold constant."""
-    args.scope_hashes = {name: scope_hash(arm_python(b)) for name, b in binaries.items()}
+    args.scope_hashes = {name: scope_hash(arm_argv(b)) for name, b in binaries.items()}
     print(f"rendered ## Scope hashes: {args.scope_hashes}")
     if args.scope_hashes["A"] == args.scope_hashes["B"]:
         print("ARMS VOID: both arms render the same ## Scope section", file=sys.stderr)
@@ -847,16 +892,21 @@ def bprime_preflight(binaries: dict[str, str], args: argparse.Namespace) -> int:
     if args.dry_run:
         args.serving_hash = None
         return 0
+    sidecar = args.out.with_suffix(args.out.suffix + ".serving.json")
     try:
         facts = serving_facts(
-            args.provider, args.base_url, args.model, args.launch_settings.read_text()
+            args.provider,
+            args.base_url,
+            args.model,
+            args.launch_settings.read_text(),
+            revision=args.model_revision,
         )
     except Exception as exc:
+        sidecar.write_text(json.dumps({"hash": None, "error": str(exc)}, indent=2) + "\n")
         print(f"LANE VOID: cannot verify what the endpoint serves: {exc}", file=sys.stderr)
         return 4
     args.serving_hash = facts_hash(facts)
     # Saved before any comparison, so a mismatching attempt keeps its evidence.
-    sidecar = args.out.with_suffix(args.out.suffix + ".serving.json")
     sidecar.write_text(json.dumps({"hash": args.serving_hash, "facts": facts}, indent=2) + "\n")
     print(f"serving hash: {args.serving_hash} (attempt {args.attempt})")
     if args.expect_serving and args.expect_serving != args.serving_hash:

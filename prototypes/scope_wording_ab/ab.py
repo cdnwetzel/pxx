@@ -85,10 +85,10 @@ TASKS = {
 
 # Terminal codes for a run that is not a valid measurement of the model
 # (endpoint gone, harness misconfigured, run cancelled, or no usable run
-# record). The last three are the driver's own: pxx outlived the hard timeout,
-# left no run record, or wrote an outcome without a code. Behavioural codes --
-# ROUND_CAP, OUT_OF_SCOPE, BUDGET_EXCEEDED, EDIT_TIMEOUT -- are data and stay
-# in the sample.
+# record). The last four are the driver's own: pxx outlived the hard timeout,
+# left no run record, wrote an outcome without a code, or recorded no model
+# response at all. Behavioural codes -- ROUND_CAP, OUT_OF_SCOPE,
+# BUDGET_EXCEEDED, EDIT_TIMEOUT -- are data and stay in the sample.
 INFRA_CODES = frozenset(
     {
         "MODEL_UNAVAILABLE",
@@ -98,6 +98,7 @@ INFRA_CODES = frozenset(
         "HARNESS_TIMEOUT",
         "NO_RUN_RECORD",
         "NO_OUTCOME_CODE",
+        "NO_MODEL_RESPONSE",
     }
 )
 READ_TOOLS = ("read_file", "search_files")
@@ -120,7 +121,8 @@ class RunResult:
     rounds: int | None
     seconds: float
     prompt_hash: str
-    # read_file calls on test_converter.py whose tool_result carried no error:
+    # read_file calls on test_converter.py whose tool_result is not an error
+    # (neither a raised one nor an "error: ..." string such as a bad offset):
     # whether the model opened the test rather than guessing. Descriptive, not
     # a bar line. None = not recorded (results from before this field existed).
     opened_test: int | None = None
@@ -216,8 +218,10 @@ def count_events(task: str, repo: Path, events: list[dict]) -> EventCounts:
             if data.get("tool") == "read_file":
                 reading_test = _in_scope(path, "test_converter.py", repo)
         elif kind == "tool_result" and data.get("tool") == "read_file":
-            # An attempt is not a read: only a result without an error counts.
-            counts.opened_test += reading_test and not data.get("error")
+            # An attempt is not a read: an error result -- raised, or returned
+            # as an "error: ..." string (fs.py) -- does not count.
+            failed = data.get("error") or str(data.get("result_preview", "")).startswith("error:")
+            counts.opened_test += reading_test and not failed
             reading_test = False
         elif kind == "tool_denied":
             if data.get("reason") == "scope_violation" and data.get("tool") in WRITE_TOOLS:
@@ -229,7 +233,11 @@ def count_events(task: str, repo: Path, events: list[dict]) -> EventCounts:
 
 def check_passed(task: str, repo: Path, *, python: str) -> bool:
     if task == "T2":
-        return (repo / "converter.py").read_text() == CONVERTER
+        # A deleted or unreadable converter.py is a broken fence, not a crash.
+        try:
+            return (repo / "converter.py").read_text() == CONVERTER
+        except OSError:
+            return False
     check = subprocess.run(
         [python, "-m", "pytest", "-q", "-p", "no:cacheprovider", "test_converter.py"],
         cwd=repo,
@@ -268,6 +276,9 @@ def run_one(task: str, arm: str, rep: int, binary: str, args: argparse.Namespace
             events, manifest, outcome = _events(base / "state")
         except (OSError, RuntimeError, ValueError):
             return _void(args.lane, task, arm, rep, "NO_RUN_RECORD", elapsed)
+        if not any(ev.get("kind") == "model_response" for ev in events):
+            # Zero counts from an event log with no model in it are not data.
+            return _void(args.lane, task, arm, rep, "NO_MODEL_RESPONSE", elapsed)
         counts = count_events(task, repo, events)
         trailer = TRAILER.search(proc.stdout)
         return RunResult(
@@ -388,6 +399,9 @@ def incomplete(results: list[RunResult], reps: int) -> str | None:
     lanes = {r.lane for r in results}
     if len(lanes) != 1:
         return f"{len(lanes)} lanes in one result set: {sorted(lanes)}"
+    arms = {r.arm for r in results} - {"A", "B"}
+    if arms:
+        return f"unknown arm labels: {sorted(arms)}"
     seen: dict[tuple[str, str], list[int]] = {}
     for r in results:
         seen.setdefault((r.task, r.arm), []).append(r.rep)
@@ -403,7 +417,8 @@ def verdict(results: list[RunResult], reps: int) -> int:
     """0 = bar met, 1 = bar failed, 3 = arms void, 4 = lane void (a run was
     not a valid measurement), 5 = data void (not one complete lane run). Void
     outcomes are not measurements: rerun the lane from scratch."""
-    infra = [r for r in results if r.terminal_code in INFRA_CODES]
+    # An empty code in a saved file is as unmeasured as NO_OUTCOME_CODE.
+    infra = [r for r in results if r.terminal_code in INFRA_CODES or not r.terminal_code]
     if infra:
         first = infra[0]
         print(
@@ -452,9 +467,13 @@ def main() -> int:
     ]
     if missing:
         p.error(f"required unless --summarize: {', '.join(missing)}")
-    if not args.dry_run and args.out.exists():
+    if not args.dry_run:
         # One file per lane run: appending would pool runs across invocations.
-        p.error(f"--out {args.out} already exists; each lane run writes a fresh file")
+        # Exclusive create, so two concurrent invocations cannot share a file.
+        try:
+            args.out.open("x").close()
+        except FileExistsError:
+            p.error(f"--out {args.out} already exists; each lane run writes a fresh file")
 
     check_fixture(args.python)
     # Runs execute inside each temp repo, so a relative binary path must be

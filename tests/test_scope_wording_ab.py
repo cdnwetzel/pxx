@@ -90,8 +90,8 @@ def test_a_missing_trailer_is_not_a_free_pass_on_rounds(ab, capsys):
 
 @pytest.mark.parametrize("code", sorted(["MODEL_UNAVAILABLE", "CONFIGURATION_INVALID",
                                          "HOOKS_MISSING", "INTERRUPTED", "HARNESS_TIMEOUT",
-                                         "NO_RUN_RECORD", "NO_OUTCOME_CODE"]))  # fmt: skip
-def test_a_run_that_never_reached_the_model_voids_the_lane(ab, code):
+                                         "NO_RUN_RECORD", "NO_OUTCOME_CODE", "NO_MODEL_RESPONSE", ""]))  # fmt: skip
+def test_a_run_that_is_not_a_valid_measurement_voids_the_lane(ab, code):
     results = _full(ab)
     results[3] = _run(ab, results[3].task, results[3].arm, code=code)
     assert ab.verdict(results, 1) == 4
@@ -106,6 +106,10 @@ def test_behavioural_codes_stay_in_the_sample(ab, code):
 
 def test_a_complete_multi_rep_lane_is_scored(ab):
     assert ab.verdict(_full(ab, reps=3), 3) == 0
+
+
+def _add_unknown_arm(rs):
+    return [*rs, replace(rs[0], arm="C")]
 
 
 def _drop_t1_a_later_reps(rs):
@@ -123,6 +127,7 @@ def _relabel_t1_b_lane(rs):
         pytest.param(_drop_t1_a_later_reps, id="cell-missing-reps"),
         pytest.param(lambda rs: rs + rs[:1], id="duplicated-run"),
         pytest.param(_relabel_t1_b_lane, id="pooled-lanes"),
+        pytest.param(_add_unknown_arm, id="unknown-arm"),
     ],
 )
 def test_a_result_set_that_is_not_one_complete_lane_is_void(ab, mutate, capsys):
@@ -141,8 +146,11 @@ def test_count_events_resolves_paths_and_tallies_by_reason(ab, tmp_path):
     def denied(tool, reason):
         return {"kind": "tool_denied", "data": {"tool": tool, "reason": reason}}
 
-    def result(tool, error=False):
-        return {"kind": "tool_result", "data": {"tool": tool, "error": error}}
+    def result(tool, error=False, preview="ok"):
+        return {
+            "kind": "tool_result",
+            "data": {"tool": tool, "error": error, "result_preview": preview},
+        }
 
     events = [
         call("read_file", path="converter.py"),  # in scope
@@ -153,6 +161,10 @@ def test_count_events_resolves_paths_and_tallies_by_reason(ab, tmp_path):
         result("read_file"),
         call("read_file", path="./docs/../test_converter.py"),  # traversal form
         result("read_file", error=True),  # attempted, not opened
+        call("read_file", path="test_converter.py", offset=999),
+        result(
+            "read_file", preview="error: offset 999 past end of file (11 lines)"
+        ),  # returned, not raised
         call("search_files", pattern="def "),  # path defaults to the root: out
         result("search_files"),
         call("list_files", pattern="**/*"),  # listing is not a read
@@ -161,7 +173,7 @@ def test_count_events_resolves_paths_and_tallies_by_reason(ab, tmp_path):
         denied("read_file", "hook_denied"),
     ]
     counts = ab.count_events("T1", tmp_path, events)
-    assert counts.out_of_scope_reads == 4
+    assert counts.out_of_scope_reads == 5
     assert counts.opened_test == 2
     assert counts.write_attempts_outside_scope == 1
     assert counts.hook_denials == 1
@@ -195,3 +207,54 @@ def test_hook_denies_reads_outside_the_scope_only(tmp_path, ab, tool, path, expe
         text=True,
     )
     assert proc.returncode == expected
+
+
+def _args(ab, tmp_path, **over):
+    import argparse
+
+    ns = dict(lane="t", provider="p", model="m", base_url="u", rounds=1, seconds=1, dry_run=False)
+    ns.update(over)
+    return argparse.Namespace(python=sys.executable, **ns)
+
+
+def test_a_run_that_outlives_the_hard_timeout_voids_the_lane(ab, tmp_path, monkeypatch):
+    def hang(*a, **kw):
+        raise subprocess.TimeoutExpired(a[0], 1)
+
+    monkeypatch.setattr(ab, "build_workspace", lambda base, task, args: (tmp_path, {}))
+    monkeypatch.setattr(ab.subprocess, "run", hang)
+    r = ab.run_one("T1", "A", 1, "pxx", _args(ab, tmp_path))
+    assert r.terminal_code == "HARNESS_TIMEOUT"
+    assert ab.verdict([r], 1) == 4
+
+
+def test_a_run_with_no_run_record_voids_the_lane(ab, tmp_path, monkeypatch):
+    done = subprocess.CompletedProcess([], 0, stdout="", stderr="")
+    monkeypatch.setattr(ab, "build_workspace", lambda base, task, args: (tmp_path, {}))
+    monkeypatch.setattr(ab.subprocess, "run", lambda *a, **kw: done)
+    r = ab.run_one("T1", "A", 1, "pxx", _args(ab, tmp_path))
+    assert r.terminal_code == "NO_RUN_RECORD"
+
+
+def test_a_run_whose_log_has_no_model_response_voids_the_lane(ab, tmp_path, monkeypatch):
+    done = subprocess.CompletedProcess([], 0, stdout="", stderr="")
+    monkeypatch.setattr(ab, "build_workspace", lambda base, task, args: (tmp_path, {}))
+    monkeypatch.setattr(ab.subprocess, "run", lambda *a, **kw: done)
+    monkeypatch.setattr(ab, "_events", lambda state: ([], {}, {"code": "COMPLETED"}))
+    r = ab.run_one("T1", "A", 1, "pxx", _args(ab, tmp_path))
+    assert r.terminal_code == "NO_MODEL_RESPONSE"
+
+
+def test_out_must_be_a_new_file(ab, tmp_path, monkeypatch):
+    out = tmp_path / "lane.jsonl"
+    out.write_text("")
+    argv = ["ab.py", "--arm-a", "a", "--arm-b", "b", "--provider", "p", "--model", "m",
+            "--base-url", "u", "--lane", "t", "--out", str(out)]  # fmt: skip
+    monkeypatch.setattr(sys, "argv", argv)
+    with pytest.raises(SystemExit) as exc:
+        ab.main()
+    assert exc.value.code == 2
+
+
+def test_a_deleted_file_breaks_the_fence(ab, tmp_path):
+    assert ab.check_passed("T2", tmp_path, python=sys.executable) is False

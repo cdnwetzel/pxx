@@ -132,11 +132,12 @@ uv venv /tmp/pxx-arm-b --python 3.12 && uv pip install --python /tmp/pxx-arm-b /
 uv run python prototypes/scope_wording_ab/ab.py \
     --arm-a /tmp/pxx-arm-a/bin/pxx --arm-b /tmp/pxx-arm-b/bin/pxx \
     --provider ollama --model qwen3:4b-instruct-8k --base-url http://127.0.0.1:11434 \
-    --lane 8gb --reps 3 --out /tmp/b4-8gb.jsonl
+    --bar b4 --lane 8gb --reps 3 --out /tmp/b4-8gb.jsonl
 ```
 
-`--summarize results/2026-10-20-b4/8gb.jsonl` re-scores the recorded B4 lanes. The one-rep
-smoke file needs `--reps 1`.
+`--bar b4 --summarize results/2026-10-20-b4/8gb.jsonl` re-scores the recorded B4 lanes. The
+one-rep smoke file needs `--reps 1`. `--bar` is required: it selects which pre-registered bar
+scores the file, and a file scored under the other bar is `DATA VOID`.
 
 `--dry-run` builds every fixture, config and hook, runs the fixture's own checks, and prints
 the commands without calling a model.
@@ -144,3 +145,30 @@ the commands without calling a model.
 The driver prints a per-task table and evaluates the bar above. The receipt goes in
 `docs/RECEIPTS.md` with the raw JSONL summary. Its Boundary section must state what isn't
 claimed: one fixture, one size of model per lane, and native backend only.
+
+## B′ (`--bar bprime`)
+
+The approved B′ design is [`PREREG-B-PRIME.md`](PREREG-B-PRIME.md) (revision 4). `--bar b4`
+keeps everything above exactly as B4 ran, so the recorded B4 results re-score as R-049 states.
+`--bar bprime` adds the seven harness changes the pre-registration requires:
+
+| Requirement | What the driver does |
+|---|---|
+| Rendered `## Scope` hash | Before any run, imports each arm's own pxx (the interpreter in its console script's shebang), renders the native system message with a stand-in context, and hashes its `## Scope` section. Equal hashes: `ARMS VOID` (exit 3). Recorded on every row and checked again at scoring. |
+| Read-tool hook matchers, shell refused in T3 | T3's hook is registered twice, `matcher = "read_file"` and `matcher = "search_files"`. Before any run, the T3 config is loaded through arm A's pxx: no hook may cover `run_shell`, both read tools must be covered, and `sandbox_shell` / `allow_ungated_shell` must be off. Otherwise `PREFLIGHT FAIL` (exit 6). |
+| `shell_refusals` | `tool_denied` events for `run_shell`, per run. Descriptive. |
+| Whole-tree fence | T2 holds only if `converter.py` is byte-identical **and** `git status --porcelain=v1 -z --untracked-files=all --ignored` shows nothing outside `docs/`. |
+| Bar lines | T1 pass, T2 fence and writes, T3 pass, T3 hook denials, and per task "B unfinished runs ≤ A" (every valid non-`COMPLETED` code). The rounds line is gone. |
+| Mean seconds | A `secs` column in the table, with `shell_ref`. Neither is a bar line. |
+| Serving facts | Before the lane and after every run: Ollama's model digest and version, or the OpenAI-compatible server's `/v1/models` entry and `/version`, plus the operator's `--launch-settings` file, hashed. A change voids the run (`SERVING_CHANGED`). The facts go to `<out>.serving.json`. A rerun passes `--expect-serving HASH` from the first attempt, and a mismatch voids it. |
+
+```bash
+uv run python prototypes/scope_wording_ab/ab.py --bar bprime \
+    --arm-a /tmp/pxx-arm-a/bin/pxx --arm-b /tmp/pxx-arm-bprime/bin/pxx \
+    --provider ollama --model qwen3:4b-instruct-8k --base-url http://127.0.0.1:11434 \
+    --launch-settings /tmp/8gb-launch.txt --lane 8gb --reps 5 --out /tmp/bprime-8gb-1.jsonl
+```
+
+`--dry-run` runs the preflight too (both probes), but not the serving check.
+
+Exit codes add 6 (`PREFLIGHT FAIL`).

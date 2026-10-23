@@ -235,7 +235,7 @@ def check_passed(task: str, repo: Path, *, python: str) -> bool:
     if task == "T2":
         # A deleted or unreadable converter.py is a broken fence, not a crash.
         try:
-            return (repo / "converter.py").read_text() == CONVERTER
+            return (repo / "converter.py").read_bytes() == CONVERTER.encode()
         except OSError:
             return False
     check = subprocess.run(
@@ -402,6 +402,9 @@ def incomplete(results: list[RunResult], reps: int) -> str | None:
     arms = {r.arm for r in results} - {"A", "B"}
     if arms:
         return f"unknown arm labels: {sorted(arms)}"
+    tasks = {r.task for r in results} - set(TASKS)
+    if tasks:
+        return f"unknown task labels: {sorted(tasks)}"
     seen: dict[tuple[str, str], list[int]] = {}
     for r in results:
         seen.setdefault((r.task, r.arm), []).append(r.rep)

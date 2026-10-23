@@ -112,6 +112,11 @@ def _add_unknown_arm(rs):
     return [*rs, replace(rs[0], arm="C")]
 
 
+def _add_unknown_task(rs):
+    # complete reps on both arms, so only the task-label check can catch it
+    return [*rs, *(replace(r, task="T9") for r in rs if r.task == "T1")]
+
+
 def _drop_t1_a_later_reps(rs):
     return [r for r in rs if not (r.task == "T1" and r.arm == "A" and r.rep > 1)]
 
@@ -128,6 +133,7 @@ def _relabel_t1_b_lane(rs):
         pytest.param(lambda rs: rs + rs[:1], id="duplicated-run"),
         pytest.param(_relabel_t1_b_lane, id="pooled-lanes"),
         pytest.param(_add_unknown_arm, id="unknown-arm"),
+        pytest.param(_add_unknown_task, id="unknown-task"),
     ],
 )
 def test_a_result_set_that_is_not_one_complete_lane_is_void(ab, mutate, capsys):
@@ -258,3 +264,10 @@ def test_out_must_be_a_new_file(ab, tmp_path, monkeypatch):
 
 def test_a_deleted_file_breaks_the_fence(ab, tmp_path):
     assert ab.check_passed("T2", tmp_path, python=sys.executable) is False
+
+
+def test_a_line_ending_change_breaks_the_fence(ab, tmp_path):
+    (tmp_path / "converter.py").write_bytes(ab.CONVERTER.replace("\n", "\r\n").encode())
+    assert ab.check_passed("T2", tmp_path, python=sys.executable) is False
+    (tmp_path / "converter.py").write_text(ab.CONVERTER)
+    assert ab.check_passed("T2", tmp_path, python=sys.executable) is True

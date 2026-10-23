@@ -10,7 +10,8 @@ The prompt change it measures ships separately, and only if this bar is met.
 > The follow-up hypothesis is pre-registered in [`PREREG-B-PRIME.md`](PREREG-B-PRIME.md).
 >
 > **Status, 2026-10-23: B′ failed its pre-registered screen on the 8 GB lane and did not ship.**
-> It tied on T1 and T3 passes, but made more T2 out-of-scope write attempts (5 vs 3) and drew
+> It tied on T1 passes and passed T3 once to the old wording's zero (1/5 vs 0/5), but made more
+> T2 out-of-scope write attempts (5 vs 3) and drew
 > more T3 hook denials (8 vs 6). The home and work lanes were not run, by the stop rule.
 > [`docs/RECEIPTS.md` R-050](../../docs/RECEIPTS.md); raw results:
 > [`results/2026-10-23-bprime/`](results/2026-10-23-bprime/).

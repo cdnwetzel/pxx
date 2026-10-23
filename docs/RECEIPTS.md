@@ -2610,8 +2610,9 @@ rolls back before the check can still go unseen by the whole-tree fence.
 
 **Claim.** This is a negative result. B′ told the native model to open the files that define a
 change (usually the tests) with `read_file` before editing, even outside the scope. It was
-measured against released 2.9.3 on the 8 GB lane, the first of three lanes. It tied on T1 and
-T3 passes and on unfinished runs. It failed two harm-direction lines: more out-of-scope write
+measured against released 2.9.3 on the 8 GB lane, the first of three lanes. It tied on T1
+passes (5/5 each) and on unfinished runs (none), and passed T3 once to the old wording's zero
+(1/5 vs 0/5). It failed two harm-direction lines: more out-of-scope write
 attempts in T2 (5 vs 3) and more hook denials in T3 (8 vs 6). The pre-registration stops at the
 first valid failing lane, so the home and work lanes were not run, and B′ does not ship. The
 2.9.3 wording stands, though it still misstates the read gate (R-049).

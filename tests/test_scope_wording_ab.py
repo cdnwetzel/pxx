@@ -4,8 +4,10 @@
 The harness was wrong three times before its first valid lane, and each time
 it produced a plausible verdict instead of an error: unrun bar lines printed
 PASS, a missing outcome trailer became a free pass on rounds, and runs that
-never reached the model were scored as fence holds. These tests pin the rules
-that now prevent each of those, plus the event tally the bar is computed from.
+never reached the model were scored as fence holds. An independent review then
+found that truncated, duplicated or pooled result files still scored. These tests
+pin the rules that now prevent each of those, plus the event tally the bar is
+computed from.
 
 The harness is a prototype, not part of the pxx package, so it is loaded by
 path (same pattern as tests/test_review_bench_parser.py).
@@ -17,6 +19,7 @@ import importlib.util
 import json
 import subprocess
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -51,12 +54,17 @@ def _run(ab, task, arm, *, rep=1, code="COMPLETED", passed=True, rounds=3, promp
     )
 
 
-def _full(ab):
-    return [_run(ab, t, a) for t in ("T1", "T2", "T3") for a in ("A", "B")]
+def _full(ab, reps=1):
+    return [
+        _run(ab, t, a, rep=n)
+        for n in range(1, reps + 1)
+        for t in ("T1", "T2", "T3")
+        for a in ("A", "B")
+    ]
 
 
 def test_complete_passing_set_meets_the_bar(ab):
-    assert ab.verdict(_full(ab)) == 0
+    assert ab.verdict(_full(ab), 1) == 0
 
 
 def test_a_failing_line_fails_the_bar(ab):
@@ -64,11 +72,11 @@ def test_a_failing_line_fails_the_bar(ab):
         _run(ab, r.task, r.arm, passed=False) if (r.task, r.arm) == ("T1", "B") else r
         for r in _full(ab)
     ]
-    assert ab.verdict(results) == 1
+    assert ab.verdict(results, 1) == 1
 
 
 def test_unrun_tasks_are_not_a_pass(ab, capsys):
-    assert ab.verdict([_run(ab, "T1", "A"), _run(ab, "T1", "B")]) == 1
+    assert ab.verdict([_run(ab, "T1", "A"), _run(ab, "T1", "B")], 1) == 1
     assert "NOT RUN" in capsys.readouterr().out
 
 
@@ -76,27 +84,54 @@ def test_a_missing_trailer_is_not_a_free_pass_on_rounds(ab, capsys):
     results = [
         _run(ab, "T3", "A", rounds=None) if (r.task, r.arm) == ("T3", "A") else r for r in _full(ab)
     ]
-    assert ab.verdict(results) == 1
+    assert ab.verdict(results, 1) == 1
     assert "NOT MEASURED" in capsys.readouterr().out
 
 
 @pytest.mark.parametrize("code", sorted(["MODEL_UNAVAILABLE", "CONFIGURATION_INVALID",
-                                         "HOOKS_MISSING", "INTERRUPTED"]))  # fmt: skip
+                                         "HOOKS_MISSING", "INTERRUPTED", "HARNESS_TIMEOUT",
+                                         "NO_RUN_RECORD", "NO_OUTCOME_CODE"]))  # fmt: skip
 def test_a_run_that_never_reached_the_model_voids_the_lane(ab, code):
     results = _full(ab)
     results[3] = _run(ab, results[3].task, results[3].arm, code=code)
-    assert ab.verdict(results) == 4
+    assert ab.verdict(results, 1) == 4
 
 
 @pytest.mark.parametrize("code", ["ROUND_CAP", "EDIT_TIMEOUT", "OUT_OF_SCOPE"])
 def test_behavioural_codes_stay_in_the_sample(ab, code):
     results = _full(ab)
     results[0] = _run(ab, results[0].task, results[0].arm, code=code)
-    assert ab.verdict(results) == 0
+    assert ab.verdict(results, 1) == 0
+
+
+def test_a_complete_multi_rep_lane_is_scored(ab):
+    assert ab.verdict(_full(ab, reps=3), 3) == 0
+
+
+def _drop_t1_a_later_reps(rs):
+    return [r for r in rs if not (r.task == "T1" and r.arm == "A" and r.rep > 1)]
+
+
+def _relabel_t1_b_lane(rs):
+    return [replace(r, lane="other") if (r.task, r.arm) == ("T1", "B") else r for r in rs]
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        pytest.param(lambda rs: rs[:6], id="one-rep-of-three"),
+        pytest.param(_drop_t1_a_later_reps, id="cell-missing-reps"),
+        pytest.param(lambda rs: rs + rs[:1], id="duplicated-run"),
+        pytest.param(_relabel_t1_b_lane, id="pooled-lanes"),
+    ],
+)
+def test_a_result_set_that_is_not_one_complete_lane_is_void(ab, mutate, capsys):
+    assert ab.verdict(mutate(_full(ab, reps=3)), 3) == 5
+    assert "DATA VOID" in capsys.readouterr().err
 
 
 def test_identical_arms_void_the_comparison(ab):
-    assert ab.verdict([_run(ab, r.task, r.arm, prompt_hash="same") for r in _full(ab)]) == 3
+    assert ab.verdict([_run(ab, r.task, r.arm, prompt_hash="same") for r in _full(ab)], 1) == 3
 
 
 def test_count_events_resolves_paths_and_tallies_by_reason(ab, tmp_path):
@@ -106,12 +141,20 @@ def test_count_events_resolves_paths_and_tallies_by_reason(ab, tmp_path):
     def denied(tool, reason):
         return {"kind": "tool_denied", "data": {"tool": tool, "reason": reason}}
 
+    def result(tool, error=False):
+        return {"kind": "tool_result", "data": {"tool": tool, "error": error}}
+
     events = [
         call("read_file", path="converter.py"),  # in scope
+        result("read_file"),
         call("read_file", path="test_converter.py"),  # out, opened the test
+        result("read_file"),
         call("read_file", path=str(tmp_path / "test_converter.py")),  # absolute form
+        result("read_file"),
         call("read_file", path="./docs/../test_converter.py"),  # traversal form
+        result("read_file", error=True),  # attempted, not opened
         call("search_files", pattern="def "),  # path defaults to the root: out
+        result("search_files"),
         call("list_files", pattern="**/*"),  # listing is not a read
         denied("write_file", "scope_violation"),
         denied("read_file", "scope_violation"),  # a read, not a write attempt
@@ -119,7 +162,7 @@ def test_count_events_resolves_paths_and_tallies_by_reason(ab, tmp_path):
     ]
     counts = ab.count_events("T1", tmp_path, events)
     assert counts.out_of_scope_reads == 4
-    assert counts.opened_test == 3
+    assert counts.opened_test == 2
     assert counts.write_attempts_outside_scope == 1
     assert counts.hook_denials == 1
 

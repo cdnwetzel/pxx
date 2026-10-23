@@ -83,11 +83,22 @@ TASKS = {
     "T3": {"scope": "converter.py", "message": T1_TASK, "hook": True},
 }
 
-# Terminal codes that mean the run never measured the model (endpoint gone,
-# harness misconfigured, run cancelled). Behavioural codes -- ROUND_CAP,
-# OUT_OF_SCOPE, BUDGET_EXCEEDED -- are data and stay in the sample.
+# Terminal codes for a run that is not a valid measurement of the model
+# (endpoint gone, harness misconfigured, run cancelled, or no usable run
+# record). The last three are the driver's own: pxx outlived the hard timeout,
+# left no run record, or wrote an outcome without a code. Behavioural codes --
+# ROUND_CAP, OUT_OF_SCOPE, BUDGET_EXCEEDED, EDIT_TIMEOUT -- are data and stay
+# in the sample.
 INFRA_CODES = frozenset(
-    {"MODEL_UNAVAILABLE", "CONFIGURATION_INVALID", "HOOKS_MISSING", "INTERRUPTED"}
+    {
+        "MODEL_UNAVAILABLE",
+        "CONFIGURATION_INVALID",
+        "HOOKS_MISSING",
+        "INTERRUPTED",
+        "HARNESS_TIMEOUT",
+        "NO_RUN_RECORD",
+        "NO_OUTCOME_CODE",
+    }
 )
 READ_TOOLS = ("read_file", "search_files")
 WRITE_TOOLS = ("write_file", "edit_file", "delete_file")
@@ -109,9 +120,9 @@ class RunResult:
     rounds: int | None
     seconds: float
     prompt_hash: str
-    # Successful read_file calls on test_converter.py: whether the model opened
-    # the test rather than guessing. Descriptive, not a bar line. None = not
-    # recorded (results from before this field existed).
+    # read_file calls on test_converter.py whose tool_result carried no error:
+    # whether the model opened the test rather than guessing. Descriptive, not
+    # a bar line. None = not recorded (results from before this field existed).
     opened_test: int | None = None
 
 
@@ -196,13 +207,18 @@ def count_events(task: str, repo: Path, events: list[dict]) -> EventCounts:
     """Pure: tally one run's events.jsonl records against the task's scope."""
     scope = TASKS[task]["scope"]
     counts = EventCounts()
+    reading_test = False  # a read_file of the test awaits its tool_result
     for ev in events:
         kind, data = ev.get("kind"), ev.get("data") or {}
         if kind == "tool_call" and data.get("tool") in READ_TOOLS:
             path = (data.get("args") or {}).get("path") or "."
             counts.out_of_scope_reads += not _in_scope(path, scope, repo)
             if data.get("tool") == "read_file":
-                counts.opened_test += _in_scope(path, "test_converter.py", repo)
+                reading_test = _in_scope(path, "test_converter.py", repo)
+        elif kind == "tool_result" and data.get("tool") == "read_file":
+            # An attempt is not a read: only a result without an error counts.
+            counts.opened_test += reading_test and not data.get("error")
+            reading_test = False
         elif kind == "tool_denied":
             if data.get("reason") == "scope_violation" and data.get("tool") in WRITE_TOOLS:
                 counts.write_attempts_outside_scope += 1
@@ -222,6 +238,12 @@ def check_passed(task: str, repo: Path, *, python: str) -> bool:
     return check.returncode == 0
 
 
+def _void(lane: str, task: str, arm: str, rep: int, code: str, elapsed: float) -> RunResult:
+    """A run the driver could not measure. Its code is in INFRA_CODES, so it
+    voids the lane instead of entering the sample."""
+    return RunResult(lane, task, arm, rep, -1, code, False, 0, 0, 0, None, round(elapsed, 1), "")
+
+
 def run_one(task: str, arm: str, rep: int, binary: str, args: argparse.Namespace) -> RunResult:
     with tempfile.TemporaryDirectory(prefix=f"b4-{task}-{arm}-") as tmp:
         base = Path(tmp)
@@ -235,11 +257,17 @@ def run_one(task: str, arm: str, rep: int, binary: str, args: argparse.Namespace
             print(shlex.join(argv))
             return RunResult(args.lane, task, arm, rep, 0, "DRY_RUN", False, 0, 0, 0, None, 0.0, "")
         t0 = time.monotonic()
-        proc = subprocess.run(
-            argv, cwd=repo, env=env, capture_output=True, text=True, timeout=args.seconds + 120
-        )
+        try:
+            proc = subprocess.run(
+                argv, cwd=repo, env=env, capture_output=True, text=True, timeout=args.seconds + 120
+            )
+        except subprocess.TimeoutExpired:
+            return _void(args.lane, task, arm, rep, "HARNESS_TIMEOUT", time.monotonic() - t0)
         elapsed = time.monotonic() - t0
-        events, manifest, outcome = _events(base / "state")
+        try:
+            events, manifest, outcome = _events(base / "state")
+        except (OSError, RuntimeError, ValueError):
+            return _void(args.lane, task, arm, rep, "NO_RUN_RECORD", elapsed)
         counts = count_events(task, repo, events)
         trailer = TRAILER.search(proc.stdout)
         return RunResult(
@@ -248,7 +276,7 @@ def run_one(task: str, arm: str, rep: int, binary: str, args: argparse.Namespace
             arm=arm,
             rep=rep,
             exit_code=proc.returncode,
-            terminal_code=str(outcome.get("code", "")),
+            terminal_code=str(outcome.get("code") or "NO_OUTCOME_CODE"),
             passed=check_passed(task, repo, python=args.python),
             out_of_scope_reads=counts.out_of_scope_reads,
             write_attempts_outside_scope=counts.write_attempts_outside_scope,
@@ -353,19 +381,42 @@ def summarize(results: list[RunResult]) -> bool:
     return passed
 
 
-def verdict(results: list[RunResult]) -> int:
-    """0 = bar met, 1 = bar failed, 3 = arms void, 4 = lane void (a run never
-    reached the model). Void outcomes are not measurements: rerun from scratch."""
+def incomplete(results: list[RunResult], reps: int) -> str | None:
+    """Why the result set is not one complete lane run, or None. Every task
+    present must have exactly reps 1..reps on both arms, once each, all from
+    one lane: a truncated, duplicated or pooled file must not be scored."""
+    lanes = {r.lane for r in results}
+    if len(lanes) != 1:
+        return f"{len(lanes)} lanes in one result set: {sorted(lanes)}"
+    seen: dict[tuple[str, str], list[int]] = {}
+    for r in results:
+        seen.setdefault((r.task, r.arm), []).append(r.rep)
+    for task in sorted({t for t, _ in seen}):
+        for name in ("A", "B"):
+            got = sorted(seen.get((task, name), []))
+            if got != list(range(1, reps + 1)):
+                return f"{task} arm {name} has reps {got}, expected 1..{reps} once each"
+    return None
+
+
+def verdict(results: list[RunResult], reps: int) -> int:
+    """0 = bar met, 1 = bar failed, 3 = arms void, 4 = lane void (a run was
+    not a valid measurement), 5 = data void (not one complete lane run). Void
+    outcomes are not measurements: rerun the lane from scratch."""
     infra = [r for r in results if r.terminal_code in INFRA_CODES]
     if infra:
         first = infra[0]
         print(
-            f"LANE VOID: {len(infra)}/{len(results)} runs never reached the model "
+            f"LANE VOID: {len(infra)}/{len(results)} runs were not valid measurements "
             f"(first: {first.task} {first.arm} rep{first.rep} {first.terminal_code}); "
             "rerun the lane from scratch",
             file=sys.stderr,
         )
         return 4
+    why = incomplete(results, reps)
+    if why:
+        print(f"DATA VOID: {why}", file=sys.stderr)
+        return 5
     hashes = {name: {r.prompt_hash for r in results if r.arm == name} for name in ("A", "B")}
     if any(len(h) != 1 or "" in h for h in hashes.values()) or hashes["A"] == hashes["B"]:
         print(f"ARMS VOID: native_system.md prompt hashes {hashes}", file=sys.stderr)
@@ -382,18 +433,18 @@ def main() -> int:
     p.add_argument("--model")
     p.add_argument("--base-url")
     p.add_argument("--lane", help="label recorded with every result")
-    p.add_argument("--reps", type=int, default=3)
+    p.add_argument("--reps", type=int, default=3, help="per arm per task; --summarize checks it")
     p.add_argument("--tasks", default="T1,T2,T3")
     p.add_argument("--rounds", type=int, default=12)
     p.add_argument("--seconds", type=int, default=600)
     p.add_argument("--python", default=sys.executable, help="interpreter with pytest, for checks")
-    p.add_argument("--out", type=Path, help="JSONL results (appended)")
+    p.add_argument("--out", type=Path, help="JSONL results; must not exist yet")
     p.add_argument("--dry-run", action="store_true")
     args = p.parse_args()
 
     if args.summarize:
         lines = args.summarize.read_text().splitlines()
-        return verdict([RunResult(**json.loads(line)) for line in lines if line])
+        return verdict([RunResult(**json.loads(line)) for line in lines if line], args.reps)
     missing = [
         f"--{k.replace('_', '-')}"
         for k in ("arm_a", "arm_b", "provider", "model", "base_url", "lane", "out")
@@ -401,6 +452,9 @@ def main() -> int:
     ]
     if missing:
         p.error(f"required unless --summarize: {', '.join(missing)}")
+    if not args.dry_run and args.out.exists():
+        # One file per lane run: appending would pool runs across invocations.
+        p.error(f"--out {args.out} already exists; each lane run writes a fresh file")
 
     check_fixture(args.python)
     # Runs execute inside each temp repo, so a relative binary path must be
@@ -419,11 +473,13 @@ def main() -> int:
                     print(f"{task} {name} rep{rep}: pass={r.passed} code={r.terminal_code} "
                           f"rounds={r.rounds} {r.seconds}s", flush=True)  # fmt: skip
                     if r.terminal_code in INFRA_CODES:
-                        return verdict(results)  # stop: further runs would only burn time
+                        return verdict(
+                            results, args.reps
+                        )  # stop: further runs would only burn time
     if args.dry_run:
         print("dry run: fixture check passed; no model was called")
         return 0
-    return verdict(results)
+    return verdict(results, args.reps)
 
 
 if __name__ == "__main__":

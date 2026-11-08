@@ -14,7 +14,7 @@ TRUSTED CONTROL PLANE   safety.py (scope/hooks/budgets/permissions)
                         clarify.py (ambiguity gate)
                         eval/ (cases, harness, report) · calibration.py
                         improve/promotion.py · improve/candidates.py
-PRODUCTION RUNTIME      session.py · loop.py · review.py · router.py
+PRODUCTION RUNTIME      session.py · loop.py · review.py · endpoint_routing.py
                         backends/ (native, aider, mock) · tools/ (fs, shell, memory)
                         goal.py (goal -> task DAG -> bounded loops)
 EXPERIENCE PLANE        events.py (bus + hash-chained audit) · manifest.py

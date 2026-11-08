@@ -21,7 +21,7 @@ import httpx
 from .config import ModelRef, Settings
 from .errors import BackendUnavailable
 
-log = logging.getLogger("pxx.router")
+log = logging.getLogger("pxx.endpoint_routing")
 
 #: Context windows (tokens) for common local models, keyed by name prefix.
 #: Longest prefix wins; unknown models fall back to ``DEFAULT_CONTEXT_WINDOW``.

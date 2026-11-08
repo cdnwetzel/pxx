@@ -187,9 +187,9 @@ async def _tool_calling_check(
 async def _endpoint_checks(settings: Settings) -> list[Check]:
     specs = [settings.model, *settings.fallback_models]
     try:
-        from .router import probe_endpoints
+        from .endpoint_routing import probe_endpoints
     except ImportError:
-        return [Check("endpoints", False, "router unavailable (skipped)", hard=False)]
+        return [Check("endpoints", False, "endpoint routing unavailable (skipped)", hard=False)]
     try:
         endpoints = await probe_endpoints(specs)
     except Exception as exc:  # probe failures are reported, never raised

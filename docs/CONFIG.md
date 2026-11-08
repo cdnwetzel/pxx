@@ -108,7 +108,7 @@ configured cap.
 
 Ordered fallback chain, each entry: `model` (required), `provider`,
 `base_url`, `api_key`. On connection failure the native backend tries the
-next entry; `pxx.router.resolve_model` picks the first reachable.
+next entry; `pxx.endpoint_routing.resolve_model` picks the first reachable.
 
 ## `[roles.review]`
 

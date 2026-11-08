@@ -1,4 +1,4 @@
-"""Router tests — all HTTP via httpx.MockTransport, no real sockets."""
+"""Endpoint-routing tests — all HTTP via httpx.MockTransport, no real sockets."""
 
 from __future__ import annotations
 
@@ -7,10 +7,10 @@ import asyncio
 import httpx
 import pytest
 
-from pxx import router
+from pxx import endpoint_routing
 from pxx.config import ModelRef, Settings
+from pxx.endpoint_routing import Endpoint, context_window, probe_endpoints, resolve_model
 from pxx.errors import BackendUnavailable
-from pxx.router import Endpoint, context_window, probe_endpoints, resolve_model
 
 
 def install_transport(monkeypatch: pytest.MonkeyPatch, handler) -> None:
@@ -19,7 +19,7 @@ def install_transport(monkeypatch: pytest.MonkeyPatch, handler) -> None:
     def factory(timeout: float = 1.0) -> httpx.AsyncClient:
         return httpx.AsyncClient(transport=httpx.MockTransport(handler), timeout=timeout)
 
-    monkeypatch.setattr(router, "_client_factory", factory)
+    monkeypatch.setattr(endpoint_routing, "_client_factory", factory)
 
 
 def test_probe_ollama_lists_models(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -99,7 +99,7 @@ def test_context_window_longest_prefix_and_default() -> None:
 
 
 def test_model_registry_probed_wins_over_default() -> None:
-    registry = router.ModelRegistry()
+    registry = endpoint_routing.ModelRegistry()
     assert registry.context_window("custom:1b") == 8192
     registry.register(["qwen2.5-coder:14b", "custom:1b"])
     assert registry.context_window("qwen2.5-coder:14b") == 32768

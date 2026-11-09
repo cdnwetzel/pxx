@@ -53,8 +53,9 @@ def test_doctor_unwritable_dir_is_hard_failure(tmp_path):
 
 
 def test_doctor_endpoints_soft_failure_no_crash(tmp_path):
-    # router may not exist yet (parallel group) or endpoints are unreachable;
-    # either way doctor must not crash and must report soft failures only.
+    # endpoint_routing may not exist yet (parallel group) or endpoints are
+    # unreachable; either way doctor must not crash and must report soft
+    # failures only.
     checks = asyncio.run(run_doctor(_settings(tmp_path), cwd=tmp_path))
     endpoint_checks = [c for c in checks if c.name.startswith("endpoint")]
     assert endpoint_checks, "expected at least one endpoint check"

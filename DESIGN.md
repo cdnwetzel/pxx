@@ -42,7 +42,7 @@ pxx/
   workflow.py          # WORKFLOW.md machine contract (load/validate, fail closed)
   clarify.py           # ambiguity gate: ready_to_act -> ReadyDecision
   audit_sampling.py    # deterministic human audit sampling (14.5)
-  router.py            # Endpoint probing, ModelRegistry, fallback chains
+  endpoint_routing.py  # Endpoint probing, ModelRegistry, fallback chains
   session.py           # Session: wires config+backend+memory+safety+events
   gitenv.py            # GIT_* env scrub, git timeout; INTERNAL_GIT argv prefix for every
                        # git command pxx runs on its own behalf (no replace refs, no
@@ -313,7 +313,7 @@ class BudgetGuard:
     # enforced by the session via deadline comparison
 ```
 
-### router.py
+### endpoint_routing.py
 - `async probe_endpoints(specs) -> list[Endpoint]`: async httpx probes with
   1s timeout; Ollama native (`/api/tags`) and OpenAI-compatible (`/v1/models`).
 - `ModelRegistry`: known context windows for common local models

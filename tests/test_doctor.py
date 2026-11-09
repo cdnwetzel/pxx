@@ -245,17 +245,17 @@ def _fake_probe(endpoints):
 
 
 def _endpoint_checks_with(monkeypatch, spec, endpoint):
-    import pxx.router
+    import pxx.endpoint_routing
     from pxx.config import Settings
     from pxx.doctor import _endpoint_checks
 
-    monkeypatch.setattr(pxx.router, "probe_endpoints", _fake_probe([endpoint]))
+    monkeypatch.setattr(pxx.endpoint_routing, "probe_endpoints", _fake_probe([endpoint]))
     settings = Settings(model=spec)
     return asyncio.run(_endpoint_checks(settings))
 
 
 def test_model_absent_on_multi_model_endpoint_is_flagged(monkeypatch):
-    from pxx.router import Endpoint
+    from pxx.endpoint_routing import Endpoint
 
     spec = ModelRef(provider="ollama", model="qwen2.5-coder:7b")  # ollama: no tool probe
     ep = Endpoint(provider="ollama", base_url="http://x", models=("a", "b"), reachable=True)
@@ -266,7 +266,7 @@ def test_model_absent_on_multi_model_endpoint_is_flagged(monkeypatch):
 
 
 def test_model_absent_on_single_model_endpoint_notes_autocorrect(monkeypatch):
-    from pxx.router import Endpoint
+    from pxx.endpoint_routing import Endpoint
 
     spec = ModelRef(provider="ollama", model="missing")
     ep = Endpoint(provider="ollama", base_url="http://x", models=("only",), reachable=True)
@@ -277,7 +277,7 @@ def test_model_absent_on_single_model_endpoint_notes_autocorrect(monkeypatch):
 
 
 def test_model_present_adds_no_extra_check(monkeypatch):
-    from pxx.router import Endpoint
+    from pxx.endpoint_routing import Endpoint
 
     spec = ModelRef(provider="ollama", model="served")
     ep = Endpoint(provider="ollama", base_url="http://x", models=("served",), reachable=True)
@@ -286,7 +286,7 @@ def test_model_present_adds_no_extra_check(monkeypatch):
 
 
 def test_ollama_endpoint_with_no_models_is_flagged(monkeypatch):
-    from pxx.router import Endpoint
+    from pxx.endpoint_routing import Endpoint
 
     spec = ModelRef(provider="ollama", model="qwen2.5-coder:7b")
     ep = Endpoint(provider="ollama", base_url="http://x", models=(), reachable=True)
